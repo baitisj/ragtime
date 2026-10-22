@@ -9,6 +9,9 @@
 #include <wx/panel.h>
 #include <wx/sizer.h>
 #include <wx/stattext.h>
+#include <wx/tglbtn.h>
+
+#include "globus/GlobusPanel.h"
 
 #include "GearshiftDialog.h"
 #include "Thresholds.h"
@@ -44,8 +47,18 @@ MainFrame::MainFrame()
     tabs_->AddPage(placeholderPage(tabs_, "No session"), wxString::FromUTF8("Session · none"));
     tabs_->AddPage(placeholderPage(tabs_, "No files yet"), "Files");
 
-    auto* sizer = new wxBoxSizer(wxVERTICAL);
+    // Globus on the right. Package E puts it behind a draggable divider
+    // and moves its toggle to the tab strip while it is hidden; until then
+    // hiding it leaves just its header.
+    globus_ = new GlobusPanel(this);
+    globus_->Bind(wxEVT_TOGGLEBUTTON, [this](wxCommandEvent& event) {
+        globus_->showGlobe(event.IsChecked());
+        Layout();
+    });
+
+    auto* sizer = new wxBoxSizer(wxHORIZONTAL);
     sizer->Add(tabs_, 1, wxEXPAND);
+    sizer->Add(globus_, 0, wxEXPAND);
     SetSizer(sizer);
 
     // Until package E puts the width and Gear buttons in, the gearshift

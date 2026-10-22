@@ -8,6 +8,9 @@ add_executable(ragtime WIN32
     src/MainFrame.cpp
     src/GearshiftDialog.cpp
     src/Thresholds.cpp
+    src/globus/GlobusPanel.cpp
+    src/globus/GlobusToggle.cpp
+    src/globus/GlobusView.cpp
 )
 
 # wx headers go in as system headers, so a warning in wxWidgets itself never

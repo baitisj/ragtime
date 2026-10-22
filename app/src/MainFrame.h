@@ -5,6 +5,7 @@
 
 #include "ragtime/gearbox/Gearbox.h"
 
+class GlobusPanel;
 class wxNotebook;
 
 // The one main window. Package E fills it in (docs/STAGE1.md): connection
@@ -20,6 +21,7 @@ private:
     void showGear();
 
     wxNotebook* tabs_ = nullptr;
+    GlobusPanel* globus_ = nullptr;
     ragtime::gearbox::Gearshift gearshift_;
 };
 

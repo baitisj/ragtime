@@ -14,3 +14,7 @@ endfunction()
 
 ragtime_test(ragtime_version_test VersionTest.cpp)
 ragtime_test(ragtime_gearbox_test GearboxTest.cpp)
+
+ragtime_test(ragtime_globus_test GlobusTest.cpp)
+# The globus test also checks the generated map tables themselves.
+target_include_directories(ragtime_globus_test PRIVATE ${PROJECT_SOURCE_DIR}/core/src/globus)

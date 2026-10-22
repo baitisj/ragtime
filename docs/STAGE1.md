@@ -53,6 +53,15 @@ Done in the skeleton PR: see "Layout" and "Build and test" in
 
 ## C. Globus widget
 
+Built in the Globus PR: `core/include/ragtime/globus/` (`Globe.h`, the
+projection, framing, rolling and map lines ported from Glissando; `Sun.h`,
+the subsolar point, the lighting and the header's time), the generated
+tables in `core/src/globus/`, the pane in `app/src/globus/`, and
+`tests/GlobusTest.cpp`. Left for package E: wiring the pane to the station
+list and the operator's locator, the draggable divider, moving the toggle
+to the tab strip while the globe is hidden, and View > Globus. Until then
+hiding the globe leaves the pane's header with the unlit toggle.
+
 - Port `Globe` (wx-free projection and Natural Earth tables) from
   Glissando, then draw it in the new theme: light blue oceans `#A8D4F2`,
   near-white land `#F7F5EE`, dark blue coasts and borders `#143068`, US
