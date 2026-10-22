@@ -213,7 +213,7 @@ MainFrame::MainFrame()
     setAutoReceive(loadBool(keys::AUTO_RECEIVE_BROADCAST, false));
 
     loadGearshift();
-    setNarrow(gearshift_.width() == gearbox::Width::Hz500);
+    setNarrow(gearshift_.narrowOnly());
     bar_->acceptSessions->SetValue(link_.settings().acceptSessions);
     setPaused(loadBool(keys::PAUSED, false));
     stationList_->setColumns(loadColumns());
@@ -1718,15 +1718,8 @@ void MainFrame::showGearshift()
 
 void MainFrame::gearChanged()
 {
-    // A width the host can take caps it: BW500 or BW2300.
-    bool narrow = gearshift_.width() == gearbox::Width::Hz500;
-    if (gearbox::hostSupportsWidth(gearshift_.width()) && narrow != link_.settings().narrow)
-    {
-        link_.setNarrow(narrow, HostConnection::nowMs());
-        bar_->setNarrow(narrow);
-        GetMenuBar()->Check(ID_NARROW, narrow);
-        host_->flush();
-    }
+    // The gearshift's width only picks the modes gears come from; it never
+    // limits data2g-host. That is the 500 Hz switch's job (setNarrow).
     saveGearshift(gearshift_);
     showGear();
 }
@@ -1735,7 +1728,7 @@ void MainFrame::showGear()
 {
     std::optional<gearbox::Gear> gear = gearshift_.current();
     bar_->setGearshiftTip(wxString("The gearshift: pick the speed, width and path. Now up to ")
-                          + gearbox::widthLabel(gearshift_.width())
+                          + gearbox::widthLabel(gearshift_.effectiveWidth())
                           + (gear ? ", " + utf8(gearbox::gearLabel(*gear)) : wxString()));
     if (!gear)
     {
@@ -1755,7 +1748,8 @@ void MainFrame::showGear()
 
 void MainFrame::setNarrow(bool narrow)
 {
-    gearshift_.setWidth(narrow ? gearbox::Width::Hz500 : gearbox::Width::Hz2400);
+    gearshift_.setNarrowOnly(narrow);
+    saveBool(keys::NARROW_ONLY, narrow);
     link_.setNarrow(narrow, HostConnection::nowMs());
     bar_->setNarrow(narrow);
     GetMenuBar()->Check(ID_NARROW, narrow);

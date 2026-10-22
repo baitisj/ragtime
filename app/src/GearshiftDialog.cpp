@@ -288,7 +288,7 @@ private:
         }
 
         // Every other best mode on a thin dashed line.
-        const int cap = widthCapHz(shift_.width());
+        const int cap = widthCapHz(shift_.effectiveWidth());
         const std::vector<const Submode*> best = bestModes(shift_.usable(), shift_.path(), cap);
         if (best.size() > 1)
         {
@@ -379,7 +379,7 @@ private:
             setPen(*gc, soft, 1.5);
             gc->SetBrush(*wxTRANSPARENT_BRUSH);
             gc->DrawEllipse(x, y + 2, 9, 9);
-            const wxString wider = wxString::FromUTF8("wider than ") + widthLabel(shift_.width());
+            const wxString wider = wxString::FromUTF8("wider than ") + widthLabel(shift_.effectiveWidth());
             double w = 0, h = 0;
             gc->GetTextExtent(wider, &w, &h);
             gc->DrawText(wider, x + 13, y + 6.5 - h / 2);
@@ -446,7 +446,6 @@ GearshiftDialog::GearshiftDialog(wxWindow* parent, Gearshift& shift, std::functi
         const Width width = ALL_WIDTHS[i];
         auto* chip = new wxToggleButton(this, wxID_ANY, utf8(widthLabel(width)),
                                         wxDefaultPosition, wxDefaultSize, wxBU_EXACTFIT);
-        chip->Enable(hostSupportsWidth(width));
         chip->Bind(wxEVT_TOGGLEBUTTON, [this, width](wxCommandEvent&) {
             shift_.setWidth(width);
             changed();
@@ -483,11 +482,10 @@ GearshiftDialog::GearshiftDialog(wxWindow* parent, Gearshift& shift, std::functi
     chips->Add(auto_, 0, wxALIGN_CENTER_VERTICAL);
     top->Add(chips, 0, wxEXPAND | wxLEFT | wxRIGHT | wxTOP, 10);
 
-    auto* widthNote = new wxStaticText(this, wxID_ANY,
-                                       "200 Hz and 1.2 kHz need data2g-host support.");
-    widthNote->SetForegroundColour(wxSystemSettings::GetColour(wxSYS_COLOUR_GRAYTEXT));
-    widthNote->SetFont(widthNote->GetFont().Smaller());
-    top->Add(widthNote, 0, wxLEFT | wxTOP, 10);
+    widthNote_ = new wxStaticText(this, wxID_ANY, wxEmptyString);
+    widthNote_->SetForegroundColour(wxSystemSettings::GetColour(wxSYS_COLOUR_GRAYTEXT));
+    widthNote_->SetFont(widthNote_->GetFont().Smaller());
+    top->Add(widthNote_, 0, wxLEFT | wxTOP, 10);
 
     // The map, and the gear list beside it.
     auto* body = new wxBoxSizer(wxHORIZONTAL);
@@ -552,7 +550,16 @@ void GearshiftDialog::refresh()
 {
     refreshing_ = true;
     for (std::size_t i = 0; i < ALL_WIDTHS.size(); i++)
-        widthChips_[i]->SetValue(ALL_WIDTHS[i] == shift_.width());
+    {
+        // The 500 Hz switch greys the wider widths; the chip lit is the
+        // width the gears come from.
+        widthChips_[i]->Enable(!shift_.narrowOnly() || widthCapHz(ALL_WIDTHS[i]) <= widthCapHz(Width::Hz500));
+        widthChips_[i]->SetValue(ALL_WIDTHS[i] == shift_.effectiveWidth());
+    }
+    widthNote_->SetLabel(shift_.narrowOnly()
+                             ? "The 500 Hz switch is on: data2g-host uses only 500 Hz modes, so the gears do too."
+                             : "Width picks the modes the gears come from; data2g-host may still use any "
+                               "width. The 500 Hz switch on the connection bar limits it.");
     for (std::size_t i = 0; i < ALL_PATHS.size(); i++)
         pathChips_[i]->SetValue(ALL_PATHS[i] == shift_.path());
     auto_->SetValue(shift_.isAuto());

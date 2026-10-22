@@ -34,11 +34,6 @@ constexpr std::array<Width, 4> ALL_WIDTHS = {Width::Hz200, Width::Hz500, Width::
 int widthCapHz(Width width);
 // "200 Hz", "500 Hz", "1.2 kHz", "2.4 kHz".
 const char* widthLabel(Width width);
-// The command that caps data2g-host at this width: "BW500" or "BW2300"
-// (which lifts the cap). Empty for 200 Hz and 1.2 kHz, which the host can't
-// take yet (an ask for Andrew); the popup greys them.
-const char* widthHostCommand(Width width);
-bool hostSupportsWidth(Width width);
 
 constexpr double GEAR_RATIO = 1.8;       // each gear at least this much faster
 constexpr double TOP_GEAR_RATIO = 1.3;   // or the fastest mode replaces the top gear
@@ -137,6 +132,11 @@ struct HostMode
 
 // The gearshift's state: width, path, Auto, and the gear in effect. The
 // popup draws it and the Gear button shows current().
+//
+// The width only picks which modes the gears come from: choosing 500 Hz
+// to get a narrow mode leaves data2g-host free to use any width. The 500 Hz
+// switch on the connection bar is what limits the host (BW500), and while
+// it is on the gears come only from 500 Hz modes (narrowOnly).
 class Gearshift
 {
 public:
@@ -153,6 +153,13 @@ public:
 
     void setWidth(Width width);
     Width width() const { return width_; }
+    // The 500 Hz switch. It caps the width without changing the one chosen,
+    // so turning it off brings the chosen width back.
+    void setNarrowOnly(bool on);
+    bool narrowOnly() const { return narrowOnly_; }
+    // The width the ladder uses: the chosen one, no wider than 500 Hz while
+    // narrowOnly.
+    Width effectiveWidth() const;
     void setPath(Path path);
     Path path() const { return path_; }
 
@@ -191,6 +198,7 @@ private:
     SubmodeTable usable_;
     std::vector<HostMode> hostModes_;
     Width width_ = Width::Hz2400;
+    bool narrowOnly_ = false;
     Path path_ = Path::Calm;
     bool auto_ = false;
     PathSnr snr_;

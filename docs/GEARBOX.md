@@ -19,8 +19,14 @@ Gear button by Send. The popup *is* the Submode Map:
 - **Width** chips, narrowest to widest: 200 Hz, 500 Hz, 1.2 kHz, 2.4 kHz
   (the map's four groups). A width is a cap: 2.4 kHz still uses the
   narrow modes. Modes wider than the cap are hollow grey circles. The
-  500 Hz switch on the connection bar is the quick way: on, data2g-host
-  uses only 500 Hz modes (`BW500`); off, any width (`BW2300`).
+  width only picks which modes the gears come from: picking 500 Hz to
+  get a narrow, easily heard mode leaves data2g-host free to use any
+  width (Jeff, 2026-10-22).
+- The **500 Hz switch** on the connection bar is what limits data2g-host:
+  on, it uses only 500 Hz modes (`BW500`); off, any width (`BW2300`).
+  While it is on the gears come only from 500 Hz modes too: the 1.2 kHz
+  and 2.4 kHz chips grey out, and turning it off brings back the width
+  chosen before.
 - **Path** chips: Calm (no fading, AWGN), Good, Poor, Disturbed (the ITU
   F.1487 fading channels). The path picks the gearbox, because modes rank
   very differently once the path fades: polar modes rise on a good fading
@@ -180,8 +186,9 @@ run. The tables below are the Submode Map's.
   (the same ladders as `gearbox_ladder.py`, checked on all 16 gearboxes),
   `autoGearIndex` with the 3 dB margin, the short names (`snrLetter`,
   `speedShorthand`, `shortNames`), `PathSnr` (the mean of the last
-  5 bursts), the widths and their host commands, the labels, and
-  `Gearshift`, the popup's state. Changing the width or path keeps the
+  5 bursts), the widths, the labels, and
+  `Gearshift`, the popup's state (`setNarrowOnly` is the 500 Hz switch;
+  `effectiveWidth()` is the width the ladder uses). Changing the width or path keeps the
   chosen mode if it is still a gear, or else takes the fastest gear no
   faster than it, so the gearbox never shifts up on its own. Auto with no
   S/N reports yet holds the chosen gear.

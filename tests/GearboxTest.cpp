@@ -251,11 +251,6 @@ void testLadders()
     CHECK_EQ(widthCapHz(Width::Hz1200), 1200);
     CHECK_EQ(std::string(widthLabel(Width::Hz1200)), std::string("1.2 kHz"));
     CHECK_EQ(std::string(widthLabel(Width::Hz2400)), std::string("2.4 kHz"));
-    CHECK_EQ(std::string(widthHostCommand(Width::Hz500)), std::string("BW500"));
-    CHECK_EQ(std::string(widthHostCommand(Width::Hz2400)), std::string("BW2300"));
-    CHECK(!hostSupportsWidth(Width::Hz200));
-    CHECK(!hostSupportsWidth(Width::Hz1200));
-    CHECK(hostSupportsWidth(Width::Hz500));
     CHECK_EQ(std::string(pathLabel(Path::Disturbed)), std::string("Disturbed"));
     CHECK(pathFromKey("mpp") == std::optional<Path>(Path::Poor));
     CHECK(!pathFromKey("hf"));
@@ -450,6 +445,23 @@ void testGearshift()
     CHECK_EQ(shift.table().find("p-16qam")->bitsPerSecond, 400.0);
     shift.setHostModes({});
     CHECK_EQ(shift.ladder().size(), 4u);
+
+    // The 500 Hz switch caps the ladder but keeps the chosen width.
+    shift.setNarrowOnly(true);
+    CHECK(shift.narrowOnly());
+    CHECK(shift.width() == Width::Hz2400);
+    CHECK(shift.effectiveWidth() == Width::Hz500);
+    CHECK_EQ(names(shift.ladder()), std::string("p-fsk-2"));
+    shift.setWidth(Width::Hz200);  // narrower than the cap: taken as it is
+    CHECK(shift.effectiveWidth() == Width::Hz200);
+    CHECK_EQ(names(shift.ladder()), std::string("p-200"));
+    shift.setWidth(Width::Hz2400);
+    shift.setNarrowOnly(false);
+    CHECK(shift.effectiveWidth() == Width::Hz2400);
+    CHECK_EQ(shift.ladder().size(), 4u);
+    // And choosing 500 Hz by hand leaves the switch alone.
+    shift.setWidth(Width::Hz500);
+    CHECK(!shift.narrowOnly());
 }
 
 } // namespace
