@@ -66,6 +66,10 @@ meter, its reading such as `−4 dB`), and the TX light (`TX Off` / `TX`).
 
 ![Globus, home CN87 to W1AW, 22:36 UTC](images/globe-w1aw.png)
 
+As built (the pane at 300 px, the same moment, `TZ=America/Los_Angeles`):
+
+![The Globus pane in the app](images/globus-pane.png)
+
 ## Seal state icons
 
 Each icon is a wax-seal rosette with a glyph inside, so the shape carries

@@ -16,7 +16,9 @@ add_library(ragtime_core STATIC
     src/protocol/Records.cpp
     src/protocol/Stream.cpp
     src/text/HamText.cpp
-    # Package C (Globus projection and map tables): src/globus/.
+    # Package C: Globus, the globe (projection, Natural Earth tables, light).
+    src/globus/Globe.cpp
+    src/globus/Sun.cpp
     # Package D (gearbox model): src/gearbox/.
 )
 

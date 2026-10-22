@@ -3,17 +3,18 @@
 
 Reference for the theme, not app code: light blue oceans, near-white land,
 dark blue coasts and borders, lit from the subsolar point so the greyline
-shows. Reads Glissando's Natural Earth tables (LandOutlines.h, BorderLines.h).
+shows. Reads the Natural Earth tables in core/src/globus/ (LandOutlines.h,
+BorderLines.h); the app draws the same in app/src/globus/GlobusView.cpp.
 
 Usage: render_sunlit_globe.py '{"out": "g.png", "size": 640, "center": [47.5, -123],
         "home": [47.5, -123], "target": [41.7, -72.7], "dots": [],
-        "utc": [2026, 10, 21, 22, 36], "glissando": "/path/to/glissando",
-        "admin1": "us_canada_admin1_lines.json"}'
+        "utc": [2026, 10, 21, 22, 36], "admin1": "us_canada_admin1_lines.json"}'
 """
 import re, math, sys, json, numpy as np
 from PIL import Image, ImageDraw
 cfg=json.loads(sys.argv[1])
-SRC=cfg.get('glissando','../glissando').rstrip('/')+'/app/src/gui/glissando/'
+import os
+SRC=cfg.get('tables',os.path.join(os.path.dirname(os.path.abspath(__file__)),'..','..','core','src','globus')).rstrip('/')+'/'
 def arr(txt,name):
     m=re.search(name+r'\[[^\]]*\]\s*=\s*\{(.*?)\};',txt,re.S)
     return [int(v) for v in re.findall(r'-?\d+',m.group(1))]
