@@ -159,7 +159,7 @@ BroadcastPage::BroadcastPage(wxWindow* parent, const BroadcastChat& chat)
         if (m != nullptr && list_->VirtualHitTest(e.GetPosition().y) != wxNOT_FOUND)
         {
             tip = wxDateTime((time_t)m->time).FormatISOCombined(' ') + wxString::Format(", item %u", m->seq);
-            if (!m->mode.empty()) tip += ", " + wxString::FromUTF8(m->mode);
+            if (!m->mode.empty()) tip += ", " + wxString::FromUTF8(nameMode_ ? nameMode_(m->mode) : m->mode);
         }
         list_->SetToolTip(tip);
         e.Skip();

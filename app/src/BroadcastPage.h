@@ -33,6 +33,8 @@ public:
     void onGear(std::function<void()> fn) { onGear_ = std::move(fn); }
     void onCancel(std::function<void(uint64_t id)> fn) { onCancel_ = std::move(fn); }
     void onResend(std::function<void(uint64_t id)> fn) { onResend_ = std::move(fn); }
+    // Turns a Data2G mode name into the short name shown to people ("E2C").
+    void nameModes(std::function<std::string(const std::string& mode)> fn) { nameMode_ = std::move(fn); }
 
     // Redraws the messages when the chat has changed.
     void refresh();
@@ -64,6 +66,7 @@ private:
     std::function<bool(const std::string&)> onSend_;
     std::function<void()> onGear_;
     std::function<void(uint64_t)> onCancel_, onResend_;
+    std::function<std::string(const std::string&)> nameMode_;
 };
 
 #endif
