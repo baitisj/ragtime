@@ -13,7 +13,8 @@ Gear button by Send. The popup *is* the Submode Map:
   mode needs down the side (harder further down), one dot per mode,
   coloured by modulation: FSK `#0f766e`, QPSK `#1f5fbf`, 16-QAM `#7c3aed`,
   64-QAM `#b8326b`, 256-QAM `#9a3412`, polar `#a16207`. Hovering a dot
-  shows its name, width, speed and threshold.
+  shows its short name and Data2G name, width, modulation, speed and
+  threshold.
 - **Width** chips, narrowest to widest: 200 Hz, 500 Hz, 1.2 kHz, 2.4 kHz
   (the map's four groups). A width is a cap: 2.4 kHz still uses the
   narrow modes. Modes wider than the cap are hollow grey circles. The
@@ -22,18 +23,20 @@ Gear button by Send. The popup *is* the Submode Map:
   F.1487 fading channels). The path picks the gearbox, because modes rank
   very differently once the path fades: polar modes rise on a good fading
   path and the QAM modes sink.
-- The **gears** are numbered knobs joined by a heavy line; every other
+- The **gears** are numbered knobs joined by a heavy line, each labelled
+  with its short name (below, "Mode names"); every other
   best mode sits on a thin dashed line. The current gear is filled blue.
 - **Auto**: the path's S/N, from the station's last few bursts, is a
   dashed line; everything needing more than that, less a 3 dB margin, is
   shaded. Auto takes the fastest gear above the shading (ringed in green
   when Auto is off, as a suggestion).
-- The gear list beside the map: gear, mode, speed, S/N on this path, how
-  long 1 KB takes, and how many dB short the path is.
+- The gear list beside the map: gear, short name, Data2G mode, speed, S/N
+  on this path, how long 1 KB takes, and how many dB short the path is.
 - Leave out the `ack-` modes: they carry the host's own ARQ control.
 
 The connection bar shows `2.4 kHz ▼` and `500 Hz`; the button by Send
-shows `Gear 3 · polar-k96-f4 · 139 bit/s ▼`.
+shows `Gear 3 · E2C ▼`, with the Data2G name, speed and S/N in its
+tooltip. FSK, PSK and the rest show only in the popup.
 
 ## How the gears are chosen
 
@@ -51,6 +54,61 @@ For each width cap and path:
 
 `tools/gearbox/gearbox_ladder.py` does exactly this. On every path,
 2.4 kHz gets 8 gears.
+
+## Mode names
+
+Outside the popup a mode goes by a three-character short name, Jeff's idea
+(2026-10-22): a letter for how strong the signal must be, then how fast it
+goes. `A32` scrapes through at −12.5 dB and moves 32 bit/s; `Z8k` needs
+a quiet band and moves 8000. The Gear button, the status bar and the
+message tooltips use them; the popup shows both.
+
+**The letter** comes from the S/N the mode needs on a Calm path, whichever
+path is picked, so a mode keeps its name when the path changes:
+
+    letter = A + round((S/N + 12.5 dB) / 1.25 dB)
+
+A is −12.5 dB, each letter is 1.25 dB more, K is 0 dB and Z is +18.75 dB.
+Every four letters is 5 dB, so two names a few letters apart are a few
+dB apart. Anything below A reads A and anything above Z reads Z. (Halves
+round up.)
+
+**The speed** is the payload rate, rounded like the speed column (halves
+to even):
+
+| Speed | Written | Examples |
+| --- | --- | --- |
+| below 100 bit/s | the bit/s | `29`, `72` |
+| 100 to 949 | hundreds, then C | `1C` (99.5 to 149), `9C` |
+| 950 and up | thousands, then k | `1k`, `8k` |
+
+**Ties.** Two modes can come out the same: on the Submode Map,
+`n4-qpsk-r2/3` and `n4-16qam-r1/3` are both `F2C`. Names are given
+easiest first (lower Calm S/N, then faster, then by Data2G name), and a
+mode whose name is taken moves up one letter until it finds a free one,
+so the harder mode is the one that moves and its name never promises more
+than it does. A mode that would move past Z, or has no Calm figure or no
+speed yet, has no short name and shows its Data2G name. Names are worked
+out over every mode Ragtime knows of, not just those the host offers, so
+they don't change with the host's list.
+
+On the Submode Map, 12 of the 45 modes move, most by one letter; the
+farthest is `n10-qpsk-r1/3`, `F2C` to `I2C`. The 2.4 kHz gears read:
+
+| Path | Gears 1 to 8 |
+| --- | --- |
+| Calm | `A32` `C72` `E2C` `G3C` `J6C` `M2k` `Q3k` `Z8k` |
+| Good | `A32` `E69` `G1C` `G3C` `J6C` `M2k` `Q3k` `Z8k` |
+| Poor | `A32` `C72` `F1C` `G3C` `J6C` `M2k` `Q3k` `Z8k` |
+| Disturbed | `A32` `C72` `H2C` `G3C` `J6C` `M2k` `Q3k` `V7k` |
+
+The letters always follow the Calm path, so on a fading path a gear can
+read a lower letter than the one below it (`H2C` then `G3C`).
+
+Speeds from the host's `MODES` win, so the digits follow the host
+(the map's 32 bit/s may read `A29`), and a newer Data2G's thresholds can
+move a letter by one. If Andrew's `MODES` ever reports these names,
+Ragtime should take them from there.
 
 ## The figures
 
@@ -113,15 +171,17 @@ run. The tables below are the Submode Map's.
   `payloadBitsPerSecond`, paths, modulations and their colours.
 - `core/include/ragtime/gearbox/Gearbox.h`: `bestModes`, `gearLadder`
   (the same ladders as `gearbox_ladder.py`, checked on all 16 gearboxes),
-  `autoGearIndex` with the 3 dB margin, `PathSnr` (the mean of the last
+  `autoGearIndex` with the 3 dB margin, the short names (`snrLetter`,
+  `speedShorthand`, `shortNames`), `PathSnr` (the mean of the last
   5 bursts), the widths and their host commands, the labels, and
   `Gearshift`, the popup's state. Changing the width or path keeps the
   chosen mode if it is still a gear, or else takes the fastest gear no
   faster than it, so the gearbox never shifts up on its own. Auto with no
   S/N reports yet holds the chosen gear.
-- `app/src/GearshiftDialog.*`: the popup. `app/src/Thresholds.*`: finding
-  and reading the file. Until package E adds the width and Gear buttons,
-  Settings > Gearshift (Ctrl+G) opens it and the status bar shows the gear.
+- `app/src/GearshiftDialog.*`: the popup, opened by the width button, the
+  Gear button and Settings > Gearshift (Ctrl+G). `app/src/Thresholds.*`:
+  finding and reading the file. `Gearshift::shortName` names a mode for
+  the status bar and message tooltips.
 - `tests/GearboxTest.cpp` uses made-up placeholder figures, never
   Data2G's.
 

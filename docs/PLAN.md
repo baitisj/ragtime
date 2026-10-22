@@ -250,7 +250,7 @@ Mock-ups of the three tabs: [Data2G client mock-ups](https://claude.ai/artifact/
 
 The Broadcast tab is the first tab and never closes. It is where CQs, roundtables and broadcast files happen. It works much like Glissando's Data2G broadcast chat, minus the tempo art, but on its own broadcast group and protocol.
 
-- **Speed** is the gearshift ("The gearshift", under Main window): the Gear button by Send shows the gear and its mode, for example `Gear 3 · polar-k96-f4 · 139 bit/s`, and opens the gearshift on the Submode Map.
+- **Speed** is the gearshift ("The gearshift", under Main window): the Gear button by Send shows the gear and its mode's short name, for example `Gear 3 · E2C` (`docs/GEARBOX.md`, "Mode names"), and opens the gearshift on the Submode Map.
 - Each message shows Queued, Sending, Sent, or Not sent, with the same rules as now (the host's ACKMODE report, two minutes to give up). No acknowledgements in broadcast mode except for addressed messages, if we keep them.
 - The station list on the left is fed by broadcast traffic: callsign, last heard, locator if sent, and whether it takes sessions. Double-clicking a station does nothing risky: it fills "@W1AW" or offers **Call**.
 - Woah! becomes a plain **Pause sending** switch on the toolbar.

@@ -316,7 +316,8 @@ private:
             gc->DrawEllipse(at.m_x - r, at.m_y - r, 2 * r, 2 * r);
         }
 
-        // The gears: numbered knobs joined by a heavy line.
+        // The gears: numbered knobs joined by a heavy line, each with its short
+        // name.
         const std::vector<Gear>& ladder = shift_.ladder();
         const std::optional<Gear> current = shift_.current();
         const std::optional<Gear> suggestion = shift_.suggestion();
@@ -350,6 +351,14 @@ private:
             double w = 0, h = 0;
             gc->GetTextExtent(number, &w, &h);
             gc->DrawText(number, x - w / 2, y - h / 2);
+            // Its short name above and to the right, where no mode is (none
+            // is both faster and easier than a best mode).
+            if (!gear.name.empty())
+            {
+                gc->SetFont(knobFont, isCurrent ? ACCENT : ink);
+                gc->GetTextExtent(utf8(gear.name), &w, &h);
+                gc->DrawText(utf8(gear.name), x + r * 0.7, y - r * 0.7 - h);
+            }
         }
 
         // The legend.
@@ -397,7 +406,7 @@ private:
             if (hovered)
             {
                 const wxString text
-                    = utf8(hovered->name) + "\n"
+                    = utf8(shift_.shortName(hovered->name)) + "   " + utf8(hovered->name) + "\n"
                       + wxString::Format("%d Hz", hovered->widthHz) + wxString::FromUTF8(" \xC2\xB7 ")
                       + modulationLabel(hovered->modulation) + "\n" + utf8(formatSpeed(hovered->bitsPerSecond))
                       + "\n" + utf8(formatDb(*hovered->thresholdOn(shift_.path()))) + " on a "
@@ -497,14 +506,15 @@ GearshiftDialog::GearshiftDialog(wxWindow* parent, Gearshift& shift, std::functi
     side->Add(inGear_, 0, wxBOTTOM, 4);
     snr_ = new wxStaticText(this, wxID_ANY, wxEmptyString);
     side->Add(snr_, 0, wxBOTTOM, 8);
-    gears_ = new wxListCtrl(this, wxID_ANY, wxDefaultPosition, wxSize(490, -1),
+    gears_ = new wxListCtrl(this, wxID_ANY, wxDefaultPosition, wxSize(546, -1),
                             wxLC_REPORT | wxLC_SINGLE_SEL);
     gears_->InsertColumn(0, "Gear", wxLIST_FORMAT_RIGHT, 46);
-    gears_->InsertColumn(1, "Mode", wxLIST_FORMAT_LEFT, 132);
-    gears_->InsertColumn(2, "Speed", wxLIST_FORMAT_RIGHT, 84);
-    gears_->InsertColumn(3, "S/N", wxLIST_FORMAT_RIGHT, 76);
-    gears_->InsertColumn(4, "1 KB", wxLIST_FORMAT_RIGHT, 80);
-    gears_->InsertColumn(5, "Short", wxLIST_FORMAT_RIGHT, 66);
+    gears_->InsertColumn(1, "Name", wxLIST_FORMAT_LEFT, 56);
+    gears_->InsertColumn(2, "Data2G mode", wxLIST_FORMAT_LEFT, 132);
+    gears_->InsertColumn(3, "Speed", wxLIST_FORMAT_RIGHT, 84);
+    gears_->InsertColumn(4, "S/N", wxLIST_FORMAT_RIGHT, 76);
+    gears_->InsertColumn(5, "1 KB", wxLIST_FORMAT_RIGHT, 80);
+    gears_->InsertColumn(6, "Short", wxLIST_FORMAT_RIGHT, 66);
     gears_->Bind(wxEVT_LIST_ITEM_SELECTED, &GearshiftDialog::onGearSelected, this);
     side->Add(gears_, 1, wxEXPAND);
     body->Add(side, 0, wxEXPAND);
@@ -529,8 +539,8 @@ GearshiftDialog::GearshiftDialog(wxWindow* parent, Gearshift& shift, std::functi
 
     SetSizerAndFit(top);
     // Fits Jeff's 1366x768 screen with room for the panel and title bar.
-    SetSize(wxSize(1200, 610));
-    SetMinSize(wxSize(1060, 520));
+    SetSize(wxSize(1256, 610));
+    SetMinSize(wxSize(1116, 520));
     refresh();
     CentreOnParent();
 }
@@ -554,7 +564,8 @@ void GearshiftDialog::refresh()
     const std::optional<Gear> current = shift_.current();
     const std::optional<double> snr = shift_.pathSnr();
     if (current)
-        inGear_->SetLabel(utf8(gearLabel(*current)) + (shift_.isAuto() && snr ? " (Auto)" : ""));
+        inGear_->SetLabel(utf8(gearLabel(*current)) + (current->name.empty() ? "" : ", " + utf8(current->mode))
+                          + (shift_.isAuto() && snr ? " (Auto)" : ""));
     else
         inGear_->SetLabel("No gears");
     if (snr)
@@ -577,15 +588,16 @@ void GearshiftDialog::refresh()
     {
         const Gear& gear = ladder[i];
         const long row = gears_->InsertItem(static_cast<long>(i), wxString::Format("%d", gear.number));
-        gears_->SetItem(row, 1, utf8(gear.mode));
-        gears_->SetItem(row, 2, utf8(formatSpeed(gear.bitsPerSecond)));
-        gears_->SetItem(row, 3, utf8(formatDb(gear.threshold)));
-        gears_->SetItem(row, 4, utf8(formatDuration(secondsPerKilobyte(gear.bitsPerSecond))));
+        gears_->SetItem(row, 1, utf8(gear.name));
+        gears_->SetItem(row, 2, utf8(gear.mode));
+        gears_->SetItem(row, 3, utf8(formatSpeed(gear.bitsPerSecond)));
+        gears_->SetItem(row, 4, utf8(formatDb(gear.threshold)));
+        gears_->SetItem(row, 5, utf8(formatDuration(secondsPerKilobyte(gear.bitsPerSecond))));
         if (snr)
         {
             const double shortBy = dbShort(gear.threshold, *snr);
             if (shortBy > 0.05)
-                gears_->SetItem(row, 5, wxString::Format("%.1f dB", shortBy));
+                gears_->SetItem(row, 6, wxString::Format("%.1f dB", shortBy));
         }
         if (current && current->number == gear.number)
         {

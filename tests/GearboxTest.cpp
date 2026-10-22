@@ -2,6 +2,7 @@
 // exercise each rule, not Data2G's: whether Ragtime may carry Data2G's
 // thresholds file is still Jeff's call.
 #include <cmath>
+#include <map>
 #include <optional>
 #include <string>
 #include <vector>
@@ -244,8 +245,7 @@ void testLadders()
         CHECK_EQ(ladder[2].threshold, 5.0);  // the Poor path's figure
         CHECK_EQ(ladder[2].widthHz, 2300);
         CHECK(ladder[2].modulation == Modulation::Qam16);
-        CHECK_EQ(gearLabel(ladder[2]),
-                 std::string("Gear 3 \xC2\xB7 p-16qam \xC2\xB7 400 bit/s"));
+        CHECK_EQ(gearLabel(ladder[2]), std::string("Gear 3 \xC2\xB7 K4C"));
     }
 
     CHECK_EQ(widthCapHz(Width::Hz1200), 1200);
@@ -304,6 +304,76 @@ void testFormatting()
     CHECK_EQ(formatDb(-0.04), std::string("+0.0 dB"));
 }
 
+void testNames()
+{
+    // The letter: A at -12.5 dB, 1.25 dB a letter, K at 0, clamped to A..Z.
+    CHECK_EQ(snrLetter(-12.5), 'A');
+    CHECK_EQ(snrLetter(-20.0), 'A');
+    CHECK_EQ(snrLetter(-11.875), 'B');  // halves go up
+    CHECK_EQ(snrLetter(-5.0), 'G');
+    CHECK_EQ(snrLetter(0.0), 'K');
+    CHECK_EQ(snrLetter(0.6), 'K');
+    CHECK_EQ(snrLetter(0.7), 'L');
+    CHECK_EQ(snrLetter(18.75), 'Z');
+    CHECK_EQ(snrLetter(40.0), 'Z');
+
+    // The speed: bit/s below 100, then hundreds (C), then thousands (k).
+    CHECK_EQ(speedShorthand(0.0), std::string());
+    CHECK_EQ(speedShorthand(-5.0), std::string());
+    CHECK_EQ(speedShorthand(29.4), std::string("29"));
+    CHECK_EQ(speedShorthand(72.5), std::string("72"));  // as formatSpeed rounds
+    CHECK_EQ(speedShorthand(99.4), std::string("99"));
+    CHECK_EQ(speedShorthand(99.6), std::string("1C"));
+    CHECK_EQ(speedShorthand(149.0), std::string("1C"));
+    CHECK_EQ(speedShorthand(151.0), std::string("2C"));
+    CHECK_EQ(speedShorthand(949.0), std::string("9C"));
+    CHECK_EQ(speedShorthand(950.0), std::string("1k"));
+    CHECK_EQ(speedShorthand(8222.0), std::string("8k"));
+    CHECK_EQ(speedShorthand(12600.0), std::string("13k"));
+
+    const std::map<std::string, std::string> placeholder = shortNames(placeholderTable());
+    CHECK_EQ(placeholder.at("p-fsk-1"), std::string("A30"));
+    CHECK_EQ(placeholder.at("p-fsk-3"), std::string("B35"));
+    CHECK_EQ(placeholder.at("p-qpsk-2"), std::string("E1C"));
+    CHECK_EQ(placeholder.at("polar-p1"), std::string("F2C"));
+    CHECK_EQ(placeholder.at("p-16qam"), std::string("K4C"));
+    CHECK_EQ(placeholder.at("p-64qam"), std::string("O6C"));
+    CHECK(placeholder.count("p-16qam-b") == 0);  // no Calm figure, no name
+    CHECK(placeholder.count("ack-fast") == 0);
+
+    // Ties: the harder mode moves up a letter until its name is free. t-b
+    // and t-a need the same S/N, so the slower t-a is the harder one.
+    const char* ties = R"({
+      "t-a":  {"hz": 200,  "mod": "QPSK", "rate": "1/2", "bps": 200,
+               "th": {"awgn": -5.0, "mpg": null, "mpp": null, "mpd": null}},
+      "t-b":  {"hz": 200,  "mod": "QPSK", "rate": "1/2", "bps": 220,
+               "th": {"awgn": -5.0, "mpg": null, "mpp": null, "mpd": null}},
+      "t-c":  {"hz": 500,  "mod": "QPSK", "rate": "1/2", "bps": 210,
+               "th": {"awgn": -4.5, "mpg": null, "mpp": null, "mpd": null}},
+      "t-d":  {"hz": 500,  "mod": "QPSK", "rate": "2/3", "bps": 190,
+               "th": {"awgn": -2.6, "mpg": null, "mpp": null, "mpd": null}},
+      "t-y":  {"hz": 2300, "mod": "QAM64", "rate": "3/4", "bps": 8000,
+               "th": {"awgn": 30, "mpg": null, "mpp": null, "mpd": null}},
+      "t-z":  {"hz": 2300, "mod": "QAM64", "rate": "4/5", "bps": 8100,
+               "th": {"awgn": 31, "mpg": null, "mpp": null, "mpd": null}}
+    })";
+    SubmodeTable table;
+    CHECK(table.parseJson(ties));
+    const std::map<std::string, std::string> tied = shortNames(table);
+    CHECK_EQ(tied.at("t-b"), std::string("G2C"));
+    CHECK_EQ(tied.at("t-a"), std::string("H2C"));
+    CHECK_EQ(tied.at("t-c"), std::string("I2C"));
+    CHECK_EQ(tied.at("t-d"), std::string("J2C"));  // I2C, its own, went to t-c
+    CHECK_EQ(tied.at("t-y"), std::string("Z8k"));
+    CHECK(tied.count("t-z") == 0);  // would pass Z
+
+    std::vector<Gear> ladder = gearLadder(placeholderTable(), Path::Calm, 2400);
+    CHECK_EQ(ladder[2].name, std::string("K4C"));
+    CHECK_EQ(gearLabel(ladder[2]), std::string("Gear 3 \xC2\xB7 K4C"));
+    ladder[2].name.clear();
+    CHECK_EQ(gearLabel(ladder[2]), std::string("Gear 3 \xC2\xB7 p-16qam"));
+}
+
 void testGearshift()
 {
     Gearshift shift;
@@ -316,6 +386,10 @@ void testGearshift()
     CHECK(!shift.isAuto());
     CHECK_EQ(shift.ladder().size(), 4u);
     CHECK_EQ(shift.current()->number, 1);
+    CHECK_EQ(shift.current()->name, std::string("A40"));
+    CHECK_EQ(shift.shortName("p-16qam"), std::string("K4C"));
+    CHECK_EQ(shift.shortName("n4-ack-1"), std::string("n4-ack-1"));
+    CHECK_EQ(shift.shortName("p-16qam-b"), std::string("p-16qam-b"));
 
     CHECK(shift.selectGear(3));
     CHECK(!shift.selectGear(0));
@@ -368,6 +442,10 @@ void testGearshift()
     CHECK_EQ(shift.ladder()[1].bitsPerSecond, 70.0);
     CHECK_EQ(shift.ladder()[2].bitsPerSecond, 390.0);
     CHECK_EQ(shift.ladder()[2].threshold, -1.0);
+    // Names follow the host's figures, and cover modes it doesn't offer.
+    CHECK_EQ(shift.ladder()[0].name, std::string("A31"));
+    CHECK_EQ(shift.ladder()[2].name, std::string("J4C"));
+    CHECK_EQ(shift.shortName("p-fsk-2"), std::string("A40"));
     // The table itself keeps the file's figures.
     CHECK_EQ(shift.table().find("p-16qam")->bitsPerSecond, 400.0);
     shift.setHostModes({});
@@ -383,6 +461,7 @@ int main()
     testLadders();
     testAuto();
     testFormatting();
+    testNames();
     testGearshift();
     return ragtime_test::finish();
 }

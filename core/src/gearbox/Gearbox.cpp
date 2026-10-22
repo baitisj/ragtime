@@ -4,6 +4,7 @@
 #include <cmath>
 #include <cstdio>
 #include <numeric>
+#include <set>
 #include <tuple>
 #include <utility>
 
@@ -79,6 +80,69 @@ std::vector<const Submode*> bestModes(const SubmodeTable& table, Path path, int 
     return best;
 }
 
+char snrLetter(double calmDb)
+{
+    const double step = std::floor((calmDb + 12.5) / 1.25 + 0.5);
+    return static_cast<char>('A' + static_cast<int>(std::clamp(step, 0.0, 25.0)));
+}
+
+std::string speedShorthand(double bitsPerSecond)
+{
+    if (!(bitsPerSecond > 0) || !std::isfinite(bitsPerSecond))
+        return {};
+    // nearbyint rounds halves to even, as formatSpeed does, so the digits
+    // agree with the speed shown beside them.
+    const double whole = std::nearbyint(bitsPerSecond);
+    if (whole < 100)
+        return std::to_string(static_cast<long>(whole));
+    const double hundreds = std::nearbyint(bitsPerSecond / 100.0);
+    if (hundreds < 10)
+        return std::to_string(static_cast<long>(hundreds)) + "C";
+    return std::to_string(static_cast<long>(std::max(1.0, std::nearbyint(bitsPerSecond / 1000.0))))
+           + "k";
+}
+
+std::string baseShortName(const Submode& mode)
+{
+    const std::optional<double> calm = mode.thresholdOn(Path::Calm);
+    const std::string speed = speedShorthand(mode.bitsPerSecond);
+    if (!calm || speed.empty())
+        return {};
+    return snrLetter(*calm) + speed;
+}
+
+std::map<std::string, std::string> shortNames(const SubmodeTable& table)
+{
+    // Easiest first, so the harder mode of a pair is the one that moves.
+    std::vector<const Submode*> named;
+    for (const Submode& mode : table.modes())
+    {
+        if (!baseShortName(mode).empty())
+            named.push_back(&mode);
+    }
+    std::sort(named.begin(), named.end(), [](const Submode* a, const Submode* b) {
+        return std::make_tuple(*a->thresholdOn(Path::Calm), -a->bitsPerSecond, a->name)
+               < std::make_tuple(*b->thresholdOn(Path::Calm), -b->bitsPerSecond, b->name);
+    });
+
+    std::map<std::string, std::string> names;
+    std::set<std::string> taken;
+    for (const Submode* mode : named)
+    {
+        const std::string speed = speedShorthand(mode->bitsPerSecond);
+        for (char letter = snrLetter(*mode->thresholdOn(Path::Calm)); letter <= 'Z'; letter++)
+        {
+            const std::string name = letter + speed;
+            if (taken.insert(name).second)
+            {
+                names[mode->name] = name;
+                break;
+            }
+        }
+    }
+    return names;
+}
+
 std::vector<Gear> gearLadder(const SubmodeTable& table, Path path, int capHz)
 {
     const std::vector<const Submode*> best = bestModes(table, path, capHz);
@@ -100,12 +164,15 @@ std::vector<Gear> gearLadder(const SubmodeTable& table, Path path, int capHz)
             picked.back() = best.back();
     }
 
+    const std::map<std::string, std::string> names = shortNames(table);
     std::vector<Gear> ladder;
     for (const Submode* mode : picked)
     {
         Gear gear;
         gear.number = static_cast<int>(ladder.size()) + 1;
         gear.mode = mode->name;
+        if (auto name = names.find(mode->name); name != names.end())
+            gear.name = name->second;
         gear.widthHz = mode->widthHz;
         gear.modulation = mode->modulation;
         gear.bitsPerSecond = mode->bitsPerSecond;
@@ -179,8 +246,8 @@ std::string formatDb(double dB)
 
 std::string gearLabel(const Gear& gear)
 {
-    return "Gear " + std::to_string(gear.number) + " \xC2\xB7 " + gear.mode + " \xC2\xB7 "
-           + formatSpeed(gear.bitsPerSecond);
+    return "Gear " + std::to_string(gear.number) + " \xC2\xB7 "
+           + (gear.name.empty() ? gear.mode : gear.name);
 }
 
 void PathSnr::record(double dB)
@@ -233,6 +300,12 @@ bool Gearshift::selectGear(int number)
     return true;
 }
 
+std::string Gearshift::shortName(const std::string& mode) const
+{
+    auto name = names_.find(mode);
+    return name != names_.end() ? name->second : mode;
+}
+
 std::optional<Gear> Gearshift::chosen() const
 {
     if (ladder_.empty())
@@ -279,8 +352,14 @@ void Gearshift::rebuild()
                 withHost.setThreshold(mode.name, path, dB);
         }
     }
+    names_ = shortNames(withHost);
     usable_ = withHost.offeredBy(offered);
     ladder_ = gearLadder(usable_, path_, widthCapHz(width_));
+    for (Gear& gear : ladder_)
+    {
+        auto name = names_.find(gear.mode);
+        gear.name = name != names_.end() ? name->second : std::string();
+    }
     chosen_ = 0;
     if (!before)
         return;
