@@ -85,14 +85,15 @@ screens.
 - Never pull Data2G code in: no vendoring, submodule, linking or copied
   snippets. Ragtime talks to a separately running `data2g-host` over TCP:
   KISS on 8100, commands on 8300, and the session byte stream on the
-  command port + 1 (8301). Glissando's `docs/DATA2G.md` describes the
+  command port + 1 (8301). Glissando's old `docs/DATA2G.md` (last copy at
+  https://github.com/baitisj/glissando/blob/75273a5/docs/DATA2G.md,
+  before Glissando dropped Data2G) describes the
   command lines and reports as Glissando uses them.
 - Never start `data2g-host`; the operator runs it. Ragtime never touches
   the sound card or PTT for data.
-- Glissando keeps its own Data2G mode only until Ragtime is functionally
-  equivalent (checklist in `docs/PLAN.md`), then drops it. Until then
-  Glissando's Data2G mode gets fixes only. Never change Glissando's chirp
-  modem behaviour from this project.
+- Glissando dropped its own Data2G mode on 2026-10-22 (glissando PR
+  #113), so Ragtime is the only Data2G client. Never change Glissando's
+  chirp modem behaviour from this project.
 
 **Protocol**
 

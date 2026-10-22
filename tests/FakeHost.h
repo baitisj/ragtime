@@ -1,7 +1,8 @@
 // A stand-in for data2g-host, for tests: the KISS, command and session
 // data ports on 127.0.0.1, with replies scripted by the test. It is written
 // for Ragtime from the command lines and reports in docs/PROTOCOL.md and
-// Glissando's docs/DATA2G.md; no Data2G code is used, and a real
+// Glissando's old docs/DATA2G.md (glissando commit 75273a5, the last copy
+// before Glissando dropped Data2G); no Data2G code is used, and a real
 // data2g-host never runs in a test.
 //
 // Several hosts share one FakeAir: a burst one host sends reaches the
