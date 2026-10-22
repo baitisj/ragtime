@@ -80,10 +80,11 @@ hiding the globe leaves the pane's header with the unlit toggle.
 
 - Port `Globe` (wx-free projection and Natural Earth tables) from
   Glissando, then draw it in the new theme: light blue oceans `#A8D4F2`,
-  near-white land `#F7F5EE`, dark blue coasts and borders `#143068`, US
-  state and Canadian province lines thin and light
-  (`tools/globe/us_canada_admin1_lines.json`, Natural Earth, simplified to
-  0.25°).
+  near-white land `#F7F5EE`, dark blue coasts and borders `#143068`,
+  state and province lines thin and light (Natural Earth 1:10m,
+  simplified to 0.25°, by `tools/globe/gen_admin1_lines.py`) for the
+  United States, Canada, Mexico, Russia, China, India, Brazil, Argentina
+  and Australia (Jeff, 2026-10-22).
 - Lit from the subsolar point: Lambert shading on the day side, a
   twilight blend from 3° above the horizon to 12° below, so the greyline
   shows. `tools/globe/render_sunlit_globe.py` is the reference renderer;

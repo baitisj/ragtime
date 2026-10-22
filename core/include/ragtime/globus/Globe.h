@@ -270,8 +270,9 @@ std::vector<Outline> coastLines(const View& view, const Window& window);
 // as lines to stroke.
 std::vector<Outline> borderLines(const View& view, const Window& window);
 
-// The US state and Canadian province lines on the near side of the globe,
-// as lines to stroke.
+// The state and province lines on the near side of the globe, as lines to
+// stroke: for the United States, Canada, Mexico, Russia, China, India,
+// Brazil, Argentina and Australia.
 std::vector<Outline> admin1Lines(const View& view, const Window& window);
 
 // The parallels and meridians every stepDegrees on the near side of the
