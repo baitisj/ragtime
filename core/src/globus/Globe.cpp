@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <cstdlib>
 #include <cstdint>
 #include <map>
 #include <string>
@@ -1167,22 +1168,98 @@ std::vector<Outline> admin1Lines(const View& view, const Window& window)
     return nearLines(admin1(), view, window);
 }
 
+namespace
+{
+
+// Where a border or a state or province line runs along a whole degree of
+// latitude or longitude, as the California and Nevada line does down
+// 120 W and the Northwest Territories' southern lines along 60 N: for each
+// such parallel and meridian, the stretches it covers, in degrees along
+// it. The graticule leaves those stretches out, so the line shows there as
+// it does everywhere else rather than over a white stripe.
+struct Covered
+{
+    std::map<int, std::vector<std::pair<double, double>>> parallels;   // by latitude, longitudes
+    std::map<int, std::vector<std::pair<double, double>>> meridians;   // by longitude, latitudes
+};
+
+const Covered& covered()
+{
+    static const Covered all = []() {
+        Covered c;
+        const int along = 2;    // hundredths of a degree off the grid line
+        auto onGrid = [along](int v) { return std::abs(v - (int)std::lround(v / 100.0) * 100) <= along; };
+        auto add = [&c, &onGrid](int count, const uint32_t* starts, const int16_t* points) {
+            for (int l = 0; l < count; l++)
+            {
+                for (uint32_t i = starts[l]; i + 1 < starts[l + 1]; i++)
+                {
+                    int x0 = points[2 * i], y0 = points[2 * i + 1];
+                    int x1 = points[2 * i + 2], y1 = points[2 * i + 3];
+                    if (y0 != y1 && onGrid(x0) && onGrid(x1) && std::lround(x0 / 100.0) == std::lround(x1 / 100.0))
+                    {
+                        c.meridians[(int)std::lround(x0 / 100.0)].push_back({std::min(y0, y1) / 100.0, std::max(y0, y1) / 100.0});
+                    }
+                    if (x0 != x1 && onGrid(y0) && onGrid(y1) && std::lround(y0 / 100.0) == std::lround(y1 / 100.0))
+                    {
+                        c.parallels[(int)std::lround(y0 / 100.0)].push_back({std::min(x0, x1) / 100.0, std::max(x0, x1) / 100.0});
+                    }
+                }
+            }
+        };
+        add(Admin1Lines::LINE_COUNT, Admin1Lines::LINE_START, Admin1Lines::POINTS);
+        add(BorderLines::LINE_COUNT, BorderLines::LINE_START, BorderLines::POINTS);
+        return c;
+    }();
+    return all;
+}
+
+// The stretches of from..to that no line covers.
+std::vector<std::pair<double, double>> uncovered(const std::map<int, std::vector<std::pair<double, double>>>& lines,
+                                                 int at, double from, double to)
+{
+    std::vector<std::pair<double, double>> cover;
+    auto found = lines.find(at);
+    if (found != lines.end()) cover = found->second;
+    std::sort(cover.begin(), cover.end());
+    std::vector<std::pair<double, double>> free;
+    double start = from;
+    for (const auto& stretch : cover)
+    {
+        if (stretch.first > start) free.push_back({start, std::min(stretch.first, to)});
+        start = std::max(start, stretch.second);
+    }
+    if (start < to) free.push_back({start, to});
+    return free;
+}
+
+} // namespace
+
 std::vector<Outline> graticule(const View& view, const Window& window, int stepDegrees)
 {
     std::vector<Outline> lines;
     std::vector<Vec3> points;
     stepDegrees = std::clamp(stepDegrees, 1, 90);
+    const Covered& lined = covered();
     for (int lat = -90 + stepDegrees; lat < 90; lat += stepDegrees)
     {
-        points.clear();
-        for (double lon = -180.0; lon <= 180.0 + 1e-9; lon += GRID_STEP_DEGREES) points.push_back(toVector(LatLon{(double)lat, lon}));
-        addNearRuns(lines, points, view, window);
+        for (const auto& [west, east] : uncovered(lined.parallels, lat, -180.0, 180.0))
+        {
+            points.clear();
+            for (double lon = west; lon < east; lon += GRID_STEP_DEGREES) points.push_back(toVector(LatLon{(double)lat, lon}));
+            points.push_back(toVector(LatLon{(double)lat, east}));
+            addNearRuns(lines, points, view, window);
+        }
     }
     for (int lon = -180; lon < 180; lon += stepDegrees)
     {
-        points.clear();
-        for (double lat = -90.0; lat <= 90.0 + 1e-9; lat += GRID_STEP_DEGREES) points.push_back(toVector(LatLon{lat, (double)lon}));
-        addNearRuns(lines, points, view, window);
+        for (const auto& [south, north] : uncovered(lined.meridians, lon, -90.0, 90.0))
+        {
+            points.clear();
+            for (double lat = south; lat < north; lat += GRID_STEP_DEGREES) points.push_back(toVector(LatLon{lat, (double)lon}));
+            points.push_back(toVector(LatLon{north, (double)lon}));
+            addNearRuns(lines, points, view, window);
+        }
     }
     return lines;
 }

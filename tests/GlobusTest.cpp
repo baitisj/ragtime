@@ -214,6 +214,31 @@ void testOutlines()
     }
     CHECK(graticule(kansas, small, 10).size() > 2 * lines.size());
 
+    // Where a state line runs along the graticule, the graticule makes way
+    // for it: down 120 W between California and Nevada, from 39 N to 42 N,
+    // there is none, but south of there, where the line turns off down to
+    // the Colorado, the meridian shows again.
+    auto nearest = [](const std::vector<Outline>& outlines, const Point& p) {
+        double best = 1e9;
+        for (const Outline& line : outlines)
+        {
+            for (size_t i = 0; i + 1 < line.size(); i++)
+            {
+                double dx = line[i + 1].x - line[i].x, dy = line[i + 1].y - line[i].y;
+                double length = dx * dx + dy * dy;
+                double t = length > 0.0 ? std::clamp(((p.x - line[i].x) * dx + (p.y - line[i].y) * dy) / length, 0.0, 1.0) : 0.0;
+                best = std::min(best, std::hypot(line[i].x + dx * t - p.x, line[i].y + dy * t - p.y));
+            }
+        }
+        return best;
+    };
+    Window close{400.0, 400.0};
+    View sierra{lookingAt(toVector(LatLon{39.0, -120.0})), 4000.0};
+    std::vector<Outline> grid = graticule(sierra, close);
+    CHECK(nearest(grid, onScreen(sierra, close, toVector(LatLon{40.5, -120.0}))) > 20.0);
+    CHECK(nearest(grid, onScreen(sierra, close, toVector(LatLon{37.5, -120.0}))) < 1.0);
+    CHECK(nearest(admin1Lines(sierra, close), onScreen(sierra, close, toVector(LatLon{40.5, -120.0}))) < 1.0);
+
     // The coasts are the land's edges: every point of them is on the near
     // side, and over North America there are plenty.
     std::vector<Outline> coasts = coastLines(kansas, small);

@@ -61,7 +61,10 @@ beside Globus and with Globus off:
 - Globus off: the toggle moves to the right end of the tab strip, unlit.
 - Theme: oceans `#A8D4F2`, land `#F7F5EE`, coasts and country borders
   `#143068`, state and province lines and lake shores the same blue at
-  about half opacity and thinner, graticule every 30° very faint. The path is a red
+  about half opacity and thinner, graticule every 30° very faint. The
+  graticule makes way where a border or state line runs along it (120 W
+  between California and Nevada, 60 N across Canada), so the line shows
+  there as it does elsewhere (Jeff, 2026-10-22). The path is a red
   great circle (`#c8281e`), home a navy dot, stations red dots with white
   rims.
 - Each line is drawn once (Jeff, 2026-10-22): a coast only where the land

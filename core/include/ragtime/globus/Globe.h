@@ -283,7 +283,9 @@ std::vector<Outline> admin1Lines(const View& view, const Window& window);
 
 // The parallels and meridians every stepDegrees on the near side of the
 // globe, as lines to stroke: the parallels between the poles, and the
-// meridians from pole to pole.
+// meridians from pole to pole, except where a border or a state or province
+// line runs along one (120 W between California and Nevada, 60 N across
+// Canada), which is left to that line.
 std::vector<Outline> graticule(const View& view, const Window& window, int stepDegrees = 30);
 
 // Whether the outlines have land at a position, counting the lakes as land
