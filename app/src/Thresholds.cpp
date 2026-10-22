@@ -5,8 +5,9 @@
 #include <wx/config.h>
 #include <wx/file.h>
 #include <wx/filename.h>
-#include <wx/stdpaths.h>
 #include <wx/utils.h>
+
+#include "Prefs.h"
 
 namespace
 {
@@ -23,8 +24,7 @@ wxArrayString lastSources;
 
 wxString defaultThresholdsPath()
 {
-    return wxFileName(wxStandardPaths::Get().GetUserDataDir(), "submode_thresholds.json")
-        .GetFullPath();
+    return wxFileName(wxString::FromUTF8(appDataDir()), "submode_thresholds.json").GetFullPath();
 }
 
 wxString thresholdsPath()
