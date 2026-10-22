@@ -35,23 +35,6 @@ const char* widthLabel(Width width)
     return "";
 }
 
-const char* widthHostCommand(Width width)
-{
-    switch (width)
-    {
-    case Width::Hz500: return "BW500";
-    case Width::Hz2400: return "BW2300";
-    case Width::Hz200:
-    case Width::Hz1200: return "";
-    }
-    return "";
-}
-
-bool hostSupportsWidth(Width width)
-{
-    return widthHostCommand(width)[0] != '\0';
-}
-
 std::vector<const Submode*> bestModes(const SubmodeTable& table, Path path, int capHz)
 {
     // Most robust first; at equal S/N the faster first, then by name, so the
@@ -284,6 +267,19 @@ void Gearshift::setWidth(Width width)
     rebuild();
 }
 
+void Gearshift::setNarrowOnly(bool on)
+{
+    narrowOnly_ = on;
+    rebuild();
+}
+
+Width Gearshift::effectiveWidth() const
+{
+    if (narrowOnly_ && widthCapHz(width_) > widthCapHz(Width::Hz500))
+        return Width::Hz500;
+    return width_;
+}
+
 void Gearshift::setPath(Path path)
 {
     path_ = path;
@@ -353,7 +349,7 @@ void Gearshift::rebuild()
     }
     names_ = shortNames(withHost);
     usable_ = withHost.offeredBy(offered);
-    ladder_ = gearLadder(usable_, path_, widthCapHz(width_));
+    ladder_ = gearLadder(usable_, path_, widthCapHz(effectiveWidth()));
     for (Gear& gear : ladder_)
     {
         auto name = names_.find(gear.mode);

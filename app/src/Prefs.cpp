@@ -131,6 +131,8 @@ void loadGearshift(gearbox::Gearshift& shift)
     int path = (int)config().ReadLong("/Gearshift/Path", (long)gearbox::Path::Calm);
     if (width >= 0 && width < (int)gearbox::ALL_WIDTHS.size()) shift.setWidth(gearbox::ALL_WIDTHS[width]);
     if (path >= 0 && path < gearbox::PATH_COUNT) shift.setPath(gearbox::ALL_PATHS[path]);
+    // Before the 500 Hz switch had its own key it followed the width.
+    shift.setNarrowOnly(config().ReadBool(keys::NARROW_ONLY, shift.width() == gearbox::Width::Hz500));
     int gear = (int)config().ReadLong("/Gearshift/Gear", 0);
     if (gear > 0) shift.selectGear(gear);
     shift.setAuto(config().ReadBool("/Gearshift/Auto", false));

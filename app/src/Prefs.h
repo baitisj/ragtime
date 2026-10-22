@@ -77,6 +77,7 @@ namespace keys
 {
 constexpr const char* ACCEPT_SESSIONS = "/Connection/AcceptSessions";
 constexpr const char* PAUSED = "/Broadcast/Paused";
+constexpr const char* NARROW_ONLY = "/Gearshift/NarrowOnly";         // the 500 Hz switch
 constexpr const char* GLOBUS = "/Window/Globus";
 constexpr const char* LIST_WIDTH = "/Window/StationListWidth";        // beside Globus
 constexpr const char* TABLE_WIDTH = "/Window/StationTableWidth";      // Globus off

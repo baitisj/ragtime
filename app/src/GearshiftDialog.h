@@ -36,6 +36,7 @@ private:
     bool refreshing_ = false;
 
     std::array<wxToggleButton*, 4> widthChips_ {};
+    wxStaticText* widthNote_ = nullptr;
     std::array<wxToggleButton*, 4> pathChips_ {};
     wxCheckBox* auto_ = nullptr;
     SubmodeMap* map_ = nullptr;
