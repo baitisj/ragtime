@@ -4,11 +4,11 @@
 Reference for the theme, not app code: light blue oceans, near-white land,
 dark blue coasts and borders, lit from the subsolar point so the greyline
 shows. Reads the Natural Earth tables in core/src/globus/ (LandOutlines.h,
-BorderLines.h); the app draws the same in app/src/globus/GlobusView.cpp.
+BorderLines.h, and Admin1Lines.h when "admin1" is true); the app draws the same in app/src/globus/GlobusView.cpp.
 
 Usage: render_sunlit_globe.py '{"out": "g.png", "size": 640, "center": [47.5, -123],
         "home": [47.5, -123], "target": [41.7, -72.7], "dots": [],
-        "utc": [2026, 10, 21, 22, 36], "admin1": "us_canada_admin1_lines.json"}'
+        "utc": [2026, 10, 21, 22, 36], "admin1": true}'
 """
 import re, math, sys, json, numpy as np
 from PIL import Image, ImageDraw
@@ -91,7 +91,8 @@ for lo in range(-180,180,30): polyline([(lo,la) for la in np.arange(-90,91,2)],(
 for r in landR: polyline(r+[r[0]],(20,48,104,255),int(1.6*SS))
 for l in bordL: polyline(l,(20,48,104,220),int(1.1*SS))
 if cfg.get('admin1'):
-    for l in json.load(open(cfg['admin1'])): polyline(l,(20,48,104,120),int(0.8*SS))
+    adm=open(SRC+'Admin1Lines.h').read()
+    for l in rings(arr(adm,'LINE_START'),arr(adm,'POINTS')): polyline(l,(20,48,104,120),int(0.8*SS))
 def gc(p,q,n=200):
     a=vec(*p); b=vec(*q); om=math.acos(float(np.clip(a@b,-1,1))); pts=[]
     for i in range(n+1):

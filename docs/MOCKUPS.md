@@ -70,6 +70,11 @@ beside Globus and with Globus off:
   lakes (Natural Earth 1:110m, the Great Lakes among them) are filled in
   the ocean's colour with a coast round them, so Lake Michigan parts
   Wisconsin from Michigan.
+- State and province lines (Jeff, 2026-10-22) for the United States,
+  Canada, Mexico, Russia, China, India, Brazil, Argentina and Australia,
+  its federal territories included: Natural Earth 1:10m, every line the
+  1:50m set leaves out among them (British Columbia's with the Northwest
+  Territories, for one), smoothed to a quarter of a degree.
 - Lighting: the light source sits over the subsolar point. Day side
   Lambert-lit lightly (0.93 + 0.07 cos z); night side is the colour × 0.30
   plus navy `#1C2C56` × 0.55; a smoothstep between sun altitude +3° and
