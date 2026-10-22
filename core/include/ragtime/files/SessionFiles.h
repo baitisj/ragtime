@@ -284,6 +284,7 @@ private:
     {
         uint64_t id = 0;
         std::string peer;
+        std::string name;               // the name offered, made safe
         uint64_t size = 0;
         protocol::Digest digest{};
         std::string path;               // where it was to be saved

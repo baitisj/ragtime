@@ -444,7 +444,24 @@ void FakeHost::serviceData()
     waiting_ += bytes.size();
     reply("BUFFER " + std::to_string(waiting_));
     lastSessionMs_ = nowMs();
-    crossing_.push_back({std::move(bytes), nowMs() + airtimeMs_});
+    long long at = nowMs() + airtimeMs_;
+    if (sessionRate_ <= 0)
+    {
+        crossing_.push_back({std::move(bytes), at});
+    }
+    else
+    {
+        // In pieces of a quarter second each, one after another.
+        size_t piece = std::max<size_t>(1, (size_t)sessionRate_ / 4);
+        at = std::max(at, lastCrossingMs_);
+        for (size_t i = 0; i < bytes.size(); i += piece)
+        {
+            size_t n = std::min(piece, bytes.size() - i);
+            at += (long long)(n * 1000 / (size_t)sessionRate_);
+            crossing_.push_back({std::vector<uint8_t>(bytes.begin() + (long)i, bytes.begin() + (long)(i + n)), at});
+        }
+        lastCrossingMs_ = at;
+    }
     stepSession(nowMs());
 }
 

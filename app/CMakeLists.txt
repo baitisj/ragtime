@@ -8,6 +8,7 @@ add_executable(ragtime WIN32
     src/MainFrame.cpp
     src/BroadcastPage.cpp
     src/ConnectionBar.cpp
+    src/FilesPage.cpp
     src/GearshiftDialog.cpp
     src/HostConnection.cpp
     src/Html.cpp

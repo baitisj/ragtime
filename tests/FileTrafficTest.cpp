@@ -422,7 +422,8 @@ void testLeavingKeepsThePartAndTheQueue()
     CHECK(rows.size() == 1 && rows[0].look == Look::Kept && rows[0].state == "Part kept");
     if (rows.size() == 1)
     {
-        CHECK(rows[0].done > 0 && rows[0].done < 30000 && rows[0].name == "one.bin");
+        // Named as offered, not as saved.
+        CHECK(rows[0].done > 0 && rows[0].done < 30000 && rows[0].name == "ONE.BIN");
         CHECK_EQ(rows[0].expiresAtMs, p.now + SessionFiles::KEPT_MS);
     }
     rows = p.a.traffic.rows(p.now);

@@ -382,6 +382,7 @@ void SessionFiles::keep(Entry& entry)
     Kept& k = kept_.emplace_back();
     k.id = nextId_++;
     k.peer = t.peer;
+    k.name = t.name;
     k.size = t.size;
     k.digest = t.digest;
     k.path = t.path;
@@ -1130,7 +1131,7 @@ std::vector<KeptPart> SessionFiles::keptParts() const
         KeptPart p;
         p.id = k.id;
         p.peer = k.peer;
-        p.name = utf8FromPath(pathFromUtf8(k.path).filename());
+        p.name = !k.name.empty() ? k.name : utf8FromPath(pathFromUtf8(k.path).filename());
         p.size = k.size;
         std::copy(k.digest.begin(), k.digest.end(), p.digest);
         p.path = k.path;
@@ -1162,6 +1163,7 @@ void SessionFiles::restoreKept(const std::vector<KeptPart>& parts, uint64_t nowM
         Kept& k = kept_.emplace_back();
         k.id = nextId_++;
         k.peer = protocol::normalCallsign(p.peer);
+        k.name = p.name;
         k.size = p.size;
         std::copy(p.digest, p.digest + protocol::DIGEST_BYTES, k.digest.begin());
         k.path = p.path;

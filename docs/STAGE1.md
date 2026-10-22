@@ -217,6 +217,51 @@ The brief:
 
 ## G. Session files and the Files tab
 
+Done in the package G PR: `files::FileTraffic` (core/src/files/), which
+plugs `SessionFiles` into the session as its `SessionTraffic`;
+`files/FileRows.h`, the Files tab's rows and its lasting log, shared with
+package H; the Files tab (`app/src/FilesPage`); offer cards and the send
+queue in the Session tab; the received folder and auto-accept list in
+Settings > Station; and in the bench, bots that save what you send them
+and offer their bulletin (`ragtime_fake_air --call AG7EW`, then type
+"send the file again"; `--rate` sets how fast session bytes cross).
+Choices made there, for Jeff to keep or change:
+
+- **Pacing.** No more file bytes wait at data2g-host than about a minute
+  of the session's acknowledged rate (1 to 16 KB, 4 KB until the rate is
+  known), and a FileData carries at most half of that. A message typed
+  mid-file goes out behind at most that much, not behind the whole file.
+- **Offers wait for the far end's Hello,** and go only if it takes
+  session files; a file queued for a station that doesn't ends Not taken.
+- **Leave** cancels what is under way, so the far end hears why and keeps
+  its part; files still queued stay queued for the next session with that
+  station, shown as "Waiting for a session with W1AW" in Files (Remove
+  from the queue is on the row's menu).
+- **Save** puts the file straight into the received folder (default
+  "Ragtime received" in the documents folder) under the name offered,
+  numbered if it's taken; **Save as...** asks. With a part kept from
+  before, both carry on in it.
+- **Send file outside a session** asks "Call W1AW and send them once
+  you're connected?", then queues the files and calls. Files dropped on
+  the Session tab go only while a session is up.
+- **Ask to send the rest** (a kept part) and **Ask W1AW to send it
+  again** (a failed file in Completed) type "Please send FRED.TXT again:
+  I have 4,096 of 7,000 bytes kept, so only the rest needs to come." into
+  the session; with none up, they offer to call and send it once
+  connected. **Send it again** is on a file of ours that didn't arrive.
+- **Stalled** shows once nothing has moved for 30 s, with its timer. Rate
+  and the finish estimate show in the Progress and State columns.
+- **The log.** Completed and the kept parts live in a plain text file
+  beside the `--config` file (`a.conf.files`), or `files.log` in the user
+  data folder: the last 500 finished transfers, and up to 8 parts kept 7
+  days each. Lines it doesn't know (package H's, say) are kept as they
+  are.
+- **Closing Ragtime** mid-transfer fails it and keeps the part.
+- **An offer in the background** raises a desktop notification and
+  counts on the Session tab's badge.
+
+The brief:
+
 - Offer cards in the Session tab (Save, Save as..., Decline, expiry),
   drag and drop, a send queue you can reorder, auto-accept list,
   whole-file SHA-256, `.part` files kept 7 days across restarts and
