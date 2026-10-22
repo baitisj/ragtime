@@ -20,6 +20,9 @@ add_library(ragtime_core STATIC
     src/globus/Globe.cpp
     src/globus/Sun.cpp
     # Package D (gearbox model): src/gearbox/.
+    src/gearbox/Gearbox.cpp
+    src/gearbox/Json.cpp
+    src/gearbox/Submodes.cpp
 )
 
 target_include_directories(ragtime_core PUBLIC

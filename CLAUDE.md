@@ -40,6 +40,10 @@ screens.
   (`core/src/files/`), and a fake data2g-host for tests
   (`tests/FakeHost.*`). Ported from Glissando: Data2GLink, Sha256,
   HamText with its generator, Data2GFileTransfer (now `SessionFiles`).
+- Package D (gearshift) gives `core/src/gearbox/` and the popup
+  (`app/src/GearshiftDialog.*`). It reads Data2G's thresholds from the
+  operator's own file at run time; none are committed
+  (`docs/GEARBOX.md`).
 - The live design draft was the Claude Doc "Data2G client: plan"
   (https://claude.ai/code/artifact/87db2cd2-f5bc-4030-ba8d-99bef19c027d,
   private to Jeff). `docs/PLAN.md` is its 2026-10-22 snapshot and is now

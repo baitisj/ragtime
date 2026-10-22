@@ -3,6 +3,8 @@
 
 #include <wx/frame.h>
 
+#include "ragtime/gearbox/Gearbox.h"
+
 class GlobusPanel;
 class wxNotebook;
 
@@ -14,8 +16,13 @@ public:
     MainFrame();
 
 private:
+    void loadGearshift();
+    void showGearshift();
+    void showGear();
+
     wxNotebook* tabs_ = nullptr;
     GlobusPanel* globus_ = nullptr;
+    ragtime::gearbox::Gearshift gearshift_;
 };
 
 #endif
