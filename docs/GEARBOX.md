@@ -138,8 +138,9 @@ to or updating the one before:
    no widths or speeds; those come from `MODES`.
 2. **A thresholds file** picked with **Load thresholds...** in the popup
    (remembered as `/Gearshift/ThresholdsFile`), or else
-   `submode_thresholds.json` in the user data folder (`~/.Ragtime` on
-   Linux, `%APPDATA%\Ragtime` on Windows). Either form works: Data2G's
+   `submode_thresholds.json` in Ragtime's data folder
+   (`~/.local/share/ragtime` on Linux, or `$XDG_DATA_HOME/ragtime`;
+   `%APPDATA%\Ragtime` on Windows). Either form works: Data2G's
    own, or the Submode Map's JSON as `tools/gearbox/gearbox_ladder.py`
    reads it (`{name: {"hz", "mod", "rate", "bps", "th": {"awgn", ...}}}`,
    null for never), which carries widths and speeds, so it gives gears

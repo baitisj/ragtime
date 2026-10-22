@@ -967,6 +967,9 @@ void MainFrame::saveFilesLog(bool force)
     if (!force && state == savedLog_) return;
     savedLog_ = state;
     wxFileName path(utf8(filesLogPath()));
+    // A log that can't be saved says so in the status bar, not in a
+    // dialog every time a transfer changes.
+    wxLogNull quiet;
     path.Mkdir(wxS_DIR_DEFAULT, wxPATH_MKDIR_FULL);
     wxTempFile out(path.GetFullPath());
     std::string text = files::saveFilesText(history_, sessionFiles_.keptParts(), logOther_);

@@ -5,12 +5,14 @@
 #include <cctype>
 #include <cmath>
 #include <cstdint>
+#include <map>
 #include <string>
 #include <utility>
 #include <vector>
 
 #include "Admin1Lines.h"
 #include "BorderLines.h"
+#include "LakeOutlines.h"
 #include "LandOutlines.h"
 
 namespace ragtime::globus
@@ -110,40 +112,51 @@ struct Ring
     bool clockwise = true;  // land; a hole goes anticlockwise
 };
 
+std::vector<Ring> unpackRings(int count, const uint32_t* starts, const int16_t* points, double unitsPerDegree)
+{
+    std::vector<Ring> unpacked;
+    for (int r = 0; r < count; r++)
+    {
+        Ring ring;
+        double area = 0.0;
+        uint32_t first = starts[r];
+        uint32_t last = starts[r + 1];
+        Vec3 sum;
+        for (uint32_t i = first; i < last; i++)
+        {
+            double lon = points[2 * i] / unitsPerDegree;
+            double lat = points[2 * i + 1] / unitsPerDegree;
+            uint32_t j = i + 1 < last ? i + 1 : first;
+            double lon2 = points[2 * j] / unitsPerDegree;
+            double lat2 = points[2 * j + 1] / unitsPerDegree;
+            area += lon * lat2 - lon2 * lat;
+            ring.points.push_back(toVector(LatLon{lat, lon}));
+            sum = plus(sum, ring.points.back());
+        }
+        ring.clockwise = area < 0.0;
+        ring.centre = length(sum) > 1e-9 ? normalized(sum) : ring.points.front();
+        for (const Vec3& p : ring.points) ring.reach = std::max(ring.reach, angleOf(ring.centre, p));
+        unpacked.push_back(std::move(ring));
+    }
+    return unpacked;
+}
+
 const std::vector<Ring>& rings()
 {
-    static const std::vector<Ring> all = []() {
-        std::vector<Ring> unpacked;
-        for (int r = 0; r < LandOutlines::RING_COUNT; r++)
-        {
-            Ring ring;
-            double area = 0.0;
-            uint32_t first = LandOutlines::RING_START[r];
-            uint32_t last = LandOutlines::RING_START[r + 1];
-            Vec3 sum;
-            for (uint32_t i = first; i < last; i++)
-            {
-                double lon = LandOutlines::POINTS[2 * i] / LandOutlines::UNITS_PER_DEGREE;
-                double lat = LandOutlines::POINTS[2 * i + 1] / LandOutlines::UNITS_PER_DEGREE;
-                uint32_t j = i + 1 < last ? i + 1 : first;
-                double lon2 = LandOutlines::POINTS[2 * j] / LandOutlines::UNITS_PER_DEGREE;
-                double lat2 = LandOutlines::POINTS[2 * j + 1] / LandOutlines::UNITS_PER_DEGREE;
-                area += lon * lat2 - lon2 * lat;
-                ring.points.push_back(toVector(LatLon{lat, lon}));
-                sum = plus(sum, ring.points.back());
-            }
-            ring.clockwise = area < 0.0;
-            ring.centre = length(sum) > 1e-9 ? normalized(sum) : ring.points.front();
-            for (const Vec3& p : ring.points) ring.reach = std::max(ring.reach, angleOf(ring.centre, p));
-            unpacked.push_back(std::move(ring));
-        }
-        return unpacked;
-    }();
+    static const std::vector<Ring> all = unpackRings(LandOutlines::RING_COUNT, LandOutlines::RING_START,
+                                                     LandOutlines::POINTS, LandOutlines::UNITS_PER_DEGREE);
+    return all;
+}
+
+const std::vector<Ring>& lakes()
+{
+    static const std::vector<Ring> all = unpackRings(LakeOutlines::RING_COUNT, LakeOutlines::RING_START,
+                                                     LakeOutlines::POINTS, LakeOutlines::UNITS_PER_DEGREE);
     return all;
 }
 
 // The borders, and the state and province lines, unpacked once in the
-// same way. The coasts are the rings again, closed, as lines.
+// same way.
 struct Line
 {
     std::vector<Vec3> points;
@@ -186,17 +199,88 @@ const std::vector<Line>& admin1()
     return all;
 }
 
+// A line's cap: the middle of its points, and how far the farthest is.
+void capLine(Line& line)
+{
+    Vec3 sum;
+    for (const Vec3& p : line.points) sum = plus(sum, p);
+    line.centre = length(sum) > 1e-9 ? normalized(sum) : line.points.front();
+    line.reach = 0.0;
+    for (const Vec3& p : line.points) line.reach = std::max(line.reach, angleOf(line.centre, p));
+}
+
+// The coasts: the edges of the land's outlines that only one country has,
+// run together into lines, and the shores of the lakes. An edge two
+// countries' outlines share is a border between them, which borderLines
+// draws, smoothed; stroked as coast as well it would show twice, the
+// smoothed border a hair beside it. Shared edges are the same points in
+// the tables, one outline going one way and the other back.
 const std::vector<Line>& coasts()
 {
     static const std::vector<Line> all = []() {
+        using Corner = std::pair<int16_t, int16_t>;
+        auto corner = [](uint32_t i) { return Corner{LandOutlines::POINTS[2 * i], LandOutlines::POINTS[2 * i + 1]}; };
+        std::map<std::pair<Corner, Corner>, int> edges;
+        for (int r = 0; r < LandOutlines::RING_COUNT; r++)
+        {
+            uint32_t first = LandOutlines::RING_START[r];
+            uint32_t last = LandOutlines::RING_START[r + 1];
+            for (uint32_t i = first; i < last; i++)
+            {
+                Corner a = corner(i);
+                Corner b = corner(i + 1 < last ? i + 1 : first);
+                edges[a < b ? std::make_pair(a, b) : std::make_pair(b, a)]++;
+            }
+        }
+
         std::vector<Line> lines;
-        for (const Ring& ring : rings())
+        const std::vector<Ring>& land = rings();
+        for (int r = 0; r < LandOutlines::RING_COUNT; r++)
+        {
+            uint32_t first = LandOutlines::RING_START[r];
+            uint32_t last = LandOutlines::RING_START[r + 1];
+            const uint32_t n = last - first;
+            auto coastal = [&](uint32_t k) {
+                Corner a = corner(first + k % n);
+                Corner b = corner(first + (k + 1) % n);
+                return edges[a < b ? std::make_pair(a, b) : std::make_pair(b, a)] == 1;
+            };
+            // Start where a border ends, so no run of coast is cut in two;
+            // an island all coast starts anywhere.
+            uint32_t start = 0;
+            while (start < n && coastal(start)) start++;
+            bool island = start == n;
+            if (island) start = 0;
+
+            Line line;
+            for (uint32_t k = 0; k < n; k++)
+            {
+                uint32_t edge = (start + k) % n;
+                if (coastal(edge))
+                {
+                    if (line.points.empty()) line.points.push_back(land[(size_t)r].points[edge]);
+                    line.points.push_back(land[(size_t)r].points[(edge + 1) % n]);
+                }
+                else if (!line.points.empty())
+                {
+                    capLine(line);
+                    lines.push_back(std::move(line));
+                    line = Line();
+                }
+            }
+            if (!line.points.empty())
+            {
+                capLine(line);
+                lines.push_back(std::move(line));
+            }
+        }
+        for (const Ring& lake : lakes())
         {
             Line line;
-            line.points = ring.points;
-            line.points.push_back(ring.points.front());
-            line.centre = ring.centre;
-            line.reach = ring.reach;
+            line.points = lake.points;
+            line.points.push_back(lake.points.front());
+            line.centre = lake.centre;
+            line.reach = lake.reach;
             lines.push_back(std::move(line));
         }
         return lines;
@@ -835,12 +919,17 @@ View Roller::target() const
     return View{toAttitude(fieldOn_ ? target_ : current_), std::exp(targetLogRadius_)};
 }
 
-std::vector<Outline> landOutlines(const View& view, const Window& window)
+namespace
+{
+
+// The rings the window shows, as outlines to fill by the non-zero winding
+// rule, following the rim where they go round the back of the globe.
+std::vector<Outline> fillOutlines(const std::vector<Ring>& all, const View& view, const Window& window)
 {
     std::vector<Outline> outlines;
     const double reach = visibleReach(view, window);
     std::vector<Vec3> projected;
-    for (const Ring& ring : rings())
+    for (const Ring& ring : all)
     {
         // Wholly behind, or nowhere near the window: nothing to draw.
         if (angleOf(ring.centre, view.attitude.out) - ring.reach > reach) continue;
@@ -937,6 +1026,18 @@ std::vector<Outline> landOutlines(const View& view, const Window& window)
     return outlines;
 }
 
+} // namespace
+
+std::vector<Outline> landOutlines(const View& view, const Window& window)
+{
+    return fillOutlines(rings(), view, window);
+}
+
+std::vector<Outline> lakeOutlines(const View& view, const Window& window)
+{
+    return fillOutlines(lakes(), view, window);
+}
+
 namespace
 {
 
@@ -989,28 +1090,45 @@ std::vector<Outline> graticule(const View& view, const Window& window, int stepD
     return lines;
 }
 
-bool isLand(const LatLon& position)
+namespace
 {
-    // Winding round the point in longitude and latitude, as the outlines
-    // were drawn on the map they come from.
+
+// Winding round the point in longitude and latitude, as the outlines were
+// drawn on the map they come from.
+int windingAt(const LatLon& position, int count, const uint32_t* starts, const int16_t* points, double unitsPerDegree)
+{
     int winding = 0;
-    for (int r = 0; r < LandOutlines::RING_COUNT; r++)
+    for (int r = 0; r < count; r++)
     {
-        uint32_t first = LandOutlines::RING_START[r];
-        uint32_t last = LandOutlines::RING_START[r + 1];
+        uint32_t first = starts[r];
+        uint32_t last = starts[r + 1];
         for (uint32_t i = first; i < last; i++)
         {
             uint32_t j = i + 1 < last ? i + 1 : first;
-            double x0 = LandOutlines::POINTS[2 * i] / LandOutlines::UNITS_PER_DEGREE;
-            double y0 = LandOutlines::POINTS[2 * i + 1] / LandOutlines::UNITS_PER_DEGREE;
-            double x1 = LandOutlines::POINTS[2 * j] / LandOutlines::UNITS_PER_DEGREE;
-            double y1 = LandOutlines::POINTS[2 * j + 1] / LandOutlines::UNITS_PER_DEGREE;
+            double x0 = points[2 * i] / unitsPerDegree;
+            double y0 = points[2 * i + 1] / unitsPerDegree;
+            double x1 = points[2 * j] / unitsPerDegree;
+            double y1 = points[2 * j + 1] / unitsPerDegree;
             double side = (x1 - x0) * (position.lat - y0) - (position.lon - x0) * (y1 - y0);
             if (y0 <= position.lat && y1 > position.lat && side > 0.0) winding++;
             else if (y0 > position.lat && y1 <= position.lat && side < 0.0) winding--;
         }
     }
-    return winding != 0;
+    return winding;
+}
+
+} // namespace
+
+bool isLand(const LatLon& position)
+{
+    return windingAt(position, LandOutlines::RING_COUNT, LandOutlines::RING_START, LandOutlines::POINTS,
+                     LandOutlines::UNITS_PER_DEGREE) != 0;
+}
+
+bool isLake(const LatLon& position)
+{
+    return windingAt(position, LakeOutlines::RING_COUNT, LakeOutlines::RING_START, LakeOutlines::POINTS,
+                     LakeOutlines::UNITS_PER_DEGREE) != 0;
 }
 
 } // namespace ragtime::globus
