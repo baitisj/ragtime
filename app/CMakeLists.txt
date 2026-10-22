@@ -6,6 +6,9 @@ find_package(wxWidgets 3.2 REQUIRED COMPONENTS core base)
 add_executable(ragtime WIN32
     src/RagtimeApp.cpp
     src/MainFrame.cpp
+    src/globus/GlobusPanel.cpp
+    src/globus/GlobusToggle.cpp
+    src/globus/GlobusView.cpp
 )
 
 # wx headers go in as system headers, so a warning in wxWidgets itself never
