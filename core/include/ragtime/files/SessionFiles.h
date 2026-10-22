@@ -25,6 +25,7 @@
 #include <utility>
 #include <vector>
 
+#include "ragtime/files/FileRows.h"
 #include "ragtime/protocol/Records.h"
 #include "ragtime/protocol/Stream.h"
 
@@ -79,6 +80,7 @@ struct FileTransfer
     uint64_t kept = 0;
     std::string keptPath;
     uint64_t resumedFrom = 0;   // either way: where in the file this transfer started
+    uint64_t atMs = 0;          // ours: when queued, then when offered; theirs: when offered to us
     protocol::Digest digest{};  // the whole file's
 
     // Still going: waiting, offered, being answered or under way.
@@ -121,8 +123,9 @@ public:
 
     // The part file of one received from a station that ended unfinished
     // is kept, for that station to send the same file again, for this
-    // long, and so many at most, the oldest going first. Package G keeps
-    // them across restarts; here they go when the engine does.
+    // long, and so many at most, the oldest going first. keptParts() and
+    // restoreKept() carry them across restarts; a part not restored is
+    // left on disk when the engine goes.
     static constexpr uint64_t KEPT_MS = 7ull * 24 * 60 * 60 * 1000;
     static constexpr size_t KEPT_MAX = 8;
 
@@ -165,6 +168,21 @@ public:
 
     // nowMs, when given, fills in each unanswered offer's expiresInMs.
     std::vector<FileTransfer> transfers(uint64_t nowMs = 0) const;
+    const FileTransfer* transfer(uint64_t id) const;
+
+    // Moves a file of ours still waiting its turn up (delta < 0) or down
+    // the station's queue. False if it isn't waiting or can't move.
+    bool reorder(uint64_t id, int delta);
+
+    // The part files kept, for the log, and back after a restart: a part
+    // whose file is gone, isn't the size noted or is past its time is
+    // dropped. Parts restored take fresh ids.
+    std::vector<KeptPart> keptParts() const;
+    void restoreKept(const std::vector<KeptPart>& parts, uint64_t nowMs);
+    // Keep 7 days longer (from now or from when it would have gone,
+    // whichever is later), and Delete part.
+    bool keepLonger(uint64_t keptId, uint64_t ms, uint64_t nowMs);
+    bool deleteKept(uint64_t keptId);
 
     // Moves whenever anything transfers() shows changes.
     uint64_t changes() const { return changes_; }
@@ -174,15 +192,17 @@ public:
     //---------------------------------------------------------------------
 
     // The records to write into the session now: answers, cancels and
-    // FileSaved, then the offer of the next file once none is going.
-    // numbering is the session's: an offer takes the next item number.
-    std::vector<uint8_t> takeRecords(const std::string& peer, protocol::Numbering& numbering, uint64_t nowMs);
+    // FileSaved, then (with offerNext) the offer of the next file once
+    // none is going. numbering is the session's: an offer takes the next
+    // item number.
+    std::vector<uint8_t> takeRecords(const std::string& peer, protocol::Numbering& numbering, uint64_t nowMs,
+                                     bool offerNext = true);
 
-    // Appends the next FileData for the file going to the station, if
-    // any; streamOffset is where in the session's byte stream it will
-    // start.
+    // Appends the next FileData for the file going to the station, at most
+    // maxBytes of the file, if any; streamOffset is where in the session's
+    // byte stream it will start.
     bool takePiece(const std::string& peer, protocol::Numbering& numbering, uint64_t streamOffset,
-                   uint64_t nowMs, std::vector<uint8_t>& out);
+                   uint64_t nowMs, std::vector<uint8_t>& out, size_t maxBytes = PIECE_BYTES);
 
     // The far end's modem has acknowledged the session's bytes up to here.
     void acknowledged(const std::string& peer, uint64_t streamAcked);
@@ -262,6 +282,7 @@ private:
     // A part file kept from a transfer of theirs that ended unfinished.
     struct Kept
     {
+        uint64_t id = 0;
         std::string peer;
         uint64_t size = 0;
         protocol::Digest digest{};
@@ -269,6 +290,7 @@ private:
         std::filesystem::path part;
         uint64_t bytes = 0;
         uint64_t keptAtMs = 0;
+        uint64_t keepUntilMs = 0;       // 0: KEPT_MS from keptAtMs
     };
 
     Entry* find(uint64_t id);
