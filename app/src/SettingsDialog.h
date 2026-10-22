@@ -5,12 +5,15 @@
 
 #include "Prefs.h"
 
+class wxDirPickerCtrl;
 class wxSpinCtrl;
 class wxStaticText;
 class wxTextCtrl;
 
-// Settings > Station: the callsign and locator Ragtime sends, and where
-// data2g-host is. Small enough for a 1366x768 screen.
+// Settings > Station: the callsign and locator Ragtime sends, where
+// data2g-host is, and where files go (the received folder, and the
+// stations whose files are saved without asking). Small enough for a
+// 1366x768 screen.
 class SettingsDialog : public wxDialog
 {
 public:
@@ -28,6 +31,8 @@ private:
     wxSpinCtrl* kissPort_ = nullptr;
     wxSpinCtrl* commandPort_ = nullptr;
     wxStaticText* dataPort_ = nullptr;
+    wxDirPickerCtrl* received_ = nullptr;
+    wxTextCtrl* autoAccept_ = nullptr;
     wxStaticText* problem_ = nullptr;
 };
 

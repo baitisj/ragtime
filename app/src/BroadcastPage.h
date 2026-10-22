@@ -25,9 +25,14 @@ struct FileCard
     std::string state;          // "Receiving, 12 of 15 pieces", "Saved", "Repairs open until 15:42 (1 h 10 min)"
     bool good = false;          // shown green: Saved, Sent
     bool bad = false;           // shown red: Failed
-    // The card's links and its right-click menu, in order: (action, label),
-    // such as ("receive", "Receive...") and ("ignore", "Ignore").
+    // The card's links, in order: (action, label), such as
+    // ("receive", "Receive...") and ("ignore", "Ignore").
     std::vector<std::pair<std::string, std::string>> actions;
+    // Its right-click menu, the same on the Files tab: a greyed first line
+    // when there is one ("Repairs open until 15:42 (1 h 10 min)"), then
+    // these, or the links when there are none.
+    std::string title;
+    std::vector<std::pair<std::string, std::string>> menu;
 };
 
 // The Broadcast tab (docs/STAGE1.md, package E): the messages on D2G, each

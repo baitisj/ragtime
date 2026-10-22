@@ -19,6 +19,8 @@ struct StationPrefs
     std::string host = "127.0.0.1";
     int kissPort = 8100;
     int commandPort = 8300;     // the session data port is the next one
+    std::string receivedFolder; // where files saved from a session go
+    std::vector<std::string> autoAccept;   // stations whose files are saved without asking
 };
 
 StationPrefs loadStationPrefs();

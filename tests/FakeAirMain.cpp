@@ -5,12 +5,17 @@
 // sessions answer a Call and ragchew: they answer what you type, and
 // leave after you send 73.
 //
-//   ragtime_fake_air [--bots N] [--airtime MS] [--call CALL] [--fade]
+//   ragtime_fake_air [--bots N] [--airtime MS] [--call CALL] [--fade] [--rate BPS]
 //                    [--loss PCT] [--files]
 //
 // --call CALL has the first bot that takes sessions call CALL half a
-// minute in, for an incoming session. --fade puts the bots' sessions into
-// a 45 s fade every two minutes, so Link quiet shows. A call from host A
+// minute in, for an incoming session, and offer you its bulletin, a small
+// text file, once the session has run 20 s. In any ragchew a bot offers
+// its bulletin again when you mention a file ("send the file again"), and
+// saves whatever you send it (in the temp folder) and says so. --fade puts the bots' sessions into
+// a 45 s fade every two minutes, so Link quiet shows. --rate BPS carries
+// session bytes at most that fast (default 400 bytes a second), so files
+// take a while and show their progress. A call from host A
 // or B is answered on its second try, so "try 2 of 5" shows.
 //
 // The bots seal what they broadcast and answer repair requests, and take
@@ -29,6 +34,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <cctype>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -46,6 +52,8 @@
 #include "ragtime/broadcast/BroadcastChat.h"
 #include "ragtime/broadcast/BroadcastFiles.h"
 #include "ragtime/broadcast/Seals.h"
+#include "ragtime/files/FileTraffic.h"
+#include "ragtime/files/SessionFiles.h"
 #include "ragtime/link/HostLink.h"
 #include "ragtime/protocol/Records.h"
 #include "ragtime/session/SessionChat.h"
@@ -136,14 +144,45 @@ bool says73(const std::string& text)
     return text.find("73") != std::string::npos;
 }
 
+bool mentionsAFile(std::string text)
+{
+    for (char& c : text) c = (char)std::tolower((unsigned char)c);
+    return text.find("file") != std::string::npos || text.find("again") != std::string::npos
+           || text.find("bulletin") != std::string::npos;
+}
+
+// A bot's folder, for its bulletin and what it is sent.
+std::filesystem::path botFolder(const char* call)
+{
+    std::filesystem::path dir = std::filesystem::temp_directory_path()
+                                / ("ragtime-fake-air-" + std::to_string((long)::getpid())) / call;
+    std::error_code ec;
+    std::filesystem::create_directories(dir, ec);
+    return dir;
+}
+
+std::string writeBulletin(const Profile& p)
+{
+    std::filesystem::path path = botFolder(p.call) / (std::string(p.call) + "-bulletin.txt");
+    std::ofstream out(path, std::ios::binary);
+    out << "QST de " << p.call << ": D2G net bulletin\n\n";
+    for (int i = 1; i <= 60; i++)
+        out << i << ". " << p.lines[i % 3] << ". Name " << p.name << ", locator "
+            << (p.locator[0] != 0 ? p.locator : "unknown") << ", all stations welcome on the D2G net.\n";
+    out << "\n73 de " << p.call << "\n";
+    return files::utf8FromPath(path);
+}
+
 // A station of the bench's own: a HostLink and a BroadcastChat on its own
 // fake host, over real sockets.
 struct Bot
 {
     Bot(FakeAir& air, const Profile& p, int airtimeMs, uint64_t startMs, std::mt19937& random)
-        : host(air), link({p.call, p.sessions, false}), chat(link), seals(link, chat), files(link, chat, seals),
-          session(link), profile(p), random(random)
+        : host(air), link({p.call, p.sessions, false}), chat(link), seals(link, chat), broadcasts(link, chat, seals),
+          session(link), traffic(files, history), profile(p), random(random)
     {
+        session.setTraffic(&traffic);
+        bulletin = writeBulletin(p);
         host.setAirtimeMs(airtimeMs);
         host.setIdleBroadcastMs(3000);
         kiss = connectTo(host.kissPort());
@@ -159,9 +198,7 @@ struct Bot
         seals.setRandomSeed((uint32_t)random());
         chat.onItems([this](const std::vector<protocol::Record>& items, uint64_t burst, const std::string& mode,
                             uint64_t at) { seals.going(items, burst, mode, at); });
-        folder = std::filesystem::temp_directory_path() / (std::string("ragtime-fake-air-") + p.call);
-        std::filesystem::create_directories(folder);
-        files.setAutoReceive(folder.string());
+        broadcasts.setAutoReceive(files::utf8FromPath(botFolder(p.call)));
         session::SessionChat::Settings ss;
         ss.callsign = p.call;
         ss.locator = p.locator;
@@ -194,12 +231,18 @@ struct Bot
                                        + (profile.locator[0] != 0 ? profile.locator : "unknown") + ". How copy?";
                 say(greeting, now + 3000);
                 fadeAtMs = now + 60000;
+                if (!e.incoming && offersOnCall) offerMs = now + 20000;
             }
             else if (e.type == Type::Heard)
             {
                 const session::Message* m = session.find(e.id);
                 if (m == nullptr) continue;
-                if (says73(m->text))
+                if (mentionsAFile(m->text))
+                {
+                    say("Sure, here comes my bulletin.", now + 3000);
+                    offerMs = now + 5000;
+                }
+                else if (says73(m->text))
                 {
                     say(std::string("73 ") + e.peer + ", thanks for the ragchew. QRT for now.", now + 4000);
                     leaveMs = now + 9000;
@@ -215,8 +258,32 @@ struct Bot
                 sayText.clear();
                 leaveMs = 0;
                 fadeAtMs = 0;
+                offerMs = 0;
                 host.fadeSession(false);
             }
+        }
+        // Files: saves what it is offered, and offers its bulletin when asked.
+        for (const files::FileTraffic::Event& e : traffic.takeEvents())
+        {
+            const files::FileTransfer* t = files.transfer(e.id);
+            if (t == nullptr) continue;
+            if (e.type == files::FileTraffic::Event::Type::Offered && t->state == files::FileTransfer::State::Asking)
+            {
+                std::string error;
+                std::string path = files::utf8FromPath(files::freeSavePath(botFolder(profile.call), t->name));
+                if (!files.accept(e.id, t->kept > 0 ? t->keptPath : path, error)) files.decline(e.id);
+            }
+            else if (e.type == files::FileTraffic::Event::Type::Finished && !t->outgoing
+                     && t->state == files::FileTransfer::State::Saved)
+            {
+                say("Got " + t->name + ", " + files::sizeText(t->size) + ", thanks!", now + 2000);
+            }
+        }
+        if (offerMs != 0 && now >= offerMs && session.phase() == session::SessionChat::Phase::Connected)
+        {
+            std::string error;
+            files.offer(session.peer(), bulletin, now, error);
+            offerMs = 0;
         }
         if (!sayText.empty() && now >= sayMs && session.phase() == session::SessionChat::Phase::Connected)
         {
@@ -244,7 +311,7 @@ struct Bot
     // A short bulletin, broadcast as a file.
     void share(uint64_t now)
     {
-        std::filesystem::path path = folder / (std::string(profile.call) + "-bulletin-" + std::to_string(++shared)
+        std::filesystem::path path = botFolder(profile.call) / (std::string(profile.call) + "-bulletin-" + std::to_string(++shared)
                                                + ".txt");
         std::ofstream out(path, std::ios::trunc);
         out << "QST de " << profile.call << ": D2G net bulletin number " << shared << "\n\n";
@@ -252,7 +319,7 @@ struct Bot
             out << "Line " << (i + 1) << ": the net meets nightly; check in, pass traffic, and 73 to all.\n";
         out.close();
         std::string error;
-        if (files.send(path.string(), "", now, error) == 0) std::fprintf(stderr, "%s: %s\n", profile.call, error.c_str());
+        if (broadcasts.send(files::utf8FromPath(path), "", now, error) == 0) std::fprintf(stderr, "%s: %s\n", profile.call, error.c_str());
     }
 
     void say(const std::string& text, uint64_t atMs)
@@ -275,19 +342,20 @@ struct Bot
         link.tick(now);
         session.tick(now);
         seals.tick(now);
-        files.tick(now);
-        files.takeEvents();
-        files.takeFinished();
+        broadcasts.tick(now);
+        broadcasts.takeEvents();
+        broadcasts.takeFinished();
+        traffic.tick(now);
 
         for (const link::HostLink::Event& e : link.takeEvents())
         {
             session.onEvent(e, now);
             seals.onEvent(e, now);
-            files.onEvent(e, now);
+            broadcasts.onEvent(e, now);
             for (const protocol::Record& r : chat.onEvent(e, now))
             {
                 seals.onRecord(r, now);
-                files.onRecord(r, now);
+                broadcasts.onRecord(r, now);
                 const protocol::Text* text = r.as<protocol::Text>();
                 if (text != nullptr && text->to == profile.call)
                 {
@@ -337,8 +405,11 @@ struct Bot
     link::HostLink link;
     broadcast::BroadcastChat chat;
     broadcast::Seals seals;
-    broadcast::BroadcastFiles files;
+    broadcast::BroadcastFiles broadcasts;
     session::SessionChat session;
+    files::SessionFiles files;
+    files::FileHistory history;
+    files::FileTraffic traffic;
     const Profile& profile;
     std::mt19937& random;
     int kiss = -1, command = -1, data = -1;
@@ -350,12 +421,14 @@ struct Bot
     uint64_t fadeAtMs = 0;
     std::string callWho;
     uint64_t callMs = 0;
+    bool offersOnCall = false;
+    std::string bulletin;
+    uint64_t offerMs = 0;
     uint64_t nextMs = 0;
     uint64_t checkInMs = 0;
     size_t line = 0;
     std::string replyTo;
     uint64_t replyMs = 0;
-    std::filesystem::path folder;
     uint64_t shareEveryMs = 0;
     uint64_t shareMs = 0;
     int shared = 0;
@@ -371,6 +444,7 @@ int main(int argc, char** argv)
     bool fades = false;
     int lossPct = 0;
     bool share = false;
+    int rate = 400;
     for (int i = 1; i < argc; i++)
     {
         if (std::strcmp(argv[i], "--bots") == 0 && i + 1 < argc)
@@ -381,6 +455,8 @@ int main(int argc, char** argv)
             callWho = argv[++i];
         else if (std::strcmp(argv[i], "--fade") == 0)
             fades = true;
+        else if (std::strcmp(argv[i], "--rate") == 0 && i + 1 < argc)
+            rate = std::atoi(argv[++i]);
         else if (std::strcmp(argv[i], "--loss") == 0 && i + 1 < argc)
             lossPct = std::atoi(argv[++i]);
         else if (std::strcmp(argv[i], "--files") == 0)
@@ -388,7 +464,7 @@ int main(int argc, char** argv)
         else
         {
             std::fprintf(stderr, "usage: ragtime_fake_air [--bots N] [--airtime MS] [--call CALL] [--fade] "
-                                 "[--loss PCT] [--files]\n");
+                                 "[--rate BPS] [--loss PCT] [--files]\n");
             return 2;
         }
     }
@@ -414,6 +490,7 @@ int main(int argc, char** argv)
     for (FakeHost* h : {a.get(), b.get()})
     {
         h->setAirtimeMs(airtimeMs);
+        h->setSessionRate(rate);
         h->setAnswerOnCall(2);
         h->setIdleBroadcastMs(3000);
         h->setLoss(std::min(100, std::max(0, lossPct)) / 100.0);
@@ -427,6 +504,7 @@ int main(int argc, char** argv)
         stations.push_back(std::make_unique<Bot>(air, PROFILES[i], airtimeMs, start + 3000 + 2500 * (uint64_t)i,
                                                  random));
         stations.back()->fades = fades;
+        stations.back()->host.setSessionRate(rate);
     }
     if (share && !stations.empty())
     {
@@ -438,6 +516,7 @@ int main(int argc, char** argv)
         if (callWho.empty() || !s->profile.sessions) continue;
         s->callWho = callWho;
         s->callMs = start + 30000;
+        s->offersOnCall = true;
         break;
     }
 

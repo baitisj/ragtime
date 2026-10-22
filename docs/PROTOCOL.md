@@ -342,8 +342,18 @@ One file goes to a station at a time; the next waits for it.
 6. Either side can **FileCancel** at any time. A FileSaved that crosses
    the sender's cancel still counts as delivered.
 7. A session ending under a transfer fails it. The receiver keeps the
-   part file, for 7 days and at most 8 of them, so the same file from the
-   same station carries on from it next time.
+   part file, for 7 days and at most 8 of them, across restarts, so the
+   same file from the same station carries on from it next time.
+8. **Leaving** with a transfer under way, a station writes its
+   FileCancel (`0x01` or `0x81`) before the farewell, so the far end
+   hears why. A file still waiting its turn is offered in the next
+   session with that station.
+
+A sender offers nothing until the far end's Hello has come and says it
+takes session files. It keeps no more file bytes waiting at the host than
+about a minute of the session's acknowledged rate, so a Text typed during
+a transfer goes out behind at most that much; how much is the sender's
+own business and not part of the protocol.
 
 The receiver saves under a safe form of the offered name: its last path
 part only, without control or direction characters, path separators,

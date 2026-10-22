@@ -37,6 +37,7 @@ const int ID_REPLY = wxID_HIGHEST + 401;
 const int ID_CANCEL = wxID_HIGHEST + 402;
 const int ID_RESEND = wxID_HIGHEST + 403;
 const int ID_COPY = wxID_HIGHEST + 404;
+const int ID_FILE_TITLE = wxID_HIGHEST + 409;
 const int ID_FILE_ACTION = wxID_HIGHEST + 410;     // and the actions after it
 
 } // namespace
@@ -333,15 +334,21 @@ void BroadcastPage::showFileMenu(const Message& m)
     if (fileCard_) fileCard_(file, card);
     wxString name = wxString::FromUTF8(m.text);
 
+    const auto& actions = card.menu.empty() ? card.actions : card.menu;
     wxMenu menu;
-    for (size_t i = 0; i < card.actions.size(); i++)
-        menu.Append(ID_FILE_ACTION + (int)i, wxString::FromUTF8(card.actions[i].second));
+    if (!card.title.empty())
+    {
+        menu.Append(ID_FILE_TITLE, wxString::FromUTF8(card.title));
+        menu.Enable(ID_FILE_TITLE, false);
+    }
+    for (size_t i = 0; i < actions.size(); i++)
+        menu.Append(ID_FILE_ACTION + (int)i, wxString::FromUTF8(actions[i].second));
     if (menu.GetMenuItemCount() > 0) menu.AppendSeparator();
     menu.Append(ID_COPY, "Copy file name");
     menu.Bind(wxEVT_MENU, [=](wxCommandEvent& e) {
         int index = e.GetId() - ID_FILE_ACTION;
-        if (index >= 0 && (size_t)index < card.actions.size() && onFileAction_)
-            onFileAction_(file, card.actions[(size_t)index].first);
+        if (index >= 0 && (size_t)index < actions.size() && onFileAction_)
+            onFileAction_(file, actions[(size_t)index].first);
         if (e.GetId() == ID_COPY && wxTheClipboard->Open())
         {
             wxTheClipboard->SetData(new wxTextDataObject(name));

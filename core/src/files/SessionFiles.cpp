@@ -199,8 +199,9 @@ bool fileDigest(const std::filesystem::path& path, uint64_t size, protocol::Dige
 
 SessionFiles::~SessionFiles()
 {
+    // What was under way is kept as a part, and parts stay on disk: the
+    // owner saved keptParts() first, to carry on after a restart.
     stopAll("closed");
-    while (!kept_.empty()) dropKept(kept_.begin());
 }
 
 SessionFiles::Entry* SessionFiles::find(uint64_t id)
@@ -332,6 +333,7 @@ uint64_t SessionFiles::offer(const std::string& peer, const std::string& path, u
     t.path = path;
     t.state = FileTransfer::State::Waiting;
     t.digest = digest;
+    t.atMs = nowMs;
     entry.sinceMs = nowMs;
     changed();
     uint64_t id = t.id;
@@ -378,7 +380,9 @@ void SessionFiles::keep(Entry& entry)
     auto older = findKept(entry);
     if (older != kept_.end()) dropKept(older);
     Kept& k = kept_.emplace_back();
+    k.id = nextId_++;
     k.peer = t.peer;
+    k.name = t.name;
     k.size = t.size;
     k.digest = t.digest;
     k.path = t.path;
@@ -386,6 +390,7 @@ void SessionFiles::keep(Entry& entry)
     k.bytes = t.done;
     k.keptAtMs = nowMs_;
     limitKept(nowMs_);
+    changed();
 }
 
 void SessionFiles::dropKept(std::list<Kept>::iterator it)
@@ -393,6 +398,7 @@ void SessionFiles::dropKept(std::list<Kept>::iterator it)
     std::error_code ec;
     std::filesystem::remove(it->part, ec);
     kept_.erase(it);
+    changed();
 }
 
 void SessionFiles::limitKept(uint64_t nowMs)
@@ -401,7 +407,8 @@ void SessionFiles::limitKept(uint64_t nowMs)
     {
         // Kept where no time was to hand: its time starts now.
         if (it->keptAtMs == 0) it->keptAtMs = nowMs;
-        bool old = nowMs > it->keptAtMs && nowMs - it->keptAtMs >= KEPT_MS;
+        if (it->keepUntilMs == 0) it->keepUntilMs = it->keptAtMs + KEPT_MS;
+        bool old = nowMs >= it->keepUntilMs;
         auto next = std::next(it);
         if (old) dropKept(it);
         it = next;
@@ -597,7 +604,7 @@ std::vector<FileTransfer> SessionFiles::transfers(uint64_t nowMs) const
 }
 
 std::vector<uint8_t> SessionFiles::takeRecords(const std::string& peer, protocol::Numbering& numbering,
-                                               uint64_t nowMs)
+                                               uint64_t nowMs, bool offerNext)
 {
     std::vector<uint8_t> out;
     uint32_t time = unixSeconds(nowMs);
@@ -613,7 +620,7 @@ std::vector<uint8_t> SessionFiles::takeRecords(const std::string& peer, protocol
         return e.transfer.outgoing && e.transfer.peer == peer &&
                (e.transfer.state == FileTransfer::State::Offered || e.transfer.state == FileTransfer::State::Sending);
     });
-    if (going || inhibited_) return out;
+    if (going || inhibited_ || !offerNext) return out;
 
     for (Entry& entry : entries_)
     {
@@ -632,6 +639,7 @@ std::vector<uint8_t> SessionFiles::takeRecords(const std::string& peer, protocol
         }
         entry.offer = record.header.seq;
         t.state = FileTransfer::State::Offered;
+        t.atMs = nowMs;
         t.resumedFrom = 0;
         t.done = 0;
         entry.sinceMs = nowMs;
@@ -643,7 +651,7 @@ std::vector<uint8_t> SessionFiles::takeRecords(const std::string& peer, protocol
 }
 
 bool SessionFiles::takePiece(const std::string& peer, protocol::Numbering& numbering, uint64_t streamOffset,
-                             uint64_t nowMs, std::vector<uint8_t>& out)
+                             uint64_t nowMs, std::vector<uint8_t>& out, size_t maxBytes)
 {
     if (inhibited_) return false;
     uint32_t time = unixSeconds(nowMs);
@@ -653,7 +661,8 @@ bool SessionFiles::takePiece(const std::string& peer, protocol::Numbering& numbe
         if (!t.outgoing || t.peer != peer || t.state != FileTransfer::State::Sending) continue;
         if (entry.written >= t.size) return false;
 
-        size_t length = (size_t)std::min<uint64_t>(PIECE_BYTES, t.size - entry.written);
+        size_t most = std::max<size_t>(1, std::min(maxBytes, PIECE_BYTES));
+        size_t length = (size_t)std::min<uint64_t>(most, t.size - entry.written);
         protocol::FileData data;
         data.offset = (uint32_t)entry.written;
         data.bytes.resize(length);
@@ -762,6 +771,7 @@ void SessionFiles::onRecord(const std::string& peer, const protocol::Record& rec
         t.digest = offer->digest;
         t.name = safeFileName(offer->name);
         t.state = State::Asking;
+        t.atMs = nowMs;
         entry.offer = number;
         entry.sinceMs = nowMs;
         auto kept = findKept(entry);
@@ -1070,6 +1080,121 @@ void SessionFiles::setInhibited(bool inhibited)
         }
         finish(entry, State::Failed, NOT_ALLOWED);
     }
+}
+
+const FileTransfer* SessionFiles::transfer(uint64_t id) const
+{
+    for (const Entry& entry : entries_)
+    {
+        if (entry.transfer.id == id) return &entry.transfer;
+    }
+    return nullptr;
+}
+
+bool SessionFiles::reorder(uint64_t id, int delta)
+{
+    auto isQueued = [](const Entry& e, const std::string& peer) {
+        return e.transfer.outgoing && e.transfer.peer == peer && e.transfer.state == FileTransfer::State::Waiting;
+    };
+    auto it = std::find_if(entries_.begin(), entries_.end(), [id](const Entry& e) { return e.transfer.id == id; });
+    if (it == entries_.end() || delta == 0) return false;
+    const std::string peer = it->transfer.peer;
+    if (!isQueued(*it, peer)) return false;
+    if (delta < 0)
+    {
+        // Before the queued one ahead of it.
+        auto before = entries_.end();
+        for (auto j = entries_.begin(); j != it; ++j)
+        {
+            if (isQueued(*j, peer)) before = j;
+        }
+        if (before == entries_.end()) return false;
+        entries_.splice(before, entries_, it);
+    }
+    else
+    {
+        // After the queued one behind it.
+        auto after = std::next(it);
+        while (after != entries_.end() && !isQueued(*after, peer)) ++after;
+        if (after == entries_.end()) return false;
+        entries_.splice(std::next(after), entries_, it);
+    }
+    changed();
+    return true;
+}
+
+std::vector<KeptPart> SessionFiles::keptParts() const
+{
+    std::vector<KeptPart> out;
+    for (const Kept& k : kept_)
+    {
+        KeptPart p;
+        p.id = k.id;
+        p.peer = k.peer;
+        p.name = !k.name.empty() ? k.name : utf8FromPath(pathFromUtf8(k.path).filename());
+        p.size = k.size;
+        std::copy(k.digest.begin(), k.digest.end(), p.digest);
+        p.path = k.path;
+        p.part = utf8FromPath(k.part);
+        p.bytes = k.bytes;
+        p.keptAtMs = k.keptAtMs;
+        p.keepUntilMs = k.keepUntilMs != 0 ? k.keepUntilMs : k.keptAtMs + KEPT_MS;
+        out.push_back(std::move(p));
+    }
+    return out;
+}
+
+void SessionFiles::restoreKept(const std::vector<KeptPart>& parts, uint64_t nowMs)
+{
+    for (const KeptPart& p : parts)
+    {
+        std::filesystem::path part = pathFromUtf8(p.part);
+        std::error_code ec;
+        uint64_t bytes = std::filesystem::file_size(part, ec);
+        uint64_t until = p.keepUntilMs != 0 ? p.keepUntilMs : p.keptAtMs + KEPT_MS;
+        if (ec || bytes != p.bytes || p.bytes == 0 || p.bytes >= p.size || nowMs >= until)
+        {
+            // Gone, changed or too old: whatever is left of it goes.
+            if (!ec && nowMs >= until) std::filesystem::remove(part, ec);
+            continue;
+        }
+        bool known = std::any_of(kept_.begin(), kept_.end(), [&](const Kept& k) { return k.part == part; });
+        if (known) continue;
+        Kept& k = kept_.emplace_back();
+        k.id = nextId_++;
+        k.peer = protocol::normalCallsign(p.peer);
+        k.name = p.name;
+        k.size = p.size;
+        std::copy(p.digest, p.digest + protocol::DIGEST_BYTES, k.digest.begin());
+        k.path = p.path;
+        k.part = part;
+        k.bytes = p.bytes;
+        k.keptAtMs = p.keptAtMs;
+        k.keepUntilMs = until;
+    }
+    limitKept(nowMs);
+    changed();
+}
+
+bool SessionFiles::keepLonger(uint64_t keptId, uint64_t ms, uint64_t nowMs)
+{
+    for (Kept& k : kept_)
+    {
+        if (k.id != keptId) continue;
+        uint64_t until = k.keepUntilMs != 0 ? k.keepUntilMs : k.keptAtMs + KEPT_MS;
+        k.keepUntilMs = std::max(until, nowMs) + ms;
+        changed();
+        return true;
+    }
+    return false;
+}
+
+bool SessionFiles::deleteKept(uint64_t keptId)
+{
+    auto it = std::find_if(kept_.begin(), kept_.end(), [keptId](const Kept& k) { return k.id == keptId; });
+    if (it == kept_.end()) return false;
+    dropKept(it);
+    return true;
 }
 
 bool SessionFiles::hasRecords(const std::string& peer) const

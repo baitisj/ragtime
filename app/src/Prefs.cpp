@@ -39,6 +39,8 @@ StationPrefs loadStationPrefs()
     p.host = readString("/Connection/Host", p.host);
     p.kissPort = (int)config().ReadLong("/Connection/KissPort", p.kissPort);
     p.commandPort = (int)config().ReadLong("/Connection/CommandPort", p.commandPort);
+    p.receivedFolder = receivedFolder();
+    p.autoAccept = loadAutoAccept();
     return p;
 }
 
@@ -49,6 +51,9 @@ void saveStationPrefs(const StationPrefs& p)
     config().Write("/Connection/Host", wxString::FromUTF8(p.host));
     config().Write("/Connection/KissPort", (long)p.kissPort);
     config().Write("/Connection/CommandPort", (long)p.commandPort);
+    // The default folder stays the default until the operator picks another.
+    if (!p.receivedFolder.empty() && p.receivedFolder != receivedFolder()) saveReceivedFolder(p.receivedFolder);
+    saveAutoAccept(p.autoAccept);
     config().Flush();
 }
 

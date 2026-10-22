@@ -3,14 +3,18 @@
 
 #include <cstdint>
 #include <functional>
+#include <map>
 #include <string>
+#include <vector>
 
 #include <wx/panel.h>
 
+#include "ragtime/files/FileTraffic.h"
 #include "ragtime/session/SessionChat.h"
 
 class wxBoxSizer;
 class wxButton;
+class wxListBox;
 class wxStaticText;
 class wxTextCtrl;
 class SessionMessages;
@@ -22,10 +26,18 @@ class SessionMessages;
 // when the far end's modem has acknowledged it; and the line to type in.
 // With no session up the tab is greyed: the last session's messages stay
 // readable, and nothing can be typed.
+//
+// Files (package G) show among the messages as cards: an offer to us with
+// Save, Save as..., Decline and its countdown, and "4,096 of 7,000 kept
+// from before" when a part is kept; a file moving either way with its
+// progress and Cancel; how each ended. Files dropped on the tab, or picked
+// with Send file..., queue for the partner; the queue shows above the line
+// to type in, to reorder or remove before each starts.
 class SessionPage : public wxPanel
 {
 public:
-    SessionPage(wxWindow* parent, const ragtime::session::SessionChat& session);
+    SessionPage(wxWindow* parent, const ragtime::session::SessionChat& session,
+                const ragtime::files::FileTraffic& files);
 
     // Send pressed: true when the text went, and the line is cleared.
     void onSend(std::function<bool(const std::string& typed)> fn) { onSend_ = std::move(fn); }
@@ -33,6 +45,16 @@ public:
     void onLeave(std::function<void()> fn) { onLeave_ = std::move(fn); }
     void onLeaveNow(std::function<void()> fn) { onLeaveNow_ = std::move(fn); }
     void onCallAgain(std::function<void()> fn) { onCallAgain_ = std::move(fn); }
+    // Send file... pressed.
+    void onSendFile(std::function<void()> fn) { onSendFile_ = std::move(fn); }
+    // Files dropped on the tab.
+    void onDropFiles(std::function<void(const std::vector<std::string>& paths)> fn) { onDropFiles_ = std::move(fn); }
+    // A card's link or the queue's buttons: "save", "saveas", "decline",
+    // "cancel", "open", "folder", "up", "down", with the transfer's id.
+    void onFileAction(std::function<void(const std::string& action, uint64_t id)> fn)
+    {
+        onFileAction_ = std::move(fn);
+    }
 
     // Redraws the strip every second, and the messages when they change.
     void refresh(uint64_t nowMs, long utcOffsetS);
@@ -42,10 +64,30 @@ public:
 private:
     friend class SessionMessages;
 
+    // One line of the list: a message, or a file's card.
+    struct Item
+    {
+        bool file = false;
+        size_t message = 0;         // the message's index
+        uint64_t transfer = 0;      // the file's id
+        uint64_t atMs = 0;
+    };
+
     void send();
     void showMenu(int row);
+    void rebuild(uint64_t nowMs);
+    void refreshQueue();
+    wxString cardHtml(const ragtime::files::FileTransfer& t, bool picked) const;
 
     const ragtime::session::SessionChat& session_;
+    const ragtime::files::FileTraffic& files_;
+    std::vector<Item> items_;
+    std::map<uint64_t, ragtime::files::FileTransfer> transfers_;   // the cards', as of the last rebuild
+    std::vector<uint64_t> queued_;                                  // the queue's, top first
+    uint64_t nowMs_ = 0;
+    long utcOffsetS_ = 0;
+    uint64_t shownFiles_ = ~0ull;
+    bool liveFiles_ = false;        // a card counts down or moves: redrawn every second
     wxPanel* strip_ = nullptr;
     wxStaticText* stripText_ = nullptr;
     wxButton* cancel_ = nullptr;
@@ -56,13 +98,19 @@ private:
     wxStaticText* paused_ = nullptr;
     wxTextCtrl* compose_ = nullptr;
     wxButton* send_ = nullptr;
+    wxButton* sendFile_ = nullptr;
+    wxPanel* queue_ = nullptr;
+    wxStaticText* queueTitle_ = nullptr;
+    wxListBox* queueList_ = nullptr;
     uint64_t shownVersion_ = ~0ull;
     std::string shownStrip_;
     bool shownAmber_ = false;
     int shownPhase_ = -1;
 
     std::function<bool(const std::string&)> onSend_;
-    std::function<void()> onCancel_, onLeave_, onLeaveNow_, onCallAgain_;
+    std::function<void()> onCancel_, onLeave_, onLeaveNow_, onCallAgain_, onSendFile_;
+    std::function<void(const std::vector<std::string>&)> onDropFiles_;
+    std::function<void(const std::string&, uint64_t)> onFileAction_;
 };
 
 #endif

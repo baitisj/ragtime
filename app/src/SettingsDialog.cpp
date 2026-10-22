@@ -3,6 +3,8 @@
 #include <string>
 
 #include <wx/button.h>
+#include <wx/filepicker.h>
+#include <wx/tokenzr.h>
 #include <wx/sizer.h>
 #include <wx/spinctrl.h>
 #include <wx/statbox.h>
@@ -66,12 +68,32 @@ SettingsDialog::SettingsDialog(wxWindow* parent, const StationPrefs& prefs)
     hostGrid->Add(dataPort_, 0);
     host->Add(hostGrid, 0, wxEXPAND | wxALL, 6);
 
+    auto* files = new wxStaticBoxSizer(wxVERTICAL, this, "Files");
+    box = files->GetStaticBox();
+    received_ = new wxDirPickerCtrl(box, wxID_ANY, wxString::FromUTF8(prefs.receivedFolder), "Where received files go",
+                                    wxDefaultPosition, wxDefaultSize, wxDIRP_USE_TEXTCTRL);
+    received_->SetToolTip("Save puts a file offered in a session here; a part file waits beside it while it comes");
+    wxString calls;
+    for (const std::string& call : prefs.autoAccept) calls << (calls.empty() ? "" : " ") << wxString::FromUTF8(call);
+    autoAccept_ = new wxTextCtrl(box, wxID_ANY, calls);
+    autoAccept_->SetHint("W1AW KC2G");
+    autoAccept_->SetToolTip("Files these stations offer in a session are saved in the received folder without "
+                            "asking, under the name offered (numbered if it's taken). Callsigns, separated by spaces");
+    auto* filesGrid = new wxFlexGridSizer(2, 6, 10);
+    filesGrid->AddGrowableCol(1);
+    filesGrid->Add(new wxStaticText(box, wxID_ANY, "Received files"), 0, wxALIGN_CENTER_VERTICAL);
+    filesGrid->Add(received_, 1, wxEXPAND);
+    filesGrid->Add(new wxStaticText(box, wxID_ANY, "Save without asking from"), 0, wxALIGN_CENTER_VERTICAL);
+    filesGrid->Add(autoAccept_, 1, wxEXPAND);
+    files->Add(filesGrid, 0, wxEXPAND | wxALL, 6);
+
     problem_ = new wxStaticText(this, wxID_ANY, "");
     problem_->SetForegroundColour(wxColour(0xb4, 0x23, 0x18));
 
     auto* sizer = new wxBoxSizer(wxVERTICAL);
     sizer->Add(station, 0, wxEXPAND | wxLEFT | wxRIGHT | wxTOP, 12);
     sizer->Add(host, 0, wxEXPAND | wxLEFT | wxRIGHT | wxTOP, 12);
+    sizer->Add(files, 0, wxEXPAND | wxLEFT | wxRIGHT | wxTOP, 12);
     sizer->Add(problem_, 0, wxEXPAND | wxLEFT | wxRIGHT | wxTOP, 12);
     sizer->Add(CreateStdDialogButtonSizer(wxOK | wxCANCEL), 0, wxEXPAND | wxALL, 12);
     SetSizer(sizer);
@@ -81,6 +103,7 @@ SettingsDialog::SettingsDialog(wxWindow* parent, const StationPrefs& prefs)
 
     auto changed = [this](wxCommandEvent&) { check(); };
     callsign_->Bind(wxEVT_TEXT, changed);
+    autoAccept_->Bind(wxEVT_TEXT, changed);
     locator_->Bind(wxEVT_TEXT, changed);
     commandPort_->Bind(wxEVT_SPINCTRL, [this](wxSpinEvent&) { check(); });
     check();
@@ -96,6 +119,13 @@ StationPrefs SettingsDialog::prefs() const
     if (p.host.empty()) p.host = "127.0.0.1";
     p.kissPort = kissPort_->GetValue();
     p.commandPort = commandPort_->GetValue();
+    p.receivedFolder = std::string(received_->GetPath().Strip(wxString::both).utf8_str());
+    wxStringTokenizer words(autoAccept_->GetValue(), ", ;");
+    while (words.HasMoreTokens())
+    {
+        std::string call = ragtime::protocol::normalCallsign(std::string(words.GetNextToken().utf8_str()));
+        if (!call.empty()) p.autoAccept.push_back(call);
+    }
     return p;
 }
 
@@ -109,6 +139,13 @@ void SettingsDialog::check()
         problem = "A callsign is letters, digits, / and -, at most 10 characters.";
     else if (!locator.empty() && ragtime::globus::tidyLocator(locator).empty())
         problem = "A locator is 4 or 6 characters, such as CN87 or CN87ux.";
+    wxStringTokenizer words(autoAccept_->GetValue(), ", ;");
+    while (problem.empty() && words.HasMoreTokens())
+    {
+        wxString word = words.GetNextToken();
+        if (ragtime::protocol::normalCallsign(std::string(word.utf8_str())).empty())
+            problem = "\"" + word + "\" isn't a callsign: list the stations separated by spaces.";
+    }
     problem_->SetLabel(problem);
     if (wxWindow* ok = FindWindow(wxID_OK)) ok->Enable(problem.empty());
     Layout();

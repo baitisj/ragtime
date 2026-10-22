@@ -78,6 +78,9 @@ public:
     // A deep fade: session bytes are read and counted, but neither carried
     // nor acknowledged until it lifts.
     void fadeSession(bool fade) { fading_ = fade; }
+    // Session bytes cross at most this fast, bytes a second, after the
+    // airtime (0, the default: all at once).
+    void setSessionRate(int bytesPerSecond) { sessionRate_ = bytesPerSecond; }
     // Bursts go while a session has been idle this long (0: never).
     void setIdleBroadcastMs(int ms) { idleBroadcastMs_ = ms; }
     // The next burst is dropped: BCAST <port> DROPPED <frames>, no acks.
@@ -173,6 +176,8 @@ private:
         long long atMs;
     };
     std::vector<Crossing> crossing_;
+    int sessionRate_ = 0;
+    long long lastCrossingMs_ = 0;  // when the last byte read is due across
     size_t waiting_ = 0;
     bool fading_ = false;
     bool disconnectPending_ = false;

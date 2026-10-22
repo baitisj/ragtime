@@ -2,6 +2,7 @@
 #define RAGTIME_MAIN_FRAME_H
 
 #include <cstdint>
+#include <map>
 #include <memory>
 #include <string>
 #include <vector>
@@ -14,6 +15,9 @@
 #include "ragtime/broadcast/BroadcastFiles.h"
 #include "ragtime/broadcast/Seals.h"
 #include "ragtime/broadcast/Stations.h"
+#include "ragtime/files/FileRows.h"
+#include "ragtime/files/FileTraffic.h"
+#include "ragtime/files/SessionFiles.h"
 #include "ragtime/gearbox/Gearbox.h"
 #include "ragtime/link/HostLink.h"
 #include "ragtime/session/SessionChat.h"
@@ -21,6 +25,7 @@
 class BroadcastPage;
 struct FileCard;
 class ConnectionBar;
+class FilesPage;
 class GlobusPanel;
 class GlobusToggle;
 class HostConnection;
@@ -73,6 +78,26 @@ private:
     void refreshSession();
     bool canCall() const;
 
+    // Files (docs/PLAN.md, "File transfer"). In a session they go to the
+    // partner; to another station, Ragtime offers to call it first: there
+    // is no hidden session for a file.
+    void sendFilePrompt(const std::string& call);
+    void queueFiles(const std::string& call, const std::vector<std::string>& paths);
+    void fileAction(const std::string& action, uint64_t id);
+    void saveOffer(uint64_t id, bool ask);
+    // "Please send FRED.TXT again": a line in the session, now if one is
+    // up with the station, or once a call to it connects.
+    void askAgain(const std::string& call, const std::string& name, uint64_t kept, uint64_t size);
+    void sessionFileMenu(const ragtime::files::FileRow& row, wxMenu& menu);
+    void finishedFileMenu(const ragtime::files::FinishedFile& file, wxMenu& menu);
+    void onFileEvents();
+    void refreshFiles();
+    void applyFilePrefs();
+    void loadFilesLog();
+    void saveFilesLog(bool force);
+    // The newest transfer in one line, for the status bar.
+    std::string transfersLine() const;
+
     // Broadcasts.
     bool sendTyped(const std::string& typed);
     std::string broadcastMode() const;
@@ -84,7 +109,9 @@ private:
     // links do, and keeping the seal chain across restarts.
     void broadcastFile();
     bool fileCard(uint64_t id, FileCard& card);
-    void fileAction(uint64_t id, const std::string& action);
+    void broadcastFileAction(uint64_t id, const std::string& action);
+    void broadcastFileMenu(const ragtime::files::FileRow& row, wxMenu& menu);
+    void keepRepairsUntil(uint64_t id, uint64_t untilMs);
     void receiveFile(uint64_t id);
     void setAutoReceive(bool on);
     void onBroadcastFiles();
@@ -111,6 +138,12 @@ private:
     ragtime::broadcast::Stations stations_;
     ragtime::gearbox::Gearshift gearshift_;
     std::unique_ptr<HostConnection> host_;
+    // Session files: the engine, the log of finished transfers (the Files
+    // tab's Completed pane, shared with broadcast files), and the two
+    // plugged into the session.
+    ragtime::files::SessionFiles sessionFiles_;
+    ragtime::files::FileHistory history_;
+    ragtime::files::FileTraffic fileTraffic_;
 
     ConnectionBar* bar_ = nullptr;
     wxSplitterWindow* outer_ = nullptr;     // station list | the rest
@@ -120,6 +153,7 @@ private:
     wxNotebook* tabs_ = nullptr;
     BroadcastPage* broadcast_ = nullptr;
     SessionPage* sessionPage_ = nullptr;
+    FilesPage* filesPage_ = nullptr;
     GlobusPanel* globus_ = nullptr;
     GlobusToggle* tabToggle_ = nullptr;
     wxMenu* viewMenu_ = nullptr;
@@ -140,8 +174,9 @@ private:
 
     uint64_t broadcastFilesVersion_ = 0;
     uint16_t savedSeal_ = 0;    // the seal chain's number last saved
-    // Broadcast transfers that have ended, for the Files tab's log.
-    std::vector<ragtime::files::FinishedFile> finishedFiles_;
+    std::map<std::string, std::string> askOnConnect_;   // a line to send once a session with the station is up
+    std::vector<std::string> logOther_;                 // lines of the files log this version doesn't read
+    uint64_t savedLog_ = ~0ull;                         // what the log on disk has (history and parts' changes)
 };
 
 #endif

@@ -13,12 +13,15 @@
 #include <wx/clipbrd.h>
 #include <wx/config.h>
 #include <wx/datetime.h>
+#include <wx/ffile.h>
+#include <wx/file.h>
 #include <wx/filedlg.h>
 #include <wx/filename.h>
 #include <wx/log.h>
 #include <wx/menu.h>
 #include <wx/msgdlg.h>
 #include <wx/notebook.h>
+#include <wx/notifmsg.h>
 #include <wx/panel.h>
 #include <wx/persist/toplevel.h>
 #include <wx/sizer.h>
@@ -31,6 +34,7 @@
 
 #include "BroadcastPage.h"
 #include "ConnectionBar.h"
+#include "FilesPage.h"
 #include "GearshiftDialog.h"
 #include "HostConnection.h"
 #include "SessionPage.h"
@@ -71,7 +75,28 @@ enum
     ID_STATION_LEAVE,
     ID_BROADCAST_FILE,
     ID_AUTO_RECEIVE,
+    // A broadcast file's menu on the Files tab.
+    ID_BROADCAST_FILE_TITLE,
+    ID_BROADCAST_FILE_ACTION,
+    ID_BROADCAST_FILE_ACTION_LAST = ID_BROADCAST_FILE_ACTION + 7,
+    ID_SEND_FILE,
+    ID_OPEN_RECEIVED,
+    ID_STATION_SEND_FILE,
+    // A file's right-click menu.
+    ID_FILE_SAVE,
+    ID_FILE_SAVE_AS,
+    ID_FILE_DECLINE,
+    ID_FILE_CANCEL,
+    ID_FILE_UP,
+    ID_FILE_DOWN,
+    ID_FILE_ASK_REST,
+    ID_FILE_KEEP_LONGER,
+    ID_FILE_DELETE_PART,
+    ID_FILE_ASK_AGAIN,
+    ID_FILE_SEND_AGAIN,
 };
+
+constexpr size_t BROADCAST_FILE_ACTIONS = ID_BROADCAST_FILE_ACTION_LAST - ID_BROADCAST_FILE_ACTION + 1;
 
 enum Tab
 {
@@ -95,18 +120,7 @@ wxString utf8(const std::string& text)
     return wxString::FromUTF8(text);
 }
 
-wxPanel* placeholderPage(wxWindow* parent, const wxString& text)
-{
-    auto* page = new wxPanel(parent);
-    auto* sizer = new wxBoxSizer(wxVERTICAL);
-    sizer->AddStretchSpacer();
-    auto* label = new wxStaticText(page, wxID_ANY, text, wxDefaultPosition, wxDefaultSize, wxALIGN_CENTRE_HORIZONTAL);
-    label->Disable();
-    sizer->Add(label, 0, wxALIGN_CENTER_HORIZONTAL | wxALL, 12);
-    sizer->AddStretchSpacer();
-    page->SetSizer(sizer);
-    return page;
-}
+const char* const DOT = " \xc2\xb7 ";
 
 std::string software()
 {
@@ -159,8 +173,10 @@ MainFrame::MainFrame()
     , seals_(link_, chat_)
     , broadcastFiles_(link_, chat_, seals_)
     , session_(link_)
+    , fileTraffic_(sessionFiles_, history_)
     , clock_(this)
 {
+    session_.setTraffic(&fileTraffic_);
     // Every dialog and the main window must fit Jeff's 1366x768 screen.
     SetMinSize(wxSize(960, 600));
 
@@ -200,8 +216,10 @@ MainFrame::MainFrame()
         sort = broadcast::ALL_COLUMNS[(size_t)saved];
     stationList_->setSort(sort, loadBool(keys::SORT_ASCENDING, true));
 
+    loadFilesLog();
     applyPrefs(true);
     showStatus();
+    refreshFiles();
 
     wxPersistentRegisterAndRestore(this, "MainWindow");
     if (!IsMaximized() && GetPosition() == wxDefaultPosition) Centre();
@@ -209,6 +227,11 @@ MainFrame::MainFrame()
     Bind(wxEVT_TIMER, [this](wxTimerEvent&) { onClock(); });
     clock_.Start(CLOCK_MS);
     Bind(wxEVT_CLOSE_WINDOW, [this](wxCloseEvent& e) {
+        // What is under way ends here; a part received is kept, and the
+        // log keeps it for next time.
+        sessionFiles_.stopAll("Ragtime was closed");
+        fileTraffic_.update(HostConnection::nowMs());
+        saveFilesLog(true);
         rememberDividers();
         saveBool(keys::GLOBUS, globusOn_);
         saveInt(keys::LIST_WIDTH, listWidth_);
@@ -241,6 +264,10 @@ MainFrame::~MainFrame()
 void MainFrame::buildMenus()
 {
     auto* file = new wxMenu;
+    file->Append(ID_SEND_FILE, "&Send file...\tCtrl+O",
+                 "Offers files to the station you're in a session with, or calls the station picked first");
+    file->Append(ID_OPEN_RECEIVED, "Open &received folder", "Where files you receive go");
+    file->AppendSeparator();
     file->Append(ID_BROADCAST_FILE, "&Broadcast a file...\tCtrl+Shift+B",
                  "Sends a file to everyone on D2G, with repairs for stations that miss pieces");
     file->AppendCheckItem(ID_AUTO_RECEIVE, "&Receive broadcast files automatically",
@@ -259,6 +286,8 @@ void MainFrame::buildMenus()
     station->Append(ID_LEAVE, "&Leave the session\tCtrl+L",
                     "Leaves once what you sent is acknowledged (DISCONNECT); while calling, stops the call");
     station->Append(ID_LEAVE_NOW, "Leave &now\tCtrl+Shift+L", "Leaves at once (ABORT)");
+    station->Append(ID_STATION_SEND_FILE, "Send a &file...", "Offers files in the session, calling the station first if "
+                                                             "you aren't in one with it");
     station->AppendSeparator();
     station->AppendCheckItem(ID_PAUSE, "&Pause sending\tCtrl+P");
 
@@ -307,6 +336,15 @@ void MainFrame::buildMenus()
     Bind(wxEVT_MENU, [this](wxCommandEvent&) { callPrompt(); }, ID_CALL);
     Bind(wxEVT_MENU, [this](wxCommandEvent&) { leaveSession(); }, ID_LEAVE);
     Bind(wxEVT_MENU, [this](wxCommandEvent&) { leaveSessionNow(); }, ID_LEAVE_NOW);
+    Bind(wxEVT_MENU, [this](wxCommandEvent&) { sendFilePrompt(""); }, ID_SEND_FILE);
+    Bind(wxEVT_MENU, [this](wxCommandEvent&) { sendFilePrompt(""); }, ID_STATION_SEND_FILE);
+    Bind(wxEVT_MENU, [this](wxCommandEvent&) {
+        wxFileName::Mkdir(wxString::FromUTF8(receivedFolder()), wxS_DIR_DEFAULT, wxPATH_MKDIR_FULL);
+        openWithDesktop(receivedFolder());
+    }, ID_OPEN_RECEIVED);
+    Bind(wxEVT_UPDATE_UI, [this](wxUpdateUIEvent& e) {
+        e.Enable(session_.phase() == session::SessionChat::Phase::Connected || canCall());
+    }, ID_SEND_FILE, ID_STATION_SEND_FILE);
     Bind(wxEVT_UPDATE_UI, [this](wxUpdateUIEvent& e) { e.Enable(canCall() || session_.active()); }, ID_CALL);
     Bind(wxEVT_UPDATE_UI, [this](wxUpdateUIEvent& e) {
         e.Enable(session_.phase() == session::SessionChat::Phase::Calling
@@ -367,9 +405,10 @@ void MainFrame::buildLayout()
     broadcast_ = new BroadcastPage(tabs_, chat_);
     // Tab order is fixed: Broadcast, Session, Files (CLAUDE.md).
     tabs_->AddPage(broadcast_, "Broadcast", true);
-    sessionPage_ = new SessionPage(tabs_, session_);
+    sessionPage_ = new SessionPage(tabs_, session_, fileTraffic_);
     tabs_->AddPage(sessionPage_, wxString::FromUTF8("Session \xc2\xb7 none"));
-    tabs_->AddPage(placeholderPage(tabs_, "No files yet."), "Files");
+    filesPage_ = new FilesPage(tabs_, history_);
+    tabs_->AddPage(filesPage_, "Files");
     auto* middleSizer = new wxBoxSizer(wxVERTICAL);
     middleSizer->Add(tabs_, 1, wxEXPAND);
     middle_->SetSizer(middleSizer);
@@ -436,7 +475,7 @@ void MainFrame::buildLayout()
     });
     broadcast_->onBroadcastFile([this]() { broadcastFile(); });
     broadcast_->fileCards([this](uint64_t id, FileCard& card) { return fileCard(id, card); });
-    broadcast_->onFileAction([this](uint64_t id, const std::string& action) { fileAction(id, action); });
+    broadcast_->onFileAction([this](uint64_t id, const std::string& action) { broadcastFileAction(id, action); });
     // The Session tab.
     sessionPage_->onSend([this](const std::string& typed) {
         if (session_.send(typed, HostConnection::nowMs()) == 0) return false;
@@ -448,6 +487,25 @@ void MainFrame::buildLayout()
     sessionPage_->onLeave([this]() { leaveSession(); });
     sessionPage_->onLeaveNow([this]() { leaveSessionNow(); });
     sessionPage_->onCallAgain([this]() { callStation(session_.peer()); });
+    sessionPage_->onSendFile([this]() { sendFilePrompt(session_.peer()); });
+    sessionPage_->onDropFiles([this](const std::vector<std::string>& paths) {
+        if (session_.phase() == session::SessionChat::Phase::Connected)
+            queueFiles(session_.peer(), paths);
+        else
+            wxMessageBox("Files go in a session: call a station first, then drop them here.", "Send a file",
+                         wxOK | wxICON_INFORMATION, this);
+    });
+    sessionPage_->onFileAction([this](const std::string& action, uint64_t id) { fileAction(action, id); });
+    // The Files tab: each row's menu comes from what moves it.
+    filesPage_->onRowMenu([this](const files::FileRow& row, wxMenu& menu) {
+        if (row.via == files::Via::Session) sessionFileMenu(row, menu);
+        else broadcastFileMenu(row, menu);
+    });
+    filesPage_->onFinishedMenu([this](const files::FinishedFile& file, wxMenu& menu) { finishedFileMenu(file, menu); });
+    filesPage_->onOpenFolder([this]() {
+        wxFileName::Mkdir(wxString::FromUTF8(receivedFolder()), wxS_DIR_DEFAULT, wxPATH_MKDIR_FULL);
+        openWithDesktop(receivedFolder());
+    });
     tabs_->Bind(wxEVT_NOTEBOOK_PAGE_CHANGED, [this](wxBookCtrlEvent& e) {
         updateTabLabels();
         placeTabToggle();
@@ -490,6 +548,7 @@ void MainFrame::applyPrefs(bool reconnect)
     session_.setSettings(ss);
     stations_.setMyCallsign(prefs_.callsign);
     stations_.setHome(prefs_.locator);
+    applyFilePrefs();
     globus_->setHome(prefs_.locator);
     bar_->setCallsign(utf8(prefs_.callsign));
     SetTitle(prefs_.callsign.empty() ? wxString("Ragtime") : wxString::FromUTF8("Ragtime \xc2\xb7 ") + utf8(prefs_.callsign));
@@ -575,6 +634,7 @@ void MainFrame::onHostEvents(const std::vector<Event>& events)
     }
     onBroadcastFiles();
     onSessionEvents();
+    onFileEvents();
     showConnection();
     showStatus();
     refreshMessages();
@@ -590,8 +650,12 @@ void MainFrame::onClock()
     broadcastFiles_.tick(now);
     onBroadcastFiles();
     session_.tick(now);
+    fileTraffic_.tick(now);
     onSessionEvents();
+    onFileEvents();
     host_->flush();
+    refreshFiles();
+    saveFilesLog(false);
     refreshSession();
     showConnection();
     stationList_->refresh(HostConnection::nowMs());
@@ -620,7 +684,7 @@ void MainFrame::showStatus()
     SetStatusText(link_.busy() ? "Channel busy" : "Channel clear", FIELD_CHANNEL);
     std::string mode = !modeUsed_.empty() ? modeUsed_ : link_.groupMode();
     SetStatusText(mode.empty() ? wxString("Mode: the host's") : "Mode " + utf8(mode), FIELD_MODE);
-    SetStatusText(note_.empty() ? wxString("No transfers") : utf8(note_), FIELD_TRANSFERS);
+    SetStatusText(utf8(transfersLine()), FIELD_TRANSFERS);
 }
 
 void MainFrame::refreshMessages()
@@ -674,9 +738,12 @@ void MainFrame::stationMenu(const std::string& call)
         menu.Enable(ID_STATION_CALL, canCall() || session_.active());
     }
     menu.Append(ID_STATION_MESSAGE, "Message @" + utf8(call) + "\tCtrl+M");
+    menu.Append(ID_STATION_SEND_FILE, "Send a file to " + utf8(call) + "...");
+    menu.Enable(ID_STATION_SEND_FILE, canCall() || (session_.phase() == session::SessionChat::Phase::Connected));
     menu.Append(ID_STATION_COPY, "Copy callsign");
     menu.Bind(wxEVT_MENU, [this, call](wxCommandEvent& e) {
         if (e.GetId() == ID_STATION_CALL) callStation(call);
+        if (e.GetId() == ID_STATION_SEND_FILE) CallAfter([this, call]() { sendFilePrompt(call); });
         if (e.GetId() == ID_STATION_LEAVE) leaveSession();
         if (e.GetId() == ID_STATION_MESSAGE)
         {
@@ -865,6 +932,7 @@ void MainFrame::onSessionData(const uint8_t* bytes, size_t length)
     // heard in the session says it was heard.
     for (const protocol::Record& r : session_.dataBytes(bytes, length, now)) stations_.onRecord(r, now);
     onSessionEvents();
+    onFileEvents();
     refreshSession();
     refreshStations();
 }
@@ -891,6 +959,12 @@ void MainFrame::onSessionEvents()
                 sessionUnread_ = 0;
                 tabs_->SetSelection(TAB_SESSION);
                 if (e.incoming && !IsActive()) RequestUserAttention(wxUSER_ATTENTION_INFO);
+                // A request saved for this station ("send it again") goes now.
+                if (auto ask = askOnConnect_.find(e.peer); ask != askOnConnect_.end())
+                {
+                    session_.send(ask->second, now);
+                    askOnConnect_.erase(ask);
+                }
                 break;
             case Type::Ended:
                 stations_.setPartner("", false, now);
@@ -914,6 +988,324 @@ void MainFrame::refreshSession()
     sessionPage_->refresh(HostConnection::nowMs(), localOffsetSeconds());
     updateTabLabels();
     refreshStations();
+}
+
+//-------------------------------------------------------------------------
+// Files
+//-------------------------------------------------------------------------
+
+void MainFrame::applyFilePrefs()
+{
+    // Auto-accept saves straight into the received folder.
+    sessionFiles_.setAutoAccept(receivedFolder(), loadAutoAccept());
+}
+
+void MainFrame::loadFilesLog()
+{
+    wxString path = utf8(filesLogPath());
+    if (!wxFileName::FileExists(path)) return;
+    wxFFile file(path, "rb");
+    wxString text;
+    if (!file.IsOpened() || !file.ReadAll(&text, wxConvUTF8)) return;
+    std::vector<files::KeptPart> kept;
+    files::FileHistory history;
+    if (!files::loadFilesText(std::string(text.utf8_str()), history, kept, &logOther_))
+    {
+        wxLogWarning("The files log %s isn't Ragtime's; it is left alone and a new one kept beside it.", path);
+        return;
+    }
+    for (const files::FinishedFile& f : history.entries()) history_.add(f);
+    sessionFiles_.restoreKept(kept, HostConnection::nowMs());
+}
+
+void MainFrame::saveFilesLog(bool force)
+{
+    // Saved when the log or the kept parts change, not as bytes move.
+    uint64_t state = history_.version() * 1000003u;
+    for (const files::KeptPart& k : sessionFiles_.keptParts())
+        state = state * 31 + k.bytes + k.keepUntilMs * 7 + std::hash<std::string>()(k.part);
+    if (!force && state == savedLog_) return;
+    savedLog_ = state;
+    wxFileName path(utf8(filesLogPath()));
+    path.Mkdir(wxS_DIR_DEFAULT, wxPATH_MKDIR_FULL);
+    wxTempFile out(path.GetFullPath());
+    std::string text = files::saveFilesText(history_, sessionFiles_.keptParts(), logOther_);
+    if (!out.IsOpened() || !out.Write(text.data(), text.size()) || !out.Commit())
+        note_ = "Couldn't save the files log, " + std::string(path.GetFullPath().utf8_str());
+}
+
+void MainFrame::refreshFiles()
+{
+    uint64_t now = HostConnection::nowMs();
+    std::vector<files::FileRow> rows = fileTraffic_.rows(now);
+    for (files::FileRow& r : broadcastFiles_.rows(now)) rows.push_back(std::move(r));
+    filesPage_->setRows(std::move(rows), now, localOffsetSeconds());
+    showStatus();
+}
+
+std::string MainFrame::transfersLine() const
+{
+    uint64_t now = HostConnection::nowMs();
+    const files::FileRow* newest = nullptr;
+    std::vector<files::FileRow> rows = fileTraffic_.rows(now);
+    for (files::FileRow& r : broadcastFiles_.rows(now)) rows.push_back(std::move(r));
+    for (const files::FileRow& r : rows)
+    {
+        if (r.look == files::FileRow::Look::Kept) continue;
+        if (newest == nullptr || r.atMs > newest->atMs) newest = &r;
+    }
+    if (newest == nullptr) return note_.empty() ? std::string("No transfers") : note_;
+    std::string line = newest->name + (newest->outgoing ? " to " : " from ") + newest->peer;
+    if (newest->look == files::FileRow::Look::Moving || newest->look == files::FileRow::Look::Stalled)
+        line += DOT + files::progressText(newest->done, newest->size);
+    return line + DOT + newest->state;
+}
+
+void MainFrame::onFileEvents()
+{
+    using Type = files::FileTraffic::Event::Type;
+    for (const files::FileTraffic::Event& e : fileTraffic_.takeEvents())
+    {
+        const files::FileTransfer* t = sessionFiles_.transfer(e.id);
+        if (e.type == Type::Offered && t != nullptr)
+        {
+            // An offer is a card in the session; the tab and, in the
+            // background, the desktop draw attention to it.
+            std::string what = t->peer + (e.autoAccepted ? " is sending " : " offers ") + t->name + ", "
+                               + files::sizeText(t->size);
+            note_ = what;
+            if (!(tabs_->GetSelection() == TAB_SESSION && IsActive())) sessionUnread_++;
+            if (!IsActive())
+            {
+                wxNotificationMessage notice("Ragtime", utf8(what), this);
+                notice.Show();
+                RequestUserAttention(wxUSER_ATTENTION_INFO);
+            }
+        }
+        else if (e.type == Type::Finished)
+        {
+            if (const files::FinishedFile* f = history_.find(e.historyId))
+                note_ = f->name + (f->outgoing ? " to " : " from ") + f->peer + ": " + files::resultLabel(*f);
+        }
+    }
+    updateTabLabels();
+}
+
+void MainFrame::sendFilePrompt(const std::string& call)
+{
+    using Phase = session::SessionChat::Phase;
+    std::string them = protocol::normalCallsign(call);
+    if (them.empty()) them = session_.active() ? session_.peer() : stationList_->selected();
+    if (them.empty())
+    {
+        wxTextEntryDialog ask(this, "The callsign of the station to send files to:", "Send a file");
+        if (ask.ShowModal() != wxID_OK) return;
+        them = protocol::normalCallsign(std::string(ask.GetValue().Upper().utf8_str()));
+        if (them.empty()) return;
+    }
+    bool inSession = session_.peer() == them && (session_.phase() == Phase::Connected
+                                                 || session_.phase() == Phase::Calling);
+    if (!inSession)
+    {
+        // There is no hidden session for a file: the operator calls.
+        wxMessageDialog ask(this,
+                            "Files go in a session. Call " + utf8(them)
+                                + " and send them once you're connected?",
+                            "Send a file to " + utf8(them), wxYES_NO | wxYES_DEFAULT | wxICON_QUESTION);
+        ask.SetYesNoLabels("Pick files and call", "Cancel");
+        if (ask.ShowModal() != wxID_YES) return;
+    }
+    wxFileDialog pick(this, "Send to " + utf8(them), wxEmptyString, wxEmptyString, "All files|*",
+                      wxFD_OPEN | wxFD_FILE_MUST_EXIST | wxFD_MULTIPLE);
+    if (pick.ShowModal() != wxID_OK) return;
+    wxArrayString picked;
+    pick.GetPaths(picked);
+    std::vector<std::string> paths;
+    for (const wxString& p : picked) paths.push_back(std::string(p.utf8_str()));
+    queueFiles(them, paths);
+    if (!inSession) callStation(them);
+}
+
+void MainFrame::queueFiles(const std::string& call, const std::vector<std::string>& paths)
+{
+    uint64_t now = HostConnection::nowMs();
+    std::string problems;
+    for (const std::string& path : paths)
+    {
+        std::string error;
+        if (sessionFiles_.offer(call, path, now, error) == 0) problems += error + "\n";
+    }
+    fileTraffic_.update(now);
+    host_->flush();
+    refreshSession();
+    refreshFiles();
+    if (!problems.empty()) wxMessageBox(utf8(problems), "Send a file", wxOK | wxICON_WARNING, this);
+}
+
+void MainFrame::saveOffer(uint64_t id, bool ask)
+{
+    const files::FileTransfer* t = sessionFiles_.transfer(id);
+    if (t == nullptr || t->state != files::FileTransfer::State::Asking) return;
+    std::string folder = receivedFolder();
+    std::string path;
+    if (t->kept > 0 && !t->keptPath.empty())
+    {
+        // Carries on in the part kept from before.
+        path = t->keptPath;
+        folder = std::string(wxFileName(utf8(path)).GetPath().utf8_str());
+    }
+    wxFileName::Mkdir(utf8(folder), wxS_DIR_DEFAULT, wxPATH_MKDIR_FULL);
+    if (path.empty()) path = files::utf8FromPath(files::freeSavePath(files::pathFromUtf8(folder), t->name));
+    if (ask)
+    {
+        std::string name = t->name;
+        wxFileDialog save(this, "Save " + utf8(name) + " from " + utf8(t->peer), utf8(folder),
+                          wxFileName(utf8(path.empty() ? name : path)).GetFullName(), "All files|*",
+                          wxFD_SAVE | wxFD_OVERWRITE_PROMPT);
+        if (save.ShowModal() != wxID_OK) return;
+        path = std::string(save.GetPath().utf8_str());
+        // The offer may have gone while the dialog was up.
+        t = sessionFiles_.transfer(id);
+        if (t == nullptr || t->state != files::FileTransfer::State::Asking) return;
+    }
+    if (path.empty()) return;
+    std::string error;
+    if (!sessionFiles_.accept(id, path, error)) wxMessageBox(utf8(error), "Save the file", wxOK | wxICON_WARNING, this);
+}
+
+void MainFrame::fileAction(const std::string& action, uint64_t id)
+{
+    const files::FileTransfer* t = sessionFiles_.transfer(id);
+    if (t == nullptr) return;
+    if (action == "save" || action == "saveas")
+        saveOffer(id, action == "saveas");
+    else if (action == "decline")
+        sessionFiles_.decline(id);
+    else if (action == "cancel")
+        sessionFiles_.cancel(id);
+    else if (action == "up" || action == "down")
+        sessionFiles_.reorder(id, action == "up" ? -1 : 1);
+    else if (action == "open")
+        openWithDesktop(t->path);
+    else if (action == "folder")
+        openWithDesktop(std::string(wxFileName(utf8(t->path)).GetPath().utf8_str()));
+    fileTraffic_.update(HostConnection::nowMs());
+    host_->flush();
+    refreshSession();
+    refreshFiles();
+}
+
+void MainFrame::askAgain(const std::string& call, const std::string& name, uint64_t kept, uint64_t size)
+{
+    std::string text = "Please send " + name + " again";
+    if (kept > 0 && kept < size)
+        text += ": I have " + files::progressText(kept, size) + " bytes kept, so only the rest needs to come.";
+    else
+        text += ".";
+    if (session_.phase() == session::SessionChat::Phase::Connected && session_.peer() == call)
+    {
+        session_.send(text, HostConnection::nowMs());
+        host_->flush();
+        tabs_->SetSelection(TAB_SESSION);
+        refreshSession();
+        return;
+    }
+    wxMessageDialog ask(this, "Call " + utf8(call) + " first? The request goes into the session once you're connected:\n\n\"" + utf8(text) + "\"",
+                        "Ask " + utf8(call), wxYES_NO | wxYES_DEFAULT | wxICON_QUESTION);
+    ask.SetYesNoLabels("Call", "Cancel");
+    if (ask.ShowModal() != wxID_YES) return;
+    askOnConnect_[call] = text;
+    callStation(call);
+}
+
+void MainFrame::sessionFileMenu(const files::FileRow& row, wxMenu& menu)
+{
+    using Look = files::FileRow::Look;
+    uint64_t id = row.id;
+    if (row.look == Look::Kept)
+    {
+        // A part kept from before.
+        std::string peer = row.peer, name = row.name;
+        uint64_t kept = row.done, size = row.size;
+        menu.Append(ID_FILE_ASK_REST, "&Ask " + utf8(peer) + " to send the rest");
+        menu.Append(ID_FILE_KEEP_LONGER, "&Keep 7 days longer");
+        menu.AppendSeparator();
+        menu.Append(ID_FILE_DELETE_PART, "&Delete part");
+        menu.Bind(wxEVT_MENU, [=](wxCommandEvent&) { CallAfter([=]() { askAgain(peer, name, kept, size); }); },
+                  ID_FILE_ASK_REST);
+        menu.Bind(wxEVT_MENU, [this, id](wxCommandEvent&) {
+            sessionFiles_.keepLonger(id, files::SessionFiles::KEPT_MS, HostConnection::nowMs());
+            refreshFiles();
+        }, ID_FILE_KEEP_LONGER);
+        menu.Bind(wxEVT_MENU, [this, id](wxCommandEvent&) {
+            sessionFiles_.deleteKept(id);
+            refreshFiles();
+        }, ID_FILE_DELETE_PART);
+        return;
+    }
+    const files::FileTransfer* t = sessionFiles_.transfer(id);
+    if (t == nullptr) return;
+    auto act = [this, id](const char* action) {
+        std::string what = action;
+        return [this, id, what](wxCommandEvent&) { CallAfter([this, id, what]() { fileAction(what, id); }); };
+    };
+    switch (t->state)
+    {
+        case files::FileTransfer::State::Asking:
+            menu.Append(ID_FILE_SAVE, t->kept > 0 ? "&Save (carry on from the part kept)" : "&Save");
+            menu.Append(ID_FILE_SAVE_AS, "Save &as...");
+            menu.Append(ID_FILE_DECLINE, "&Decline");
+            menu.Bind(wxEVT_MENU, act("save"), ID_FILE_SAVE);
+            menu.Bind(wxEVT_MENU, act("saveas"), ID_FILE_SAVE_AS);
+            menu.Bind(wxEVT_MENU, act("decline"), ID_FILE_DECLINE);
+            break;
+        case files::FileTransfer::State::Waiting:
+            menu.Append(ID_FILE_UP, "Move &up the queue");
+            menu.Append(ID_FILE_DOWN, "Move &down the queue");
+            menu.AppendSeparator();
+            menu.Append(ID_FILE_CANCEL, "&Remove from the queue");
+            menu.Bind(wxEVT_MENU, act("up"), ID_FILE_UP);
+            menu.Bind(wxEVT_MENU, act("down"), ID_FILE_DOWN);
+            menu.Bind(wxEVT_MENU, act("cancel"), ID_FILE_CANCEL);
+            break;
+        default:
+            menu.Append(ID_FILE_CANCEL, "&Cancel");
+            menu.Bind(wxEVT_MENU, act("cancel"), ID_FILE_CANCEL);
+            break;
+    }
+}
+
+void MainFrame::finishedFileMenu(const files::FinishedFile& file, wxMenu& menu)
+{
+    using Result = files::FinishedFile::Result;
+    // A broadcast file's finished row needs nothing past what the tab
+    // gives every row (Open, Open folder, Remove from list).
+    if (file.via != files::Via::Session) return;
+    std::string peer = file.peer, name = file.name, path = file.path;
+    if (!file.outgoing && file.result != Result::Saved && file.result != Result::Declined
+        && file.result != Result::Cancelled)
+    {
+        uint64_t kept = 0, size = file.size;
+        for (const files::KeptPart& k : sessionFiles_.keptParts())
+        {
+            if (k.peer == peer && k.size == size && k.name == name) kept = k.bytes;
+        }
+        menu.Append(ID_FILE_ASK_AGAIN, "&Ask " + utf8(peer) + " to send it again");
+        menu.Bind(wxEVT_MENU, [=](wxCommandEvent&) { CallAfter([=]() { askAgain(peer, name, kept, size); }); },
+                  ID_FILE_ASK_AGAIN);
+    }
+    if (file.outgoing && file.result != Result::Sent && !path.empty())
+    {
+        menu.Append(ID_FILE_SEND_AGAIN, "&Send it to " + utf8(peer) + " again");
+        menu.Enable(ID_FILE_SEND_AGAIN, wxFileName::FileExists(utf8(path)));
+        menu.Bind(wxEVT_MENU, [=](wxCommandEvent&) {
+            CallAfter([=]() {
+                bool inSession = session_.peer() == peer && session_.phase() == session::SessionChat::Phase::Connected;
+                queueFiles(peer, {path});
+                if (!inSession) callStation(peer);
+            });
+        }, ID_FILE_SEND_AGAIN);
+    }
 }
 
 //-------------------------------------------------------------------------
@@ -1025,11 +1417,12 @@ void MainFrame::broadcastFile()
         wxMessageBox(text, "Broadcast a file", wxOK | wxICON_INFORMATION, this);
         return;
     }
+    std::string air = durationText(estimate.airSeconds), wall = durationText(estimate.wallSeconds);
     wxString text = wxString::Format(
-        "%s, %s bytes, %d pieces in %s: about %s on the air (%s with the gaps between bursts), then repairs "
-        "until %s at the latest. Stations will not confirm receipt.",
-        name, utf8(files::groupedNumber(size.GetValue())), estimate.pieces, where,
-        utf8(durationText(estimate.airSeconds)), utf8(durationText(estimate.wallSeconds)),
+        "%s, %s bytes, %d pieces in %s: about %s on the air%s, then repairs until %s at the latest. Stations "
+        "will not confirm receipt.",
+        name, utf8(files::groupedNumber(size.GetValue())), estimate.pieces, where, utf8(air),
+        wall == air ? wxString() : " (" + utf8(wall) + " with the gaps between bursts)",
         clockIn(estimate.wallSeconds + (double)estimate.repairsMs / 1000.0));
     bool long_ = estimate.airSeconds > broadcast::BroadcastFiles::WARN_AIR_SECONDS;
     if (long_)
@@ -1077,7 +1470,15 @@ bool MainFrame::fileCard(uint64_t id, FileCard& card)
                              + (f.askers == 0 ? std::string()
                                               : ", " + std::to_string(f.askers) + (f.askers == 1 ? " station" : " stations")
                                                     + " asked");
-            if (f.sealed) card.actions = {{"keep", "Keep open 30 min longer"}, {"close", "Close repairs now"}};
+            if (f.sealed)
+            {
+                card.actions = {{"keep", "Keep open 30 min longer"}, {"close", "Close repairs now"}};
+                card.title = "Repairs open until " + files::expiryText(f.repairsUntilMs, now, localOffsetSeconds());
+                card.menu = {{"keep", "Keep open 30 min longer"},
+                             {"keep2h", "Keep open 2 hours longer"},
+                             {"keepuntil", "Keep open until..."},
+                             {"close", "Close repairs now"}};
+            }
             break;
         case State::Sent:
             card.state = "Sent";
@@ -1135,7 +1536,7 @@ void MainFrame::receiveFile(uint64_t id)
     }
 }
 
-void MainFrame::fileAction(uint64_t id, const std::string& action)
+void MainFrame::broadcastFileAction(uint64_t id, const std::string& action)
 {
     broadcast::BroadcastFile f;
     uint64_t now = HostConnection::nowMs();
@@ -1148,14 +1549,61 @@ void MainFrame::fileAction(uint64_t id, const std::string& action)
         broadcastFiles_.cancel(id);
     else if (action == "keep")
         broadcastFiles_.keepOpen(id, std::max(f.repairsUntilMs, now) + 30 * 60 * 1000);
+    else if (action == "keep2h")
+        broadcastFiles_.keepOpen(id, std::max(f.repairsUntilMs, now) + 2 * 60 * 60 * 1000);
+    else if (action == "keepuntil")
+        keepRepairsUntil(id, f.repairsUntilMs);
     else if (action == "close")
         broadcastFiles_.closeRepairs(id);
     else if (action == "open" && !f.path.empty())
-        wxLaunchDefaultApplication(utf8(f.path));
+        openWithDesktop(f.path);
     else if (action == "folder" && !f.path.empty())
-        wxLaunchDefaultApplication(wxFileName(utf8(f.path)).GetPath());
+        openWithDesktop(std::string(wxFileName(utf8(f.path)).GetPath().utf8_str()));
     onBroadcastFiles();
     host_->flush();
+    refreshFiles();
+}
+
+void MainFrame::keepRepairsUntil(uint64_t id, uint64_t untilMs)
+{
+    // A local time today, or tomorrow if that has gone by: "18:30".
+    wxDateTime shown = untilMs != 0 ? wxDateTime((wxLongLong)(long long)untilMs) : wxDateTime::Now();
+    wxTextEntryDialog ask(this, "Keep repairs open until (your local time, such as 18:30):", "Keep repairs open",
+                          shown.Format("%H:%M"));
+    if (ask.ShowModal() != wxID_OK) return;
+    wxDateTime at = wxDateTime::Now();
+    wxString::const_iterator end;
+    if (!at.ParseTime(ask.GetValue().Trim().Trim(false), &end))
+    {
+        wxMessageBox("\"" + ask.GetValue() + "\" isn't a time of day, such as 18:30.", "Keep repairs open",
+                     wxOK | wxICON_INFORMATION, this);
+        return;
+    }
+    if (at <= wxDateTime::Now()) at += wxDateSpan::Day();
+    uint64_t ms = (uint64_t)at.GetValue().GetValue();
+    broadcastFiles_.keepOpen(id, ms);
+}
+
+void MainFrame::broadcastFileMenu(const files::FileRow& row, wxMenu& menu)
+{
+    FileCard card;
+    if (!fileCard(row.id, card)) return;
+    const auto& actions = card.menu.empty() ? card.actions : card.menu;
+    if (!card.title.empty())
+    {
+        menu.Append(ID_BROADCAST_FILE_TITLE, utf8(card.title));
+        menu.Enable(ID_BROADCAST_FILE_TITLE, false);
+    }
+    uint64_t id = row.id;
+    for (size_t i = 0; i < actions.size() && i < BROADCAST_FILE_ACTIONS; i++)
+    {
+        int itemId = ID_BROADCAST_FILE_ACTION + (int)i;
+        menu.Append(itemId, utf8(actions[i].second));
+        std::string action = actions[i].first;
+        menu.Bind(wxEVT_MENU, [this, id, action](wxCommandEvent&) {
+            CallAfter([this, id, action]() { broadcastFileAction(id, action); });
+        }, itemId);
+    }
 }
 
 void MainFrame::setAutoReceive(bool on)
@@ -1192,7 +1640,11 @@ void MainFrame::onBroadcastFiles()
                 break;
         }
     }
-    for (files::FinishedFile& done : broadcastFiles_.takeFinished()) finishedFiles_.push_back(std::move(done));
+    for (files::FinishedFile& done : broadcastFiles_.takeFinished())
+    {
+        note_ = done.name + (done.outgoing ? " to " : " from ") + done.peer + ": " + files::resultLabel(done);
+        history_.add(std::move(done));
+    }
     if (broadcastFiles_.version() != broadcastFilesVersion_)
     {
         broadcastFilesVersion_ = broadcastFiles_.version();
