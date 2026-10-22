@@ -42,6 +42,7 @@ StationPrefs loadStationPrefs()
     p.commandPort = (int)config().ReadLong("/Connection/CommandPort", p.commandPort);
     p.receivedFolder = receivedFolder();
     p.autoAccept = loadAutoAccept();
+    p.sealChat = config().ReadBool("/Broadcast/SealChat", p.sealChat);
     return p;
 }
 
@@ -55,6 +56,7 @@ void saveStationPrefs(const StationPrefs& p)
     // The default folder stays the default until the operator picks another.
     if (!p.receivedFolder.empty() && p.receivedFolder != receivedFolder()) saveReceivedFolder(p.receivedFolder);
     saveAutoAccept(p.autoAccept);
+    config().Write("/Broadcast/SealChat", p.sealChat);
     config().Flush();
 }
 

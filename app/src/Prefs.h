@@ -21,6 +21,7 @@ struct StationPrefs
     int commandPort = 8300;     // the session data port is the next one
     std::string receivedFolder; // where files saved from a session go
     std::vector<std::string> autoAccept;   // stations whose files are saved without asking
+    bool sealChat = false;      // our broadcast chat is sealed too (files always are)
 };
 
 StationPrefs loadStationPrefs();

@@ -548,6 +548,7 @@ void MainFrame::applyPrefs(bool reconnect)
     chat_.setSettings(s, loadNewestItem(protocol::normalCallsign(prefs_.callsign)));
     seals_.setChain(prefs_.callsign, loadSealChain(protocol::normalCallsign(prefs_.callsign)));
     savedSeal_ = seals_.chain().number;
+    seals_.setSealText(prefs_.sealChat);
     session::SessionChat::Settings ss;
     ss.callsign = prefs_.callsign;
     ss.locator = prefs_.locator;

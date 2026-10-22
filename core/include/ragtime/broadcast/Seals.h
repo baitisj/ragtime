@@ -3,8 +3,10 @@
 // multicast (NORM) repairs: listeners say only what they lack, after a
 // random wait, and keep quiet when someone else has asked for it already.
 //
-// Ours. Every item we broadcast (a Text, a file's FileAnnounce) is listed
-// in a Seal once its burst has gone: the seal names our first item since
+// Ours. Every file we broadcast (its FileAnnounce) is listed in a Seal once
+// its burst has gone, and so are our Texts when the operator asks for that
+// (setSealText, off by default: on a poor link a seal can take 30 to 60 s
+// of airtime, and plain chat must never pay for it unasked): the seal names our first item since
 // the last seal and gives each one's record digest, zeros for a number
 // whose burst never went. Each seal names the one before by its digest,
 // so a listener that missed one sees the gap. A seal goes once an over
@@ -103,6 +105,12 @@ public:
     // The mode our requests and seals go in when nothing else says (the
     // gear's mode, or empty for the group's).
     void setMode(const std::string& mode) { mode_ = mode; }
+    // Our Texts are sealed too (Settings, "Seal my broadcast messages").
+    // Off, a Text is never listed, so a chat over goes with no seal and no
+    // repair; a file is sealed either way. It applies to Texts sent from
+    // now on.
+    void setSealText(bool on) { sealText_ = on; }
+    bool sealText() const { return sealText_; }
 
     // Our seal chain, kept across restarts with the broadcast numbering:
     // the newest seal's number and digest. A new callsign starts afresh.
@@ -296,6 +304,7 @@ private:
     SealedFiles* files_ = nullptr;
     std::mt19937 random_;
     std::string mode_;
+    bool sealText_ = false;
     std::string callsign_;
 
     std::deque<OurItem> unsealed_;          // in the order they went
