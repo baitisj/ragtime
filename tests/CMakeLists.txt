@@ -38,6 +38,7 @@ ragtime_test(ragtime_gearbox_test GearboxTest.cpp)
 ragtime_test(ragtime_broadcast_test BroadcastTest.cpp)
 
 ragtime_test(ragtime_session_test SessionTest.cpp)
+ragtime_test(ragtime_session_log_test SessionLogTest.cpp)
 
 ragtime_test(ragtime_globus_test GlobusTest.cpp)
 # The globus test also checks the generated map tables themselves.

@@ -36,6 +36,7 @@ add_library(ragtime_core STATIC
     src/broadcast/Seals.cpp
     # Package F (sessions): src/session/.
     src/session/SessionChat.cpp
+    src/session/SessionLog.cpp
 )
 
 target_include_directories(ragtime_core PUBLIC

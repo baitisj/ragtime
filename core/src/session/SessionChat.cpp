@@ -4,6 +4,7 @@
 #include <utility>
 
 #include "ragtime/broadcast/Stations.h"
+#include "ragtime/session/SessionLog.h"
 
 namespace ragtime
 {
@@ -148,8 +149,8 @@ bool SessionChat::call(const std::string& peer, uint64_t nowMs)
     sinceMs_ = nowMs;
     connectedMs_ = 0;
     cancelling_ = gaveUp_ = dataLost_ = false;
-    // A new session starts in the tab: the last one's messages go.
-    messages_.clear();
+    // A new session starts in the tab, below what was said with them before.
+    showHistory(them);
     SessionChat::Event calling;
     calling.type = SessionChat::Event::Type::Calling;
     calling.peer = them;
@@ -218,6 +219,7 @@ uint64_t SessionChat::send(const std::string& typed, uint64_t nowMs)
     m.atMs = nowMs;
     m.state = State::Queued;
     queued_.push_back({m.id, std::move(bytes)});
+    if (log_ != nullptr) log_->added(peer_, m);
     messages_.push_back(std::move(m));
     uint64_t id = messages_.back().id;
     trim();
@@ -266,6 +268,7 @@ void SessionChat::writeQueued(uint64_t nowMs)
             if (m.id != q.first) continue;
             m.state = State::Sent;
             m.streamEnd = account_.written() + out_.size();
+            logState(m);
         }
     }
     if (!queued_.empty()) changed();
@@ -342,6 +345,7 @@ void SessionChat::onRecord(const protocol::Record& record, uint64_t nowMs)
         m.seq = record.header.seq;
         m.time = record.header.time;
         m.atMs = nowMs;
+        if (log_ != nullptr) log_->added(peer_, m);
         messages_.push_back(m);
         trim();
         SessionChat::Event e;
@@ -380,6 +384,7 @@ void SessionChat::settle()
         if (m.ours && m.state == State::Sent && m.streamEnd <= acked)
         {
             m.state = State::Delivered;
+            logState(m);
             changed();
         }
     }
@@ -409,7 +414,7 @@ void SessionChat::onEvent(const link::HostLink::Event& event, uint64_t nowMs)
                 tries_ = 0;
                 sinceMs_ = nowMs;
                 connectedMs_ = 0;
-                messages_.clear();
+                showHistory(peer_);
                 changed();
             }
             break;
@@ -490,7 +495,8 @@ void SessionChat::begin(const std::string& peer, bool incoming, int bandwidth, u
 {
     bool stopping = cancelling_ || gaveUp_;
     endAfterglow();
-    if (incoming || phase_ != Phase::Calling) messages_.clear();
+    if (incoming || phase_ != Phase::Calling || peer != peer_) showHistory(peer);
+    if (log_ != nullptr) log_->began(peer, nowMs);
     phase_ = Phase::Connected;
     peer_ = peer;
     incoming_ = incoming;
@@ -545,6 +551,8 @@ void SessionChat::finish(Ending ending, uint64_t nowMs)
     }
     queued_.clear();
     if (wasUp && traffic_ != nullptr) traffic_->ended(peer_, nowMs);
+    // The log's end mark waits out the afterglow, for the last words in it.
+    if (wasUp && log_ != nullptr) logEndMs_ = std::max<uint64_t>(nowMs, 1);
     phase_ = Phase::Ended;
     ending_ = ending;
     sinceMs_ = nowMs;
@@ -555,9 +563,14 @@ void SessionChat::finish(Ending ending, uint64_t nowMs)
     early_.clear();
     out_.clear();
     if (ending == Ending::LinkLost)
+    {
         afterglowUntilMs_ = std::max<uint64_t>(nowMs + AFTERGLOW_MS, 1);
+    }
     else
+    {
         reader_.reset();
+        endLog();
+    }
 
     SessionChat::Event e;
     e.type = SessionChat::Event::Type::Ended;
@@ -572,6 +585,34 @@ void SessionChat::endAfterglow()
     if (afterglowUntilMs_ == 0) return;
     afterglowUntilMs_ = 0;
     reader_.reset();
+    endLog();
+}
+
+void SessionChat::endLog()
+{
+    if (logEndMs_ == 0) return;
+    if (log_ != nullptr) log_->ended(peer_, logEndMs_);
+    logEndMs_ = 0;
+}
+
+void SessionChat::showHistory(const std::string& peer)
+{
+    endLog();
+    messages_.clear();
+    if (log_ != nullptr)
+    {
+        for (Message& m : log_->load(peer, MAX_MESSAGES))
+        {
+            m.id = nextId_++;
+            messages_.push_back(std::move(m));
+        }
+    }
+    changed();
+}
+
+void SessionChat::logState(const Message& m)
+{
+    if (log_ != nullptr && !m.past) log_->settled(peer_, m);
 }
 
 void SessionChat::dataPort(bool up, uint64_t nowMs)

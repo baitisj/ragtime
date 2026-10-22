@@ -69,6 +69,9 @@ std::string appDataDir();
 // The Files tab's lasting log (finished transfers and kept part files):
 // beside the --config file, or in appDataDir().
 std::string filesLogPath();
+// The Session tab's lasting log, a file per station: beside the --config
+// file (<config>.sessions), or appDataDir()/sessions.
+std::string sessionLogDir();
 
 namespace keys
 {

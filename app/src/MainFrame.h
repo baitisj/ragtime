@@ -21,6 +21,7 @@
 #include "ragtime/gearbox/Gearbox.h"
 #include "ragtime/link/HostLink.h"
 #include "ragtime/session/SessionChat.h"
+#include "ragtime/session/SessionLog.h"
 
 class BroadcastPage;
 struct FileCard;
@@ -135,6 +136,7 @@ private:
     ragtime::broadcast::Seals seals_;
     ragtime::broadcast::BroadcastFiles broadcastFiles_;
     ragtime::session::SessionChat session_;
+    ragtime::session::SessionLog sessionLog_;
     ragtime::broadcast::Stations stations_;
     ragtime::gearbox::Gearshift gearshift_;
     std::unique_ptr<HostConnection> host_;
