@@ -7,6 +7,7 @@
 #include <utility>
 #include <vector>
 
+#include <wx/arrstr.h>
 #include <wx/button.h>
 #include <wx/checkbox.h>
 #include <wx/dcbuffer.h>
@@ -55,6 +56,28 @@ constexpr double MIN_BPS = 20.0;
 constexpr double MAX_BPS = 10000.0;
 constexpr double DOT_RADIUS = 4.5;
 constexpr double KNOB_RADIUS = 9.5;
+
+// Why there are no gears to draw, or empty when there are: no thresholds
+// found at all, or thresholds with no widths and speeds yet (data2g-host's
+// own file has none; its MODES list gives them).
+wxString whyNoGears(const Gearshift& shift)
+{
+    if (shift.table().empty())
+    {
+        return "No thresholds found. Ragtime looks for Data2G's own\n"
+               "data2g/codes_data/mode_thresholds.json in a Data2G checkout\n"
+               "($DATA2G_HOME, ~/Data2G, ~/src/Data2G and the like).\n"
+               "Load it with Load thresholds... below.";
+    }
+    for (const Submode& mode : shift.usable().modes())
+    {
+        if (mode.hasFacts())
+            return wxString();
+    }
+    return wxString::Format("Thresholds loaded for %d modes. Their widths and speeds\n"
+                            "come from data2g-host: the gears appear once it is connected.",
+                            static_cast<int>(shift.table().modes().size()));
+}
 
 void setPen(wxGraphicsContext& gc, const wxColour& colour, double width,
             wxPenStyle style = wxPENSTYLE_SOLID)
@@ -187,11 +210,11 @@ private:
         const wxFont small = font.Smaller();
         const Plot p = plot();
 
-        if (shift_.usable().empty())
+        const wxString empty = whyNoGears(shift_);
+        if (!empty.empty())
         {
             gc->SetFont(font, soft);
-            const wxString text = "No thresholds loaded. Load Data2G's mode_thresholds.json\n"
-                                  "or the Submode Map file below to see the gears.";
+            const wxString& text = empty;
             double w = 0, h = 0;
             gc->GetTextExtent(text, &w, &h);
             gc->DrawText(text, (GetClientSize().x - w) / 2, (GetClientSize().y - h) / 2);
@@ -497,7 +520,9 @@ GearshiftDialog::GearshiftDialog(wxWindow* parent, Gearshift& shift, std::functi
     load->Bind(wxEVT_BUTTON, [this](wxCommandEvent&) { loadFile(); });
     foot->Add(load, 0, wxRIGHT, 6);
     auto* close = new wxButton(this, wxID_CLOSE);
-    close->Bind(wxEVT_BUTTON, [this](wxCommandEvent&) { Close(); });
+    // Close, Escape and the title bar's X all end the dialog through the
+    // escape id. Binding the button to Close() as well would send the same
+    // press round again, and the dialog would never end.
     SetEscapeId(wxID_CLOSE);
     foot->Add(close, 0);
     top->Add(foot, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 10);
@@ -569,16 +594,18 @@ void GearshiftDialog::refresh()
         }
     }
 
-    const wxString path = thresholdsPath();
+    const wxArrayString sources = loadedThresholdSources();
     const int count = static_cast<int>(shift_.table().modes().size());
     if (shift_.table().empty())
-        source_->SetLabel("No thresholds file. Ragtime looks for " + defaultThresholdsPath());
-    else if (path.empty())
+        source_->SetLabel("No thresholds found");
+    else if (sources.empty())
         source_->SetLabel(wxString::Format("Thresholds for %d modes", count));
     else
         source_->SetLabel(wxString::Format("Thresholds from %s (%d modes)",
-                                           wxFileName(path).GetFullName(), count));
-    source_->SetToolTip(path);
+                                           wxJoin(sources, ';', '\0'), count));
+    source_->SetToolTip(sources.empty()
+                            ? "Looked in " + wxJoin(data2gSearchFolders(), ',', '\0')
+                            : wxJoin(sources, '\n', '\0'));
 
     map_->Refresh();
     refreshing_ = false;
@@ -599,14 +626,17 @@ void GearshiftDialog::loadFile()
                         wxFD_OPEN | wxFD_FILE_MUST_EXIST);
     if (picker.ShowModal() != wxID_OK)
         return;
-    SubmodeTable table;
+    SubmodeTable check;
     wxString error;
-    if (!loadThresholds(picker.GetPath(), table, error))
+    if (!loadThresholds(picker.GetPath(), check, error))
     {
         wxMessageBox(error, "Thresholds not loaded", wxOK | wxICON_WARNING, this);
         return;
     }
+    // The picked file goes on top of a Data2G checkout's, if one was found.
     rememberThresholdsPath(picker.GetPath());
-    shift_.setTable(std::move(table));
+    wxArrayString sources;
+    wxString errors;
+    shift_.setTable(loadAllThresholds(sources, errors));
     changed();
 }
