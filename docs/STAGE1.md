@@ -24,6 +24,9 @@ side by side.
 
 ## A. Repo skeleton and CI
 
+Done in the skeleton PR: see "Layout" and "Build and test" in
+`CLAUDE.md`. The Windows cross build moved to package I.
+
 - CMake project: `core/` (socket-free library, no wx), `app/` (wx),
   `tests/`, `tools/`, `docs/`. C++17.
 - GitHub Actions on Ubuntu 24.04: build core and app, run ctest. A second
@@ -139,6 +142,8 @@ side by side.
 
 - Linux AppImage and portable Windows zip (strip with
   `x86_64-w64-mingw32-strip`), as Glissando. `SHA256SUMS-<version>`.
+- The MinGW-w64 Windows cross build, with wxWidgets built from source
+  (Glissando's `docs/APP.md` recipe), and a CI job for it.
   Smoke-test headless (Xvfb, Wine). Jeff tags and publishes.
 - Before calling Stage 1 done, Jeff runs the two-host bench on Hamlet:
   two real `data2g-host`s and a Ragtime on each.

@@ -1,0 +1,49 @@
+name: Build and test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  linux:
+    name: Linux (Ubuntu 24.04, GCC 13)
+    runs-on: ubuntu-24.04
+    steps:
+    - uses: actions/checkout@v4
+    - name: Install packages
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y build-essential cmake libwxgtk3.2-dev
+    - name: Build
+      run: |
+        cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+        cmake --build build -j$(nproc)
+    - name: Test
+      run: ctest --test-dir build --output-on-failure
+
+  gcc16:
+    # Jeff builds with GCC 16, which warns about things GCC 13 doesn't.
+    # -O2 and -O3 flag different things, so both run, with -Werror.
+    name: GCC 16 -Werror (${{ matrix.build_type }})
+    runs-on: ubuntu-24.04
+    container: gcc:16
+    strategy:
+      fail-fast: false
+      matrix:
+        build_type: [Release, RelWithDebInfo]
+    steps:
+    - uses: actions/checkout@v4
+    - name: Install packages
+      run: |
+        apt-get update
+        apt-get install -y --no-install-recommends cmake make libwxgtk3.2-dev
+    - name: Build
+      run: |
+        # The image's GCC 16 is in /usr/local/bin; never let Debian's g++ in.
+        /usr/local/bin/g++ --version | head -1 | grep -q ' 16\.'
+        cmake -S . -B build -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} -DRAGTIME_WERROR=ON \
+          -DCMAKE_CXX_COMPILER=/usr/local/bin/g++
+        cmake --build build -j$(nproc)
+    - name: Test
+      run: ctest --test-dir build --output-on-failure

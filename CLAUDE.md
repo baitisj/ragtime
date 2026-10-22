@@ -28,7 +28,9 @@ screens.
 
 - 2026-10-22: name chosen (Ragtime), repository created, MIT licence,
   C++17 and wxWidgets chosen. Stage 1 (parity with Glissando's Data2G
-  mode, and then some) has started. No code yet.
+  mode, and then some) has started.
+- Package A (skeleton and CI) gives the layout below, a placeholder main
+  window with the three tabs, and CI. Packages B, C and D build on it.
 - The live design draft was the Claude Doc "Data2G client: plan"
   (https://claude.ai/code/artifact/87db2cd2-f5bc-4030-ba8d-99bef19c027d,
   private to Jeff). `docs/PLAN.md` is its 2026-10-22 snapshot and is now
@@ -87,6 +89,42 @@ screens.
   copy, never defined terms in the spec.
 - The radio is the source of truth for frequency: retune only when the
   operator asks.
+
+## Layout
+
+| Path | What |
+| --- | --- |
+| `core/` | `ragtime_core`, the socket-free library: no wx, no sockets in the engines, all unit-tested. Headers in `core/include/ragtime/`, sources in `core/src/`, one subfolder per area: `protocol/`, `link/`, `text/`, `files/` (package B), `globus/` (C), `gearbox/` (D). Add sources to `core/CMakeLists.txt` |
+| `app/` | The wxWidgets app (`app/src/`). It draws and wires; logic goes in core. `MainFrame` is the one main window |
+| `tests/` | ctest unit tests for core, plain executables on `tests/Check.h` (`CHECK`, `CHECK_EQ`). Add one with `ragtime_test(<name> <source>)` in `tests/CMakeLists.txt`. Fake hosts for link tests go here too |
+| `tools/` | Reference scripts: `globe/` (sunlit globe renderer, admin-1 lines), `gearbox/` (ladders), `gcc16/check.py` (GCC 16 check) |
+| `cmake/` | CMake helpers. `ragtime_warnings(<target>)` gives every target `-Wall -Wextra` and, with `RAGTIME_WERROR` (on by default), `-Werror` |
+| `docs/` | The plan and specs. Change them in the same PR as the code they describe |
+
+The version is `project(ragtime VERSION ...)` in the top-level
+`CMakeLists.txt`; core gets it from the generated `ragtime/Version.h`.
+
+## Build and test
+
+Ubuntu 24.04 needs `build-essential cmake libwxgtk3.2-dev`.
+
+    cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+    cmake --build build -j$(nproc)
+    ctest --test-dir build --output-on-failure
+
+Tests are on by default (`-DRAGTIME_TESTS=OFF` turns them off), and
+every test runs headless, the app included (`ragtime --version`).
+`-DRAGTIME_APP=OFF` builds only core and its tests, with no wx needed.
+
+CI (`.github/workflows/build.yml`) runs on every PR and every push to
+`main`: the Ubuntu 24.04 build with tests, and the same build and tests in
+the `gcc:16` image with `-Werror` at `-O2` (RelWithDebInfo) and `-O3`
+(Release). Before pushing C++, run `tools/gcc16/check.py` (needs docker;
+start `dockerd &` in a cloud session): it compiles every source in
+`gcc:16` at both levels without apt, which the cloud sandbox can't reach.
+
+There is no Windows CI yet. Package I adds the MinGW-w64 cross build;
+keep the CMake free of Linux-only assumptions meanwhile.
 
 ## Code
 
