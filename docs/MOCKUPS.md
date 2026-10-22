@@ -64,6 +64,12 @@ beside Globus and with Globus off:
   opacity and thinner, graticule every 30° very faint. The path is a red
   great circle (`#c8281e`), home a navy dot, stations red dots with white
   rims.
+- Each line is drawn once (Jeff, 2026-10-22): a coast only where the land
+  meets the sea, never along an edge two countries share, which is a
+  border; and no state or province line along a country border. The big
+  lakes (Natural Earth 1:110m, the Great Lakes among them) are filled in
+  the ocean's colour with a coast round them, so Lake Michigan parts
+  Wisconsin from Michigan.
 - Lighting: the light source sits over the subsolar point. Day side
   Lambert-lit lightly (0.93 + 0.07 cos z); night side is the colour × 0.30
   plus navy `#1C2C56` × 0.55; a smoothstep between sun altitude +3° and
