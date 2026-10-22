@@ -28,6 +28,7 @@ add_executable(ragtime WIN32
     src/ConnectionBar.cpp
     src/FilesPage.cpp
     src/GearshiftDialog.cpp
+    src/GearshiftIcon.cpp
     src/HostConnection.cpp
     src/Html.cpp
     src/PhraseHighlight.cpp
@@ -36,6 +37,7 @@ add_executable(ragtime WIN32
     src/SettingsDialog.cpp
     src/StationList.cpp
     src/Thresholds.cpp
+    src/ToggleSwitch.cpp
     src/TxLamp.cpp
     src/globus/GlobusPanel.cpp
     src/globus/GlobusToggle.cpp
