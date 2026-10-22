@@ -373,9 +373,10 @@ void GlobusView::OnPaint(wxPaintEvent&)
 
     stroke(gc.get(), graticule(view, window_, 30), GRATICULE, GRATICULE_WIDTH);
     stroke(gc.get(), admin1Lines(view, window_), ADMIN1, ADMIN1_WIDTH);
-    stroke(gc.get(), lakeShores(view, window_), ADMIN1, ADMIN1_WIDTH);
     stroke(gc.get(), borderLines(view, window_), BORDER, BORDER_WIDTH);
     stroke(gc.get(), coastLines(view, window_), COAST, COAST_WIDTH);
+    // The lake shores last, over the ends of the borders that meet them.
+    stroke(gc.get(), lakeShores(view, window_), ADMIN1, ADMIN1_WIDTH);
 
     const Vec3 home = toVector(homeAt_);
     const Vec3 station = toVector(stationAt_);

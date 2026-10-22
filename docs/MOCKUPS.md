@@ -74,7 +74,9 @@ beside Globus and with Globus off:
   (2026-10-22): the 1:110m borders run on across Victoria, down
   Tanganyika and Malawi and along the Great Lakes, and the rougher lake
   outlines made them wander in and out of the water. The lake is the
-  divide.
+  divide: a border ends exactly where it meets the shore, a scrap under
+  half a degree where it strays out of the lake and back is dropped, and
+  the shores are drawn last, over the borders' ends.
 - State and province lines (Jeff, 2026-10-22) for the United States,
   Canada, Mexico, Russia, China, India, Brazil, Argentina and Australia,
   its federal territories included: Natural Earth 1:10m, every line the
