@@ -747,8 +747,8 @@ Functionally equivalent means the client does all of this (tick as each lands):
 - [ ] Session files: offer, save or decline, auto-accept list, carrying on from a kept part, whole-file hash check
 - [ ] Broadcast files with repair, received automatically or on request
 - [ ] Progress for each transfer, both directions at once, with a finish estimate
-- [ ] The 500 Hz setting, sending `BW500`/`BW2300`
-- [ ] Pause sending (Glissando's Woah!)
+- [x] The 500 Hz setting, sending `BW500`/`BW2300` (package E)
+- [x] Pause sending (Glissando's Woah!) (package E)
 - [ ] No sending outside the US data segments when receive only is set
 
 The Data2G TV scene and the BONKing cat are Glissando art, so they go with the mode rather than to the client. You may want to keep the cat somewhere; that's your call.

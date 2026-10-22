@@ -24,9 +24,17 @@ ragtime_test(ragtime_session_files_test SessionFilesTest.cpp)
 # Two stations on loopback sockets to fake data2g-hosts (POSIX sockets).
 if(UNIX)
     ragtime_test(ragtime_fake_host_test FakeHostTest.cpp FakeHost.cpp)
+
+    # The bench: fake hosts on 8100/8300 and 8110/8310 and a few bot
+    # stations, for trying the app without Data2G. Not a test.
+    add_executable(ragtime_fake_air FakeAirMain.cpp FakeHost.cpp)
+    target_link_libraries(ragtime_fake_air PRIVATE ragtime_core)
+    ragtime_warnings(ragtime_fake_air)
 endif()
 
 ragtime_test(ragtime_gearbox_test GearboxTest.cpp)
+
+ragtime_test(ragtime_broadcast_test BroadcastTest.cpp)
 
 ragtime_test(ragtime_globus_test GlobusTest.cpp)
 # The globus test also checks the generated map tables themselves.

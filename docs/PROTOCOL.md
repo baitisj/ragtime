@@ -114,7 +114,8 @@ the file ends Not taken.
 session; 2 QRT, closing down), then optionally the partner's callsign
 when QRL.
 
-**Text** (`0x10`): one message, whole.
+**Text** (`0x10`): one message, whole, or one part of a long one
+(Broadcast, below).
 
 | Field | Bytes | Meaning |
 | --- | --- | --- |
@@ -343,6 +344,19 @@ Broadcasts go on the `D2G` group, opened with `BCAST OPEN D2G FROM
 - The host reports `BCAST <port> HEARD <call>` for a burst it decoded
   and `LOST` for one it couldn't. The records inside name their senders
   anyway.
+- **A message too long for one frame** goes as several Texts, each an
+  item of its own in a frame of its own, all in one burst. The sender
+  splits between words where it can (at a space, which is dropped) and
+  always between UTF-8 characters. A message is at most 2,000 bytes.
+- **Check-ins.** A Hello rides along at the front of a message's first
+  frame: the first message after the group opens, the first after the
+  station's callsign, locator or Accept sessions changes, and then at
+  most every 10 minutes. A station may also send a Hello alone.
+- **Addressed Texts.** A Text addressed to a station with ack wanted is
+  answered on the group by that station's Ack, at once and without the
+  operator; Acks heard together go in one burst. A Text heard again (the
+  same callsign, seq and time) is shown once but acknowledged again, since
+  the sender is asking because the first Ack went missing.
 
 ### Seals and repair
 

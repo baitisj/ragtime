@@ -1,13 +1,21 @@
 # The Ragtime desktop app: wxWidgets on top of ragtime_core. Keep logic in
 # core where it can be tested without a display; the app draws and wires.
 
-find_package(wxWidgets 3.2 REQUIRED COMPONENTS core base)
+find_package(wxWidgets 3.2 REQUIRED COMPONENTS html net core base)
 
 add_executable(ragtime WIN32
     src/RagtimeApp.cpp
     src/MainFrame.cpp
+    src/BroadcastPage.cpp
+    src/ConnectionBar.cpp
     src/GearshiftDialog.cpp
+    src/HostConnection.cpp
+    src/Html.cpp
+    src/Prefs.cpp
+    src/SettingsDialog.cpp
+    src/StationList.cpp
     src/Thresholds.cpp
+    src/TxLamp.cpp
     src/globus/GlobusPanel.cpp
     src/globus/GlobusToggle.cpp
     src/globus/GlobusView.cpp

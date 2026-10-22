@@ -1,0 +1,189 @@
+#include "ConnectionBar.h"
+
+#include <algorithm>
+
+#include <wx/button.h>
+#include <wx/checkbox.h>
+#include <wx/gauge.h>
+#include <wx/settings.h>
+#include <wx/sizer.h>
+#include <wx/statline.h>
+#include <wx/stattext.h>
+#include <wx/tglbtn.h>
+
+#include "Html.h"
+#include "TxLamp.h"
+
+namespace
+{
+
+wxStaticLine* divider(wxWindow* parent)
+{
+    return new wxStaticLine(parent, wxID_ANY, wxDefaultPosition, wxDefaultSize, wxLI_VERTICAL);
+}
+
+} // namespace
+
+ConnectionBar::ConnectionBar(wxWindow* parent)
+    : wxPanel(parent)
+{
+    host_ = new wxStaticText(this, wxID_ANY, "data2g-host");
+    state_ = new wxStaticText(this, wxID_ANY, "Not connected");
+    state_->SetFont(state_->GetFont().Bold());
+    callsign_ = new wxStaticText(this, wxID_ANY, "No callsign");
+    callsign_->SetFont(callsign_->GetFont().Bold());
+    callsign_->SetToolTip("Your callsign: Settings > Station");
+    auto* group = new wxStaticText(this, wxID_ANY, "Group D2G");
+    group->SetToolTip("The broadcast group Ragtime opens on data2g-host");
+
+    width = new wxButton(this, wxID_ANY, wxString::FromUTF8("2.4 kHz \xe2\x96\xbc"), wxDefaultPosition,
+                         wxDefaultSize, wxBU_EXACTFIT);
+    width->SetToolTip("The widest modes data2g-host may use: opens the gearshift");
+    narrow = new wxToggleButton(this, wxID_ANY, "500 Hz", wxDefaultPosition, wxDefaultSize, wxBU_EXACTFIT);
+    narrow->SetToolTip("One press for 500 Hz modes only (BW500); press again for the full width (BW2300)");
+    acceptSessions = new wxCheckBox(this, wxID_ANY, "Accept sessions");
+    acceptSessions->SetToolTip("Whether other stations can call you (LISTEN ON or OFF)");
+    pause = new wxToggleButton(this, wxID_ANY, "Pause sending", wxDefaultPosition, wxDefaultSize, wxBU_EXACTFIT);
+    pause->SetToolTip("Hold new broadcasts as Queued; a burst data2g-host already has still goes");
+
+    // Auto ALC needs data2g-host to take a TX level command (an ask for
+    // Andrew), so it waits, greyed, until then.
+    autoAlc = new wxCheckBox(this, wxID_ANY, "Auto ALC");
+    alcMeter = new wxGauge(this, wxID_ANY, 100, wxDefaultPosition, wxSize(FromDIP(60), FromDIP(10)),
+                           wxGA_HORIZONTAL | wxGA_SMOOTH);
+    alcReading = new wxStaticText(this, wxID_ANY, wxString::FromUTF8("\xe2\x80\x94 dB"));
+    const wxString alcWhy = "Keeps transmit drive just under the rig's ALC. It waits for data2g-host to take a "
+                            "TX level command, since Ragtime never touches the sound card.";
+    for (wxWindow* w : {(wxWindow*)autoAlc, (wxWindow*)alcMeter, (wxWindow*)alcReading})
+    {
+        w->SetToolTip(alcWhy);
+        w->Disable();
+    }
+    tx = new TxLamp(this);
+
+    // The joined width and 500 Hz buttons, and Pause sending, stand the
+    // same height.
+    int height = 0;
+    for (wxWindow* w : {(wxWindow*)width, (wxWindow*)narrow, (wxWindow*)pause}) height = std::max(height, w->GetBestSize().y);
+    for (wxWindow* w : {(wxWindow*)width, (wxWindow*)narrow, (wxWindow*)pause}) w->SetMinSize(wxSize(-1, height));
+
+    left_ = new wxBoxSizer(wxHORIZONTAL);
+    auto add = [this](wxSizer* to, wxWindow* w, int left) {
+        to->Add(w, 0, wxALIGN_CENTER_VERTICAL | wxLEFT, FromDIP(left));
+    };
+    add(left_, host_, 8);
+    add(left_, state_, 6);
+    left_->Add(divider(this), 0, wxEXPAND | wxLEFT | wxTOP | wxBOTTOM, FromDIP(8));
+    add(left_, callsign_, 8);
+    add(left_, group, 12);
+    left_->Add(divider(this), 0, wxEXPAND | wxLEFT | wxTOP | wxBOTTOM, FromDIP(8));
+    add(left_, width, 8);
+    add(left_, narrow, 0);   // joined to the width button
+    add(left_, acceptSessions, 14);
+    add(left_, pause, 12);
+
+    right_ = new wxBoxSizer(wxHORIZONTAL);
+    add(right_, autoAlc, 8);
+    add(right_, alcMeter, 6);
+    add(right_, alcReading, 6);
+    add(right_, tx, 12);
+    right_->AddSpacer(FromDIP(8));
+
+    // One row, the TX light at the right end; on a narrow window the Auto
+    // ALC and TX group drops to a second row rather than off the edge.
+    first_ = new wxBoxSizer(wxHORIZONTAL);
+    first_->Add(left_, 0, wxEXPAND);
+    first_->AddStretchSpacer();
+    first_->Add(right_, 0, wxEXPAND);
+    second_ = new wxBoxSizer(wxHORIZONTAL);
+    auto* outer = new wxBoxSizer(wxVERTICAL);
+    outer->Add(first_, 0, wxEXPAND | wxTOP | wxBOTTOM, FromDIP(5));
+    outer->Add(second_, 0, wxEXPAND | wxBOTTOM, FromDIP(5));
+    SetSizer(outer);
+    Bind(wxEVT_SIZE, [this](wxSizeEvent& e) {
+        arrange(e.GetSize().x);
+        e.Skip();
+    });
+
+    narrow->Bind(wxEVT_TOGGLEBUTTON, [this](wxCommandEvent& e) {
+        lightToggle(narrow);
+        e.Skip();
+    });
+    pause->Bind(wxEVT_TOGGLEBUTTON, [this](wxCommandEvent& e) {
+        lightToggle(pause);
+        e.Skip();
+    });
+}
+
+void ConnectionBar::arrange(int width)
+{
+    bool fits = left_->GetMinSize().x + right_->GetMinSize().x + FromDIP(16) <= width;
+    if (fits && twoRows_)
+    {
+        second_->Detach(right_);
+        second_->Clear();   // the spacer
+        first_->Add(right_, 0, wxEXPAND);
+        twoRows_ = false;
+    }
+    else if (!fits && !twoRows_)
+    {
+        first_->Detach(right_);
+        second_->AddStretchSpacer();
+        second_->Add(right_, 0, wxEXPAND);
+        twoRows_ = true;
+    }
+    else
+    {
+        return;
+    }
+    GetParent()->Layout();
+}
+
+void ConnectionBar::setHost(const wxString& address, const wxString& state, const wxString& tooltip)
+{
+    host_->SetLabel("data2g-host " + address);
+    state_->SetLabel(state);
+    host_->SetToolTip(tooltip);
+    state_->SetToolTip(tooltip);
+    Layout();
+}
+
+void ConnectionBar::setCallsign(const wxString& callsign)
+{
+    callsign_->SetLabel(callsign.empty() ? wxString("No callsign") : callsign);
+    Layout();
+}
+
+void ConnectionBar::setWidthLabel(const wxString& label)
+{
+    width->SetLabel(label + wxString::FromUTF8(" \xe2\x96\xbc"));
+    Layout();
+}
+
+void ConnectionBar::setNarrow(bool on)
+{
+    narrow->SetValue(on);
+    lightToggle(narrow);
+}
+
+void ConnectionBar::setPaused(bool on)
+{
+    pause->SetValue(on);
+    lightToggle(pause);
+}
+
+// Toggles that are on turn blue (docs/MOCKUPS.md, "Look").
+void ConnectionBar::lightToggle(wxToggleButton* button)
+{
+    if (button->GetValue())
+    {
+        button->SetBackgroundColour(ACCENT_BLUE);
+        button->SetForegroundColour(*wxWHITE);
+    }
+    else
+    {
+        button->SetBackgroundColour(wxNullColour);
+        button->SetForegroundColour(wxNullColour);
+    }
+    button->Refresh();
+}
