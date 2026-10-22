@@ -167,6 +167,45 @@ The brief:
 
 ## F. Sessions
 
+Done in the package F PR: `core/src/session/SessionChat.cpp` (the Session
+tab's engine, and `StreamAccount`, the `BUFFER` bookkeeping), Status QRL
+and QRV in `BroadcastChat::announce`, the session partner in `Stations`,
+the session data port in `HostConnection`, the tab in
+`app/src/SessionPage`, and in the bench, calls that take tries, session
+bytes that take airtime and can fade, and bots that ragchew
+(`ragtime_fake_air --call AG7EW --fade`). Choices made there, for Jeff to
+keep or change:
+
+- **Try 2 of 5** is counted from the host's `PTT ON` reports while
+  calling, since data2g-host doesn't report its calls. A host that hasn't
+  settled a call in 3 minutes is stopped with `ABORT`, as Glissando does.
+- **Link quiet** shows only while our bytes wait for acknowledgement and
+  nothing has come back for 30 s. A session where nobody types just shows
+  how long since the far end was last heard, without the amber.
+- **A farewell.** Leave writes a Status QRV into the session before
+  `DISCONNECT`, so the far end can say "Session ended by AG7EW" rather
+  than "Link lost" (`PROTOCOL.md`, "Sessions").
+- **The buttons follow the moment:** Cancel while calling, Leave in a
+  session, Leave now once leaving (as PLAN.md describes it), and Call
+  again once it has ended. All are on the Station menu too (Ctrl+K,
+  Ctrl+L, Ctrl+Shift+L).
+- **Calling a busy station** (its QRL heard, or its check-in says no
+  sessions) asks first: Call anyway, Message instead, or Cancel. "Tell me
+  when free" is not built yet.
+- **Calling while in a session** asks "Leave it and call KC2G?", then
+  calls once the first session has ended.
+- **Pause sending** holds session messages as Queued too.
+- The Session tab keeps the last session's messages, greyed, until the
+  next call or incoming session. There is no idle limit (PLAN.md question
+  7 leaves it off by default; it isn't built).
+
+Left for G: files plug into `session::SessionTraffic` (records in and
+out, acknowledgements, the far end's Hello, the session's end, and
+`busy()`, which makes Leave ask first). `SessionFiles` already has the
+matching calls; `tests/SessionTest.cpp` shows a stand-in.
+
+The brief:
+
 - Call (with Calling, try 2 of 5, Cancel), incoming sessions (caller on
   the station list at once), Accept sessions, the Session tab popping open
   and greying out, its status strip, Link quiet with a timer, Leave

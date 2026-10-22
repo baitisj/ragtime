@@ -27,6 +27,8 @@ add_library(ragtime_core STATIC
     # Package E: the station list and the Broadcast tab's engine.
     src/broadcast/BroadcastChat.cpp
     src/broadcast/Stations.cpp
+    # Package F (sessions): src/session/.
+    src/session/SessionChat.cpp
 )
 
 target_include_directories(ragtime_core PUBLIC

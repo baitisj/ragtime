@@ -13,14 +13,22 @@
 // - MYCALL, CHAT, LISTEN, BW500, BW2300, BCAST MODE: OK.
 // - BCAST OPEN <group> FROM <call>: BCAST PORT <groupPort>.
 // - MODES: a MODE line for each of link::knownModes(), then OK.
-// - CONNECT <me> <them>: OK, then CONNECTED on both hosts if a host on
-//   the air is <them> and listening; DISCONNECTED otherwise.
-// - DISCONNECT and ABORT: OK, then DISCONNECTED on both.
+// - CONNECT <me> <them>: OK, then up to five calls, each keying up (PTT
+//   ON, PTT OFF after the airtime). CONNECTED on both hosts at the call
+//   the far host answers on, if a host on the air is <them>, listening and
+//   free; DISCONNECTED after the fifth otherwise.
+// - DISCONNECT: OK, then DISCONNECTED on both once nothing is waiting to
+//   cross. ABORT: OK and DISCONNECTED at once, on both.
 // - ACKMODE frames on the group port: sent as one burst at the next step
 //   unless a session is up (it holds the group) or bursts are held. A burst
 //   goes out as PTT ON, MODE <mode>, BCAST <port> HEARD <call> and the
 //   frames on every other host on the air, the ACKMODE acks, PTT OFF.
-// - Session bytes: BUFFER <n> once read, carried to the far end, BUFFER 0.
+// - Session bytes: BUFFER <n> once read (n: all still waiting to cross),
+//   carried to the far end after the airtime, then BUFFER with what is
+//   left. A fading session holds them, read and counted but not carried.
+// - With setIdleBroadcastMs, bursts go while a session has been idle that
+//   long, as data2g-host does since Data2G PR #59; otherwise a session
+//   holds the group for as long as it lasts.
 #ifndef RAGTIME_TESTS_FAKE_HOST_H
 #define RAGTIME_TESTS_FAKE_HOST_H
 
@@ -64,6 +72,13 @@ public:
     // For the bench: a burst keeps PTT on this long before the far hosts
     // hear it and the acks come back (0, the tests' default: all at once).
     void setAirtimeMs(int ms) { airtimeMs_ = ms; }
+    // Calls: the host called answers on this call, 1 to 5 (default 1).
+    void setAnswerOnCall(int call) { answerOn_ = call; }
+    // A deep fade: session bytes are read and counted, but neither carried
+    // nor acknowledged until it lifts.
+    void fadeSession(bool fade) { fading_ = fade; }
+    // Bursts go while a session has been idle this long (0: never).
+    void setIdleBroadcastMs(int ms) { idleBroadcastMs_ = ms; }
     // The next burst is dropped: BCAST <port> DROPPED <frames>, no acks.
     void dropNextBurst() { dropNext_ = true; }
     // Closes the command port's client, as a host that stopped would.
@@ -75,6 +90,9 @@ public:
     bool listening() const { return listening_; }
     bool groupOpen() const { return groupOpen_; }
     bool inSession() const { return partner_ != nullptr; }
+    bool calling() const { return calling_; }
+    // Session bytes read from our client, not yet carried.
+    size_t sessionWaiting() const { return waiting_; }
     size_t burstsSent() const { return burstsSent_; }
 
 private:
@@ -97,6 +115,10 @@ private:
     void finishBurst();
     void connected(FakeHost& caller, FakeHost& called);
     void disconnected();
+    void stepCall(long long nowMs);
+    void stepSession(long long nowMs);
+    bool sessionIdle(long long nowMs) const;
+    FakeHost* reachable(const std::string& call);
     void writeTo(Port& port, const std::vector<uint8_t>& bytes);
 
     FakeAir& air_;
@@ -127,6 +149,27 @@ private:
     std::vector<Tagged> onAir_;     // keyed up, not yet heard
     long long onAirUntilMs_ = -1;
     FakeHost* partner_ = nullptr;
+
+    // A call under way.
+    int answerOn_ = 1;
+    bool calling_ = false;
+    std::string target_;
+    int calls_ = 0;
+    bool keyed_ = false;
+    long long callNextMs_ = 0;
+
+    // The session's bytes, read and waiting to cross.
+    struct Crossing
+    {
+        std::vector<uint8_t> bytes;
+        long long atMs;
+    };
+    std::vector<Crossing> crossing_;
+    size_t waiting_ = 0;
+    bool fading_ = false;
+    bool disconnectPending_ = false;
+    long long lastSessionMs_ = 0;   // bytes last read or carried
+    int idleBroadcastMs_ = 0;
 };
 
 class FakeAir

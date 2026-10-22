@@ -66,6 +66,7 @@ public:
     enum class SessionEnd
     {
         NoAnswer,   // the call was never answered
+        Refused,    // the host answered the CONNECT with WRONG
         Left,       // we left (Leave or Leave now)
         Ended,      // the far end left, or the host gave up the link
         HostLost,   // the command port closed
@@ -109,6 +110,9 @@ public:
     static constexpr uint64_t NOT_SENT_MS = 2 * 60 * 1000;
     // A command the host hasn't answered in this long is taken as answered.
     static constexpr uint64_t ANSWER_MS = 10 * 1000;
+    // An ABORT the host hasn't followed with DISCONNECTED in this long ends
+    // the session here anyway, so Leave now always leaves.
+    static constexpr uint64_t ABORT_WAIT_MS = 15 * 1000;
 
     explicit HostLink(Settings settings);
 
@@ -154,6 +158,9 @@ public:
     // Drops a burst still queued; false once the host has it.
     bool cancel(uint64_t id);
     BurstState burstState(uint64_t id) const;
+    // A burst of ours is with the host (Sending or Held), so a MODE report
+    // may be its.
+    bool burstWithHost() const;
 
     // Pause sending: queued bursts stay queued. One the host has goes on.
     void setPaused(bool paused, uint64_t nowMs);
@@ -166,7 +173,8 @@ public:
     // Call: false if the host isn't ready or a session is already up.
     bool call(const std::string& peer, uint64_t nowMs);
     // Leave: DISCONNECT, which waits for what is unacknowledged. Leave now:
-    // ABORT. While calling, either stops the call.
+    // ABORT, and the session ends here ABORT_WAIT_MS later even if the host
+    // never says DISCONNECTED. While calling, either stops the call.
     bool leave(uint64_t nowMs);
     bool leaveNow(uint64_t nowMs);
 
@@ -249,6 +257,7 @@ private:
     std::string peer_;
     bool incoming_ = false;
     int buffer_ = 0;
+    uint64_t abortMs_ = 0;              // when ABORT went, while it waits for DISCONNECTED
 };
 
 } // namespace link

@@ -124,6 +124,18 @@ void Stations::setHome(const std::string& locator)
 void Stations::clear()
 {
     stations_.clear();
+    if (!partner_.empty()) touch(partner_, 0);
+    version_++;
+}
+
+void Stations::setPartner(const std::string& call, bool connected, uint64_t nowMs)
+{
+    std::string normal = protocol::normalCallsign(call);
+    if (normal == me_) normal.clear();
+    if (normal == partner_ && connected == partnerConnected_) return;
+    partner_ = normal;
+    partnerConnected_ = connected;
+    if (!partner_.empty() && find(partner_) == nullptr) touch(partner_, nowMs);
     version_++;
 }
 
@@ -201,6 +213,12 @@ StatusView Stations::status(const Station& s, uint64_t nowMs) const
 {
     using State = protocol::Status::State;
     StatusView view;
+    if (!partner_.empty() && s.call == partner_)
+    {
+        view.word = partnerConnected_ ? "In session with you" : "Calling";
+        view.how = partnerConnected_ ? "Our own session with " + s.call : "We're calling " + s.call;
+        return view;
+    }
     std::string ago = s.statusHeard ? heardAgo(s.statusMs, nowMs) : std::string();
     if (s.statusHeard && s.state == State::Qrl)
     {
@@ -351,6 +369,9 @@ std::vector<const Station*> Stations::sorted(Column column, bool ascending, uint
     };
 
     std::stable_sort(out.begin(), out.end(), [&](const Station* a, const Station* b) {
+        // The session partner is pinned at the top.
+        bool pa = !partner_.empty() && a->call == partner_, pb = !partner_.empty() && b->call == partner_;
+        if (pa != pb) return pa;
         bool ma = missing(a), mb = missing(b);
         if (ma != mb) return mb;
         int c = ma ? 0 : compare(a, b);

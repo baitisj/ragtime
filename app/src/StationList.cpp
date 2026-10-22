@@ -59,10 +59,10 @@ protected:
         bool picked = IsSelected(n);
         StatusView status = owner_->stations_.status(*s, owner_->nowMs_);
         wxString grey = picked ? wxString() : " color=\"" + htmlColour(secondaryText()) + "\"";
-        wxString tint = picked ? wxString()
-                               : " color=\"" + htmlColour(status.filled ? (status.word == "QRV" ? AVAILABLE : BUSY)
-                                                                       : secondaryText())
-                                     + "\"";
+        // Green for available, orange for busy, blue for our own session.
+        bool ours = s->call == owner_->stations_.partner();
+        wxColour dot = !status.filled ? secondaryText() : ours ? ACCENT_BLUE : status.word == "QRV" ? AVAILABLE : BUSY;
+        wxString tint = picked ? wxString() : " color=\"" + htmlColour(dot) + "\"";
         wxString html;
         html << "<table width=\"100%\" cellspacing=\"0\" cellpadding=\"1\">"
              << "<tr><td nowrap><b>" << htmlEscape(s->call) << "</b>&nbsp;&nbsp;<font" << tint << ">"

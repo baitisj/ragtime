@@ -111,6 +111,14 @@ public:
     // A Hello of its own: "check in".
     bool checkIn(const std::string& mode, uint64_t nowMs);
 
+    // Our session state on the group (docs/PLAN.md, "Busy stations"): a
+    // QRL naming the partner on entering a session, a QRV on leaving it.
+    // A QRV goes only after a QRL; a QRL still queued when the session ends
+    // is taken back instead, and then no QRV is needed. False when nothing
+    // went.
+    bool announce(protocol::Status::State state, const std::string& partner, const std::string& mode,
+                  uint64_t nowMs);
+
     // Takes back a message HostLink hasn't handed to the host yet (with the
     // rest of its burst). False once the host has it.
     bool cancel(uint64_t id);
@@ -155,6 +163,9 @@ private:
     uint64_t nextId_ = 1;
     uint64_t version_ = 0;
     size_t foreign_ = 0;
+
+    uint64_t qrlBurst_ = 0;         // our latest QRL's burst
+    bool qrlOut_ = false;           // a QRL has gone (or is going) with no QRV since
 
     bool helloSent_ = false;        // since the group opened or the settings changed
     uint64_t helloMs_ = 0;

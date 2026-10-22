@@ -160,7 +160,11 @@ FakeHost::FakeHost(FakeAir& air, int groupPort, int kissPort, int commandPort) :
 
 FakeHost::~FakeHost()
 {
-    if (partner_ != nullptr) partner_->partner_ = nullptr;
+    if (partner_ != nullptr)
+    {
+        partner_->partner_ = nullptr;
+        partner_->reply("DISCONNECTED");
+    }
     air_.hosts_.erase(std::remove(air_.hosts_.begin(), air_.hosts_.end(), this), air_.hosts_.end());
     for (Port* port : {&kiss_, &command_, &data_})
     {
@@ -292,24 +296,39 @@ void FakeHost::onCommand(const std::string& line)
     else if (verb == "CONNECT" && w.size() >= 3)
     {
         reply("OK");
-        FakeHost* called = nullptr;
-        for (FakeHost* h : air_.hosts_)
+        if (partner_ != nullptr || calling_)
         {
-            if (h != this && h->call_ == w[2] && h->listening_ && h->partner_ == nullptr) called = h;
-        }
-        if (called != nullptr && partner_ == nullptr)
-        {
-            connected(*this, *called);
+            reply("DISCONNECTED");
         }
         else
         {
-            reply("DISCONNECTED");
+            calling_ = true;
+            target_ = w[2];
+            calls_ = 0;
+            keyed_ = false;
+            callNextMs_ = nowMs();
+            stepCall(nowMs());
         }
     }
     else if (verb == "DISCONNECT" || verb == "ABORT")
     {
         reply("OK");
-        disconnected();
+        if (calling_)
+        {
+            calling_ = false;
+            if (keyed_) reply("PTT OFF");
+            keyed_ = false;
+            reply("DISCONNECTED");
+        }
+        else if (verb == "DISCONNECT" && waiting_ > 0)
+        {
+            // DISCONNECT waits for what is still to cross.
+            disconnectPending_ = true;
+        }
+        else
+        {
+            disconnected();
+        }
     }
     else
     {
@@ -317,10 +336,59 @@ void FakeHost::onCommand(const std::string& line)
     }
 }
 
+FakeHost* FakeHost::reachable(const std::string& call)
+{
+    for (FakeHost* h : air_.hosts_)
+    {
+        if (h != this && h->call_ == call && h->listening_ && h->partner_ == nullptr && !h->calling_) return h;
+    }
+    return nullptr;
+}
+
+void FakeHost::stepCall(long long now)
+{
+    // With no airtime the calls all happen at once.
+    for (int i = 0; i < 16 && calling_ && now >= callNextMs_; i++)
+    {
+        if (!keyed_)
+        {
+            reply("PTT ON");
+            keyed_ = true;
+            callNextMs_ = now + airtimeMs_;
+            continue;
+        }
+        reply("PTT OFF");
+        keyed_ = false;
+        calls_++;
+        FakeHost* called = reachable(target_);
+        if (called != nullptr && calls_ >= answerOn_)
+        {
+            calling_ = false;
+            connected(*this, *called);
+        }
+        else if (calls_ >= 5)
+        {
+            calling_ = false;
+            reply("DISCONNECTED");
+        }
+        else
+        {
+            callNextMs_ = now + airtimeMs_;
+        }
+    }
+}
+
 void FakeHost::connected(FakeHost& caller, FakeHost& called)
 {
     caller.partner_ = &called;
     called.partner_ = &caller;
+    for (FakeHost* h : {&caller, &called})
+    {
+        h->crossing_.clear();
+        h->waiting_ = 0;
+        h->disconnectPending_ = false;
+        h->lastSessionMs_ = nowMs();
+    }
     std::string line = "CONNECTED " + caller.call_ + " " + called.call_ + " 2300";
     caller.reply(line);
     called.reply(line);
@@ -332,6 +400,12 @@ void FakeHost::disconnected()
     FakeHost* other = partner_;
     partner_ = nullptr;
     other->partner_ = nullptr;
+    for (FakeHost* h : {this, other})
+    {
+        h->crossing_.clear();
+        h->waiting_ = 0;
+        h->disconnectPending_ = false;
+    }
     reply("DISCONNECTED");
     other->reply("DISCONNECTED");
 }
@@ -367,9 +441,35 @@ void FakeHost::serviceData()
     std::vector<uint8_t> bytes;
     bytes.swap(data_.in);
     if (partner_ == nullptr) return; // no session: nowhere for them to go
-    reply("BUFFER " + std::to_string(bytes.size()));
-    partner_->writeTo(partner_->data_, bytes);
-    reply("BUFFER 0");
+    waiting_ += bytes.size();
+    reply("BUFFER " + std::to_string(waiting_));
+    lastSessionMs_ = nowMs();
+    crossing_.push_back({std::move(bytes), nowMs() + airtimeMs_});
+    stepSession(nowMs());
+}
+
+void FakeHost::stepSession(long long now)
+{
+    if (partner_ == nullptr || fading_) return;
+    size_t carried = 0;
+    while (carried < crossing_.size() && crossing_[carried].atMs <= now)
+    {
+        Crossing& c = crossing_[carried++];
+        partner_->writeTo(partner_->data_, c.bytes);
+        waiting_ -= c.bytes.size();
+        lastSessionMs_ = partner_->lastSessionMs_ = now;
+    }
+    if (carried == 0) return;
+    crossing_.erase(crossing_.begin(), crossing_.begin() + (long)carried);
+    reply("BUFFER " + std::to_string(waiting_));
+    if (disconnectPending_ && waiting_ == 0) disconnected();
+}
+
+bool FakeHost::sessionIdle(long long now) const
+{
+    if (partner_ == nullptr) return !calling_;
+    if (idleBroadcastMs_ <= 0 || waiting_ > 0 || partner_->waiting_ > 0) return false;
+    return now >= std::max(lastSessionMs_, partner_->lastSessionMs_) + idleBroadcastMs_;
 }
 
 void FakeHost::sendBurst()
@@ -419,7 +519,13 @@ void FakeAir::step(int timeoutMs)
         h->serviceKiss();
         h->serviceData();
     }
-    // A session holds the group: its bursts wait for it to end.
+    for (FakeHost* h : hosts_)
+    {
+        h->stepCall(nowMs());
+        h->stepSession(nowMs());
+    }
+    // A session holds the group: its bursts wait for it to end, or to go
+    // idle.
     for (FakeHost* h : hosts_)
     {
         if (h->onAirUntilMs_ >= 0)
@@ -428,7 +534,7 @@ void FakeAir::step(int timeoutMs)
             if (nowMs() >= h->onAirUntilMs_) h->finishBurst();
             continue;
         }
-        if (!h->burst_.empty() && !h->holdBursts_ && h->partner_ == nullptr) h->sendBurst();
+        if (!h->burst_.empty() && !h->holdBursts_ && h->sessionIdle(nowMs())) h->sendBurst();
     }
 }
 

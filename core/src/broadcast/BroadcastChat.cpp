@@ -260,6 +260,32 @@ bool BroadcastChat::checkIn(const std::string& mode, uint64_t nowMs)
     return link_.broadcast({frame}, mode, nowMs) != 0;
 }
 
+bool BroadcastChat::announce(protocol::Status::State state, const std::string& partner, const std::string& mode,
+                             uint64_t nowMs)
+{
+    using StatusState = protocol::Status::State;
+    if (settings_.callsign.empty()) return false;
+    if (state == StatusState::Qrv)
+    {
+        if (!qrlOut_) return false;
+        qrlOut_ = false;
+        // Nobody heard the QRL: nothing to take back on the air.
+        if (link_.cancel(qrlBurst_)) return false;
+    }
+    protocol::Status status;
+    status.state = state;
+    if (state == StatusState::Qrl) status.partner = protocol::normalCallsign(partner);
+    std::vector<uint8_t> frame = protocol::encodeFrame({numbering_.record(status, seconds(nowMs))});
+    if (frame.empty()) return false;
+    uint64_t id = link_.broadcast({frame}, mode, nowMs);
+    if (state == StatusState::Qrl)
+    {
+        qrlBurst_ = id;
+        qrlOut_ = id != 0;
+    }
+    return id != 0;
+}
+
 Message* BroadcastChat::findMine(uint64_t id)
 {
     for (Message& m : messages_)

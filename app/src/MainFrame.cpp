@@ -1,6 +1,7 @@
 #include "MainFrame.h"
 
 #include <algorithm>
+#include <ctime>
 #include <optional>
 #include <utility>
 
@@ -11,6 +12,7 @@
 #include <wx/config.h>
 #include <wx/log.h>
 #include <wx/menu.h>
+#include <wx/msgdlg.h>
 #include <wx/notebook.h>
 #include <wx/panel.h>
 #include <wx/persist/toplevel.h>
@@ -18,12 +20,14 @@
 #include <wx/splitter.h>
 #include <wx/statusbr.h>
 #include <wx/stattext.h>
+#include <wx/textdlg.h>
 #include <wx/tglbtn.h>
 
 #include "BroadcastPage.h"
 #include "ConnectionBar.h"
 #include "GearshiftDialog.h"
 #include "HostConnection.h"
+#include "SessionPage.h"
 #include "SettingsDialog.h"
 #include "StationList.h"
 #include "Thresholds.h"
@@ -31,6 +35,7 @@
 #include "globus/GlobusPanel.h"
 #include "globus/GlobusToggle.h"
 #include "ragtime/Version.h"
+#include "ragtime/globus/Sun.h"
 
 using namespace ragtime;
 using Event = link::HostLink::Event;
@@ -52,6 +57,11 @@ enum
     ID_TAB_FILES,
     ID_STATION_MESSAGE,
     ID_STATION_COPY,
+    ID_CALL,
+    ID_LEAVE,
+    ID_LEAVE_NOW,
+    ID_STATION_CALL,
+    ID_STATION_LEAVE,
 };
 
 enum Tab
@@ -94,6 +104,26 @@ std::string software()
     return std::string("Ragtime ") + versionString();
 }
 
+// Local time's lead on UTC, daylight time in it, for the strip's clock times.
+long localOffsetSeconds()
+{
+    std::time_t now = std::time(nullptr);
+    const std::tm* localNow = std::localtime(&now);
+    if (localNow == nullptr) return 0;
+    std::tm local = *localNow;
+    const std::tm* utcNow = std::gmtime(&now);
+    if (utcNow == nullptr) return 0;
+    return globus::utcOffsetSeconds(local, *utcNow);
+}
+
+// "From W1AW's QRL, 3 min ago" as the middle of a sentence.
+std::string lowerFirst(std::string text)
+{
+    if (!text.empty() && text[0] >= 'A' && text[0] <= 'Z' && (text.size() < 2 || !(text[1] >= 'A' && text[1] <= 'Z')))
+        text[0] = (char)(text[0] - 'A' + 'a');
+    return text;
+}
+
 } // namespace
 
 MainFrame::MainFrame()
@@ -101,6 +131,7 @@ MainFrame::MainFrame()
     , prefs_(loadStationPrefs())
     , link_({prefs_.callsign, loadBool(keys::ACCEPT_SESSIONS, true), false})
     , chat_(link_)
+    , session_(link_)
     , clock_(this)
 {
     // Every dialog and the main window must fit Jeff's 1366x768 screen.
@@ -117,6 +148,15 @@ MainFrame::MainFrame()
     host_ = std::make_unique<HostConnection>(link_, [this](const std::vector<Event>& events) {
         onHostEvents(events);
     });
+    HostConnection::DataSide data;
+    data.bytes = [this](const uint8_t* bytes, size_t length) { onSessionData(bytes, length); };
+    data.take = [this]() { return session_.takeDataOutput(HostConnection::nowMs()); };
+    data.up = [this](bool up) {
+        session_.dataPort(up, HostConnection::nowMs());
+        onSessionEvents();
+        refreshSession();
+    };
+    host_->setDataSide(std::move(data));
 
     loadGearshift();
     setNarrow(gearshift_.width() == gearbox::Width::Hz500);
@@ -177,6 +217,12 @@ void MainFrame::buildMenus()
     station->Append(ID_CHECK_IN, "Check &in\tCtrl+I", "Broadcasts your check-in: callsign, locator and whether "
                                                        "you take sessions");
     station->AppendSeparator();
+    station->Append(ID_CALL, "&Call...\tCtrl+K", "Starts a session (a ragchew) with the station picked in the list, "
+                                                "or one you name");
+    station->Append(ID_LEAVE, "&Leave the session\tCtrl+L",
+                    "Leaves once what you sent is acknowledged (DISCONNECT); while calling, stops the call");
+    station->Append(ID_LEAVE_NOW, "Leave &now\tCtrl+Shift+L", "Leaves at once (ABORT)");
+    station->AppendSeparator();
     station->AppendCheckItem(ID_PAUSE, "&Pause sending\tCtrl+P");
 
     viewMenu_ = new wxMenu;
@@ -218,6 +264,15 @@ void MainFrame::buildMenus()
     Bind(wxEVT_MENU, [this](wxCommandEvent& e) { setGlobus(e.IsChecked()); }, ID_GLOBUS);
     Bind(wxEVT_MENU, [this](wxCommandEvent& e) { setPaused(e.IsChecked()); }, ID_PAUSE);
     Bind(wxEVT_MENU, [this](wxCommandEvent&) { checkIn(); }, ID_CHECK_IN);
+    Bind(wxEVT_MENU, [this](wxCommandEvent&) { callPrompt(); }, ID_CALL);
+    Bind(wxEVT_MENU, [this](wxCommandEvent&) { leaveSession(); }, ID_LEAVE);
+    Bind(wxEVT_MENU, [this](wxCommandEvent&) { leaveSessionNow(); }, ID_LEAVE_NOW);
+    Bind(wxEVT_UPDATE_UI, [this](wxUpdateUIEvent& e) { e.Enable(canCall() || session_.active()); }, ID_CALL);
+    Bind(wxEVT_UPDATE_UI, [this](wxUpdateUIEvent& e) {
+        e.Enable(session_.phase() == session::SessionChat::Phase::Calling
+                 || session_.phase() == session::SessionChat::Phase::Connected);
+    }, ID_LEAVE);
+    Bind(wxEVT_UPDATE_UI, [this](wxUpdateUIEvent& e) { e.Enable(session_.active()); }, ID_LEAVE_NOW);
     Bind(wxEVT_MENU, [this](wxCommandEvent&) {
         tabs_->SetSelection(TAB_BROADCAST);
         if (!stationList_->selected().empty()) broadcast_->address(stationList_->selected());
@@ -272,9 +327,8 @@ void MainFrame::buildLayout()
     broadcast_ = new BroadcastPage(tabs_, chat_);
     // Tab order is fixed: Broadcast, Session, Files (CLAUDE.md).
     tabs_->AddPage(broadcast_, "Broadcast", true);
-    tabs_->AddPage(placeholderPage(tabs_, "No session.\nA session opens here when you Call a station, "
-                                          "or one calls you."),
-                   wxString::FromUTF8("Session \xc2\xb7 none"));
+    sessionPage_ = new SessionPage(tabs_, session_);
+    tabs_->AddPage(sessionPage_, wxString::FromUTF8("Session \xc2\xb7 none"));
     tabs_->AddPage(placeholderPage(tabs_, "No files yet."), "Files");
     auto* middleSizer = new wxBoxSizer(wxVERTICAL);
     middleSizer->Add(tabs_, 1, wxEXPAND);
@@ -340,6 +394,17 @@ void MainFrame::buildLayout()
         host_->flush();
         refreshMessages();
     });
+    // The Session tab.
+    sessionPage_->onSend([this](const std::string& typed) {
+        if (session_.send(typed, HostConnection::nowMs()) == 0) return false;
+        host_->flush();
+        refreshSession();
+        return true;
+    });
+    sessionPage_->onCancel([this]() { leaveSession(); });
+    sessionPage_->onLeave([this]() { leaveSession(); });
+    sessionPage_->onLeaveNow([this]() { leaveSessionNow(); });
+    sessionPage_->onCallAgain([this]() { callStation(session_.peer()); });
     tabs_->Bind(wxEVT_NOTEBOOK_PAGE_CHANGED, [this](wxBookCtrlEvent& e) {
         updateTabLabels();
         placeTabToggle();
@@ -372,6 +437,12 @@ void MainFrame::applyPrefs(bool reconnect)
     s.acceptsSessions = link_.settings().acceptSessions;
     s.software = software();
     chat_.setSettings(s, loadNewestItem(protocol::normalCallsign(prefs_.callsign)));
+    session::SessionChat::Settings ss;
+    ss.callsign = prefs_.callsign;
+    ss.locator = prefs_.locator;
+    ss.acceptsSessions = link_.settings().acceptSessions;
+    ss.software = software();
+    session_.setSettings(ss);
     stations_.setMyCallsign(prefs_.callsign);
     stations_.setHome(prefs_.locator);
     globus_->setHome(prefs_.locator);
@@ -410,6 +481,7 @@ void MainFrame::onHostEvents(const std::vector<Event>& events)
     uint64_t now = HostConnection::nowMs();
     for (const Event& e : events)
     {
+        session_.onEvent(e, now);
         switch (e.type)
         {
             case Event::Type::Ptt:
@@ -449,14 +521,20 @@ void MainFrame::onHostEvents(const std::vector<Event>& events)
         }
         for (const protocol::Record& r : chat_.onEvent(e, now)) stations_.onRecord(r, now);
     }
+    onSessionEvents();
     showConnection();
     showStatus();
     refreshMessages();
+    refreshSession();
     refreshStations();
 }
 
 void MainFrame::onClock()
 {
+    session_.tick(HostConnection::nowMs());
+    onSessionEvents();
+    host_->flush();
+    refreshSession();
     showConnection();
     stationList_->refresh(HostConnection::nowMs());
     if (!stationList_->selected().empty()) stationPicked(stationList_->selected());
@@ -525,9 +603,23 @@ void MainFrame::stationPicked(const std::string& call)
 void MainFrame::stationMenu(const std::string& call)
 {
     wxMenu menu;
+    if (session_.active() && session_.peer() == call)
+    {
+        menu.Append(ID_STATION_LEAVE, session_.phase() == session::SessionChat::Phase::Calling
+                                          ? "Stop calling " + utf8(call)
+                                          : "Leave the session with " + utf8(call));
+        menu.Enable(ID_STATION_LEAVE, session_.phase() != session::SessionChat::Phase::Leaving);
+    }
+    else
+    {
+        menu.Append(ID_STATION_CALL, "Call " + utf8(call) + "\tCtrl+K");
+        menu.Enable(ID_STATION_CALL, canCall() || session_.active());
+    }
     menu.Append(ID_STATION_MESSAGE, "Message @" + utf8(call) + "\tCtrl+M");
     menu.Append(ID_STATION_COPY, "Copy callsign");
     menu.Bind(wxEVT_MENU, [this, call](wxCommandEvent& e) {
+        if (e.GetId() == ID_STATION_CALL) callStation(call);
+        if (e.GetId() == ID_STATION_LEAVE) leaveSession();
         if (e.GetId() == ID_STATION_MESSAGE)
         {
             tabs_->SetSelection(TAB_BROADCAST);
@@ -565,6 +657,205 @@ void MainFrame::updateTabLabels()
                                                        : wxString::Format("Broadcast (%zu)", unread_));
         placeTabToggle();
     }
+
+    // Session · W1AW, Session · calling W1AW, or greyed: Session · none.
+    if (tabs_->GetSelection() == TAB_SESSION && IsActive()) sessionUnread_ = 0;
+    wxString session = wxString::FromUTF8("Session \xc2\xb7 ");
+    if (!session_.active())
+        session += "none";
+    else if (session_.phase() == session::SessionChat::Phase::Calling)
+        session += "calling " + utf8(session_.peer());
+    else
+        session += utf8(session_.peer());
+    if (sessionUnread_ > 0) session += wxString::Format(" (%zu)", sessionUnread_);
+    if (tabs_->GetPageText(TAB_SESSION) != session)
+    {
+        tabs_->SetPageText(TAB_SESSION, session);
+        placeTabToggle();
+    }
+}
+
+//-------------------------------------------------------------------------
+// Sessions
+//-------------------------------------------------------------------------
+
+bool MainFrame::canCall() const
+{
+    return !prefs_.callsign.empty() && link_.commandConnected() && host_ && host_->dataUp();
+}
+
+void MainFrame::callPrompt()
+{
+    std::string call = stationList_->selected();
+    if (call.empty() || (session_.active() && call == session_.peer()))
+    {
+        wxTextEntryDialog ask(this, "The callsign of the station to call:", "Call a station");
+        if (ask.ShowModal() != wxID_OK) return;
+        call = std::string(ask.GetValue().Upper().utf8_str());
+    }
+    callStation(call);
+}
+
+void MainFrame::callStation(const std::string& call)
+{
+    std::string them = protocol::normalCallsign(call);
+    if (them.empty()) return;
+    uint64_t now = HostConnection::nowMs();
+
+    // One session at a time: data2g-host runs one ARQ link.
+    if (session_.active())
+    {
+        if (session_.peer() == them)
+        {
+            tabs_->SetSelection(TAB_SESSION);
+            return;
+        }
+        wxMessageDialog ask(this,
+                            "You're in a session with " + utf8(session_.peer()) + ". Leave it and call " + utf8(them)
+                                + "?",
+                            "One session at a time", wxYES_NO | wxNO_DEFAULT | wxICON_QUESTION);
+        ask.SetYesNoLabels("Leave and call", "Stay");
+        if (ask.ShowModal() != wxID_YES) return;
+        pendingCall_ = them;
+        leaveSession();
+        return;
+    }
+    if (!canCall())
+    {
+        note_ = host_ && !host_->dataUp() && link_.commandConnected()
+                    ? "Can't call: data2g-host's session data port isn't connected"
+                    : "Can't call: data2g-host isn't connected";
+        showStatus();
+        return;
+    }
+
+    // A station that's busy, or doesn't take sessions, is asked about first.
+    if (const broadcast::Station* s = stations_.find(them))
+    {
+        broadcast::StatusView view = stations_.status(*s, now);
+        std::string why;
+        if (view.word == "QRL" || view.word.compare(0, 4, "QRL ") == 0)
+            why = them + " is " + view.word + ": " + lowerFirst(view.how) + ".";
+        else if (view.word == "No sessions")
+            why = view.how + ".";
+        if (!why.empty())
+        {
+            wxMessageDialog ask(this, utf8(why) + "\n\nCall anyway, or send it a message on D2G instead?",
+                                "Call " + utf8(them), wxYES_NO | wxCANCEL | wxCANCEL_DEFAULT | wxICON_QUESTION);
+            ask.SetYesNoCancelLabels("Call anyway", "Message instead", "Cancel");
+            int answer = ask.ShowModal();
+            if (answer == wxID_NO)
+            {
+                tabs_->SetSelection(TAB_BROADCAST);
+                broadcast_->address(them);
+                return;
+            }
+            if (answer != wxID_YES) return;
+        }
+    }
+
+    if (!session_.call(them, now))
+    {
+        note_ = "Couldn't call " + them;
+        showStatus();
+        return;
+    }
+    onSessionEvents();
+    host_->flush();
+    refreshSession();
+}
+
+void MainFrame::leaveSession()
+{
+    using Phase = session::SessionChat::Phase;
+    if (!session_.active() || session_.phase() == Phase::Leaving)
+    {
+        if (!session_.active()) pendingCall_.clear();
+        return;
+    }
+    // Files moving: ask, once.
+    if (session_.phase() == Phase::Connected && session_.trafficBusy())
+    {
+        wxMessageDialog ask(this,
+                            "A file is still moving with " + utf8(session_.peer())
+                                + ". Leave anyway? It can carry on next time.",
+                            "Leave the session", wxYES_NO | wxNO_DEFAULT | wxICON_QUESTION);
+        ask.SetYesNoLabels("Leave", "Stay");
+        if (ask.ShowModal() != wxID_YES)
+        {
+            pendingCall_.clear();
+            return;
+        }
+    }
+    session_.leave(HostConnection::nowMs());
+    host_->flush();
+    refreshSession();
+}
+
+void MainFrame::leaveSessionNow()
+{
+    if (!session_.active()) return;
+    session_.leaveNow(HostConnection::nowMs());
+    host_->flush();
+    refreshSession();
+}
+
+void MainFrame::onSessionData(const uint8_t* bytes, size_t length)
+{
+    uint64_t now = HostConnection::nowMs();
+    // The far end's Hello tells the station list its locator; anything
+    // heard in the session says it was heard.
+    for (const protocol::Record& r : session_.dataBytes(bytes, length, now)) stations_.onRecord(r, now);
+    onSessionEvents();
+    refreshSession();
+    refreshStations();
+}
+
+void MainFrame::onSessionEvents()
+{
+    using Type = session::SessionChat::Event::Type;
+    uint64_t now = HostConnection::nowMs();
+    for (const session::SessionChat::Event& e : session_.takeEvents())
+    {
+        switch (e.type)
+        {
+            case Type::Calling:
+                // The tab opens at once, in the Calling state.
+                stations_.setPartner(e.peer, false, now);
+                sessionUnread_ = 0;
+                tabs_->SetSelection(TAB_SESSION);
+                break;
+            case Type::Started:
+                // Whoever called, the tab comes to the front, and the group
+                // hears we're QRL (once the session goes idle).
+                stations_.setPartner(e.peer, true, now);
+                chat_.announce(protocol::Status::State::Qrl, e.peer, broadcastMode(), now);
+                sessionUnread_ = 0;
+                tabs_->SetSelection(TAB_SESSION);
+                if (e.incoming && !IsActive()) RequestUserAttention(wxUSER_ATTENTION_INFO);
+                break;
+            case Type::Ended:
+                stations_.setPartner("", false, now);
+                chat_.announce(protocol::Status::State::Qrv, "", broadcastMode(), now);
+                if (!pendingCall_.empty())
+                {
+                    std::string next = pendingCall_;
+                    pendingCall_.clear();
+                    CallAfter([this, next]() { callStation(next); });
+                }
+                break;
+            case Type::Heard:
+                if (!(tabs_->GetSelection() == TAB_SESSION && IsActive())) sessionUnread_++;
+                break;
+        }
+    }
+}
+
+void MainFrame::refreshSession()
+{
+    sessionPage_->refresh(HostConnection::nowMs(), localOffsetSeconds());
+    updateTabLabels();
+    refreshStations();
 }
 
 //-------------------------------------------------------------------------
@@ -607,6 +898,8 @@ void MainFrame::checkIn()
 void MainFrame::setPaused(bool paused)
 {
     link_.setPaused(paused, HostConnection::nowMs());
+    session_.setPaused(paused, HostConnection::nowMs());
+    sessionPage_->setPaused(paused);
     bar_->setPaused(paused);
     GetMenuBar()->Check(ID_PAUSE, paused);
     broadcast_->setPaused(paused);
