@@ -118,7 +118,7 @@ private:
     void onBroadcastFiles();
     void saveBroadcastState();
 
-    // The gearshift and the width buttons.
+    // The gearshift, its button and the 500 Hz switch.
     void loadGearshift();
     void showGearshift();
     void gearChanged();

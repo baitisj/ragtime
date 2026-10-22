@@ -17,6 +17,7 @@
 #include <wx/file.h>
 #include <wx/filedlg.h>
 #include <wx/filename.h>
+#include <wx/bmpbuttn.h>
 #include <wx/log.h>
 #include <wx/menu.h>
 #include <wx/msgdlg.h>
@@ -42,6 +43,7 @@
 #include "SettingsDialog.h"
 #include "StationList.h"
 #include "Thresholds.h"
+#include "ToggleSwitch.h"
 #include "TxLamp.h"
 #include "globus/GlobusPanel.h"
 #include "globus/GlobusToggle.h"
@@ -446,7 +448,7 @@ void MainFrame::buildLayout()
     });
 
     // The connection bar.
-    bar_->width->Bind(wxEVT_BUTTON, [this](wxCommandEvent&) { showGearshift(); });
+    bar_->gearshift->Bind(wxEVT_BUTTON, [this](wxCommandEvent&) { showGearshift(); });
     bar_->narrow->Bind(wxEVT_TOGGLEBUTTON, [this](wxCommandEvent& e) { setNarrow(e.IsChecked()); });
     bar_->pause->Bind(wxEVT_TOGGLEBUTTON, [this](wxCommandEvent& e) { setPaused(e.IsChecked()); });
     bar_->acceptSessions->Bind(wxEVT_CHECKBOX, [this](wxCommandEvent& e) {
@@ -1731,8 +1733,10 @@ void MainFrame::gearChanged()
 
 void MainFrame::showGear()
 {
-    bar_->setWidthLabel(gearbox::widthLabel(gearshift_.width()));
     std::optional<gearbox::Gear> gear = gearshift_.current();
+    bar_->setGearshiftTip(wxString("The gearshift: pick the speed, width and path. Now up to ")
+                          + gearbox::widthLabel(gearshift_.width())
+                          + (gear ? ", " + utf8(gearbox::gearLabel(*gear)) : wxString()));
     if (!gear)
     {
         broadcast_->setGearLabel("Gear: the host's mode",

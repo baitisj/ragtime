@@ -23,7 +23,7 @@ from them, so the canvas is never the only copy.
   `#1d2129`, secondary text `#4a515c`, borders `#d9dce1` and `#b9bec7`,
   accent blue `#1f5fbf` (selected, toggles on, the current gear), focus
   ring `#f0a020`.
-- Toggles that are on turn blue: the Globus button, the width button, a
+- Toggles that are on turn blue: the Globus button, the 500 Hz switch, a
   selected chip.
 - Layout at 1280×800: connection bar on top; station list, tabs, and
   Globus side by side (each side pane 280 to 340 px), with draggable
@@ -32,7 +32,8 @@ from them, so the canvas is never the only copy.
 ## Connection bar
 
 Left to right: host address and state, my callsign, group `D2G`, the
-width button (`2.4 kHz ▼`) joined to the one-press `500 Hz` button,
+gearshift button (a speedometer icon; it opens the gearshift) and the
+`500 Hz` slide switch (on: 500 Hz modes only; off: any width),
 Accept sessions, Pause sending, **Auto ALC** (checkbox, a small level
 meter, its reading such as `−4 dB`), and the TX light (`TX Off` / `TX`).
 

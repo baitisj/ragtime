@@ -1,9 +1,12 @@
 name: Build and test
 
+# Each PR gets the quick Ubuntu build and tests. The rest (GCC 16, Windows,
+# AppImage) runs only when started by hand: Actions > Build and test >
+# Run workflow, which runs every job. Jeff chose this on 2026-10-22, since
+# threads build, test and run tools/gcc16/check.py before every push.
 on:
-  push:
-    branches: [main]
   pull_request:
+  workflow_dispatch:
 
 jobs:
   linux:
@@ -26,6 +29,7 @@ jobs:
     # Jeff builds with GCC 16, which warns about things GCC 13 doesn't.
     # -O2 and -O3 flag different things, so both run, with -Werror.
     name: GCC 16 -Werror (${{ matrix.build_type }})
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04
     container: gcc:16
     strategy:
@@ -52,6 +56,7 @@ jobs:
     # The portable Windows zip, cross-compiled with MinGW-w64 against a
     # static wxWidgets, and the unit tests run as Windows programs under Wine.
     name: Windows (MinGW-w64 cross build, tests under Wine)
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04
     steps:
     - uses: actions/checkout@v4
@@ -74,6 +79,7 @@ jobs:
 
   appimage:
     name: Linux AppImage
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04
     steps:
     - uses: actions/checkout@v4

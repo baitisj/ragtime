@@ -170,12 +170,16 @@ Tests are on by default (`-DRAGTIME_TESTS=OFF` turns them off), and
 every test runs headless, the app included (`ragtime --version`).
 `-DRAGTIME_APP=OFF` builds only core and its tests, with no wx needed.
 
-CI (`.github/workflows/build.yml`) runs on every PR and every push to
-`main`: the Ubuntu 24.04 build with tests, the same build and tests in
-the `gcc:16` image with `-Werror` at `-O2` (RelWithDebInfo) and `-O3`
-(Release), the Windows cross build with the unit tests run under Wine,
-and the AppImage. The last two keep the zip and the AppImage as the run's
-artifacts. Before pushing C++, run `tools/gcc16/check.py` (needs docker;
+CI (`.github/workflows/build.yml`) runs only the Ubuntu 24.04 build with
+tests on each PR (Jeff's choice, 2026-10-22: threads already build and
+test before pushing). Nothing runs on a push to `main`. The full set runs
+only when started by hand (Actions > Build and test > Run workflow, or
+the GitHub `actions_run_trigger` tool on the branch): Ubuntu, the same
+build and tests in the `gcc:16` image with `-Werror` at `-O2`
+(RelWithDebInfo) and `-O3` (Release), the Windows cross build with the
+unit tests run under Wine, and the AppImage. The last two keep the zip and
+the AppImage as the run's artifacts. Start a full run on a PR that
+changes CMake, packaging or platform code, and always on a release PR. Before pushing C++, run `tools/gcc16/check.py` (needs docker;
 start `dockerd &` in a cloud session): it compiles every source in
 `gcc:16` at both levels without apt, which the cloud sandbox can't reach.
 
@@ -211,8 +215,8 @@ The bench's fake hosts are POSIX, but `wine ragtime.exe` talks to a Linux
 
 ## Releases
 
-1. A PR sets the version, `project(ragtime VERSION ...)`, and runs full CI
-   (no `[skip ci]`).
+1. A PR sets the version, `project(ragtime VERSION ...)`, and gets a full
+   CI run, started by hand on its branch (no `[skip ci]`).
 2. After Jeff merges it, build from the merge commit:
    `packaging/linux/make-appimage.sh` and `packaging/windows/make-zip.sh`.
    Files are named `Ragtime-<version>-beta-<hash>-...` (`release-name.sh`).

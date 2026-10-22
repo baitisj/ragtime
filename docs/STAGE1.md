@@ -158,8 +158,8 @@ The brief:
   middle, Globus on the right, status bar. Both dividers drag and are
   remembered; Globus off gives the messages the full width.
 - Connection bar: host address and state (Connected, Reconnecting in
-  8 s), my callsign, group `D2G`, the width button and the one-press
-  500 Hz button, Accept sessions, Pause sending, TX light from `PTT`, and
+  8 s), my callsign, group `D2G`, the gearshift button and the 500 Hz
+  switch, Accept sessions, Pause sending, TX light from `PTT`, and
   an **Auto ALC** checkbox with a level meter (disabled until the host
   takes a TX level command).
 - Station list: columns Call, Status, Heard, Locator, Distance, Bearing,

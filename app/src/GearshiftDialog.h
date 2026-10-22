@@ -17,8 +17,7 @@ class SubmodeMap;
 
 // The gearshift popup (docs/GEARBOX.md): the Data2G Submode Map with the
 // gears on it, Width and Path chips, Auto, and the gear list. It opens from
-// the width button on the connection bar and the Gear button by Send
-// (package E wires those). Every change goes straight to the Gearshift it
+// the gearshift button on the connection bar and the Gear button by Send. Every change goes straight to the Gearshift it
 // was given, and onChange runs after each, so the buttons can follow.
 class GearshiftDialog : public wxDialog
 {
