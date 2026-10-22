@@ -3,6 +3,8 @@
 
 #include <wx/frame.h>
 
+#include "ragtime/gearbox/Gearbox.h"
+
 class wxNotebook;
 
 // The one main window. Package E fills it in (docs/STAGE1.md): connection
@@ -13,7 +15,12 @@ public:
     MainFrame();
 
 private:
+    void loadGearshift();
+    void showGearshift();
+    void showGear();
+
     wxNotebook* tabs_ = nullptr;
+    ragtime::gearbox::Gearshift gearshift_;
 };
 
 #endif

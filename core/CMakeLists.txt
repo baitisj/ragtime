@@ -11,6 +11,9 @@ add_library(ragtime_core STATIC
     # sources under src/protocol/, src/link/, src/text/, src/files/.
     # Package C (Globus projection and map tables): src/globus/.
     # Package D (gearbox model): src/gearbox/.
+    src/gearbox/Gearbox.cpp
+    src/gearbox/Json.cpp
+    src/gearbox/Submodes.cpp
 )
 
 target_include_directories(ragtime_core PUBLIC

@@ -71,14 +71,18 @@ Done in the skeleton PR: see "Layout" and "Build and test" in
 
 ## D. Gearshift model and popup
 
+Done in the gearshift PR, except wiring the popup to the connection bar's
+width button and the Gear button by Send, and feeding it `MODES` and
+burst S/N, which come with package E.
+
 - `docs/GEARBOX.md` is the spec. Model in core (thresholds table, best
   modes, gear ladders, Auto's pick from a path S/N with a 3 dB margin);
   the popup in app (the Submode Map as a chart, Width and Path chips, gear
   list, Auto).
-- Until the host reports thresholds, the table is built in, from the
-  Submode Map figures (`/mnt/project-files/d2g-client/submode_thresholds.json`
-  in the Claude project; ask Jeff before committing it, since it is
-  Data2G's data).
+- Nothing of Data2G's is built in (committing the Submode Map figures is
+  still Jeff's call). Ragtime reads the operator's own data2g-host
+  `mode_thresholds.json` or the Submode Map's JSON, with widths and
+  speeds from `MODES`: `GEARBOX.md`, "Where Ragtime gets the figures".
 - Width caps today are only `BW500` and `BW2300`; 200 Hz and 1.2 kHz are
   greyed with "needs data2g-host support" until Andrew adds them.
 
