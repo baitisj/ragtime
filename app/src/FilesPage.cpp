@@ -165,7 +165,7 @@ FilesPage::FilesPage(wxWindow* parent, FileHistory& history) : wxPanel(parent), 
     auto* progress = new wxDataViewColumn("Progress", new ProgressRenderer(this), G_PROGRESS, FromDIP(170),
                                           wxALIGN_LEFT, wxDATAVIEW_COL_RESIZABLE);
     going_->AppendColumn(progress, "long");
-    going_->AppendTextColumn("de", wxDATAVIEW_CELL_INERT, FromDIP(96), wxALIGN_LEFT, wxDATAVIEW_COL_RESIZABLE);
+    going_->AppendTextColumn("de", wxDATAVIEW_CELL_INERT, FromDIP(120), wxALIGN_LEFT, wxDATAVIEW_COL_RESIZABLE);
     going_->AppendTextColumn("State", wxDATAVIEW_CELL_INERT, FromDIP(200), wxALIGN_LEFT,
                              wxDATAVIEW_COL_RESIZABLE);
     going_->AppendTextColumn("Expiry", wxDATAVIEW_CELL_INERT, FromDIP(120), wxALIGN_LEFT, wxDATAVIEW_COL_RESIZABLE);
@@ -181,7 +181,7 @@ FilesPage::FilesPage(wxWindow* parent, FileHistory& history) : wxPanel(parent), 
     done_->AppendTextColumn("Size", wxDATAVIEW_CELL_INERT, FromDIP(84), wxALIGN_RIGHT, wxDATAVIEW_COL_RESIZABLE);
     // Bits a second over the whole transfer, to set beside the gear's speed.
     done_->AppendTextColumn("bps", wxDATAVIEW_CELL_INERT, FromDIP(64), wxALIGN_RIGHT, wxDATAVIEW_COL_RESIZABLE);
-    done_->AppendTextColumn("de", wxDATAVIEW_CELL_INERT, FromDIP(96), wxALIGN_LEFT, wxDATAVIEW_COL_RESIZABLE);
+    done_->AppendTextColumn("de", wxDATAVIEW_CELL_INERT, FromDIP(120), wxALIGN_LEFT, wxDATAVIEW_COL_RESIZABLE);
     done_->AppendTextColumn("Result", wxDATAVIEW_CELL_INERT, FromDIP(220), wxALIGN_LEFT, wxDATAVIEW_COL_RESIZABLE);
     done_->AppendTextColumn("Saved in", wxDATAVIEW_CELL_INERT, FromDIP(240), wxALIGN_LEFT,
                             wxDATAVIEW_COL_RESIZABLE);

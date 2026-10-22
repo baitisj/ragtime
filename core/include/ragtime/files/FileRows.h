@@ -29,7 +29,7 @@ enum class Via
     Broadcast,  // on the D2G group, with seal-driven repair
 };
 
-// "Broadcast": the de (From or To) column for a file we broadcast.
+// "Broadcast": the receiver in the de column for a file we broadcast.
 extern const char* const BROADCAST_PEER;
 
 // A broadcast file's pieces in FileRow::pieces.
@@ -179,7 +179,8 @@ std::string stateText(const FileRow& row, uint64_t nowMs, long utcOffsetS);
 std::string expiryText(uint64_t atMs, uint64_t nowMs, long utcOffsetS);
 // The date column: "14:32" today, "Oct 21 14:32" before.
 std::string dateText(uint64_t atMs, uint64_t nowMs, long utcOffsetS);
-// "To W1AW", "From W1AW", "To Broadcast".
+// The de column, sender → receiver with the operator as OM: "OM → W1AW",
+// "W1AW → OM", "OM → Broadcast".
 std::string peerText(bool outgoing, const std::string& peer);
 
 // The transfer rate over a sliding window, from how far a transfer has

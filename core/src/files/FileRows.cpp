@@ -449,7 +449,9 @@ std::string dateText(uint64_t atMs, uint64_t nowMs, long utcOffsetS)
 
 std::string peerText(bool outgoing, const std::string& peer)
 {
-    return (outgoing ? "To " : "From ") + peer;
+    // Sender to receiver, the operator as OM (Jeff, 2026-10-22).
+    const std::string arrow = " \xe2\x86\x92 ";
+    return outgoing ? "OM" + arrow + peer : peer + arrow + "OM";
 }
 
 //-------------------------------------------------------------------------

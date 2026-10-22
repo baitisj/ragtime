@@ -234,7 +234,7 @@ Mock-ups of the three tabs: [Data2G client mock-ups](https://claude.ai/artifact/
 **The Files tab** has two panes, each ordered by date, newest first.
 
 - **In progress and parts** (top): every transfer that isn't finished, including parts kept from earlier sessions. Columns: date, file, size, progress (bytes of total), de (From or To; the heading is ham shorthand, Jeff 2026-10-22), state, and expiry.
-  - From or To is the other station. For a file you broadcast, To says **Broadcast**. For a broadcast you're receiving, From is the sending station.
+  - de reads sender → receiver, the operator as OM: "W1AW → OM" for a file coming in, "OM → W1AW" for one going out (Jeff, 2026-10-22). For a file you broadcast it says "OM → **Broadcast**". For a broadcast you're receiving, the sender is the sending station.
   - States: Waiting for answer, Moving, Stalled, Repairing (a broadcast share taking repair requests), and Part kept.
   - Expiry is when a kept part is deleted (7 days by default), or when a broadcast share's repair rounds end.
 - **Completed** (bottom): finished transfers, with date, file, size, de (From or To), result (Saved, Sent, Declined, or Failed with the reason), and where it was saved.

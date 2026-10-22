@@ -553,9 +553,9 @@ void testWordsAndNumbers()
     CHECK_EQ(rateText(4.25), std::string("4.2 B/s"));
     CHECK_EQ(rateText(38.4), std::string("38 B/s"));
     CHECK_EQ(rateText(1229), std::string("1.2 KB/s"));
-    CHECK_EQ(peerText(true, "W1AW"), std::string("To W1AW"));
-    CHECK_EQ(peerText(false, "W1AW"), std::string("From W1AW"));
-    CHECK_EQ(peerText(true, BROADCAST_PEER), std::string("To Broadcast"));
+    CHECK_EQ(peerText(true, "W1AW"), std::string("OM \xe2\x86\x92 W1AW"));
+    CHECK_EQ(peerText(false, "W1AW"), std::string("W1AW \xe2\x86\x92 OM"));
+    CHECK_EQ(peerText(true, BROADCAST_PEER), std::string("OM \xe2\x86\x92 Broadcast"));
 
     // 2026-10-22 14:19 UTC; local is UTC-7.
     uint64_t now = T0 + (14 * 60 + 19) * 60000ull;
