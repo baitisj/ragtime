@@ -54,7 +54,9 @@ screens.
   Session tab's engine, with `StreamAccount` for the `BUFFER` counts),
   QRL and QRV broadcasts (`BroadcastChat::announce`), the session partner
   pinned in `Stations`, the session data port in `HostConnection`, and
-  `app/src/SessionPage`.
+  `app/src/SessionPage`. `SessionLog` keeps each station's sessions on
+  disk (`sessionLogDir()` in `Prefs`), so a new session with a station
+  carries on below the earlier ones, a rule where each ended.
 - Package G (session files and the Files tab) gives `files::FileTraffic`
   (`core/src/files/`, `SessionFiles` plugged into the session: pacing,
   Leave, rates, the log), `files/FileRows.h` (the Files tab's rows and
@@ -144,7 +146,7 @@ screens.
 
 | Path | What |
 | --- | --- |
-| `core/` | `ragtime_core`, the socket-free library: no wx, no sockets in the engines, all unit-tested. Headers in `core/include/ragtime/`, sources in `core/src/`, one subfolder per area: `protocol/`, `link/`, `text/`, `files/` (package B; G adds `FileRows`, `FileTraffic`), `globus/` (C), `gearbox/` (D), `broadcast/` (E; H adds `Airtime`, `Seals`, `BroadcastFiles`), `session/` (F). Add sources to `core/CMakeLists.txt` |
+| `core/` | `ragtime_core`, the socket-free library: no wx, no sockets in the engines, all unit-tested. Headers in `core/include/ragtime/`, sources in `core/src/`, one subfolder per area: `protocol/`, `link/`, `text/`, `files/` (package B; G adds `FileRows`, `FileTraffic`), `globus/` (C), `gearbox/` (D), `broadcast/` (E; H adds `Airtime`, `Seals`, `BroadcastFiles`), `session/` (F, and `SessionLog`). Add sources to `core/CMakeLists.txt` |
 | `app/` | The wxWidgets app (`app/src/`). It draws and wires; logic goes in core. `MainFrame` is the one main window and owns the engines; `HostConnection` is the only code with sockets; `Prefs` holds every wxConfig key, and `appDataDir()` is where Ragtime keeps its own files (never wx's `GetUserDataDir()`: on Linux that is `~/.Ragtime`, the settings file); `app/src/globus/` is the Globus pane (`GlobusPanel`, `GlobusView`, `GlobusToggle`) |
 | `tests/` | ctest unit tests for core, plain executables on `tests/Check.h` (`CHECK`, `CHECK_EQ`). Add one with `ragtime_test(<name> <source>)` in `tests/CMakeLists.txt`. `FakeHost.*` is a fake data2g-host on loopback sockets (POSIX, so its test and the bench build only `if(UNIX)`); `FakeAirMain.cpp` is the bench `ragtime_fake_air` |
 | `tools/` | Reference scripts: `icon/` (`make_leaf_svg.py` draws the icon, the Maple Leaf Rag's leaf going digital, as `app/res/ragtime.svg`; `make_icons.sh` renders its PNG and ICO), `globe/` (sunlit globe renderer, and the generators of the map tables in `core/src/globus/`: coasts and borders from Natural Earth, the big lakes from `ne_110m_lakes.geojson`, state and province lines from Natural Earth's 1:10m admin-1 lines, fetched for the run, for the countries in `gen_admin1_lines.py`), `gearbox/` (ladders), `ham_table/` (text table 0 generator and corpus: `gen_table.py --check`), `gcc16/check.py` (GCC 16 check) |

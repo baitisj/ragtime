@@ -23,6 +23,10 @@
 //   read it, DISCONNECT, which waits for what is unacknowledged. Leave now
 //   is ABORT.
 //
+// - History: with a SessionLog, a call or a session shows what was said
+//   with that station before, each earlier session closed by a rule, and
+//   the log carries on below.
+//
 // Files (package G) and anything else that rides in a session plug in as
 // a SessionTraffic. No sockets and no clock: the app hands in the data
 // port's bytes and HostLink's events, and writes what this gives back.
@@ -44,6 +48,8 @@ namespace ragtime
 {
 namespace session
 {
+
+class SessionLog;
 
 // How much of our session stream the host has read and the far end's
 // modem has acknowledged, from the host's BUFFER reports. BUFFER n is the
@@ -102,7 +108,17 @@ struct Message
         NotDelivered,   // the session ended first
     };
 
+    // A row is a message, a file that went in a session (from the log), or
+    // the rule drawn where an earlier session ended.
+    enum class Kind
+    {
+        Text,
+        File,
+        Rule,
+    };
+
     uint64_t id = 0;
+    Kind kind = Kind::Text;
     bool ours = false;
     std::string from;
     std::string text;           // the exact UTF-8
@@ -111,6 +127,8 @@ struct Message
     uint64_t atMs = 0;          // when we made or heard it
     State state = State::Heard;
     uint64_t streamEnd = 0;     // ours, once written: where its record ends in our stream
+    bool past = false;          // from an earlier session with the peer, read from the SessionLog
+    uint64_t beganMs = 0;       // a rule: when that session began (atMs: when it ended); 0 if not known
 };
 
 // "Queued", "Sent", "Delivered", "Not delivered"; "" for one heard.
@@ -219,6 +237,10 @@ public:
     void setSettings(const Settings& settings);
     const Settings& settings() const { return settings_; }
     void setTraffic(SessionTraffic* traffic) { traffic_ = traffic; }
+    // Where sessions are kept: a call or a session shows what was said
+    // with the station before, and its own messages are added. None: each
+    // session starts with an empty tab.
+    void setLog(SessionLog* log) { log_ = log; }
 
     //---------------------------------------------------------------------
     // The operator
@@ -238,7 +260,10 @@ public:
     // link loses, so the same record again would only be a duplicate). 0
     // for a message still Queued, or no session up.
     uint64_t resend(uint64_t id, uint64_t nowMs);
-    static bool canResend(const Message& message) { return message.ours && message.state != Message::State::Queued; }
+    static bool canResend(const Message& message)
+    {
+        return message.kind == Message::Kind::Text && message.ours && message.state != Message::State::Queued;
+    }
     // Pause sending: new messages wait as Queued.
     void setPaused(bool paused, uint64_t nowMs);
     bool paused() const { return paused_; }
@@ -324,12 +349,17 @@ private:
     void heard(uint64_t nowMs);
     void trim();
     void endAfterglow();
+    void endLog();
+    void showHistory(const std::string& peer);
+    void logState(const Message& m);
     void emit(Event event) { events_.push_back(std::move(event)); }
     void changed() { version_++; }
 
     link::HostLink& link_;
     Settings settings_;
     SessionTraffic* traffic_ = nullptr;
+    SessionLog* log_ = nullptr;
+    uint64_t logEndMs_ = 0;         // a session's end, kept back through the afterglow
 
     Phase phase_ = Phase::None;
     std::string peer_;

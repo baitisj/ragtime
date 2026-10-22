@@ -180,6 +180,8 @@ MainFrame::MainFrame()
     , clock_(this)
 {
     session_.setTraffic(&fileTraffic_);
+    sessionLog_.setFolder(sessionLogDir());
+    session_.setLog(&sessionLog_);
     SetIcons(appIcons());
     // Every dialog and the main window must fit Jeff's 1366x768 screen.
     SetMinSize(wxSize(960, 600));
@@ -1100,7 +1102,21 @@ void MainFrame::onFileEvents()
         else if (e.type == Type::Finished)
         {
             if (const files::FinishedFile* f = history_.find(e.historyId))
+            {
                 note_ = f->name + (f->outgoing ? " to " : " from ") + f->peer + ": " + files::resultLabel(*f);
+                if (f->via == files::Via::Session)
+                {
+                    // One line in the station's session log, for the
+                    // next session with it to show.
+                    session::Message line;
+                    line.kind = session::Message::Kind::File;
+                    line.ours = f->outgoing;
+                    line.from = f->outgoing ? session_.settings().callsign : f->peer;
+                    line.atMs = f->atMs;
+                    line.text = f->name + ", " + files::sizeText(f->size) + ": " + files::resultLabel(*f);
+                    sessionLog_.file(f->peer, line);
+                }
+            }
         }
     }
     updateTabLabels();

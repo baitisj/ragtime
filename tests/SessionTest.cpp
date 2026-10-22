@@ -4,10 +4,13 @@
 // Leave with its farewell, Leave now, the far end leaving, the link lost,
 // no answer, a refused call, the data port closing, a stream that isn't
 // Ragtime's, and the hook for what else rides in a session. Then the
-// QRL and QRV broadcasts, and the station list's session partner. The
+// QRL and QRV broadcasts, the station list's session partner, and the
+// log that carries a station's sessions on from one to the next. The
 // clock is simulated.
 #include <cstdint>
+#include <filesystem>
 #include <string>
+#include <system_error>
 #include <vector>
 
 #include "Check.h"
@@ -17,6 +20,7 @@
 #include "ragtime/protocol/Records.h"
 #include "ragtime/protocol/Stream.h"
 #include "ragtime/session/SessionChat.h"
+#include "ragtime/session/SessionLog.h"
 
 using namespace ragtime;
 using link::HostLink;
@@ -749,6 +753,106 @@ void testTheSessionPartnerOnTheStationList()
     CHECK(stations.partner().empty());
 }
 
+void testTheLogCarriesOn()
+{
+    std::filesystem::path dir = std::filesystem::temp_directory_path() / "ragtime-session-history-test";
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
+    session::SessionLog log(dir.string());
+    using Kind = session::Message::Kind;
+
+    // A first session with W1AW: one of ours delivered, one of theirs, and
+    // one of ours the session ends under.
+    {
+        Rig rig;
+        rig.chat.setLog(&log);
+        Far far("W1AW");
+        connect(rig, far);
+        uint64_t id = rig.chat.send("Good evening Hiram", rig.now);
+        rig.pump();
+        rig.say("BUFFER " + std::to_string(rig.written.size()) + "\r");
+        rig.advance(5000);
+        rig.say("BUFFER 0\r");
+        CHECK(rig.chat.find(id)->state == MState::Delivered);
+        rig.from(far.text("Fine business, how copy?", rig.now));
+        rig.chat.send("73", rig.now);
+        rig.pump();
+        rig.advance(60 * 1000);
+        rig.from(far.farewell(rig.now));
+        rig.say("DISCONNECTED\r");
+        CHECK(rig.chat.ending() == Ending::LeftThere);
+        // This session's own rows aren't past; no rule while it is shown.
+        CHECK_EQ(rig.chat.messages().size(), (size_t)3);
+        CHECK(!rig.chat.messages().front().past);
+    }
+
+    // After a restart: calling W1AW brings it all back, closed by a rule,
+    // and the new session carries on below it.
+    Rig rig(T0 + 3600 * 1000);
+    rig.chat.setLog(&log);
+    CHECK(rig.chat.messages().empty());
+    Far far("W1AW");
+    connect(rig, far);
+    const auto& rows = rig.chat.messages();
+    CHECK_EQ(rows.size(), (size_t)4);
+    if (rows.size() == 4)
+    {
+        CHECK(rows[0].past && rows[0].ours && rows[0].text == "Good evening Hiram" && rows[0].state == MState::Delivered);
+        CHECK(rows[1].past && !rows[1].ours && rows[1].text == "Fine business, how copy?");
+        CHECK(rows[2].text == "73" && rows[2].state == MState::NotDelivered);
+        CHECK(rows[3].kind == Kind::Rule && rows[3].beganMs == T0 && rows[3].atMs == T0 + 65 * 1000);
+        CHECK(rows[0].id != 0 && rows[1].id != rows[0].id);
+        // An earlier message of ours can go again in this session.
+        CHECK(SessionChat::canResend(rows[0]) && !SessionChat::canResend(rows[3]));
+    }
+    uint64_t again = rig.chat.resend(rows.front().id, rig.now);
+    CHECK(again != 0);
+    rig.pump();
+    CHECK(!rig.chat.find(again)->past && rig.chat.find(again)->text == "Good evening Hiram");
+    CHECK_EQ(rig.chat.messages().size(), (size_t)5);
+    // Its link lost, the far end's last words still come in the afterglow,
+    // and go in the log before the session's end.
+    rig.say("DISCONNECTED\r");
+    rig.from(far.text("last words", rig.now));
+    rig.advance(SessionChat::AFTERGLOW_MS);
+    CHECK_EQ(rig.chat.messages().back().text, std::string("last words"));
+
+    // Another station has its own log: nothing yet.
+    rig.from(far.opening(rig.now));     // none of this session's business
+    CHECK(rig.chat.call("K1ABC", rig.now));
+    rig.pump();
+    CHECK(rig.chat.messages().empty());
+    rig.say("OK\rDISCONNECTED\r");
+    CHECK(rig.chat.ending() == Ending::NoAnswer);
+
+    // An incoming session from W1AW: both earlier sessions, a rule each.
+    Far back("W1AW");
+    rig.say("CONNECTED W1AW AG7EW\r");
+    rig.from(back.opening(rig.now));
+    CHECK(rig.chat.incoming());
+    const auto& all = rig.chat.messages();
+    CHECK_EQ(all.size(), (size_t)7);
+    if (all.size() == 7)
+    {
+        CHECK(all[3].kind == Kind::Rule);
+        CHECK(all[4].text == "Good evening Hiram" && all[4].state == MState::NotDelivered);
+        CHECK_EQ(all[5].text, std::string("last words"));
+        // Ended when the host said so, not when the afterglow was over.
+        CHECK(all[6].kind == Kind::Rule && all[6].beganMs == T0 + 3600 * 1000);
+        CHECK_EQ(all[6].atMs, T0 + 3600 * 1000);
+    }
+    // The call that never connected left no session in the log.
+    CHECK(log.load("K1ABC", 100).empty());
+
+    // No log: each session starts empty, as before.
+    Rig plain;
+    Far far2("W1AW");
+    connect(plain, far2);
+    CHECK(plain.chat.messages().empty());
+
+    std::filesystem::remove_all(dir, ec);
+}
+
 void testTheLengths()
 {
     CHECK_EQ(session::sessionLength(30 * 1000), std::string("less than a minute"));
@@ -779,5 +883,6 @@ int main()
     testQrlAndQrv();
     testTheSessionPartnerOnTheStationList();
     testTheLengths();
+    testTheLogCarriesOn();
     return ragtime_test::finish();
 }

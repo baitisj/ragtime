@@ -205,6 +205,15 @@ keep or change:
 - The Session tab keeps the last session's messages, greyed, until the
   next call or incoming session. There is no idle limit (PLAN.md question
   7 leaves it off by default; it isn't built).
+- **Sessions carry on (Jeff, 2026-10-22).** What is said in a session is
+  kept on disk, a file per station (`session::SessionLog`, in
+  `<data folder>/sessions/`, or `<config>.sessions/` beside a `--config`
+  file). Calling a station, or a session from it, brings back the earlier
+  sessions with it, greyed, each closed by a rule ("Session with W1AW
+  ended 14:32 · 22 min"), and the new session carries on below. Session
+  files that finished show there as one line each. A station's file is
+  cut to its later half when it passes 1 MB, and the tab shows the newest
+  2000 rows.
 
 Left for G: files plug into `session::SessionTraffic` (records in and
 out, acknowledgements, the far end's Hello, the session's end, and

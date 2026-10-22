@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <ctime>
+#include <string>
 #include <utility>
 
 #include <wx/button.h>
@@ -39,9 +40,11 @@ constexpr int BADGE_ROOM = 20;
 const int ID_COPY = wxID_HIGHEST + 501;
 const int ID_RESEND = wxID_HIGHEST + 502;
 
+// "14:32" today, "22 Oct 14:32" on another day (an earlier session's).
 wxString clock(uint64_t ms)
 {
-    return wxDateTime((time_t)(ms / 1000)).Format("%H:%M");
+    wxDateTime at((time_t)(ms / 1000));
+    return at.Format(at.IsSameDate(wxDateTime::Today()) ? "%H:%M" : "%d %b %H:%M");
 }
 
 wxString utf8(const std::string& text)
@@ -120,12 +123,31 @@ protected:
         const Message* m = at(n);
         if (m == nullptr) return wxString();
         bool picked = IsSelected(n);
-        // A session that has ended reads in grey.
-        bool live = owner_->session_.active();
+        // A session that has ended reads in grey, and so do the earlier
+        // ones above it.
+        bool live = owner_->session_.active() && !m->past;
         auto colour = [picked](const wxColour& c) {
             return picked ? wxString() : " color=\"" + htmlColour(c) + "\"";
         };
         wxString body = live ? wxString() : colour(secondaryText());
+
+        if (m->kind == Message::Kind::Rule)
+        {
+            // Where an earlier session ended: the log carries on below.
+            std::string caption = "Session with " + owner_->session_.peer() + " ended "
+                                  + std::string(clock(m->atMs).utf8_str());
+            if (m->beganMs != 0 && m->atMs > m->beganMs) caption += DOT + sessionLength(m->atMs - m->beganMs);
+            wxString html;
+            html << "<table width=\"100%\" cellspacing=\"0\" cellpadding=\"2\"><tr>"
+                 << "<td width=\"50%\" valign=\"middle\"><hr></td>"
+                 << "<td nowrap valign=\"middle\"><font size=\"-1\"" << colour(secondaryText()) << ">"
+                 << htmlEscape(caption) << "</font></td>"
+                 << "<td width=\"50%\" valign=\"middle\"><hr></td>"
+                 << "</tr></table>";
+            return html;
+        }
+        wxString what = htmlEscape(m->text);
+        if (m->kind == Message::Kind::File) what = "<i>File</i>&nbsp; " + what;
 
         wxString state;
         if (m->ours)
@@ -142,7 +164,7 @@ protected:
              << "<td valign=\"top\" nowrap><font" << colour(secondaryText()) << ">" << clock(m->atMs)
              << "</font></td>"
              << "<td valign=\"top\" width=\"100%\"><font" << body << "><b>" << htmlEscape(m->from) << "</b>&nbsp; "
-             << htmlEscape(m->text) << "</font></td>"
+             << what << "</font></td>"
              << "<td valign=\"top\" nowrap align=\"right\">" << state << "</td>"
              << "</tr></table>";
         return html;
@@ -263,7 +285,7 @@ SessionPage::SessionPage(wxWindow* parent, const SessionChat& session, const rag
         const Message* m = row == wxNOT_FOUND ? nullptr : list_->at((size_t)row);
         const FileTransfer* t = row == wxNOT_FOUND ? nullptr : list_->fileAt((size_t)row);
         wxString tip;
-        if (m != nullptr) tip = wxDateTime((time_t)m->time).FormatISOCombined(' ') + wxString::Format(", item %u", m->seq);
+        if (m != nullptr && m->kind == Message::Kind::Text) tip = wxDateTime((time_t)m->time).FormatISOCombined(' ') + wxString::Format(", item %u", m->seq);
         if (t != nullptr && !t->path.empty()) tip = utf8(t->path);
         list_->SetToolTip(tip);
         e.Skip();
@@ -542,7 +564,7 @@ void SessionPage::send()
 void SessionPage::showMenu(int row)
 {
     const Message* m = row == wxNOT_FOUND ? nullptr : list_->at((size_t)row);
-    if (m == nullptr) return;
+    if (m == nullptr || m->kind == Message::Kind::Rule) return;
     uint64_t id = m->id;
     wxString text = wxString::FromUTF8(m->text);
     wxMenu menu;

@@ -229,7 +229,7 @@ Mock-ups of the three tabs: [Data2G client mock-ups](https://claude.ai/artifact/
 | Session | The one session you're in: its messages, file offers, status strip, and Leave | Pops open when a session starts, whoever called; greyed out when there's no active session |
 | Files | Every transfer, both directions, in sessions and broadcast | Always |
 
-**The Session tab.** There is one tab, not one per session, because data2g-host runs one ARQ link at a time. It comes to the front by itself when a session starts, whether you called or were called. When the session ends it greys out: no typing and no sending. My suggestion is that the last session's messages stay readable there until the next session starts; they are in the log either way.
+**The Session tab.** There is one tab, not one per session, because data2g-host runs one ARQ link at a time. It comes to the front by itself when a session starts, whether you called or were called. When the session ends it greys out: no typing and no sending. The last session's messages stay readable there until the next session starts. Each station's sessions are kept on disk, so a new session with a station you've talked to before opens with the earlier ones above it, a rule where each ended, and the chat log carries on.
 
 **The Files tab** has two panes, each ordered by date, newest first.
 
