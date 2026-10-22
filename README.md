@@ -7,7 +7,18 @@ Rodland, KC2G. Ragtime is a sibling of
 chirp-mode chat app, and is named for the same musical family and for the
 ragchew.
 
-Status: design done, Stage 1 under way. Nothing to run yet.
+Status: design done, Stage 1 under way. The app builds and opens an empty
+window; nothing to use on the air yet.
+
+## Building
+
+On Ubuntu 24.04:
+
+    sudo apt-get install build-essential cmake libwxgtk3.2-dev
+    cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+    cmake --build build -j$(nproc)
+    ctest --test-dir build --output-on-failure
+    ./build/app/ragtime
 
 ## The idea
 
