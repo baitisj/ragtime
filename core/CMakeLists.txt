@@ -9,6 +9,9 @@ add_library(ragtime_core STATIC
     src/Version.cpp
     # Package B: protocol v0, the Data2G link, session files, HamText, SHA-256.
     src/files/SessionFiles.cpp
+    # Package G: the Files tab's rows and log, session files in a session.
+    src/files/FileRows.cpp
+    src/files/FileTraffic.cpp
     src/files/Sha256.cpp
     src/link/Data2GLink.cpp
     src/link/HostLink.cpp

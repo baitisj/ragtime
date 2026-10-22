@@ -18,6 +18,8 @@ struct StationPrefs
     std::string host = "127.0.0.1";
     int kissPort = 8100;
     int commandPort = 8300;     // the session data port is the next one
+    std::string receivedFolder; // where files saved from a session go
+    std::vector<std::string> autoAccept;   // stations whose files are saved without asking
 };
 
 StationPrefs loadStationPrefs();
@@ -41,6 +43,20 @@ void saveColumns(const std::vector<ragtime::broadcast::Column>& columns);
 void loadGearshift(ragtime::gearbox::Gearshift& shift);
 void saveGearshift(const ragtime::gearbox::Gearshift& shift);
 
+// Files (docs/PLAN.md, "File transfer"): where received files go (by
+// default "Ragtime received" in the documents folder), and the stations
+// whose session files are taken without asking.
+std::string receivedFolder();
+void saveReceivedFolder(const std::string& folder);
+std::vector<std::string> loadAutoAccept();
+void saveAutoAccept(const std::vector<std::string>& calls);
+
+// --config's file, when one was given ("" for the usual place).
+void setConfigPath(const std::string& path);
+// The Files tab's lasting log (finished transfers and kept part files):
+// beside the --config file, or in the user data folder.
+std::string filesLogPath();
+
 namespace keys
 {
 constexpr const char* ACCEPT_SESSIONS = "/Connection/AcceptSessions";
@@ -51,6 +67,8 @@ constexpr const char* TABLE_WIDTH = "/Window/StationTableWidth";      // Globus 
 constexpr const char* GLOBUS_WIDTH = "/Window/GlobusWidth";
 constexpr const char* SORT_COLUMN = "/Stations/SortColumn";
 constexpr const char* SORT_ASCENDING = "/Stations/SortAscending";
+constexpr const char* RECEIVED_FOLDER = "/Files/ReceivedFolder";
+constexpr const char* AUTO_ACCEPT = "/Files/AutoAccept";             // callsigns, comma separated
 } // namespace keys
 
 #endif
