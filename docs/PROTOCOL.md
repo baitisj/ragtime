@@ -31,8 +31,10 @@ never `GLISS`.
 
 ## Where records travel
 
-data2g-host has three TCP ports (Glissando's `docs/DATA2G.md` describes
-the command lines):
+data2g-host has three TCP ports (Glissando's old
+[`docs/DATA2G.md`](https://github.com/baitisj/glissando/blob/75273a5/docs/DATA2G.md),
+the last copy before Glissando dropped Data2G, describes the command
+lines):
 
 | Port | Default | Carries |
 | --- | --- | --- |
