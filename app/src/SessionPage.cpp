@@ -36,6 +36,7 @@ const wxColour QUIET(0x8a, 0x4b, 0x00);         // amber, as the Repair Asked ba
 constexpr int BADGE_ROOM = 20;
 
 const int ID_COPY = wxID_HIGHEST + 501;
+const int ID_RESEND = wxID_HIGHEST + 502;
 
 wxString clock(uint64_t ms)
 {
@@ -536,11 +537,24 @@ void SessionPage::showMenu(int row)
 {
     const Message* m = row == wxNOT_FOUND ? nullptr : list_->at((size_t)row);
     if (m == nullptr) return;
+    uint64_t id = m->id;
     wxString text = wxString::FromUTF8(m->text);
     wxMenu menu;
+    if (SessionChat::canResend(*m))
+    {
+        // Into the session that is up; greyed, saying why, when none is.
+        bool connected = session_.phase() == SessionChat::Phase::Connected;
+        menu.Append(ID_RESEND, connected ? wxString("Re-send")
+                                         : wxString("Re-send (no session up)"))->Enable(connected);
+        menu.AppendSeparator();
+    }
     menu.Append(ID_COPY, "Copy text");
-    menu.Bind(wxEVT_MENU, [=](wxCommandEvent&) {
-        if (wxTheClipboard->Open())
+    menu.Bind(wxEVT_MENU, [=](wxCommandEvent& e) {
+        if (e.GetId() == ID_RESEND)
+        {
+            if (onResend_) onResend_(id);
+        }
+        else if (wxTheClipboard->Open())
         {
             wxTheClipboard->SetData(new wxTextDataObject(text));
             wxTheClipboard->Close();

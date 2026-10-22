@@ -250,6 +250,15 @@ void testAddressedAndAcknowledged()
     CHECK(heard != nullptr && heard->to == "TEST2" && heard->text == "are you there?");
     CHECK(mine->state == State::Acknowledged);
 
+    // Re-sent once acknowledged: TEST2 acknowledges it again, and doesn't
+    // list it twice.
+    size_t listed = b.chat.messages().size();
+    CHECK(a.chat.resend(ids[0], "", now));
+    CHECK(mine->state == State::Queued);
+    settle(a, b);
+    CHECK(mine->state == State::Acknowledged);
+    CHECK_EQ(b.chat.messages().size(), listed);
+
     // A message for someone else gets no Ack from TEST2.
     ids = a.chat.send("@W1AW hello", "", now);
     settle(a, b);
@@ -318,7 +327,12 @@ void testPauseCancelResend()
     CHECK(a.chat.resend(ids[0], "", now));
     settle(a, b);
     CHECK(m->state == State::Sent);
-    CHECK(a.chat.resend(ids[0], "", now) == false);     // only Not sent or Cancelled
+    CHECK_EQ(b.chat.messages().size(), (size_t)2);
+    // Re-sent once Sent: still one line at TEST2.
+    CHECK(a.chat.resend(ids[0], "", now));
+    CHECK(a.chat.resend(ids[0], "", now) == false);     // not while it is still going
+    settle(a, b);
+    CHECK(m->state == State::Sent);
     CHECK_EQ(b.chat.messages().size(), (size_t)2);
 
     // A burst the host holds too long is Not sent.

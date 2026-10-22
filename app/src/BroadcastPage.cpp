@@ -311,7 +311,7 @@ void BroadcastPage::showMenu(int row)
     wxMenu menu;
     if (!m->ours) menu.Append(ID_REPLY, "Reply to " + wxString::FromUTF8(from));
     if (m->ours && m->state == State::Queued) menu.Append(ID_CANCEL, "Cancel");
-    if (m->ours && (m->state == State::NotSent || m->state == State::Cancelled)) menu.Append(ID_RESEND, "Send again");
+    if (ragtime::broadcast::BroadcastChat::canResend(*m)) menu.Append(ID_RESEND, "Re-send");
     if (menu.GetMenuItemCount() > 0) menu.AppendSeparator();
     menu.Append(ID_COPY, "Copy text");
     menu.Bind(wxEVT_MENU, [=](wxCommandEvent& e) {

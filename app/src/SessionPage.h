@@ -45,6 +45,8 @@ public:
     void onLeave(std::function<void()> fn) { onLeave_ = std::move(fn); }
     void onLeaveNow(std::function<void()> fn) { onLeaveNow_ = std::move(fn); }
     void onCallAgain(std::function<void()> fn) { onCallAgain_ = std::move(fn); }
+    // Re-send on a message's right-click menu, with the message's id.
+    void onResend(std::function<void(uint64_t id)> fn) { onResend_ = std::move(fn); }
     // Send file... pressed.
     void onSendFile(std::function<void()> fn) { onSendFile_ = std::move(fn); }
     // Files dropped on the tab.
@@ -111,6 +113,7 @@ private:
     std::function<void()> onCancel_, onLeave_, onLeaveNow_, onCallAgain_, onSendFile_;
     std::function<void(const std::vector<std::string>&)> onDropFiles_;
     std::function<void(const std::string&, uint64_t)> onFileAction_;
+    std::function<void(uint64_t)> onResend_;
 };
 
 #endif

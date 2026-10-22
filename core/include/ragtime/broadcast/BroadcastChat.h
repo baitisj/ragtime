@@ -143,9 +143,12 @@ public:
     // Takes back a message HostLink hasn't handed to the host yet (with the
     // rest of its burst). False once the host has it.
     bool cancel(uint64_t id);
-    // Sends a Not sent or Cancelled message again, the same record, so
-    // stations that heard it the first time know it.
+    // Re-send: one of our messages goes again, once it has settled (Sent,
+    // Not sent, Cancelled or Acknowledged). It goes as the same record, so
+    // a station that heard it the first time doesn't list it twice, and an
+    // addressed one is acknowledged again. False while it is still going.
     bool resend(uint64_t id, const std::string& mode, uint64_t nowMs);
+    static bool canResend(const Message& message);
 
     // Every HostLink event goes here: bursts settling, frames heard, the
     // group opening.
