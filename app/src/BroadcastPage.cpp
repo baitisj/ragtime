@@ -15,6 +15,7 @@
 #include <wx/textctrl.h>
 
 #include "Html.h"
+#include "PhraseHighlight.h"
 
 using namespace ragtime::broadcast;
 using State = Message::State;
@@ -156,7 +157,7 @@ BroadcastPage::BroadcastPage(wxWindow* parent, const BroadcastChat& chat)
     paused_->SetForegroundColour(secondaryText());
     paused_->Hide();
 
-    compose_ = new wxTextCtrl(this, wxID_ANY, "", wxDefaultPosition, wxDefaultSize, wxTE_PROCESS_ENTER);
+    compose_ = new wxTextCtrl(this, wxID_ANY, "", wxDefaultPosition, wxDefaultSize, wxTE_PROCESS_ENTER | PHRASE_ENTRY_STYLE);
     compose_->SetHint("Message to everyone on D2G; start with @CALL for one station");
     compose_->SetMaxLength((unsigned long)MAX_TYPED);
     file_ = new wxButton(this, wxID_ANY, "File...", wxDefaultPosition, wxDefaultSize, wxBU_EXACTFIT);
@@ -189,6 +190,10 @@ BroadcastPage::BroadcastPage(wxWindow* parent, const BroadcastChat& chat)
     });
 
     compose_->Bind(wxEVT_TEXT_ENTER, [this](wxCommandEvent&) { send(); });
+    compose_->Bind(wxEVT_TEXT, [this](wxCommandEvent& e) {
+        showPhrases();
+        e.Skip();
+    });
     send_->Bind(wxEVT_BUTTON, [this](wxCommandEvent&) { send(); });
     gear_->Bind(wxEVT_BUTTON, [this](wxCommandEvent&) {
         if (onGear_) onGear_();
@@ -283,11 +288,18 @@ void BroadcastPage::address(const std::string& call)
     // replace the address: focus first, then the text, the cursor after it.
     compose_->SetFocus();
     compose_->ChangeValue(text);
+    showPhrases();
     compose_->SetInsertionPointEnd();
     CallAfter([this]() {
         compose_->SelectNone();
         compose_->SetInsertionPointEnd();
     });
+}
+
+void BroadcastPage::showPhrases()
+{
+    std::string typed(compose_->GetValue().utf8_str());
+    highlightPhrases(compose_, typed, ragtime::broadcast::BroadcastChat::phrases(typed));
 }
 
 void BroadcastPage::focusCompose()

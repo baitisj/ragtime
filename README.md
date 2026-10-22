@@ -31,7 +31,7 @@ thresholds...** in the gearshift. See [docs/GEARBOX.md](docs/GEARBOX.md).
 
 On Ubuntu 24.04:
 
-    sudo apt-get install build-essential cmake libwxgtk3.2-dev
+    sudo apt-get install build-essential cmake libwxgtk3.2-dev libgtk-3-dev
     cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
     cmake --build build -j$(nproc)
     ctest --test-dir build --output-on-failure

@@ -114,6 +114,15 @@ bool BroadcastChat::addressee(const std::string& typed, std::string& call, std::
     return true;
 }
 
+std::vector<text::HamText::PhraseSpan> BroadcastChat::phrases(const std::string& typed)
+{
+    std::string call, rest;
+    if (!addressee(typed, call, rest)) return text::HamText::phraseSpans(typed);
+    std::vector<text::HamText::PhraseSpan> spans = text::HamText::phraseSpans(rest);
+    for (text::HamText::PhraseSpan& span : spans) span.start += typed.size() - rest.size();
+    return spans;
+}
+
 protocol::Record BroadcastChat::helloRecord(uint32_t time)
 {
     protocol::Hello hello;

@@ -33,6 +33,7 @@
 #include "ragtime/link/HostLink.h"
 #include "ragtime/protocol/Records.h"
 #include "ragtime/protocol/Stream.h"
+#include "ragtime/text/HamText.h"
 
 namespace ragtime
 {
@@ -123,6 +124,10 @@ public:
     // "@W1AW" at the start of typed text: the station, and the text after
     // it. False when it isn't addressed.
     static bool addressee(const std::string& typed, std::string& call, std::string& rest);
+    // The ham phrases send() will code as one symbol each, as spans of
+    // typed (an "@W1AW" in front goes in the record's To, not its text),
+    // for the entry line to show as they are typed.
+    static std::vector<text::HamText::PhraseSpan> phrases(const std::string& typed);
 
     // Sends typed text in mode (empty: the group's mode as it stands).
     // Returns the messages it became; none for blank text, text over
