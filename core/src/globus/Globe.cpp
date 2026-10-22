@@ -185,13 +185,6 @@ std::vector<Line> unpackLines(int count, const uint32_t* starts, const int16_t* 
     return unpacked;
 }
 
-const std::vector<Line>& borders()
-{
-    static const std::vector<Line> all = unpackLines(BorderLines::LINE_COUNT, BorderLines::LINE_START,
-                                                     BorderLines::POINTS, BorderLines::UNITS_PER_DEGREE);
-    return all;
-}
-
 const std::vector<Line>& admin1()
 {
     static const std::vector<Line> all = unpackLines(Admin1Lines::LINE_COUNT, Admin1Lines::LINE_START,
@@ -209,8 +202,97 @@ void capLine(Line& line)
     for (const Vec3& p : line.points) line.reach = std::max(line.reach, angleOf(line.centre, p));
 }
 
+// Where the arc from a to b crosses the arc from c to d, as how far along
+// a to b, 0 to 1; or -1 if they don't cross.
+double crossingAlong(const Vec3& a, const Vec3& b, const Vec3& c, const Vec3& d)
+{
+    Vec3 meet = cross(cross(a, b), cross(c, d));
+    if (length(meet) < 1e-12) return -1.0;
+    meet = normalized(meet);
+    if (dot(meet, plus(a, b)) < 0.0) meet = scaled(meet, -1.0);
+    const double ab = angleOf(a, b);
+    const double cd = angleOf(c, d);
+    if (std::fabs(angleOf(a, meet) + angleOf(meet, b) - ab) > 1e-9) return -1.0;
+    if (std::fabs(angleOf(c, meet) + angleOf(meet, d) - cd) > 1e-9) return -1.0;
+    return ab > 0.0 ? angleOf(a, meet) / ab : -1.0;
+}
+
+// The lines with the stretches over the big lakes taken out. The 1:110m
+// countries fill the lakes in as land, so their borders run on across the
+// water, and the 1:110m lakes are drawn more roughly than the borders, so a
+// border down a lake (Tanganyika, Malawi) wanders in and out of it. Drawn
+// in the sea's colour, the lake is the divide: a border stops where it
+// meets the shore, and a scrap of border between two crossings, shorter
+// than SCRAP, where it wanders out of the lake and back, goes too.
+std::vector<Line> offLakes(const std::vector<Line>& lines)
+{
+    const double SCRAP = 0.5 * PI / 180.0;
+    std::vector<Line> kept;
+    for (const Line& line : lines)
+    {
+        Line run;
+        bool fromShore = false;     // the run starts at a crossing
+        double runLength = 0.0;
+        auto finish = [&](bool toShore) {
+            bool scrap = fromShore && toShore && runLength < SCRAP;
+            if (run.points.size() >= 2 && !scrap)
+            {
+                capLine(run);
+                kept.push_back(std::move(run));
+            }
+            run = Line();
+            runLength = 0.0;
+        };
+        auto extend = [&](const Vec3& p) {
+            if (!run.points.empty()) runLength += angleOf(run.points.back(), p);
+            run.points.push_back(p);
+        };
+        extend(line.points.front());
+        for (size_t i = 0; i + 1 < line.points.size(); i++)
+        {
+            const Vec3& a = line.points[i];
+            const Vec3& b = line.points[i + 1];
+            // Where the edge crosses a shore, in order along it.
+            std::vector<double> cuts{0.0, 1.0};
+            for (const Ring& lake : lakes())
+            {
+                if (angleOf(lake.centre, a) > lake.reach + angleOf(a, b)) continue;
+                for (size_t k = 0; k < lake.points.size(); k++)
+                {
+                    double t = crossingAlong(a, b, lake.points[k], lake.points[(k + 1) % lake.points.size()]);
+                    if (t > 0.0 && t < 1.0) cuts.push_back(t);
+                }
+            }
+            std::sort(cuts.begin(), cuts.end());
+            auto along = [&a, &b](double t) { return normalized(plus(scaled(a, 1.0 - t), scaled(b, t))); };
+            for (size_t k = 0; k + 1 < cuts.size(); k++)
+            {
+                Vec3 p = along(cuts[k]);
+                Vec3 q = along(cuts[k + 1]);
+                if (isLake(toLatLon(along((cuts[k] + cuts[k + 1]) / 2.0))))
+                {
+                    if (!run.points.empty()) finish(true);
+                    fromShore = true;
+                    continue;
+                }
+                if (run.points.empty()) extend(p);
+                extend(q);
+            }
+        }
+        finish(false);
+    }
+    return kept;
+}
+
+const std::vector<Line>& borders()
+{
+    static const std::vector<Line> all = offLakes(unpackLines(BorderLines::LINE_COUNT, BorderLines::LINE_START,
+                                                              BorderLines::POINTS, BorderLines::UNITS_PER_DEGREE));
+    return all;
+}
+
 // The coasts: the edges of the land's outlines that only one country has,
-// run together into lines, and the shores of the lakes. An edge two
+// run together into lines. An edge two
 // countries' outlines share is a border between them, which borderLines
 // draws, smoothed; stroked as coast as well it would show twice, the
 // smoothed border a hair beside it. Shared edges are the same points in
@@ -274,6 +356,16 @@ const std::vector<Line>& coasts()
                 lines.push_back(std::move(line));
             }
         }
+        return lines;
+    }();
+    return all;
+}
+
+// The shores of the big lakes, each lake's outline closed.
+const std::vector<Line>& shores()
+{
+    static const std::vector<Line> all = []() {
+        std::vector<Line> lines;
         for (const Ring& lake : lakes())
         {
             Line line;
@@ -1058,6 +1150,11 @@ std::vector<Outline> nearLines(const std::vector<Line>& all, const View& view, c
 std::vector<Outline> coastLines(const View& view, const Window& window)
 {
     return nearLines(coasts(), view, window);
+}
+
+std::vector<Outline> lakeShores(const View& view, const Window& window)
+{
+    return nearLines(shores(), view, window);
 }
 
 std::vector<Outline> borderLines(const View& view, const Window& window)

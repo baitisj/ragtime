@@ -31,8 +31,9 @@ constexpr double WHEEL_STEP = 1.25;
 const LatLon NOWHERE_YET{30.0, -40.0};
 
 // The theme (docs/MOCKUPS.md): light blue oceans, near-white land, dark
-// blue coasts and borders, the state and province lines the same blue at
-// about half opacity and thinner, and a very faint graticule every 30°.
+// blue coasts and borders, the state and province lines and the lake
+// shores the same blue at about half opacity and thinner, and a very faint
+// graticule every 30°.
 const wxColour OCEAN(0xA8, 0xD4, 0xF2);
 const wxColour LAND(0xF7, 0xF5, 0xEE);
 const wxColour COAST(0x14, 0x30, 0x68);
@@ -374,6 +375,8 @@ void GlobusView::OnPaint(wxPaintEvent&)
     stroke(gc.get(), admin1Lines(view, window_), ADMIN1, ADMIN1_WIDTH);
     stroke(gc.get(), borderLines(view, window_), BORDER, BORDER_WIDTH);
     stroke(gc.get(), coastLines(view, window_), COAST, COAST_WIDTH);
+    // The lake shores last, over the ends of the borders that meet them.
+    stroke(gc.get(), lakeShores(view, window_), ADMIN1, ADMIN1_WIDTH);
 
     const Vec3 home = toVector(homeAt_);
     const Vec3 station = toVector(stationAt_);
