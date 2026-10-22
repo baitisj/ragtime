@@ -43,6 +43,8 @@ class FakeHost
 {
 public:
     explicit FakeHost(FakeAir& air, int groupPort = 2);
+    // On fixed ports, for the bench (0: any free one). Throws if they're taken.
+    FakeHost(FakeAir& air, int groupPort, int kissPort, int commandPort);
     ~FakeHost();
 
     FakeHost(const FakeHost&) = delete;
@@ -59,6 +61,9 @@ public:
     void say(const std::string& line);
     // Bursts written to the group wait here until let go.
     void holdBursts(bool hold) { holdBursts_ = hold; }
+    // For the bench: a burst keeps PTT on this long before the far hosts
+    // hear it and the acks come back (0, the tests' default: all at once).
+    void setAirtimeMs(int ms) { airtimeMs_ = ms; }
     // The next burst is dropped: BCAST <port> DROPPED <frames>, no acks.
     void dropNextBurst() { dropNext_ = true; }
     // Closes the command port's client, as a host that stopped would.
@@ -89,6 +94,7 @@ private:
     void onCommand(const std::string& line);
     void reply(const std::string& line);
     void sendBurst();
+    void finishBurst();
     void connected(FakeHost& caller, FakeHost& called);
     void disconnected();
     void writeTo(Port& port, const std::vector<uint8_t>& bytes);
@@ -117,6 +123,9 @@ private:
     };
     std::vector<Tagged> burst_;
     size_t burstsSent_ = 0;
+    int airtimeMs_ = 0;
+    std::vector<Tagged> onAir_;     // keyed up, not yet heard
+    long long onAirUntilMs_ = -1;
     FakeHost* partner_ = nullptr;
 };
 

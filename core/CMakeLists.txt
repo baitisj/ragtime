@@ -12,6 +12,7 @@ add_library(ragtime_core STATIC
     src/files/Sha256.cpp
     src/link/Data2GLink.cpp
     src/link/HostLink.cpp
+    src/link/Reconnect.cpp
     src/protocol/Fields.cpp
     src/protocol/Records.cpp
     src/protocol/Stream.cpp
@@ -23,6 +24,9 @@ add_library(ragtime_core STATIC
     src/gearbox/Gearbox.cpp
     src/gearbox/Json.cpp
     src/gearbox/Submodes.cpp
+    # Package E: the station list and the Broadcast tab's engine.
+    src/broadcast/BroadcastChat.cpp
+    src/broadcast/Stations.cpp
 )
 
 target_include_directories(ragtime_core PUBLIC

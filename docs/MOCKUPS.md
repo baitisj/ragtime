@@ -46,6 +46,13 @@ meter, its reading such as `−4 dB`), and the TX light (`TX Off` / `TX`).
   (`FN31 · 3,951 km`).
 - Status always pairs a word with its dot (never colour alone).
 
+As built in package E (the bench, `ragtime_fake_air`, at 1280×720),
+beside Globus and with Globus off:
+
+![The main window, Broadcast tab](images/main-window.png)
+
+![Globus off: the station table and the toggle on the tab strip](images/globus-off-table.png)
+
 ## Globus
 
 - Header: the **Globus** toggle (globe icon, blue when on) where the

@@ -7,8 +7,9 @@ Rodland, KC2G. Ragtime is a sibling of
 chirp-mode chat app, and is named for the same musical family and for the
 ragchew.
 
-Status: design done, Stage 1 under way. The app builds and opens an empty
-window; nothing to use on the air yet.
+Status: Stage 1 under way. Ragtime connects to data2g-host and chats on
+the D2G broadcast group, with the station list and Globus; sessions and
+files come next. It hasn't been on the air with a real data2g-host yet.
 
 ## Building
 
@@ -19,6 +20,18 @@ On Ubuntu 24.04:
     cmake --build build -j$(nproc)
     ctest --test-dir build --output-on-failure
     ./build/app/ragtime
+
+### Trying it without Data2G
+
+The build includes a bench of fake data2g-hosts with a few chatty
+stations of its own. Nothing goes on the radio.
+
+    ./build/tests/ragtime_fake_air &
+    ./build/app/ragtime --config /tmp/ragtime-a.conf
+
+Set any callsign and locator in Settings > Station; the address
+127.0.0.1 and ports 8100 and 8300 are the defaults. A second Ragtime
+with its own `--config` file and ports 8110 and 8310 talks to the first.
 
 ## The idea
 

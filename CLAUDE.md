@@ -44,6 +44,12 @@ screens.
   (`app/src/GearshiftDialog.*`). It reads Data2G's thresholds from the
   operator's own file at run time; none are committed
   (`docs/GEARBOX.md`).
+- Package E (app shell and Broadcast tab) gives `core/src/broadcast/`
+  (`Stations`, the station list model; `BroadcastChat`, the Broadcast
+  tab's engine), `link::Reconnect`, the window around them
+  (`app/src/MainFrame`, `ConnectionBar`, `StationList`, `BroadcastPage`,
+  `SettingsDialog`, `HostConnection` for the sockets) and the bench
+  `ragtime_fake_air` (below). Sessions (F) and files (G, H) are next.
 - The live design draft was the Claude Doc "Data2G client: plan"
   (https://claude.ai/code/artifact/87db2cd2-f5bc-4030-ba8d-99bef19c027d,
   private to Jeff). `docs/PLAN.md` is its 2026-10-22 snapshot and is now
@@ -107,9 +113,9 @@ screens.
 
 | Path | What |
 | --- | --- |
-| `core/` | `ragtime_core`, the socket-free library: no wx, no sockets in the engines, all unit-tested. Headers in `core/include/ragtime/`, sources in `core/src/`, one subfolder per area: `protocol/`, `link/`, `text/`, `files/` (package B), `globus/` (C), `gearbox/` (D). Add sources to `core/CMakeLists.txt` |
-| `app/` | The wxWidgets app (`app/src/`). It draws and wires; logic goes in core. `MainFrame` is the one main window; `app/src/globus/` is the Globus pane (`GlobusPanel`, `GlobusView`, `GlobusToggle`) |
-| `tests/` | ctest unit tests for core, plain executables on `tests/Check.h` (`CHECK`, `CHECK_EQ`). Add one with `ragtime_test(<name> <source>)` in `tests/CMakeLists.txt`. `FakeHost.*` is a fake data2g-host on loopback sockets (POSIX, so its test builds only `if(UNIX)`) |
+| `core/` | `ragtime_core`, the socket-free library: no wx, no sockets in the engines, all unit-tested. Headers in `core/include/ragtime/`, sources in `core/src/`, one subfolder per area: `protocol/`, `link/`, `text/`, `files/` (package B), `globus/` (C), `gearbox/` (D), `broadcast/` (E). Add sources to `core/CMakeLists.txt` |
+| `app/` | The wxWidgets app (`app/src/`). It draws and wires; logic goes in core. `MainFrame` is the one main window and owns the engines; `HostConnection` is the only code with sockets; `Prefs` holds every wxConfig key; `app/src/globus/` is the Globus pane (`GlobusPanel`, `GlobusView`, `GlobusToggle`) |
+| `tests/` | ctest unit tests for core, plain executables on `tests/Check.h` (`CHECK`, `CHECK_EQ`). Add one with `ragtime_test(<name> <source>)` in `tests/CMakeLists.txt`. `FakeHost.*` is a fake data2g-host on loopback sockets (POSIX, so its test and the bench build only `if(UNIX)`); `FakeAirMain.cpp` is the bench `ragtime_fake_air` |
 | `tools/` | Reference scripts: `globe/` (sunlit globe renderer, and the generators of the map tables in `core/src/globus/`: coasts and borders from Natural Earth, state and province lines from `us_canada_admin1_lines.json`), `gearbox/` (ladders), `ham_table/` (text table 0 generator and corpus: `gen_table.py --check`), `gcc16/check.py` (GCC 16 check) |
 | `cmake/` | CMake helpers. `ragtime_warnings(<target>)` gives every target `-Wall -Wextra` and, with `RAGTIME_WERROR` (on by default), `-Werror` |
 | `docs/` | The plan and specs. Change them in the same PR as the code they describe |
@@ -135,6 +141,15 @@ the `gcc:16` image with `-Werror` at `-O2` (RelWithDebInfo) and `-O3`
 (Release). Before pushing C++, run `tools/gcc16/check.py` (needs docker;
 start `dockerd &` in a cloud session): it compiles every source in
 `gcc:16` at both levels without apt, which the cloud sandbox can't reach.
+
+**The bench.** `build/tests/ragtime_fake_air` runs two fake data2g-hosts
+on one shared air (A: KISS 8100, commands 8300; B: 8110 and 8310) and a
+few bot stations that check in, chat and answer `@` messages. Point a
+Ragtime at each host with its own settings file, `ragtime --config
+a.conf`, to try the window with no Data2G and no radio. Headless:
+`Xvfb :91 &`, `DISPLAY=:91 ragtime ...`, `xdotool` to click and type,
+`import -window root` for a screenshot. Never point the bench at Jeff's
+radio PC's real host ports while his data2g-host runs.
 
 There is no Windows CI yet. Package I adds the MinGW-w64 cross build;
 keep the CMake free of Linux-only assumptions meanwhile.

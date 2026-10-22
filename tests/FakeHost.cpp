@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <cerrno>
+#include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <random>
@@ -88,6 +89,12 @@ bool service(int& listener, int& client, std::vector<uint8_t>& in)
     }
 }
 
+long long nowMs()
+{
+    return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch())
+        .count();
+}
+
 std::vector<std::string> words(const std::string& line)
 {
     std::vector<std::string> out;
@@ -110,13 +117,29 @@ std::vector<std::string> words(const std::string& line)
 
 } // namespace
 
-FakeHost::FakeHost(FakeAir& air, int groupPort) : air_(air), groupPort_(groupPort)
+FakeHost::FakeHost(FakeAir& air, int groupPort) : FakeHost(air, groupPort, 0, 0)
 {
-    kiss_.listener = listenOn(0);
+}
+
+FakeHost::FakeHost(FakeAir& air, int groupPort, int kissPort, int commandPort) : air_(air), groupPort_(groupPort)
+{
+    kiss_.listener = listenOn(kissPort);
     if (kiss_.listener < 0) throw std::runtime_error("fake host: no KISS port");
     kissPort_ = boundPort(kiss_.listener);
 
     // The data port is the command port + 1, so the two are taken together.
+    if (commandPort != 0)
+    {
+        command_.listener = listenOn(commandPort);
+        data_.listener = command_.listener >= 0 ? listenOn(commandPort + 1) : -1;
+        if (data_.listener < 0)
+        {
+            closeFd(command_.listener);
+            closeFd(kiss_.listener);
+            throw std::runtime_error("fake host: command or data port taken");
+        }
+        commandPort_ = commandPort;
+    }
     std::random_device random;
     for (int attempt = 0; attempt < 100 && commandPort_ == 0; attempt++)
     {
@@ -361,6 +384,16 @@ void FakeHost::sendBurst()
     }
     reply("PTT ON");
     reply("MODE " + mode_);
+    onAir_ = std::move(burst);
+    onAirUntilMs_ = nowMs() + airtimeMs_;
+    if (airtimeMs_ <= 0) finishBurst();
+}
+
+void FakeHost::finishBurst()
+{
+    onAirUntilMs_ = -1;
+    std::vector<Tagged> burst;
+    burst.swap(onAir_);
     for (FakeHost* h : air_.hosts_)
     {
         if (h == this || !h->groupOpen_) continue;
@@ -389,6 +422,12 @@ void FakeAir::step(int timeoutMs)
     // A session holds the group: its bursts wait for it to end.
     for (FakeHost* h : hosts_)
     {
+        if (h->onAirUntilMs_ >= 0)
+        {
+            // One burst on the air at a time.
+            if (nowMs() >= h->onAirUntilMs_) h->finishBurst();
+            continue;
+        }
         if (!h->burst_.empty() && !h->holdBursts_ && h->partner_ == nullptr) h->sendBurst();
     }
 }

@@ -113,6 +113,40 @@ burst S/N, which come with package E.
 
 ## E. App shell and the Broadcast tab
 
+Done in the package E PR: `core/src/broadcast/` (`Stations`, the station
+list; `BroadcastChat`, the Broadcast tab's engine), `link::Reconnect`, the
+window in `app/src/`, and the bench `ragtime_fake_air` (CLAUDE.md, "The
+bench"). Choices made there, for Jeff to keep or change:
+
+- **"@W1AW" messages** (PLAN.md question 6, kept as recommended): a
+  line starting `@W1AW` is a Text addressed to W1AW asking for an Ack.
+  W1AW's Ragtime answers on the group by itself, and the message shows
+  "Acknowledged by W1AW", or "Sent, no ack yet". No automatic retries:
+  Send again is on the message's right-click menu once it is Not sent.
+- **Check-ins.** A Hello rides along in the first frame of the first
+  message after the group opens, after the callsign, locator or Accept
+  sessions changes, and every 10 minutes after that; Station > Check in
+  sends one alone. Ragtime never transmits on its own except to answer an
+  `@` message with an Ack.
+- **Long messages** split between words into several Texts, one frame
+  each, all in one burst (`PROTOCOL.md`, "Broadcast").
+- **Pause sending** holds new bursts as Queued and survives a restart; a
+  burst the host already has still goes.
+- The **Broadcast tab label** counts messages heard while it is out of
+  sight, "Broadcast (3)".
+- **Auto ALC** and its meter are there, greyed, with a tooltip saying why.
+  **SNR** is in the Columns menu, greyed, "needs a host report".
+- The **status bar**: channel clear or busy, the mode the host last sent
+  in, and a line that will show the newest transfer (clicking it opens
+  Files); until then it shows the host's refusals and undecoded bursts.
+
+Left for F: Call and Leave on the Station menu and the station's
+right-click menu, the session partner pinned at the top of the list and
+"In session with you", Status QRL and QRV broadcasts on entering and
+leaving, the Session tab, and the session data port in `HostConnection`.
+
+The brief:
+
 - One main window: connection bar, station list on the left, tabs in the
   middle, Globus on the right, status bar. Both dividers drag and are
   remembered; Globus off gives the messages the full width.
