@@ -1299,10 +1299,10 @@ void MainFrame::setPaused(bool paused)
 
 void MainFrame::loadGearshift()
 {
-    const wxString path = thresholdsPath();
-    gearbox::SubmodeTable table;
-    wxString error;
-    if (!path.empty() && !loadThresholds(path, table, error)) wxLogWarning("Gearshift: %s", error);
+    wxArrayString sources;
+    wxString errors;
+    gearbox::SubmodeTable table = loadAllThresholds(sources, errors);
+    if (!errors.empty()) wxLogWarning("Gearshift: %s", errors);
     gearshift_.setTable(std::move(table));
     ::loadGearshift(gearshift_);
     showGear();
@@ -1336,8 +1336,8 @@ void MainFrame::showGear()
     if (!gear)
     {
         broadcast_->setGearLabel("Gear: the host's mode",
-                                 "No gears yet: load the thresholds in the gearshift. Until then broadcasts go in "
-                                 "the group's mode as data2g-host has it.");
+                                 "No gears yet: the gearshift says why. Until then broadcasts go in the group's "
+                                 "mode as data2g-host has it.");
         return;
     }
     wxString tip = "Opens the gearshift";

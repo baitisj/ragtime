@@ -6,6 +6,7 @@
 #include <wx/file.h>
 #include <wx/filename.h>
 #include <wx/stdpaths.h>
+#include <wx/utils.h>
 
 namespace
 {
@@ -14,6 +15,9 @@ namespace
 constexpr wxFileOffset MAX_FILE_BYTES = 4 * 1024 * 1024;
 
 const char* CONFIG_KEY = "/Gearshift/ThresholdsFile";
+
+// The files the last loadAllThresholds() used, for the popup.
+wxArrayString lastSources;
 
 } // namespace
 
@@ -30,6 +34,41 @@ wxString thresholdsPath()
         return picked;
     const wxString fallback = defaultThresholdsPath();
     return wxFileName::FileExists(fallback) ? fallback : wxString();
+}
+
+wxArrayString data2gSearchFolders()
+{
+    wxArrayString folders;
+    wxString home;
+    if (wxGetEnv("DATA2G_HOME", &home) && !home.empty())
+        folders.Add(home);
+    const wxString user = wxGetHomeDir();
+    for (const char* parent : {"", "src", "git", "code", "projects", "Projects", "repos", "dev"})
+    {
+        for (const char* name : {"Data2G", "data2g"})
+        {
+            wxFileName folder = wxFileName::DirName(user);
+            if (parent[0] != '\0')
+                folder.AppendDir(parent);
+            folder.AppendDir(name);
+            folders.Add(folder.GetPath());
+        }
+    }
+    return folders;
+}
+
+wxString findData2GThresholds()
+{
+    for (const wxString& folder : data2gSearchFolders())
+    {
+        wxFileName file = wxFileName::DirName(folder);
+        file.AppendDir("data2g");
+        file.AppendDir("codes_data");
+        file.SetFullName("mode_thresholds.json");
+        if (file.FileExists())
+            return file.GetFullPath();
+    }
+    return wxString();
 }
 
 void rememberThresholdsPath(const wxString& path)
@@ -67,4 +106,28 @@ bool loadThresholds(const wxString& path, ragtime::gearbox::SubmodeTable& table,
         return false;
     }
     return true;
+}
+
+ragtime::gearbox::SubmodeTable loadAllThresholds(wxArrayString& sources, wxString& errors)
+{
+    ragtime::gearbox::SubmodeTable table;
+    sources.Clear();
+    errors.clear();
+    for (const wxString& path : {findData2GThresholds(), thresholdsPath()})
+    {
+        if (path.empty() || sources.Index(path) != wxNOT_FOUND)
+            continue;
+        wxString error;
+        if (loadThresholds(path, table, error))
+            sources.Add(path);
+        else
+            errors += (errors.empty() ? "" : "\n") + error;
+    }
+    lastSources = sources;
+    return table;
+}
+
+wxArrayString loadedThresholdSources()
+{
+    return lastSources;
 }

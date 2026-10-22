@@ -66,29 +66,35 @@ fading path.
 
 ## Where Ragtime gets the figures
 
-Nothing of Data2G's is built in: whether Ragtime may carry Data2G's
-figures is still Jeff's call. Ragtime reads them at run time:
+Nothing of Data2G's is built in (Jeff, 2026-10-22: "Nothing built in,
+find Data2G"). Ragtime reads the figures at run time, each source adding
+to or updating the one before:
 
-1. **A thresholds file**, picked with **Load thresholds...** in the
-   popup (remembered as `/Gearshift/ThresholdsFile`), or else
+1. **A Data2G checkout.** On launch Ragtime looks for data2g-host's own
+   `data2g/codes_data/mode_thresholds.json` under `$DATA2G_HOME`, then
+   under `Data2G` or `data2g` in the home folder or in its `src`, `git`,
+   `code`, `projects`, `Projects`, `repos` or `dev` folder. Data2G is run
+   from a clone (`uv sync`), so every operator running data2g-host has
+   this file. Its form is `{"channels": ["awgn", "mpg", "mpp", "mpd"],
+   "modes": {name: [dB, ...]}}`, 99 for a threshold never reached. It has
+   no widths or speeds; those come from `MODES`.
+2. **A thresholds file** picked with **Load thresholds...** in the popup
+   (remembered as `/Gearshift/ThresholdsFile`), or else
    `submode_thresholds.json` in the user data folder (`~/.Ragtime` on
-   Linux, `%APPDATA%\Ragtime` on Windows). Either form works:
-   - data2g-host's own `data2g/codes_data/mode_thresholds.json`, which
-     every operator running data2g-host already has: `{"channels":
-     ["awgn", "mpg", "mpp", "mpd"], "modes": {name: [dB, ...]}}`, 99 for a
-     threshold never reached. It has no widths or speeds; those come from
-     `MODES`.
-   - The Submode Map's JSON, as `tools/gearbox/gearbox_ladder.py` reads it:
-     `{name: {"hz", "mod", "rate", "bps", "th": {"awgn", ...}}}`, null for
-     never. It carries widths and speeds, so it works before the host
-     connects.
-2. **The host's `MODES` list.** Gears use only the modes the host offers.
+   Linux, `%APPDATA%\Ragtime` on Windows). Either form works: Data2G's
+   own, or the Submode Map's JSON as `tools/gearbox/gearbox_ladder.py`
+   reads it (`{name: {"hz", "mod", "rate", "bps", "th": {"awgn", ...}}}`,
+   null for never), which carries widths and speeds, so it gives gears
+   before the host connects.
+3. **The host's `MODES` list.** Gears use only the modes the host offers.
    Its width and speed win over the file's: the speed is the payload rate
    from its airtimes, each codeword past the first adding
    (time at most codewords − time at one) / (most codewords − 1) seconds
    for its bytes. Thresholds in `MODES`, once Andrew adds them, win too.
 
-With no file the popup says where Ragtime looks, and there are no gears.
+With no thresholds found, the popup says where Ragtime looked. With
+Data2G's file but no host yet, it says the gears appear once data2g-host
+is connected.
 
 The figures move as Data2G improves. Data2G's own file at `674c268`
 (2026-10-22) differs from the Submode Map by up to a dB or so, enough to
