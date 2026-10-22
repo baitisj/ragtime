@@ -645,6 +645,33 @@ void testDigestMismatch()
     CHECK(b.seals.requestsSent() >= 1);
 }
 
+// The announce lost, and only the pieces heard: they show the listener was
+// there, so it asks for the announce and then for the rest.
+void testLostAnnounce()
+{
+    Air air;
+    Station& a = air.add("AG7EW", 1);
+    Station& b = air.add("KC2G", 2);
+    std::filesystem::path dir = freshFolder("unannounced");
+    b.files.setAutoReceive(dir.string());
+    bool lost = false;
+    b.lose = [&lost](protocol::Record& r) {
+        if (r.as<protocol::FileAnnounce>() == nullptr || lost) return false;
+        lost = true;
+        return true;
+    };
+    air.run(2000);
+    std::string error;
+    std::string path = makeFile("unannounced.bin", 1500, 4);
+    CHECK(a.files.send(path, "qpsk-r1/3", now, error) != 0);
+    air.run(180000);
+    CHECK(lost);
+    BroadcastFile f = fileFrom(b, "AG7EW");
+    CHECK(f.id != 0 && f.state == FileState::Saved);
+    if (f.id != 0) CHECK(readAll(f.path) == readAll(path));
+    CHECK(b.seals.requestsSent() >= 1);
+}
+
 // Many pieces lost: the request is cut to fit a frame, and the rest come
 // in later rounds.
 void testManyLost()
@@ -729,6 +756,7 @@ int main()
     testFiles();
     testOpenWindow();
     testDigestMismatch();
+    testLostAnnounce();
     testManyLost();
     testRefused();
     testIgnore();

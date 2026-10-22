@@ -273,6 +273,9 @@ private:
         uint64_t askAtMs = 0;                   // our request goes then; 0: none waiting
         std::map<uint16_t, Lack> covered;       // asked for by others since it was set
         std::map<uint16_t, int> sealAsks;       // requests for a seal never heard
+        // Files we heard pieces of (their announce's number, when): the
+        // announce itself may be what was lost.
+        std::map<uint32_t, uint64_t> piecesOf;
     };
 
     std::vector<Lack> lacks(const std::string& call, const Station& station, uint64_t nowMs) const;

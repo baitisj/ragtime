@@ -546,6 +546,10 @@ void Seals::onRecord(const protocol::Record& record, uint64_t nowMs)
         item.type = record.type();
         item.heardMs = nowMs;
     }
+    else if (record.as<protocol::FilePiece>() != nullptr)
+    {
+        stations_[from].piecesOf[record.header.seq] = nowMs;
+    }
 }
 
 void Seals::tick(uint64_t nowMs)
@@ -592,13 +596,16 @@ std::vector<Seals::Lack> Seals::lacks(const std::string& call, const Station& st
     {
         const HeardSeal& h = entry.second;
         if (h.givenUp || nowMs >= h.heardMs + MAX_OPEN_MS) continue;
-        // A station that heard none of this over, and no seal of its
-        // before, has just tuned in: it doesn't ask for the over it missed.
+        // A station that heard none of this over (no item, no piece of a
+        // file), and no seal of its before, has just tuned in: it doesn't
+        // ask for the over it missed.
         bool following = false;
         for (size_t i = 0; i < h.seal.items.size() && !following; i++)
         {
-            auto held = station.items.find(h.seal.firstItem + (uint32_t)i);
-            following = held != station.items.end() && held->second.digest == h.seal.items[i];
+            uint32_t seq = h.seal.firstItem + (uint32_t)i;
+            auto held = station.items.find(seq);
+            following = (held != station.items.end() && held->second.digest == h.seal.items[i])
+                        || station.piecesOf.count(seq) != 0;
         }
         for (const auto& other : station.seals)
         {
@@ -649,6 +656,10 @@ std::vector<Seals::Lack> Seals::lacks(const std::string& call, const Station& st
         for (const auto& item : station.items)
         {
             if (item.first < h.seal.firstItem && nowMs < item.second.heardMs + MAX_OPEN_MS) following = true;
+        }
+        for (const auto& piece : station.piecesOf)
+        {
+            if (piece.first < h.seal.firstItem && nowMs < piece.second + MAX_OPEN_MS) following = true;
         }
         for (const auto& other : station.seals)
         {
@@ -849,7 +860,10 @@ void Seals::forget(uint64_t nowMs)
         auto& seals = station->second.seals;
         for (auto it = seals.begin(); it != seals.end();)
             it = nowMs >= it->second.heardMs + MAX_OPEN_MS ? seals.erase(it) : std::next(it);
-        bool empty = items.empty() && seals.empty() && station->second.askAtMs == 0;
+        auto& pieces = station->second.piecesOf;
+        for (auto it = pieces.begin(); it != pieces.end();)
+            it = nowMs >= it->second + MAX_OPEN_MS ? pieces.erase(it) : std::next(it);
+        bool empty = items.empty() && seals.empty() && pieces.empty() && station->second.askAtMs == 0;
         station = empty ? stations_.erase(station) : std::next(station);
     }
 }
