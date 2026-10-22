@@ -465,10 +465,20 @@ the host's `MODES` lists them.
   more. The operator sees the estimate (pieces, airtime, when repairs end
   at the latest) before it goes; Ragtime refuses a file that would take
   over 2 hours of airtime and warns over 15 minutes.
+- **Stopping a share** ends its first pass, not its repairs. What went is
+  sealed, and while that seal is fresh (its sensitivity window, above)
+  a request on the group for any of its pieces, sent or not, is answered
+  on the group with no question to the operator; so a station part way
+  through can finish it. Close repairs ends it (Cancelled in the log).
+  Stopped before any burst went, it simply ends.
 - A listener shows a heard announce, and receives it if the operator
   presses Receive, or without asking if they turned on Receive broadcast
   files automatically (off by default). Pieces heard before their
   announce are held, up to 2 MB, until it comes.
+- A listener that stops receiving keeps what came as Incomplete and asks
+  for nothing more; Ask again carries on asking while the sender's seal
+  is fresh. Rejecting a file throws away what came and is logged as
+  Declined.
 - With every piece in, the whole-file digest is checked. A file that
   fails it is fetched once more from the start; a second failure ends
   it. A file announced again with the same size, piece size, digest and

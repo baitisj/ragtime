@@ -136,10 +136,11 @@ private:
              << "<td valign=\"top\" nowrap><font" << colour(secondaryText()) << ">" << clock(m.atMs)
              << "</font></td>"
              << "<td valign=\"top\" width=\"100%\"><b>" << who << "</b> a file: " << htmlEscape(card.what);
-        if (!links.empty()) html << "<br>" << links;
+        // The state under it, where a long one ("Stopped at 3 of 13 pieces.
+        // Repairs open until ...") can wrap, then the links.
+        html << "<br><font" << colour(c) << ">" << htmlEscape(card.state) << "</font>";
+        if (!links.empty()) html << "&nbsp;&nbsp; " << links;
         html << "</td>"
-             << "<td valign=\"top\" nowrap align=\"right\"><font" << colour(c) << ">" << htmlEscape(card.state)
-             << "</font></td>"
              << "</tr></table>";
         return html;
     }
