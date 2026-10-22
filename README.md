@@ -3,7 +3,7 @@
 A plain, friendly chat and file-transfer client for
 [Data2G](https://github.com/arodland/Data2G), the HF data modem by Andrew
 Rodland, KC2G. Ragtime is a sibling of
-[Glissando](https://github.com/baitisj/glissando), Jeff Baitis's (AG7EW)
+[Glissando](https://github.com/baitisj/glissando), Jeff Baitis' (AG7EW)
 chirp-mode chat app, and is named for the same musical family and for the
 ragchew.
 
