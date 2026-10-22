@@ -12,6 +12,8 @@
 
 #include "Prefs.h"
 #include "ragtime/broadcast/BroadcastChat.h"
+#include "ragtime/broadcast/BroadcastFiles.h"
+#include "ragtime/broadcast/Seals.h"
 #include "ragtime/broadcast/Stations.h"
 #include "ragtime/files/FileRows.h"
 #include "ragtime/files/FileTraffic.h"
@@ -21,6 +23,7 @@
 #include "ragtime/session/SessionChat.h"
 
 class BroadcastPage;
+struct FileCard;
 class ConnectionBar;
 class FilesPage;
 class GlobusPanel;
@@ -101,6 +104,19 @@ private:
     void checkIn();
     void setPaused(bool paused);
 
+    // Broadcast files (docs/STAGE1.md, package H): Broadcast a file... with
+    // the estimate box, each file's card on the Broadcast tab, what its
+    // links do, and keeping the seal chain across restarts.
+    void broadcastFile();
+    bool fileCard(uint64_t id, FileCard& card);
+    void broadcastFileAction(uint64_t id, const std::string& action);
+    void broadcastFileMenu(const ragtime::files::FileRow& row, wxMenu& menu);
+    void keepRepairsUntil(uint64_t id, uint64_t untilMs);
+    void receiveFile(uint64_t id);
+    void setAutoReceive(bool on);
+    void onBroadcastFiles();
+    void saveBroadcastState();
+
     // The gearshift and the width buttons.
     void loadGearshift();
     void showGearshift();
@@ -116,6 +132,8 @@ private:
     StationPrefs prefs_;
     ragtime::link::HostLink link_;
     ragtime::broadcast::BroadcastChat chat_;
+    ragtime::broadcast::Seals seals_;
+    ragtime::broadcast::BroadcastFiles broadcastFiles_;
     ragtime::session::SessionChat session_;
     ragtime::broadcast::Stations stations_;
     ragtime::gearbox::Gearshift gearshift_;
@@ -153,6 +171,9 @@ private:
     uint64_t stationsVersion_ = 0;
     std::string modeUsed_;      // the mode the host last sent in
     std::string note_;          // the latest thing worth a line in the status bar
+
+    uint64_t broadcastFilesVersion_ = 0;
+    uint16_t savedSeal_ = 0;    // the seal chain's number last saved
     std::map<std::string, std::string> askOnConnect_;   // a line to send once a session with the station is up
     std::vector<std::string> logOther_;                 // lines of the files log this version doesn't read
     uint64_t savedLog_ = ~0ull;                         // what the log on disk has (history and parts' changes)

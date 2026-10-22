@@ -204,6 +204,7 @@ std::vector<uint64_t> BroadcastChat::send(const std::string& typed, const std::s
 
     std::vector<std::vector<uint8_t>> frames;
     std::vector<uint64_t> made;
+    std::vector<protocol::Record> items;
     for (const std::string& piece : split(text, to, room))
     {
         protocol::Text t;
@@ -230,6 +231,7 @@ std::vector<uint64_t> BroadcastChat::send(const std::string& typed, const std::s
         m.state = State::Queued;
         m.mode = mode;
         records_[m.id] = record;
+        items.push_back(record);
         messages_.push_back(m);
         made.push_back(m.id);
     }
@@ -245,6 +247,7 @@ std::vector<uint64_t> BroadcastChat::send(const std::string& typed, const std::s
     {
         if (std::find(made.begin(), made.end(), m.id) != made.end()) m.burst = burst;
     }
+    if (onItems_ && burst != 0) onItems_(items, burst, mode, nowMs);
     trim();
     version_++;
     return made;
@@ -334,8 +337,32 @@ bool BroadcastChat::resend(uint64_t id, const std::string& mode, uint64_t nowMs)
     m->state = State::Queued;
     m->mode = mode;
     m->burst = link_.broadcast({frame}, mode, nowMs);
+    if (onItems_ && m->burst != 0) onItems_({record->second}, m->burst, mode, nowMs);
     version_++;
     return true;
+}
+
+protocol::Record BroadcastChat::record(protocol::Body body, uint32_t time, uint32_t item)
+{
+    return numbering_.record(std::move(body), time, item);
+}
+
+uint64_t BroadcastChat::addFile(uint64_t file, bool ours, const std::string& from, const std::string& name,
+                                uint64_t nowMs)
+{
+    Message m;
+    m.id = nextId_++;
+    m.ours = ours;
+    m.from = from;
+    m.text = name;
+    m.time = seconds(nowMs);
+    m.atMs = nowMs;
+    m.state = State::Heard;
+    m.file = file;
+    messages_.push_back(std::move(m));
+    trim();
+    version_++;
+    return messages_.back().id;
 }
 
 std::vector<protocol::Record> BroadcastChat::onEvent(const Event& event, uint64_t nowMs)

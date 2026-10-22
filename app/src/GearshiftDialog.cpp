@@ -50,12 +50,14 @@ wxColour blend(const wxColour& a, const wxColour& b, double t)
 
 const wxColour ACCENT(0x1f, 0x5f, 0xbf);      // the current gear, as the mock-ups
 const wxColour SUGGESTION(0x1e, 0x6b, 0x34);  // Auto's pick while Auto is off
+const wxColour TOO_HARD(0xc0, 0x26, 0x1a);    // a gear the path can't carry
 
 constexpr double PI = 3.14159265358979323846;
 constexpr double MIN_BPS = 20.0;
 constexpr double MAX_BPS = 10000.0;
 constexpr double DOT_RADIUS = 4.5;
-constexpr double KNOB_RADIUS = 9.5;
+constexpr double KNOB_RADIUS = 9.5;       // half a gear knob's height
+constexpr double KNOB_HALF_WIDTH = 19.0;  // wide enough for a short name, "E2C"
 
 // Why there are no gears to draw, or empty when there are: no thresholds
 // found at all, or thresholds with no widths and speeds yet (data2g-host's
@@ -89,8 +91,8 @@ void setPen(wxGraphicsContext& gc, const wxColour& colour, double width,
 
 // The Submode Map: speed across on a log scale, the S/N each mode needs down
 // the side (harder further down), one dot per mode coloured by modulation,
-// the best modes on a thin dashed line and the gears as numbered knobs on a
-// heavy one. Clicking a knob picks that gear.
+// the best modes on a thin dashed line and the gears as knobs bearing their
+// short names on a heavy one. Clicking a knob picks that gear.
 class SubmodeMap : public wxPanel
 {
 public:
@@ -186,7 +188,7 @@ private:
         {
             const double dx = at.x - xFor(p, gear.bitsPerSecond);
             const double dy = at.y - yFor(p, gear.threshold);
-            if (dx * dx + dy * dy <= (KNOB_RADIUS + 3) * (KNOB_RADIUS + 3))
+            if (std::fabs(dx) <= KNOB_HALF_WIDTH + 3 && std::fabs(dy) <= KNOB_RADIUS + 3)
                 return gear.number;
         }
         return 0;
@@ -316,8 +318,7 @@ private:
             gc->DrawEllipse(at.m_x - r, at.m_y - r, 2 * r, 2 * r);
         }
 
-        // The gears: numbered knobs joined by a heavy line, each with its short
-        // name.
+        // The gears: knobs bearing their short names, joined by a heavy line.
         const std::vector<Gear>& ladder = shift_.ladder();
         const std::optional<Gear> current = shift_.current();
         const std::optional<Gear> suggestion = shift_.suggestion();
@@ -335,30 +336,26 @@ private:
             const double x = xFor(p, gear.bitsPerSecond);
             const double y = yFor(p, gear.threshold);
             const bool isCurrent = current && current->number == gear.number;
+            const bool tooHard = snr && dbShort(gear.threshold, *snr) > 0;
+            const wxColour& line = isCurrent ? ACCENT : tooHard ? TOO_HARD : ink;
+            // The gear number only for a mode with no short name.
+            const wxString label = gear.name.empty() ? wxString::Format("%d", gear.number)
+                                                     : utf8(gear.name);
+            gc->SetFont(knobFont, isCurrent ? *wxWHITE : line);
+            double w = 0, h = 0;
+            gc->GetTextExtent(label, &w, &h);
+            const double r = KNOB_RADIUS;
+            const double half = std::max(KNOB_HALF_WIDTH, w / 2 + 5);
             if (!shift_.isAuto() && suggestion && suggestion->number == gear.number)
             {
-                const double r = KNOB_RADIUS + 4;
                 setPen(*gc, SUGGESTION, 2.5);
                 gc->SetBrush(*wxTRANSPARENT_BRUSH);
-                gc->DrawEllipse(x - r, y - r, 2 * r, 2 * r);
+                gc->DrawRoundedRectangle(x - half - 4, y - r - 4, 2 * (half + 4), 2 * (r + 4), r + 4);
             }
-            const double r = KNOB_RADIUS;
-            setPen(*gc, isCurrent ? ACCENT : ink, 2);
+            setPen(*gc, line, 2);
             gc->SetBrush(wxBrush(isCurrent ? ACCENT : back));
-            gc->DrawEllipse(x - r, y - r, 2 * r, 2 * r);
-            gc->SetFont(knobFont, isCurrent ? *wxWHITE : ink);
-            const wxString number = wxString::Format("%d", gear.number);
-            double w = 0, h = 0;
-            gc->GetTextExtent(number, &w, &h);
-            gc->DrawText(number, x - w / 2, y - h / 2);
-            // Its short name above and to the right, where no mode is (none
-            // is both faster and easier than a best mode).
-            if (!gear.name.empty())
-            {
-                gc->SetFont(knobFont, isCurrent ? ACCENT : ink);
-                gc->GetTextExtent(utf8(gear.name), &w, &h);
-                gc->DrawText(utf8(gear.name), x + r * 0.7, y - r * 0.7 - h);
-            }
+            gc->DrawRoundedRectangle(x - half, y - r, 2 * half, 2 * r, r);
+            gc->DrawText(label, x - w / 2, y - h / 2);
         }
 
         // The legend.
@@ -506,15 +503,14 @@ GearshiftDialog::GearshiftDialog(wxWindow* parent, Gearshift& shift, std::functi
     side->Add(inGear_, 0, wxBOTTOM, 4);
     snr_ = new wxStaticText(this, wxID_ANY, wxEmptyString);
     side->Add(snr_, 0, wxBOTTOM, 8);
-    gears_ = new wxListCtrl(this, wxID_ANY, wxDefaultPosition, wxSize(546, -1),
+    gears_ = new wxListCtrl(this, wxID_ANY, wxDefaultPosition, wxSize(434, -1),
                             wxLC_REPORT | wxLC_SINGLE_SEL);
-    gears_->InsertColumn(0, "Gear", wxLIST_FORMAT_RIGHT, 46);
-    gears_->InsertColumn(1, "Name", wxLIST_FORMAT_LEFT, 56);
-    gears_->InsertColumn(2, "Data2G mode", wxLIST_FORMAT_LEFT, 132);
-    gears_->InsertColumn(3, "Speed", wxLIST_FORMAT_RIGHT, 84);
-    gears_->InsertColumn(4, "S/N", wxLIST_FORMAT_RIGHT, 76);
-    gears_->InsertColumn(5, "1 KB", wxLIST_FORMAT_RIGHT, 80);
-    gears_->InsertColumn(6, "Short", wxLIST_FORMAT_RIGHT, 66);
+    gears_->InsertColumn(0, "Gear", wxLIST_FORMAT_LEFT, 56);
+    gears_->InsertColumn(1, "Data2G mode", wxLIST_FORMAT_LEFT, 132);
+    gears_->InsertColumn(2, "Speed", wxLIST_FORMAT_RIGHT, 84);
+    gears_->InsertColumn(3, "S/N", wxLIST_FORMAT_RIGHT, 76);
+    gears_->InsertColumn(4, "1 KB", wxLIST_FORMAT_RIGHT, 80);
+    gears_->SetToolTip("Gears in red need more S/N than the path has, less Auto's 3 dB margin");
     gears_->Bind(wxEVT_LIST_ITEM_SELECTED, &GearshiftDialog::onGearSelected, this);
     side->Add(gears_, 1, wxEXPAND);
     body->Add(side, 0, wxEXPAND);
@@ -539,8 +535,8 @@ GearshiftDialog::GearshiftDialog(wxWindow* parent, Gearshift& shift, std::functi
 
     SetSizerAndFit(top);
     // Fits Jeff's 1366x768 screen with room for the panel and title bar.
-    SetSize(wxSize(1256, 610));
-    SetMinSize(wxSize(1116, 520));
+    SetSize(wxSize(1144, 610));
+    SetMinSize(wxSize(1004, 520));
     refresh();
     CentreOnParent();
 }
@@ -587,18 +583,13 @@ void GearshiftDialog::refresh()
     for (std::size_t i = 0; i < ladder.size(); i++)
     {
         const Gear& gear = ladder[i];
-        const long row = gears_->InsertItem(static_cast<long>(i), wxString::Format("%d", gear.number));
-        gears_->SetItem(row, 1, utf8(gear.name));
-        gears_->SetItem(row, 2, utf8(gear.mode));
-        gears_->SetItem(row, 3, utf8(formatSpeed(gear.bitsPerSecond)));
-        gears_->SetItem(row, 4, utf8(formatDb(gear.threshold)));
-        gears_->SetItem(row, 5, utf8(formatDuration(secondsPerKilobyte(gear.bitsPerSecond))));
-        if (snr)
-        {
-            const double shortBy = dbShort(gear.threshold, *snr);
-            if (shortBy > 0.05)
-                gears_->SetItem(row, 6, wxString::Format("%.1f dB", shortBy));
-        }
+        const long row = gears_->InsertItem(static_cast<long>(i), utf8(gear.name));
+        gears_->SetItem(row, 1, utf8(gear.mode));
+        gears_->SetItem(row, 2, utf8(formatSpeed(gear.bitsPerSecond)));
+        gears_->SetItem(row, 3, utf8(formatDb(gear.threshold)));
+        gears_->SetItem(row, 4, utf8(formatDuration(secondsPerKilobyte(gear.bitsPerSecond))));
+        if (snr && dbShort(gear.threshold, *snr) > 0)
+            gears_->SetItemTextColour(row, TOO_HARD);
         if (current && current->number == gear.number)
         {
             gears_->SetItemState(row, wxLIST_STATE_SELECTED, wxLIST_STATE_SELECTED);

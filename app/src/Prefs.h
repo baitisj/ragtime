@@ -5,6 +5,7 @@
 #include <string>
 #include <vector>
 
+#include "ragtime/broadcast/Seals.h"
 #include "ragtime/broadcast/Stations.h"
 #include "ragtime/gearbox/Gearbox.h"
 
@@ -34,6 +35,12 @@ void saveInt(const char* key, int value);
 // (docs/PROTOCOL.md, "Sequence numbers").
 uint32_t loadNewestItem(const std::string& callsign);
 void saveNewestItem(const std::string& callsign, uint32_t newest);
+
+// Our seal chain on the group (docs/PROTOCOL.md, "Seals and repair"): the
+// newest seal's number and digest, kept with the numbering so the next
+// seal after a restart names the last one.
+ragtime::broadcast::Seals::Chain loadSealChain(const std::string& callsign);
+void saveSealChain(const std::string& callsign, const ragtime::broadcast::Seals::Chain& chain);
 
 // The station list's table columns, in order, and its sort.
 std::vector<ragtime::broadcast::Column> loadColumns();
@@ -74,6 +81,7 @@ constexpr const char* SORT_COLUMN = "/Stations/SortColumn";
 constexpr const char* SORT_ASCENDING = "/Stations/SortAscending";
 constexpr const char* RECEIVED_FOLDER = "/Files/ReceivedFolder";
 constexpr const char* AUTO_ACCEPT = "/Files/AutoAccept";             // callsigns, comma separated
+constexpr const char* AUTO_RECEIVE_BROADCAST = "/Files/AutoReceiveBroadcast";   // files on D2G, into the received folder
 } // namespace keys
 
 #endif

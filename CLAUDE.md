@@ -61,8 +61,15 @@ screens.
   its lasting log, `FileHistory`, which package H fills too), the Files
   tab (`app/src/FilesPage`), offer cards and the send queue in
   `SessionPage`, and the files settings in `Prefs` and
-  `SettingsDialog`. H (broadcast files) adds its rows and menus through
-  `MainFrame::refreshFiles` and the Files page's menu hooks.
+  `SettingsDialog`.
+- Package H (broadcast files with repair) gives, in `core/src/broadcast/`,
+  `Airtime` (burst costs in Data2G mode airtimes, frame and burst
+  packing, the file estimate), `Seals` (sealing what we broadcast,
+  listening windows, resend rounds, and asking for repairs with backoff
+  and suppression) and `BroadcastFiles` (files on D2G, feeding the Files
+  tab through `FileRows.h`); file cards and File... in `BroadcastPage`,
+  the File menu items and share menus in `MainFrame`, and the seal chain
+  in `Prefs`. Next is I (packaging and the first release).
 - The live design draft was the Claude Doc "Data2G client: plan"
   (https://claude.ai/code/artifact/87db2cd2-f5bc-4030-ba8d-99bef19c027d,
   private to Jeff). `docs/PLAN.md` is its 2026-10-22 snapshot and is now
@@ -126,10 +133,10 @@ screens.
 
 | Path | What |
 | --- | --- |
-| `core/` | `ragtime_core`, the socket-free library: no wx, no sockets in the engines, all unit-tested. Headers in `core/include/ragtime/`, sources in `core/src/`, one subfolder per area: `protocol/`, `link/`, `text/`, `files/` (package B; G adds `FileRows`, `FileTraffic`), `globus/` (C), `gearbox/` (D), `broadcast/` (E), `session/` (F). Add sources to `core/CMakeLists.txt` |
+| `core/` | `ragtime_core`, the socket-free library: no wx, no sockets in the engines, all unit-tested. Headers in `core/include/ragtime/`, sources in `core/src/`, one subfolder per area: `protocol/`, `link/`, `text/`, `files/` (package B; G adds `FileRows`, `FileTraffic`), `globus/` (C), `gearbox/` (D), `broadcast/` (E; H adds `Airtime`, `Seals`, `BroadcastFiles`), `session/` (F). Add sources to `core/CMakeLists.txt` |
 | `app/` | The wxWidgets app (`app/src/`). It draws and wires; logic goes in core. `MainFrame` is the one main window and owns the engines; `HostConnection` is the only code with sockets; `Prefs` holds every wxConfig key, and `appDataDir()` is where Ragtime keeps its own files (never wx's `GetUserDataDir()`: on Linux that is `~/.Ragtime`, the settings file); `app/src/globus/` is the Globus pane (`GlobusPanel`, `GlobusView`, `GlobusToggle`) |
 | `tests/` | ctest unit tests for core, plain executables on `tests/Check.h` (`CHECK`, `CHECK_EQ`). Add one with `ragtime_test(<name> <source>)` in `tests/CMakeLists.txt`. `FakeHost.*` is a fake data2g-host on loopback sockets (POSIX, so its test and the bench build only `if(UNIX)`); `FakeAirMain.cpp` is the bench `ragtime_fake_air` |
-| `tools/` | Reference scripts: `globe/` (sunlit globe renderer, and the generators of the map tables in `core/src/globus/`: coasts and borders from Natural Earth, the big lakes from `ne_110m_lakes.geojson`, state and province lines from `us_canada_admin1_lines.json`), `gearbox/` (ladders), `ham_table/` (text table 0 generator and corpus: `gen_table.py --check`), `gcc16/check.py` (GCC 16 check) |
+| `tools/` | Reference scripts: `globe/` (sunlit globe renderer, and the generators of the map tables in `core/src/globus/`: coasts and borders from Natural Earth, the big lakes from `ne_110m_lakes.geojson`, state and province lines from Natural Earth's 1:10m admin-1 lines, fetched for the run, for the countries in `gen_admin1_lines.py`), `gearbox/` (ladders), `ham_table/` (text table 0 generator and corpus: `gen_table.py --check`), `gcc16/check.py` (GCC 16 check) |
 | `cmake/` | CMake helpers. `ragtime_warnings(<target>)` gives every target `-Wall -Wextra` and, with `RAGTIME_WERROR` (on by default), `-Werror` |
 | `docs/` | The plan and specs. Change them in the same PR as the code they describe |
 
@@ -166,7 +173,11 @@ bulletin 20 s later, and `--fade` gives their sessions a 45 s fade every
 two minutes, for Link quiet. Bots save the files you send them (in the
 temp folder) and offer their bulletin again when you mention a file;
 `--rate BPS` caps session bytes (400 a second by default) so transfers
-take a while. A call
+take a while. The bots seal what they broadcast, answer repair requests
+and take broadcast files without asking; `--loss PCT` has hosts A and B
+lose that share of the group frames they hear, so repairs happen, and
+`--files` has the first bot broadcast a bulletin file a minute in and
+every 6 minutes. A call
 from host A or B is answered on its second try. Headless:
 `Xvfb :91 &`, `DISPLAY=:91 ragtime ...`, `xdotool` to click and type,
 `import -window root` for a screenshot. Never point the bench at Jeff's

@@ -80,10 +80,11 @@ hiding the globe leaves the pane's header with the unlit toggle.
 
 - Port `Globe` (wx-free projection and Natural Earth tables) from
   Glissando, then draw it in the new theme: light blue oceans `#A8D4F2`,
-  near-white land `#F7F5EE`, dark blue coasts and borders `#143068`, US
-  state and Canadian province lines thin and light
-  (`tools/globe/us_canada_admin1_lines.json`, Natural Earth, simplified to
-  0.25°).
+  near-white land `#F7F5EE`, dark blue coasts and borders `#143068`,
+  state and province lines thin and light (Natural Earth 1:10m,
+  simplified to 0.25°, by `tools/globe/gen_admin1_lines.py`) for the
+  United States, Canada, Mexico, Russia, China, India, Brazil, Argentina
+  and Australia (Jeff, 2026-10-22).
 - Lit from the subsolar point: Lambert shading on the day side, a
   twilight blend from 3° above the horizon to 12° below, so the greyline
   shows. `tools/globe/render_sunlit_globe.py` is the reference renderer;
@@ -280,6 +281,56 @@ The brief:
 - Right-click menus as in PLAN.md's Stage 1 section.
 
 ## H. Broadcast files with repair
+
+Done in the package H PR: `broadcast::Airtime` (what bursts cost in
+Data2G mode airtimes, packing records into frames and bursts, the file
+estimate), `broadcast::Seals` (sealing what we broadcast, the listening
+window and resend rounds; on the listening side, asking with backoff and
+suppression), `broadcast::BroadcastFiles` (sending and receiving files on
+D2G; its rows and finished files feed the Files tab through
+`files/FileRows.h`), all in core/src/broadcast/ with
+`tests/BroadcastFilesTest.cpp`; in the window, File... on the Broadcast
+tab, file cards among the messages, File > Broadcast a file... and
+Receive broadcast files automatically, and the share's menu on its card
+and its Files row; the seal chain kept per callsign across restarts. The
+bench's hosts can lose frames (`ragtime_fake_air --loss 20`) and its
+first bot can share a bulletin a minute in and every 6 minutes
+(`--files`). PROTOCOL.md "Seals and repair" and "Broadcast files" say
+what goes on the air. Choices made there, for Jeff to keep or change:
+
+- **When a seal goes.** 60 s after our last item when nothing more is on
+  the way, at once when a file's first pass ends, and at most 10 minutes
+  after the oldest unsealed item. Every message we broadcast is sealed,
+  not only files, so a lost line can be repaired too.
+- **Zero digests** for items whose burst was Not sent, so nobody asks for
+  them.
+- **Seals go again.** Each resend round ends with its seals, which opens
+  the next window; and a seal over a file goes again after a window with
+  no requests, at most twice more. On the bench at 20% frame loss a lost
+  seal or a lost request otherwise left a listener stuck for good.
+  Text-only seals aren't repeated, to save airtime.
+- **Who asks.** A listener asks only about overs it was there for: it
+  holds an item or a piece under the seal, or an older seal or item of
+  that station. A station that just tuned in doesn't ask for the past;
+  pressing Receive on a file it heard does, at once (within 10 s).
+- **Backoff in our own mode.** A listener spreads its request over the
+  window less its own request's airtime and 2 s, and gives up under a
+  seal after 5 requests that brought nothing.
+- **The sensitivity rule** as written in PROTOCOL.md: newest 3 seals, or
+  4 × the items' airtime, never past 2 hours; Keep open and Close repairs
+  now override it. Close repairs closes the whole seal (the other items
+  under it too).
+- **Refuse over 2 hours of airtime, warn over 15 minutes,** naming the
+  faster gears the host offers. Stations will not confirm receipt.
+- **Pacing.** 3 s between a file's bursts, the announce again every 20
+  pieces, a Not sent burst tried once more.
+- **Receive automatically** is off by default (File menu), into the
+  received folder. Ignore is logged as Declined.
+- **Incomplete.** A file still missing pieces 2 h 10 min after anything
+  new came is shown incomplete. Broadcast parts are kept in memory only
+  (24 hours on screen), not in the files log across restarts.
+
+The brief:
 
 - Broadcast a file with the estimate box and the 300 KB cap; receive
   automatically or on request.

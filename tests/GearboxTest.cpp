@@ -245,7 +245,7 @@ void testLadders()
         CHECK_EQ(ladder[2].threshold, 5.0);  // the Poor path's figure
         CHECK_EQ(ladder[2].widthHz, 2300);
         CHECK(ladder[2].modulation == Modulation::Qam16);
-        CHECK_EQ(gearLabel(ladder[2]), std::string("Gear 3 \xC2\xB7 K4C"));
+        CHECK_EQ(gearLabel(ladder[2]), std::string("Gear K4C"));
     }
 
     CHECK_EQ(widthCapHz(Width::Hz1200), 1200);
@@ -369,9 +369,9 @@ void testNames()
 
     std::vector<Gear> ladder = gearLadder(placeholderTable(), Path::Calm, 2400);
     CHECK_EQ(ladder[2].name, std::string("K4C"));
-    CHECK_EQ(gearLabel(ladder[2]), std::string("Gear 3 \xC2\xB7 K4C"));
+    CHECK_EQ(gearLabel(ladder[2]), std::string("Gear K4C"));
     ladder[2].name.clear();
-    CHECK_EQ(gearLabel(ladder[2]), std::string("Gear 3 \xC2\xB7 p-16qam"));
+    CHECK_EQ(gearLabel(ladder[2]), std::string("Gear p-16qam"));
 }
 
 void testGearshift()

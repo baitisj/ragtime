@@ -23,6 +23,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <deque>
+#include <functional>
 #include <map>
 #include <set>
 #include <string>
@@ -64,6 +65,9 @@ struct Message
     State state = State::Heard;
     uint64_t burst = 0;         // ours: HostLink's burst id
     std::string mode;           // the mode it went (or is going) out in, when known
+    // A broadcast file's card rather than a message: BroadcastFiles' id
+    // for it, with text the file's name.
+    uint64_t file = 0;
 };
 
 // "Queued", "Sending", "Waiting for the session to go idle", "Sent",
@@ -98,6 +102,23 @@ public:
 
     // The newest broadcast item's number, for the app to keep.
     uint32_t newestItem() const { return numbering_.newestItem(); }
+
+    // A record of ours for the group, numbered by the broadcast numbering:
+    // a FileAnnounce takes the next item number, a FilePiece its file's
+    // (item), and anything else the newest item's.
+    protocol::Record record(protocol::Body body, uint32_t time, uint32_t item = 0);
+
+    // Told of every burst of our items the chat hands HostLink, first time
+    // or again, so they can be sealed (broadcast::Seals).
+    using ItemsFn = std::function<void(const std::vector<protocol::Record>& items, uint64_t burst,
+                                       const std::string& mode, uint64_t nowMs)>;
+    void onItems(ItemsFn fn) { onItems_ = std::move(fn); }
+
+    // A broadcast file's card among the messages, ours or heard; file is
+    // BroadcastFiles' id for it. Returns the card's message id.
+    uint64_t addFile(uint64_t file, bool ours, const std::string& from, const std::string& name, uint64_t nowMs);
+    // Something a file card shows has changed.
+    void fileChanged() { version_++; }
 
     // "@W1AW" at the start of typed text: the station, and the text after
     // it. False when it isn't addressed.
@@ -156,6 +177,7 @@ private:
     void flushAcks(const std::string& mode, uint64_t nowMs);
 
     link::HostLink& link_;
+    ItemsFn onItems_;
     Settings settings_;
     protocol::Numbering numbering_;
     std::deque<Message> messages_;

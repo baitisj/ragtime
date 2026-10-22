@@ -250,7 +250,7 @@ Mock-ups of the three tabs: [Data2G client mock-ups](https://claude.ai/artifact/
 
 The Broadcast tab is the first tab and never closes. It is where CQs, roundtables and broadcast files happen. It works much like Glissando's Data2G broadcast chat, minus the tempo art, but on its own broadcast group and protocol.
 
-- **Speed** is the gearshift ("The gearshift", under Main window): the Gear button by Send shows the gear and its mode's short name, for example `Gear 3 · E2C` (`docs/GEARBOX.md`, "Mode names"), and opens the gearshift on the Submode Map.
+- **Speed** is the gearshift ("The gearshift", under Main window): the Gear button by Send shows the gear by its mode's short name, for example `Gear E2C` (`docs/GEARBOX.md`, "Mode names"), and opens the gearshift on the Submode Map.
 - Each message shows Queued, Sending, Sent, or Not sent, with the same rules as now (the host's ACKMODE report, two minutes to give up). No acknowledgements in broadcast mode except for addressed messages, if we keep them.
 - The station list on the left is fed by broadcast traffic: callsign, last heard, locator if sent, and whether it takes sessions. Double-clicking a station does nothing risky: it fills "@W1AW" or offers **Call**.
 - Woah! becomes a plain **Pause sending** switch on the toolbar.
@@ -294,7 +294,7 @@ One ordinary window in the system theme, laid out like a messaging app: connecti
 - **Connection bar:** data2g-host address and state (Connected, Reconnecting in 8 s), my callsign, broadcast group name (D2G), width (2400 Hz or 500 Hz, sending `BW2300`/`BW500`), **Accept sessions**, **Pause sending**, and a TX light from the host's `PTT` report.
 - **Left pane:** Stations heard in broadcast mode, with the session partner pinned at the top while a session is up.
 - **Right pane: the map** (your ask, 2026-10-22). Glissando's globe at the top, showing the picked station's path, with a caption in Glissando's form, `W1AW · FN31 · 3,951 km · 81°`, and the station's details below. The theme is new: light blue oceans (#A8D4F2), near-white land (#F7F5EE), and dark blue coasts and borders (#143068). The globe is lit from the sun's real position: the light source sits over the subsolar point, so the night side falls in shadow and the greyline shows as the soft edge between them. The twilight is blended from 3° above the horizon to 12° below it.
-- **Globus on or off** (your ask, 2026-10-22). A toggle button labelled **Globus** sits where the map's heading was. It turns blue when the globe is showing, and when the globe is hidden it moves to the right end of the tab strip, so the Broadcast and Session messages can use the full width. View > Globus does the same. Beside the button, the time the globe is lit for, in UTC and local time: `22:36 UTC / 15:36 PDT`. The dividers between the station list, the tabs and the globe drag, and the client remembers where you left them. The globe also draws US state and Canadian province lines, thin and light, from Natural Earth simplified to about a quarter of a degree, so the whole set stays small.
+- **Globus on or off** (your ask, 2026-10-22). A toggle button labelled **Globus** sits where the map's heading was. It turns blue when the globe is showing, and when the globe is hidden it moves to the right end of the tab strip, so the Broadcast and Session messages can use the full width. View > Globus does the same. Beside the button, the time the globe is lit for, in UTC and local time: `22:36 UTC / 15:36 PDT`. The dividers between the station list, the tabs and the globe drag, and the client remembers where you left them. The globe also draws state and province lines, thin and light, from Natural Earth simplified to about a quarter of a degree, so the whole set stays small: for the United States, Canada, Mexico, Russia, China, India, Brazil, Argentina and Australia (your ask, 2026-10-22).
 - **Station list columns.** Call, Status, Heard, Locator, Distance, Bearing, Key (the seal badge) and Services, chosen from a Columns menu and sortable by any of them. SNR waits on a host report (Asks for Andrew). With the map shown, the narrow list keeps locator and distance under the last-heard time.
 - **The gearshift** (your ask, 2026-10-22, built on the Data2G Submode Map you sent). One popup, opened from the width button on the connection bar or the Gear button by Send. The one-press 500 Hz button stays. Details under "The gearshift", below.
 - **Auto ALC** beside TX Off: a small checkbox with a level meter that keeps transmit drive just under the rig's ALC. The client never touches audio, so this needs a host command to set the TX level. The client can read ALC through Hamlib on many rigs (Asks for Andrew).
@@ -321,7 +321,7 @@ One ordinary window in the system theme, laid out like a messaging app: connecti
 | 7 | w48-16qam-r1/2 · 3278 · +13.8 | w48-16qam-r1/2 · 3278 · +7.6 | n10-256l-r3/4 · 2067 · +25.8 |
 | 8 | w48-256l-r5/8 · 8222 · +25.8 | w48-256l-r5/8 · 8222 · +18.5 |  |
 
-The gear list beside the map gives each gear's speed, its S/N on this path, how long 1 KB takes, and how many dB short the path is. The figures are the map's: 10% failure of the smallest ARQ burst, with S/N measured in 2500 Hz. Longer bursts need a little more. Glissando's five speeds sit near the Calm ladder, and two of them (fsk16r25-r1/3 and w48-16qam-r1/2) are gears on it. The new ladder replaces them.
+The gear list beside the map gives each gear's short name, Data2G mode, speed, its S/N on this path and how long 1 KB takes; gears the path can't carry (less the 3 dB margin) are red. The figures are the map's: 10% failure of the smallest ARQ burst, with S/N measured in 2500 Hz. Longer bursts need a little more. Glissando's five speeds sit near the Calm ladder, and two of them (fsk16r25-r1/3 and w48-16qam-r1/2) are gears on it. The new ladder replaces them.
 
 The window opens at its last size and place, works at 1280×720, and uses the system font, so it reads well on a small laptop at the operating position. Dark mode follows the system.
 
@@ -745,7 +745,7 @@ Functionally equivalent means the client does all of this (tick as each lands):
 - [x] Waiting for the session to go idle, shown on broadcast messages held by a session (packages E and F)
 - [x] Incoming sessions, with the caller on the station list at once (package F)
 - [ ] Session files: offer, save or decline, auto-accept list, carrying on from a kept part, whole-file hash check
-- [ ] Broadcast files with repair, received automatically or on request
+- [x] Broadcast files with repair, received automatically or on request (package H)
 - [ ] Progress for each transfer, both directions at once, with a finish estimate
 - [x] The 500 Hz setting, sending `BW500`/`BW2300` (package E)
 - [x] Pause sending (Glissando's Woah!) (package E)
