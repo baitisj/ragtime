@@ -12,8 +12,13 @@ constexpr int TICK_MS = 100;
 // A try that hasn't connected in this long has failed.
 constexpr uint64_t CONNECT_TIMEOUT_MS = 5000;
 
+// The session data port, when it won't connect or closes, is tried again
+// this often while the other two are up.
+constexpr uint64_t DATA_RETRY_MS = 5000;
+
 const int ID_KISS = 1;
 const int ID_COMMAND = 2;
+const int ID_DATA = 3;
 
 } // namespace
 
@@ -30,7 +35,7 @@ HostConnection::HostConnection(ragtime::link::HostLink& link, EventsFn onEvents)
 HostConnection::~HostConnection()
 {
     timer_.Stop();
-    for (Port* port : {&kiss_, &command_})
+    for (Port* port : {&kiss_, &command_, &data_})
     {
         if (port->socket != nullptr)
         {
@@ -86,24 +91,54 @@ void HostConnection::stop()
     flush();
 }
 
+namespace
+{
+
+void openPort(wxEvtHandler& handler, wxSocketClient*& socket, int id, const std::string& host, int number)
+{
+    socket = new wxSocketClient(wxSOCKET_NOWAIT);
+    socket->SetEventHandler(handler, id);
+    socket->SetNotify(wxSOCKET_CONNECTION_FLAG | wxSOCKET_INPUT_FLAG | wxSOCKET_OUTPUT_FLAG | wxSOCKET_LOST_FLAG);
+    socket->Notify(true);
+    wxIPV4address address;
+    address.Hostname(wxString::FromUTF8(host));
+    address.Service((unsigned short)number);
+    socket->Connect(address, false);
+}
+
+} // namespace
+
 void HostConnection::connectBoth()
 {
     reconnect_.trying();
     state_ = State::Connecting;
     triedMs_ = nowMs();
-    auto open = [this](Port& port, int id, int number) {
-        port.socket = new wxSocketClient(wxSOCKET_NOWAIT);
-        port.socket->SetEventHandler(*this, id);
-        port.socket->SetNotify(wxSOCKET_CONNECTION_FLAG | wxSOCKET_INPUT_FLAG | wxSOCKET_OUTPUT_FLAG
-                               | wxSOCKET_LOST_FLAG);
-        port.socket->Notify(true);
-        wxIPV4address address;
-        address.Hostname(wxString::FromUTF8(host_));
-        address.Service((unsigned short)number);
-        port.socket->Connect(address, false);
-    };
-    open(kiss_, ID_KISS, kissPort_);
-    open(command_, ID_COMMAND, commandPort_);
+    openPort(*this, kiss_.socket, ID_KISS, host_, kissPort_);
+    openPort(*this, command_.socket, ID_COMMAND, host_, commandPort_);
+    // The data port at the same time, so it is up before a session comes.
+    connectData();
+}
+
+void HostConnection::connectData()
+{
+    if (data_.socket != nullptr) return;
+    dataRetryMs_ = nowMs() + DATA_RETRY_MS;
+    openPort(*this, data_.socket, ID_DATA, host_, commandPort_ + 1);
+}
+
+void HostConnection::closeData()
+{
+    bool wasUp = data_.up;
+    if (data_.socket != nullptr)
+    {
+        data_.socket->Notify(false);
+        data_.socket->Destroy();
+        data_.socket = nullptr;
+    }
+    data_.up = false;
+    data_.out.clear();
+    dataRetryMs_ = nowMs() + DATA_RETRY_MS;
+    if (wasUp && dataSide_.up) dataSide_.up(false);
 }
 
 void HostConnection::closeBoth(const std::string& why)
@@ -120,6 +155,7 @@ void HostConnection::closeBoth(const std::string& why)
         port->up = false;
         port->out.clear();
     }
+    closeData();
     if (wasUp) link_.commandDown(nowMs());
     if (!why.empty())
     {
@@ -132,6 +168,40 @@ void HostConnection::closeBoth(const std::string& why)
 
 void HostConnection::onSocket(wxSocketEvent& event)
 {
+    if (event.GetId() == ID_DATA)
+    {
+        if (data_.socket == nullptr || event.GetSocket() != data_.socket) return;
+        switch (event.GetSocketEvent())
+        {
+            case wxSOCKET_CONNECTION:
+                data_.up = true;
+                if (dataSide_.up) dataSide_.up(true);
+                break;
+            case wxSOCKET_INPUT:
+            {
+                char buffer[4096];
+                for (;;)
+                {
+                    data_.socket->Read(buffer, sizeof buffer);
+                    size_t n = data_.socket->LastReadCount();
+                    if (n == 0) break;
+                    if (dataSide_.bytes) dataSide_.bytes((const uint8_t*)buffer, n);
+                    if (data_.socket == nullptr) return;
+                }
+                break;
+            }
+            case wxSOCKET_OUTPUT:
+                write(data_);
+                break;
+            case wxSOCKET_LOST:
+                // Only sessions need it: the group carries on without it.
+                closeData();
+                break;
+        }
+        flush();
+        return;
+    }
+
     Port& port = event.GetId() == ID_KISS ? kiss_ : command_;
     bool isCommand = &port == &command_;
     if (port.socket == nullptr || event.GetSocket() != port.socket) return;
@@ -212,6 +282,12 @@ void HostConnection::flush()
             link_.takeCommandOutput();
             link_.takeKissOutput();
         }
+        if (dataSide_.take)
+        {
+            std::vector<uint8_t> bytes = dataSide_.take();
+            if (data_.up) data_.out.append(bytes.begin(), bytes.end());
+            write(data_);
+        }
         std::vector<ragtime::link::HostLink::Event> events = link_.takeEvents();
         if (events.empty()) break;
         if (onEvents_) onEvents_(events);
@@ -228,6 +304,11 @@ void HostConnection::onTimer(wxTimerEvent&)
         return;
     }
     if (state_ == State::Waiting && reconnect_.due(now)) connectBoth();
+    if (state_ == State::Connected && !data_.up && now >= dataRetryMs_)
+    {
+        closeData();
+        connectData();
+    }
     link_.tick(now);
     flush();
 }

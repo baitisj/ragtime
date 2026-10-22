@@ -166,6 +166,10 @@ void HostLink::tick(uint64_t nowMs)
         if (modeAsked_) answered(true, nowMs);
     }
 
+    // Leave now always leaves, whatever the host makes of the ABORT.
+    if (session_ == SessionState::Leaving && abortMs_ != 0 && nowMs >= abortMs_ + ABORT_WAIT_MS)
+        finishSession(SessionEnd::Left);
+
     Burst* burst = current();
     bool withHost = burst != nullptr && (burst->state == BurstState::Sending || burst->state == BurstState::Held);
     if (withHost && burst->unsentMs >= NOT_SENT_MS)
@@ -236,6 +240,12 @@ void HostLink::onLine(const std::string& line, uint64_t nowMs)
                 e.text = a.command;
                 emit(e);
                 if (a.answer == BCAST_PORT) break;
+                // A call the host won't make.
+                if (a.command.compare(0, 8, "CONNECT ") == 0 && session_ == SessionState::Calling)
+                {
+                    finishSession(SessionEnd::Refused);
+                    break;
+                }
             }
             if (a.command.compare(0, 10, "BCAST MODE") == 0) answered(ok, nowMs);
             break;
@@ -413,6 +423,13 @@ HostLink::BurstState HostLink::burstState(uint64_t id) const
     return BurstState::NotSent;
 }
 
+bool HostLink::burstWithHost() const
+{
+    if (bursts_.empty()) return false;
+    BurstState state = bursts_.front().state;
+    return state == BurstState::Sending || state == BurstState::Held;
+}
+
 void HostLink::setPaused(bool paused, uint64_t nowMs)
 {
     advance(nowMs);
@@ -488,6 +505,7 @@ bool HostLink::call(const std::string& peer, uint64_t nowMs)
     peer_ = them;
     incoming_ = false;
     buffer_ = 0;
+    abortMs_ = 0;
     sendLine("CONNECT " + commandCallsign(settings_.callsign) + " " + them, OK, nowMs);
     Event e;
     e.type = Event::Type::SessionCalling;
@@ -510,6 +528,7 @@ bool HostLink::leaveNow(uint64_t nowMs)
 {
     if (session_ == SessionState::None) return false;
     session_ = SessionState::Leaving;
+    if (abortMs_ == 0) abortMs_ = std::max<uint64_t>(nowMs, 1);
     sendLine("ABORT", OK, nowMs);
     return true;
 }
@@ -522,6 +541,7 @@ void HostLink::finishSession(SessionEnd end)
     e.sessionEnd = end;
     session_ = SessionState::None;
     buffer_ = 0;
+    abortMs_ = 0;
     emit(e);
     heldChanged();
 }

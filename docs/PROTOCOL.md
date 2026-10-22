@@ -290,11 +290,34 @@ host giving up the link. Nothing else opens or closes one.
 4. The far end's Hello can arrive before `CONNECTED` is read, since they
    come on different ports. Ready the stream reader when a session ends,
    not when one starts.
+5. **Leaving.** Before `DISCONNECT`, a station writes a **Status** QRV
+   into the session, its farewell, and sends `DISCONNECT` once the host
+   has read it (or 10 s on). The far end, finding the farewell in the
+   stream, says "Session ended by AG7EW"; a session that ends without one
+   is "Link lost". The farewell and the host's `DISCONNECTED` come on
+   different ports, in either order, so a station still reads the stream
+   for a second after a session ends without one. Leave now (`ABORT`)
+   writes no farewell.
+6. **On the group,** each end sends a Status QRL naming its partner when
+   a session starts, and a Status QRV when it ends (`docs/PLAN.md`, "Busy
+   stations"). The host holds the QRL until the session goes idle; a QRL
+   still unsent when the session ends is taken back, with no QRV after
+   it.
 
 Data2G delivers the session's bytes in order and acknowledges them: the
-host's `BUFFER <n>` report is the bytes written that the far end has not
-yet acknowledged. A station takes its own writes up to the total written
-minus n as delivered.
+host's `BUFFER <n>` report is the bytes the host has read from us that the
+far end has not yet acknowledged. A station takes its own writes up to
+what the host has read minus n as delivered, counting only what it can
+be sure of (`session::StreamAccount`):
+
+- A count that rose by k means the host read at least k more bytes,
+  since acknowledgements only lower it.
+- `BUFFER 0` means everything read is acknowledged. One that comes 2 s
+  or more after a write settles that write too: the host reads its data
+  port as bytes come and answers each read with a count, so a 0 that late
+  is not from before the read. (A read that takes an acknowledgement
+  bigger than itself in the same step lowers the count instead of raising
+  it; this is what settles it.)
 
 ### Files in a session
 

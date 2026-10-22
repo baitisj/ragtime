@@ -14,12 +14,14 @@
 #include "ragtime/broadcast/Stations.h"
 #include "ragtime/gearbox/Gearbox.h"
 #include "ragtime/link/HostLink.h"
+#include "ragtime/session/SessionChat.h"
 
 class BroadcastPage;
 class ConnectionBar;
 class GlobusPanel;
 class GlobusToggle;
 class HostConnection;
+class SessionPage;
 class StationList;
 class wxMenu;
 class wxNotebook;
@@ -57,6 +59,17 @@ private:
     void stationMenu(const std::string& call);
     void updateTabLabels();
 
+    // Sessions (docs/PLAN.md, "Sometimes we ragchew"): entered only with
+    // Call or by being called, left only with Leave or Leave now.
+    void callStation(const std::string& call);
+    void callPrompt();
+    void leaveSession();
+    void leaveSessionNow();
+    void onSessionData(const uint8_t* bytes, size_t length);
+    void onSessionEvents();
+    void refreshSession();
+    bool canCall() const;
+
     // Broadcasts.
     bool sendTyped(const std::string& typed);
     std::string broadcastMode() const;
@@ -78,6 +91,7 @@ private:
     StationPrefs prefs_;
     ragtime::link::HostLink link_;
     ragtime::broadcast::BroadcastChat chat_;
+    ragtime::session::SessionChat session_;
     ragtime::broadcast::Stations stations_;
     ragtime::gearbox::Gearshift gearshift_;
     std::unique_ptr<HostConnection> host_;
@@ -89,6 +103,7 @@ private:
     wxPanel* middle_ = nullptr;
     wxNotebook* tabs_ = nullptr;
     BroadcastPage* broadcast_ = nullptr;
+    SessionPage* sessionPage_ = nullptr;
     GlobusPanel* globus_ = nullptr;
     GlobusToggle* tabToggle_ = nullptr;
     wxMenu* viewMenu_ = nullptr;
@@ -101,6 +116,8 @@ private:
 
     uint64_t seenMessage_ = 0;  // the newest message id the operator has seen
     size_t unread_ = 0;
+    size_t sessionUnread_ = 0;  // heard in the session while its tab is out of sight
+    std::string pendingCall_;   // to call once the session we're leaving has ended
     uint64_t stationsVersion_ = 0;
     std::string modeUsed_;      // the mode the host last sent in
     std::string note_;          // the latest thing worth a line in the status bar

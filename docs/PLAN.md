@@ -741,9 +741,9 @@ Decided (2026-10-21): Glissando drops Data2G entirely as soon as the client is j
 Functionally equivalent means the client does all of this (tick as each lands):
 
 - [ ] Broadcast ragchew at every speed, with Sending, Sent and Not sent
-- [ ] Messages to one station in a session, delivered by the modem's acknowledgement
-- [ ] Waiting for the session to go idle, shown on broadcast messages held by a session
-- [ ] Incoming sessions, with the caller on the station list at once
+- [x] Messages to one station in a session, delivered by the modem's acknowledgement (package F)
+- [x] Waiting for the session to go idle, shown on broadcast messages held by a session (packages E and F)
+- [x] Incoming sessions, with the caller on the station list at once (package F)
 - [ ] Session files: offer, save or decline, auto-accept list, carrying on from a kept part, whole-file hash check
 - [ ] Broadcast files with repair, received automatically or on request
 - [ ] Progress for each transfer, both directions at once, with a finish estimate

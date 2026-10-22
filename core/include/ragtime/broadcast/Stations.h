@@ -87,7 +87,8 @@ struct Station
 // What the Status column shows.
 struct StatusView
 {
-    std::string word;       // "QRV", "QRL with KC2G", "QRL? 25 min ago", "No sessions", "QRT"
+    std::string word;       // "QRV", "QRL with KC2G", "QRL? 25 min ago", "No sessions", "QRT",
+                            // "In session with you", "Calling"
     bool filled = true;     // ● or ○
     std::string how;        // the tooltip: how we know, and when
 };
@@ -107,6 +108,13 @@ public:
     void heard(const std::string& call, uint64_t nowMs);
 
     void clear();
+
+    // The station a session is up with, or being called: listed at once
+    // (a caller may never have been heard on the group), pinned at the top
+    // of every sort, and shown "In session with you" or "Calling". Empty
+    // for none.
+    void setPartner(const std::string& call, bool connected, uint64_t nowMs);
+    const std::string& partner() const { return partner_; }
 
     const std::vector<Station>& stations() const { return stations_; }
     const Station* find(const std::string& call) const;
@@ -135,6 +143,8 @@ private:
 
     std::string me_;
     std::string home_;
+    std::string partner_;
+    bool partnerConnected_ = false;
     std::vector<Station> stations_;
     uint64_t version_ = 0;
 };

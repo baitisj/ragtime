@@ -12,6 +12,7 @@ add_executable(ragtime WIN32
     src/HostConnection.cpp
     src/Html.cpp
     src/Prefs.cpp
+    src/SessionPage.cpp
     src/SettingsDialog.cpp
     src/StationList.cpp
     src/Thresholds.cpp
