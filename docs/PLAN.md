@@ -250,7 +250,7 @@ Mock-ups of the three tabs: [Data2G client mock-ups](https://claude.ai/artifact/
 
 The Broadcast tab is the first tab and never closes. It is where CQs, roundtables and broadcast files happen. It works much like Glissando's Data2G broadcast chat, minus the tempo art, but on its own broadcast group and protocol.
 
-- **Speed** is the gearshift ("The gearshift", under Main window): the Gear button by Send shows the gear and its mode's short name, for example `Gear 3 · E2C` (`docs/GEARBOX.md`, "Mode names"), and opens the gearshift on the Submode Map.
+- **Speed** is the gearshift ("The gearshift", under Main window): the Gear button by Send shows the gear by its mode's short name, for example `Gear E2C` (`docs/GEARBOX.md`, "Mode names"), and opens the gearshift on the Submode Map.
 - Each message shows Queued, Sending, Sent, or Not sent, with the same rules as now (the host's ACKMODE report, two minutes to give up). No acknowledgements in broadcast mode except for addressed messages, if we keep them.
 - The station list on the left is fed by broadcast traffic: callsign, last heard, locator if sent, and whether it takes sessions. Double-clicking a station does nothing risky: it fills "@W1AW" or offers **Call**.
 - Woah! becomes a plain **Pause sending** switch on the toolbar.
@@ -321,7 +321,7 @@ One ordinary window in the system theme, laid out like a messaging app: connecti
 | 7 | w48-16qam-r1/2 · 3278 · +13.8 | w48-16qam-r1/2 · 3278 · +7.6 | n10-256l-r3/4 · 2067 · +25.8 |
 | 8 | w48-256l-r5/8 · 8222 · +25.8 | w48-256l-r5/8 · 8222 · +18.5 |  |
 
-The gear list beside the map gives each gear's speed, its S/N on this path, how long 1 KB takes, and how many dB short the path is. The figures are the map's: 10% failure of the smallest ARQ burst, with S/N measured in 2500 Hz. Longer bursts need a little more. Glissando's five speeds sit near the Calm ladder, and two of them (fsk16r25-r1/3 and w48-16qam-r1/2) are gears on it. The new ladder replaces them.
+The gear list beside the map gives each gear's short name, Data2G mode, speed, its S/N on this path and how long 1 KB takes; gears the path can't carry (less the 3 dB margin) are red. The figures are the map's: 10% failure of the smallest ARQ burst, with S/N measured in 2500 Hz. Longer bursts need a little more. Glissando's five speeds sit near the Calm ladder, and two of them (fsk16r25-r1/3 and w48-16qam-r1/2) are gears on it. The new ladder replaces them.
 
 The window opens at its last size and place, works at 1280×720, and uses the system font, so it reads well on a small laptop at the operating position. Dark mode follows the system.
 

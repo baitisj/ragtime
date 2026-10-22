@@ -23,19 +23,22 @@ Gear button by Send. The popup *is* the Submode Map:
   F.1487 fading channels). The path picks the gearbox, because modes rank
   very differently once the path fades: polar modes rise on a good fading
   path and the QAM modes sink.
-- The **gears** are numbered knobs joined by a heavy line, each labelled
-  with its short name (below, "Mode names"); every other
+- The **gears** are knobs bearing their short names (below, "Mode
+  names"), joined by a heavy line; every other
   best mode sits on a thin dashed line. The current gear is filled blue.
 - **Auto**: the path's S/N, from the station's last few bursts, is a
   dashed line; everything needing more than that, less a 3 dB margin, is
   shaded. Auto takes the fastest gear above the shading (ringed in green
   when Auto is off, as a suggestion).
-- The gear list beside the map: gear, short name, Data2G mode, speed, S/N
-  on this path, how long 1 KB takes, and how many dB short the path is.
+- The gear list beside the map: the gear (its short name), Data2G mode,
+  speed, S/N on this path, and how long 1 KB takes. Gears go by their
+  names, not numbers (Jeff, 2026-10-22). Once the path's S/N is known,
+  gears needing more than it less the 3 dB margin are red, in the list
+  and on the map (Jeff, 2026-10-22).
 - Leave out the `ack-` modes: they carry the host's own ARQ control.
 
 The connection bar shows `2.4 kHz ▼` and `500 Hz`; the button by Send
-shows `Gear 3 · E2C ▼`, with the Data2G name, speed and S/N in its
+shows `Gear E2C ▼`, with the Data2G name, speed and S/N in its
 tooltip. FSK, PSK and the rest show only in the popup.
 
 ## How the gears are chosen
