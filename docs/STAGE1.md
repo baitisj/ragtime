@@ -36,6 +36,22 @@ Done in the skeleton PR: see "Layout" and "Build and test" in
 
 ## B. Protocol v0 and the core library
 
+Done in the package B PR: `docs/PROTOCOL.md` is the spec, and
+CLAUDE.md's Status lists what is where. For the packages after it:
+
+- **E** opens the host with `link::HostLink` (KISS and command ports),
+  builds frames with `protocol::encodeFrame` and numbers broadcasts with
+  a `protocol::Numbering` saved across restarts.
+- **F** reads the session data port with `protocol::StreamReader`
+  (opened by `protocol::streamOpening` and a Hello), with a fresh
+  Numbering each session. Reset the reader when a session ends, not when
+  `CONNECTED` arrives: the far end's Hello can come first.
+- **G** drives `files::SessionFiles` from the session (records, pieces,
+  `BUFFER` acknowledgements); keeping part files across restarts is
+  still to do.
+- **H** has the Seal, RepairRequest, FileAnnounce and FilePiece records
+  and `protocol::recordDigest`; the behaviour is its own.
+
 - Write `docs/PROTOCOL.md` v0 before the code: the records from PLAN.md's
   "On the air" (UTF-8 text records with callsign, sequence number and
   time; a hello record with protocol version and the records each end

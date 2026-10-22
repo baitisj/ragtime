@@ -1,0 +1,1274 @@
+ The Glissando app A desktop front end for Glissando : a console with the
+visi-scope waterfall, tuning and the mode's options, and a COMMS window for
+text chat whose messages go out as Glissando melodies. It lives in app/, and
+the C++ modem it uses lives in modem/, beside the NumPy prototype in
+prototype/ that the modem's tests are checked against. Where it came from
+app/ started as a copy of baitisj/freedv-gui, branch
+claude/glissando-frontend-xwberv at commit fa6a931 (itself Jeff's
+text-messaging fork of FreeDV 2.4.1), so it keeps FreeDV's licence:
+app/COPYING (LGPL 2.1) covers everything under app/. The rest of this
+repository, modem/ included, is MIT (LICENSE). It is the Glissando app, not
+a FreeDV release. Voice is outside its scope: it has no voice controls, no
+FreeDV main window, no FreeDV Reporter and no FreeDV Help menu, and text
+chat runs over Glissando. It does not carry RADE either, and the FreeDV
+voice modem is gone: nothing demodulates voice, and the console's waterfall
+takes its spectrum from its own FFT of the radio input. The codec2 library
+is still built in underneath for its data modes, which chat falls back to
+only if the console is closed. The shared freedv-backend library is no
+longer fetched at configure time: app/backend/ holds a copy of it with RADE,
+RADE text, FARGAN and the Opus bandwidth expander taken out . Settings a
+FreeDV build wrote, such as a saved voice mode or squelch level, are
+ignored. Building and running (Linux) Packages on Debian or Ubuntu: sudo apt
+install build-essential cmake git autoconf automake libtool \
+libwxgtk3.2-dev libpulse-dev libspeexdsp-dev libsndfile1-dev \ libhamlib-dev
+libasound2-dev libao-dev libgsm1-dev Then, from the top of the repository:
+cmake -S app -B build -DUSENATIVEAUDIO=1 -DUNITTEST=ON
+-DCMAKEBUILDTYPE=Release cmake --build build -j ./build/src/glissando
+Without a build type the build is Debug, and an unoptimised receiver cannot
+keep up with listening on every tempo at once: decodes fall further and
+further behind the air. The first configure fetches libsamplerate from
+GitHub. ctest --test-dir build -R "glissandotextmessaging" runs the modem
+and chat tests. Two floating windows Both open at launch: The console, the
+application's window: the visi-scope waterfall, tuning, the mode's
+modulation options, the radio's dial and the setup dialogs, dressed as
+Chaotica's control room from the Captain Proton holonovel. Closing it quits.
+The COMMS window ("Glissando COMMS"), where chat is sent and read: heard
+stations, the log of messages and the transmitter, in the same dress.
+Closing it only hides it; Comms on the console brings it back, and flashes
+red while it is closed and a message for you, or for all, has come in. The
+snooping window ("Glissando Snooper"): every message the station hears,
+including directed messages between other stations, which the chat window
+leaves out. Messages for you are lit and marked FOR YOU. The pings, pongs
+and acknowledgements around them are listed in small print, and Every frame
+adds each fragment as it is decoded. An addressee that has never been heard
+transmitting shows as and the CRC of its callsign, because frames carry only
+that. Closing it only hides it; Snooper on the console brings it back with
+everything heard meanwhile. The COMMS and snooping windows come back at
+launch only if they were open when the app last closed. --glissando is still
+accepted, so older scripts keep working, but it no longer changes anything.
+Controls Control What it does --- --- Visi-scope Receive spectrum over the
+melody's part of the passband, white phosphor on black. The scale's notes
+are ruled across it with the receiver's +/-25 Hz search band shaded. Double
+click to put the lowest note where you clicked; mouse wheel nudges the
+tuning 0.1 Hz a click, 10 Hz with shift, 1 Hz with control. Decoded frames
+Every frame the receiver decodes is written back on the visi-scope where it
+was heard, and scrolls down with it. Its held notes are lit over the
+phosphor (the three signature motifs brighter, and marked as bars down the
+left edge), and a caption beside it reads out what that frame added to the
+chat frame, which Glissando carries nine bytes at a time: first the header
+fields as each one becomes whole (MESSAGE, TO YOU, DE K6ABC, the message
+number, which part of how many), then the characters of the text. A frame
+that finishes a chat frame says RECEIVED. Frames addressed to other stations
+are written up too. Scan rate Waterfall rows per second, 0.5 to 20. Time
+lens On by default. The top of the visi-scope works like an elongated convex
+lens: the newest rows are drawn three pixels tall, and further down the time
+scale eases into a logarithmic one (y = K asinh(age / tau)), so older
+history moves down ever more slowly and eight times as much of it stays on
+screen as without the lens. Where several rows share a pixel the brightest
+wins, so an old, weak melody is squeezed but never averaged away. The rim
+marked TIME LENS x3 is where one row takes one pixel. The time scale on the
+left follows the lens. Off: one row per pixel, as before. Duet voice Widens
+the scope to show the duet gear's high voice (C6..E7). The history is kept
+across the whole band, so widening, narrowing or retuning the scope redraws
+what was heard on the new scale rather than wiping it. All tempos Decode
+every gear at once, so a station that shifts gear is still heard. Off: only
+the chosen gear (and the one automatic shifting picked). Melody offset Moves
+every note by up to +/-250 Hz, on transmit and receive: the audio equivalent
+of the tuning dial. Mouse wheel: 0.1 Hz a click, 10 Hz with shift, 1 Hz with
+control. Dragging catches at 0 Hz, and a double click returns there. Radio
+dial Shows the rig frequency, read from the radio once a second and again
+just before each keying (the radio is not read while it transmits). The
+radio is the source of truth: turning its dial or retuning it with rigctl
+shows here, and the app never puts it back. Only Presets (the frequency
+list, edited in Preferences, Options) and Set (a typed frequency) retune the
+radio; one picked while disengaged is sent when the radio connects. Starting
+and stopping leave the radio where it is. The US data segment check follows
+the shown frequency. Tempo Adagio (640 ms notes, 55 s frame), Andante,
+Allegro, Presto (80 ms, 7 s), Duet (two voices, two payloads per frame).
+Auto shift Picks the fastest gear the SNR and Doppler spread measured on the
+last frame heard support (recommendGear, the prototype's table with 2 dB
+margin). The tempo being sent lights up; the hand-picked one glows faintly
+beside it, and is used until something is heard, and again 15 minutes after
+the last frame. Scale Pentatonic (default, harmonious when stations
+overlap), whole tone, diminished, diabolus (tritones). The scale costs
+nothing in sensitivity . It is the scale you send in: the receiver hears
+every scale and shows the one heard . Telemetry Signal meter (SNR of the
+last frame heard, red from -30 to -20 dB where a frame is only just
+copyable; while transmitting, on radios whose Hamlib backend reports it, the
+meter reads the radio's SWR instead, asked for once a second, red above
+2.5:1), Doppler spread, tempo of the last frame and how long ago, tempo we
+would send at, that tempo's frame length, and the scale the last frame was
+sung in. Engage Starts and stops audio. Comms Lit while the COMMS window is
+up. Press it to open or close that window. While it is closed, a chat
+message received, directed to you or broadcast, makes the button flash red,
+in step with ENGAGE TO SEND, until the window is opened; pongs,
+acknowledgements and the window's own notices do not. Snooper Lit while the
+snooping window is up. Press it to open or close that window. Preferences
+Drops down Options, Sound cards, Rig control (CAT and PTT) and Easy setup.
+Sound cards, rig control and easy setup only change while disengaged. The
+app opens only the radio's two audio streams, input from the radio and
+output to it, so Sound cards and Easy setup ask for nothing else; leave the
+output as none to only listen. Options has four tabs: Station (your
+callsign, and the Stations Heard log file, a CSV line for each station whose
+chat frame is heard), Rig Control (among the rest, the SWR switches: show
+SWR on the meter while transmitting, on by default, and abort the
+transmission at the first reading over 3:1, off by default), Modem ) and
+Debugging. !The visi-scope at Presto, 10 rows a second, with a message from
+K6ABC and W1AW's acknowledgement written on it as each frame decoded (a
+simulated channel, drawn by the scope's own code) !The same with the time
+lens on after a three minute exchange: the last seconds magnified under the
+glass at the top, then the history squeezed on a logarithmic scale down to
+four minutes ago, with the newest captions kept where older ones would
+overlap (simulated channel) Glissando keeps its own settings and never reads
+or changes FreeDV's, so the two can be installed side by side. On Linux the
+settings are in ~/.glissando.conf (or ~/.config/glissando/glissando.conf
+with wxWidgets 3.3 and later), the chat history in
+~/.glissando/textmessaging.db (~/.local/share/glissando/ with 3.3), and the
+default reception log in ~/.local/share/glissando/. On Windows the settings
+are under HKEYCURRENTUSER\Software\Glissando. Nothing is imported from an
+existing FreeDV setup, so the first start runs Easy setup. Glissando's own
+options are in the Glissando section. Preset frequencies Presets ships with
+one calling frequency per HF band, each inside the data segment (US 47 CFR
+97.305 and the IARU Region 2 band plan) and just below the FT8, JS8 and
+PSK31 watering holes, so the whole signal stays clear of them. A solo frame
+sits 330 to 880 Hz above the dial; the duet voice reaches about 2.6 kHz, and
+the melody offset adds up to 250 Hz either way. All are USB dials. Band Dial
+(MHz) Why there --------- 160 m 1.846 Above FT8 (1.840) and JS8 (1.842),
+inside Region 2's 1.840-1.850 digital slot. 80 m 3.570 The old JT65 spot,
+now quiet; the duet still ends below FT8 at 3.573. 60 m 5.361 In the
+power-limited WRC-15 band (5.3515-5.3665, US General and up since
+2026-02-13, 9.15 W ERP): above FT8 (5.357), with the duet still ending below
+the 5.366 weak-signal slot. 40 m 7.067 Often quiet in AG7EW's operating;
+below PSK31 (7.070) and FT8 (7.074), well away from Winlink and VarAC near
+7.100. 30 m 10.133 Between JS8 (10.130) and FT8 (10.136). 30 m is narrow, so
+this is the tightest fit. 20 m 14.067 Often quiet in AG7EW's operating;
+below PSK31 (14.070), FT8 (14.074) and FT4 (14.080). 17 m 18.097 Just below
+FT8 (18.100), in Region 2's 18.095-18.105 digital slot. 15 m 21.067 The
+7.067/14.067 pattern: below PSK31 (21.070) and FT8 (21.074). 12 m 24.911
+Just below FT8 (24.915); inside the US data segment, though Region 2 marks
+it CW. 10 m 28.067 The same pattern, below PSK31 and FT8 (28.070-28.074) and
+far from the beacons at 28.200. On 30 m, the IARU Region 1 band plan caps
+every emission at 500 Hz (200 Hz below 10.130), and some countries outside
+the Americas follow it. Measured on the modem's own output, a frame's
+bandwidth (99% of its power; the -26 dB width is in brackets) is: Scale
+Adagio to Presto Presto duet --------- Pentatonic 553-563 Hz (559-603) 2317
+Hz Diabolus 504-515 Hz (510-554) 2030 Hz Whole tone 413-424 Hz (419-461)
+1771 Hz Diminished 261-271 Hz (265-307) 1342 Hz The opening E4+D5 chord is
+266 Hz wide, and the straight CW tail is 323 Hz. The closing chord is as
+wide as its scale. So where 500 Hz applies, send in the diminished or whole
+tone scale on 30 m and leave the duet off. A pentatonic station still hears
+them, because by default the receiver listens for all four scales. While the
+dial is on 30 m and the scale or duet is wider than 500 Hz, the console's
+Radio dial caption turns red and reads Over 500 Hz for 30 m, with the width
+in its tooltip. It is only a warning: US rules set no width limit on 30 m,
+so nothing stops a transmission. On 60 m keep to 9.15 W ERP (15 W EIRP
+outside the US); the app does not set power. The 20 Hz weak-signal slot at
+5.366-5.3665 is too narrow for any Glissando melody, and the older 60 m
+channels want a data signal centred on the channel, which a 330-880 Hz
+melody is not without a hand-set offset. The list is edited in Preferences,
+Options. A saved list still equal to the voice frequencies older builds
+inherited from FreeDV (nearly all in phone segments, where chat refuses to
+transmit) is replaced with this one on start; an edited list is kept. How
+chat rides on Glissando A Glissando frame carries 77 bits.
+modem/GlissandoLink.h cuts each chat burst (a 14 byte signalling frame or a
+54 byte text frame) into 9 byte segments with a 5 bit header (mode, index,
+last), dropping trailing zero padding, so a short message costs fewer
+frames. The duet gear carries two segments per frame. The receiver puts
+segments back together in order; a missing segment loses the burst and the
+chat protocol retries it, as it does a faded codec2 burst. A Glissando burst
+takes tens of seconds, so the protocol's timers (acknowledgement timeout,
+reservation for fragments still to come, reply window) are no longer
+constants: TextMessaging::AirTiming holds them, the codec2 defaults are
+unchanged, and AirTiming::forFrameSeconds() sizes them to the tempo being
+sent. Carrier sense only sees a Glissando burst once its first frame
+decodes, so the waits for the far end are sized to whole bursts. A pong,
+acknowledgement or partial acknowledgement goes out in the tempo the
+answering station sends at, the one chosen on its console or by Auto shift,
+like the rest of its traffic. A QRP station on a slow tempo is then heard
+answering a fast one, where at the fast station's tempo it might not be. So
+a station waiting on an answer allows for its own tempo and every tempo
+heard from anybody in the last 15 minutes. Before this the waits covered
+every tempo the receiver listens for: at Presto an unanswered ping held the
+queue for about 2 minutes and gave up after 2.2. A slower answer from a
+station not heard lately is caught by its opening chord, which freezes the
+timers until its keying ends; below about 14 dB, where the chord goes
+unheard, the ping may give up first, and the pong still shows in the log
+when it arrives. A pong or acknowledgement with a message of ours riding
+behind it tells every listener that more follows, and a listener that then
+loses the message holds the channel for two text fragments after the reply.
+Our own traffic used to wait that out every time, plus the answered
+station's turn: about two minutes after such a keying at Presto, and many
+more at slower tempos. The wait now ends as soon as the answered station is
+heard again, as it nearly always is, acknowledging the message that rode
+along. With two real modems talking at Presto, a message typed just after a
+ping, a pong with a message behind it and its acknowledgement went out after
+4 s instead of 2 minutes. Carrier sense also holds the channel after a
+keying's last frame for the far end's closing chord or CW tail, which no
+frame decode covers. A reply keyed over the tail loses its opening, and with
+it the acknowledgement or pong. The chord listener hears the tail stop when
+it followed the keying; where it did not, at weak signals, the channel is
+held for as long as a CW tail like ours would last at 20 WPM, which keeps an
+answer to a weak station back about 3 s more at Presto. Before this, two
+real modems at -12 dB and at -15 dB each lost an acknowledgement to the
+tail, costing a retry two minutes later, and at -15 dB the pong to a ping as
+well. With chords on, the wait that keeps our next keying off an answer that
+may still be coming (after a ping or message, or after we answer somebody)
+ends once the answer's opening chord would have been heard, not once its
+first frame could have decoded. A ping queued behind one nobody answers now
+goes 16 s after it at Presto (was 25 s), 21 s at Allegro (was 39 s) and
+about 54 s at Adagio (was about 2 minutes). The cost: an answer too weak for
+its chord to be heard, below about -14 dB, can be keyed over. The
+acknowledgement and ping timeouts still wait for the answer's first frame.
+Air time for a short message (up to 12 characters of text behind the 15 byte
+header, three segments): about 20 s at Presto, 41 s at Allegro, 2.8 minutes
+at Adagio. A full 54 byte text fragment is six frames, about 5.5 minutes at
+Adagio. The COMMS window's send button shows how long the message being
+typed will be on the air at the tempo it would go out at now, in red once
+that is longer than the transmit time-out (Preferences, Rig control; 180 s
+when the app's timer is off, the usual rig setting). Nothing is shown for
+codec2 or Data2G. More messages can be queued while the transmitter is
+keyed; they go when it is free. In COMMS, clicking a message selects the
+station it is with in the heard list, putting the station back if it has
+aged out, and a directed message for you selects its sender when no station
+is selected. A right click offers Clear Messages, which keeps only messages
+still being sent, and, on a message or ping of yours still outstanding,
+Remove from Queue if it has not been on the air yet or Abort once it has (on
+the air now, waiting for its acknowledgement or pong, or waiting to be
+retried). Either way the rest of the queue carries on. Re-send, on any
+message of yours that has left the queue (delivered, unacknowledged,
+aborted, not sent or still going), queues the same text again to the same
+station, or as a broadcast if it was one, as a new message at the back of
+the queue. A ping's line says where it has got to: queued, on the air,
+awaiting PONG, not sent or aborted. Auto acknowledge, in COMMS, is lit
+unless the station should not transmit unattended. While it is dark the
+station sends no acknowledgements or pongs, and says so on everything it
+sends: its pings set a flag in their otherwise empty payload byte, and its
+messages and broadcasts go out with the type bit 0x08 added (TYPENOAUTOACK).
+A station that hears the flag sends its messages to that station once,
+without retries; the chip reads SENT, and a message already waiting for an
+acknowledgement ends as SENT instead of retrying. The log notes when a
+station turns it off or on, and a ping to such a station that goes
+unanswered says why. Retries come back as soon as the station is heard
+without the flag, or an acknowledgement or pong arrives from it. A station
+with it lit sends exactly what earlier builds sent, so nothing changes
+between stations that leave it on. Glissando 0.3 and older drop a frame type
+they do not know, so they cannot read messages or broadcasts from a station
+with it dark; they read its pings. The right-click menu also offers Woah!,
+for when you can hear somebody the receiver has missed. Nothing keys,
+acknowledgements and pongs included, until one more modem frame at your
+tempo could have gone by (about 7 s at Presto, 55 s at Adagio). Each press
+adds another frame to whatever hold is still running, and the countdown bars
+fill to match. A keying already on the air carries on; that is what Abort is
+for. A message waiting for its first turn on the air shows a countdown bar
+on its chip, with QUEUED across it in lettering that turns dark where the
+bar is filled and light where it is empty. The bar starts full at the wait
+the message was first given and runs down to nothing as its turn comes: the
+keying on the air, the far end's turn after it, the turnarounds and holds
+running, and everything queued ahead of it (queuedWaits() in
+TextMessagingProtocol). It is an estimate and errs long, so it can jump
+ahead when an answer arrives early, and it fills again if a new hold
+lengthens the wait. While somebody else has the channel the bar stops and
+dims, since nobody can say when that keying ends. With the console
+disengaged the chip reads ENGAGE TO SEND instead. On Glissando the chip also
+names the tempo the message will key at, QUEUED  PRESTO for example, which
+follows the console and Auto shift until you choose one for it. Right-click
+it and pick from Change Tempo to... to send just that message at another
+tempo, say a slow one for a station that is hard to hear, or pick Console's
+Tempo to let it follow the console again. Its retries keep the tempo it went
+out at. A message at a tempo of its own keys by itself, never riding behind
+an acknowledgement, and nothing queued behind it rides there instead. Once a
+message is on the air its chip, SENDING (or RETRY or RESEND), sits over a
+bar in the same style that fills from the left as the audio plays out,
+across the whole transmission when it is split into several keyings for the
+time-out timer. Data2G does not say how far it has got, so its chip stays
+plain. A chat keying runs the same time-out timer as voice. When one would
+outlast it, the transport sends it as several keyings, each at least 20 s
+short of the limit (clear of the warning the main window gives 15 s before
+it) and cut only between whole frames, and lets the radio up for 2 s in
+between, which restarts both the app's timer and the rig's. The protocol
+still sees one transmission. Every Glissando frame carries its own sync and
+the far end rejoins segments by order, so the pauses cost nothing but the 2
+s each; the far end's channel-busy hold (one and a half frames) covers them.
+If the operator keys for voice during a pause, voice wins: the transport
+waits up to 10 s for the radio to come free, then drops the rest of the
+burst. Chat through Data2G Chat can also go out through Data2G, a separate
+HF data modem program. The app does not start it or include any of it: run
+data2g-host yourself (with its own sound card and rigctld PTT settings),
+then tick Send chat through Data2G under Preferences, Modem, Text Chat, and
+give its host and ports (KISS 8100, command 8300). The chat window shows
+whether data2g-host is reachable. Turn the command port off if VarAC or Pat
+also use the same data2g-host. docs/DATA2G.md has the details. Modem modem/
+is a C++17 port of prototype/glissando.py and fec.py with no wxWidgets or
+codec2 dependency: modulator, batch receiver (sync search by dechirping,
+sample-accurate time refinement, BCJR over the note trellis, K=7 r=1/2
+Viterbi, CRC-14) and a streaming receiver that searches each gear every
+quarter frame on a worker thread. It builds and tests on its own: cmake -S
+modem -B build-modem -DUNITTEST=ON cmake --build build-modem && ctest
+--test-dir build-modem The tests check modulation and FEC against vectors
+generated by the Python prototype (modem/test/makevectors.py) and decode
+across gears, scales and tuning offsets in noise. Two station bench The text
+chat loopback bench runs Glissando too: app/test/testtextchatloopback.sh up
+Press Engage in both consoles and send from either COMMS window. !Two
+stations on the loopback bench: B (right) hearing A's reply at Presto on the
+visi-scope, both chat windows below with the conversation both ways
+Packaging app/appimage/make-appimage.sh builds a Release tree in
+app/build-appimage and packages it as
+app/appimage/Glissando-<version-x8664.AppImage with the Arachnia icon. The
+version comes from app/CMakeLists.txt (PROJECTVERSION) plus the
+FREEDVVERSIONTAG (beta by default) and the git hash, for example
+0.1.0-beta-1a2b3c4; it shows in the console's title and the log. Set
+BUILDDIR to package a tree you have already built. The AppImage carries the
+libraries of the system it was built on, so build it on the oldest Linux you
+want it to run on (the beta 0.1 AppImage was built on Ubuntu 24.04 and needs
+glibc 2.39 or newer). Windows A portable 64-bit Windows build cross-compiles
+on Ubuntu 24.04: sudo apt-get install g++-mingw-w64-x86-64-posix libltdl-dev
+autoconf automake libtool cmake -S app -B build-win
+-DCMAKETOOLCHAINFILE=$PWD/app/cmake/Toolchain-Ubuntu-mingw64.cmake \
+-DCMAKEBUILDTYPE=Release -DUSENATIVEAUDIO=1 -DBOOTSTRAPWXWIDGETS=TRUE
+-DwxUSEWEBVIEW=OFF cmake --build build-win -j$(nproc) The build fetches and
+compiles wxWidgets, Hamlib and libsndfile. Put build-win/src/glissando.exe
+in a folder with the DLLs it names (x8664-w64-mingw32-objdump -p):
+libhamlib-4.dll from build-win/external/dist/bin, and libstdc++-6.dll,
+libgccsseh-1.dll, libssp-0.dll and libwinpthread-1.dll from the MinGW-w64
+install. There is no installer.  The opening and closing chord Every
+Glissando keying opens with a chord and closes with one. The idea is Tyler
+Carr's (PR 22). The opening chord is E4 and D5 together, a minor seventh,
+for 0.6 s at every tempo. Those two notes are in all four scales, so every
+Glissando station opens the same way, and listening stations use it to know
+the channel is taken (see "The opening chord as carrier sense" below). The
+closing chord is every note of the scale at once (all sixteen in the Presto
+duet), for one bar of four beats at the tempo being sent, so the ear hears
+the tempo from it: Tempo Closing chord One-frame message, with both chords
+--------- Adagio 2.56 s 55.0 s + 3.2 s Andante 1.28 s 27.5 s + 1.9 s Allegro
+0.64 s 13.8 s + 1.2 s Presto (and duet) 0.32 s 6.9 s + 0.9 s The chords go
+at the ends of a keying, not around each frame. Both are on by default, and
+set in Preferences, Options, Modem, under Text Chat: a switch for the
+opening chord, and a Tail choice of Off, Chord or CW (glorified, or straight
+on E4+D5) for the end. With CW, the station's call is sent in Morse at most
+once every ten minutes and the closing chord ends the keyings in between ).
+The chat's timers, the Send button's on-air time and the split before the
+180 s time-out all count the chords and the tail. The opening chord as
+carrier sense A station knows somebody else is sending only once it decodes
+a frame of theirs: about 10 s in at Presto, and about 70 s in at Adagio.
+Until then it can key over them. The chord listener (modem/GlissandoChord.h)
+closes most of that gap. Every tenth of a second it takes the last 0.6 s of
+audio and looks for E4 and D5 sounding together, across the whole 25 Hz
+tuning range. When it hears them, the chat treats the channel as busy. It
+stays busy for as long as the notes of the scale being sung (at the chord's
+tuning) keep sounding, and for 2.5 s after they stop, which bridges the 2 s
+pause a long keying takes before the transmit time-out. Other signals on the
+band must not look like a chord, or the chat queue freezes. The first
+version of the listener took any moment when both notes stood out as a
+chord, and any energy on the scale's notes as the melody. On a band with FT8
+or a voice in the passband it heard a "chord" ten times a second and kept
+the channel busy for the whole 20 minutes it was tested, so queued messages
+sat waiting up to the protocol's 7 minute limit on a busy spell. Now: - Both
+notes must start together. Neither may have been there, at half the chord's
+strength or more, in the 0.6 s before it. - Both must be steady tones. Each
+must stand four times over the bins 4 to 10 Hz either side of it, and sound
+in both halves of the 0.6 s. The tones of FT8, or a voice, wander across
+those bins; the chord does not. - They must be within 10 dB of each other
+(was 15 dB). - The melody must stand out from what was already there. After
+a chord, its scale's notes must reach 1.5 times their 90th percentile over
+the 15 s before it, as well as the fixed threshold. - No chord holds the
+channel more than 75 s on its own. That is long enough for the first frame
+of an Adagio melody to decode. Each frame that decodes starts the 75 s
+again, so a long keying is followed through its closing chord or CW tail to
+the end; a chord the band made up, with no frames after it, lets go after 75
+s. Measured over 20 minutes of a busy band (a dozen FT8 signals at 8 to +12
+dB and a voice two seconds in three): Before After --------- Busy band:
+channel busy 100 % of the time, all 20 min at once 6 %, at most 7.9 s at
+once FT8 parked across E4 and D5: channel busy 100 %, all 20 min at once 36
+%, at most 12.8 s at once A transmission among the FT8 signals at 8 dB:
+chord heard 8 of 8 6 of 8 ... busy through its melody 100 % 41 % The two
+chords missed among the FT8 signals had one of them already sitting on E4 or
+D5. Where the melody does not stand out from the band, the channel shows
+busy once its first frame decodes, as for a station that played no chord. On
+a quiet band nothing changed: the sensitivity test hears one chord fewer in
+20 at 14 dB at Presto and the same number elsewhere, and noise alone still
+makes no chord in 20 minutes. Which chord to send was measured, not guessed:
+0.6 s chords of each shape buried in noise, with the threshold set for about
+one false chord an hour on noise alone. SNR is a frame's power in 2500 Hz,
+as for decoding. Opening chord Heard half the time at ------ Every note of
+the scale (the old chord) 8 dB Three notes: E4, D5 and a note only that
+scale has 11.5 dB A fifth, or a tritone in the tritone scales 14 dB E4 and
+D5 (as built) 14 dB Fewer notes win because a transmitter's power is capped
+at its peak and the notes of a chord share it, so each of two notes is much
+louder than each of eight. E4 and D5 match the best two-note chord and have
+two more things going for them. There is only one chord to look for, so
+noise gets fewer chances to fake it (one false chord in four hours of
+noise). And the chord doesn't have to say which scale follows: the listener
+works that out from the melody. As built, measured on the chord and a whole
+frame, with a random tuning offset (modem/test/GlissandoChordTest.cpp checks
+these): SNR Presto: chord heard Presto: busy through the frame Adagio: chord
+heard Adagio: busy through the frame --------------- 16 dB 17 % 11 % 20 % 31
+% 14 dB 46 % 38 % 45 % 72 % 12 dB 93 % 93 % 95 % 99 % 10 dB 100 % 100 % 100
+% 97 % The channel is released about 2.5 s after the closing chord ends (the
+table was measured with a 1.5 s hold, which changes neither column). What it
+can't do: - Weak stations. A frame decodes down to 17.4 dB at Presto and
+26.5 dB at Adagio. Below about 14 dB the chord goes unheard, and the channel
+shows busy only once a frame decodes, as before. - Older builds, and
+melodies joined part way through. Stations on the 0.1 beta open with every
+note of their scale, which holds E4 and D5 steady and is heard. A melody is
+not a chord, however strong, so a station whose chord was missed is sensed
+once a frame decodes. - A carrier on one of the notes is not a chord: the
+listener wants both notes at similar strength. It could still hold the
+channel a little longer after a real chord, capped like any busy spell. Does
+the chord help the decoder? No: the decoder ignores both chords. That was
+measured, not assumed, with the first chord (every note, at both ends) and
+the C++ modem on Tyler's branch (300 frames per point, AWGN, SNR in 2500 Hz
+measured on the frame alone, listening for every scale): Without chord With
+1 s chord before and after --------- Presto, 18.4 dB 32 / 300 25 / 300
+Presto, 17.4 dB 174 / 300 171 / 300 Presto, 16.4 dB 288 / 300 289 / 300
+Allegro, 21.4 dB 36 / 300 36 / 300 Allegro, 20.4 dB 177 / 300 184 / 300
+Allegro, 19.4 dB 289 / 300 288 / 300 The two columns are the same within the
+noise of the test. The chord also never fooled the receiver: a chord on its
+own, clean or at 0 dB, gave no decode in 500 searches. Here is why, in three
+steps. 1. The receiver never listens for the chord. It finds a frame by its
+21 gliding motif notes ). Energy that isn't shaped like the motif adds
+nothing to that search. 2. If we did listen for it, there would be too
+little of it. A transmitter is limited by its peak power. One note uses the
+whole peak all the time. Eight notes at once must share the peak, and even
+with their phases chosen to spread the peaks out, the chord's power comes
+out 7.4 dB below a frame's. Each note is 16 dB down. At each tempo's decode
+threshold, the motif carries 19 dB of signal energy against the noise
+(Es/N0). A one-second three-note chord carries 12 dB at Presto, 9 dB at
+Allegro, 6 dB at Andante and 3 dB at Adagio. A best-case detector, told
+exactly when the chord starts, found it 24 % of the time at the Presto
+threshold, 5 % at Allegro and 0 % at Adagio (with one false alarm per
+thousand tries). The all-notes chord is weaker still per note. 3. A steady
+chord looks like a carrier. The glides are there so that a steady tone on
+frequency does not look like Glissando. Using steady tones as a signal would
+give that away. In Captain Proton terms, the fanfare is for the audience.
+Chaotica's radar tracks the rocket, not the brass section. What the chord
+does tell you - That the channel is taken, from the opening chord: see
+above. - The scale, for your ear, from the closing chord. The receiver
+already finds the scale for free (it hears all four at once). - The tempo,
+from the closing chord's length. A receiver could only measure that at good
+signal levels, and it searches every tempo anyway. - Start and end of a
+keying, for the ear and on the scope: the frames begin as the opening chord
+ends, and the closing chord says "over". What would make it earn its keep
+The chord could only help decoding by carrying the energy of a sync signal.
+That means shaping it like one: gliding notes the receiver already knows,
+which is exactly what the motif is. A fourth motif, played as the "chord",
+would add sync energy but would sound like the frame, not like a chord. The
+chord as built is for the ear, which is a fair thing to spend 9 % on in a
+mode whose point is to sound good. Tyler's fourths and fifths
+(transposition) Tyler's branch can also send a frame shifted up to the
+fourth or fifth degree of the scale, and the receiver then searches three
+shifts of every scale. Measured on the same bench: sensitivity and false
+decodes were unchanged (3 vs 4 false decodes in 20,000 noise searches). The
+search work roughly doubled: listening to all five tempos and all four
+scales took 16 % of a core on main and 33 % with the three shifts.  The CW
+tail Somebody who stumbles on Glissando on the air hears a pretty melody and
+has nothing to search for. So, by default, a Glissando transmission can end
+by spelling it out in Morse code: GLISS DE AG7EW, with your own call. Each
+dit and dah is sung on a note of the scale being sent. The CW Glorifier
+chooses the notes. !The tail "Gliss de AG7EW" in the pentatonic and diabolus
+scales What it sounds like The timing is standard Morse, so anyone who reads
+CW by ear can copy it. Only the pitch changes, and it follows the rules long
+and short notes follow in a tune: 1. A dah leaps to a note of the scale's
+home chord. In the pentatonic scale that is A minor (A, C and E). In
+diabolus it is E major (E, G and B). The wholetone scale uses the augmented
+chord E, G and C, and the diminished scale the diminished seventh E, G, A
+and C. 2. A dit steps to the next note of the scale, the way a passing note
+joins two chord notes. 3. Letters take turns going up and going down, and
+turn back before they run off either end of the eight notes, so each word
+has a rise and fall like a phrase. 4. Each word starts on the home note (A4
+in the pentatonic scale, E4 in the others) and the last note lands on it, so
+the tail ends on a cadence rather than a question. 5. Each note glides in
+from the one before over 20 ms, the Glissando swoop, and starts and stops
+over 5 ms so the keying makes no clicks. The same text in the same scale
+always gives the same tune. In the Presto duet the tail is sung by the low
+voice alone. Straight CW The Tail choice also offers CW, straight on E4+D5.
+It sends the same text at the same speed and interval, but as plain Morse:
+every dit and dah is E4 and D5 sounding together, the two notes of the
+opening chord, which are in every scale. It is easier to copy by ear, and a
+CW decoder tuned to either note can read it. The two notes share the
+transmitter's peak power, so each is 6 dB below a glorified note. Settings
+In Preferences, Options, Modem, under Text Chat: Setting Default ---------
+Open each Glissando transmission with a chord on E4 and D5 for 0.6 s; see
+CHORDS.md Tail CW, glorified Off, Chord (every note of the scale for one
+bar), CW glorified, or CW straight on E4+D5 CW text Gliss de <MYCALL <MYCALL
+becomes the callsign on the Station tab CW speed 20 WPM 10 to 40 At most
+once every 10 minutes 0 plays it on every transmission Under the settings
+the box shows what will be sent and how long it takes, or why the chord will
+be sent instead. That happens when no callsign is set, when nothing in the
+text has a Morse code, or when the tail would run longer than 15 s.
+Characters Morse has no code for are skipped. The accepted characters are
+letters, digits and / ? . , = + - @. With Tail set to CW, the first
+transmission ends with the CW tail. After that, the tail plays again on the
+first transmission once the set number of minutes has passed. The closing
+chord ends the transmissions in between. Why at most every ten minutes, and
+why 20 WPM At 20 WPM, "GLISS DE AG7EW" is 124 Morse units, counting the word
+space that separates it from the last frame. That is 7.4 s. A ping or an
+acknowledgement at Presto is only 7.8 s with its chords, so a CW tail on
+every one would nearly double it. Once every ten minutes keeps the chat
+brisk. Ten minutes is also how often US stations must identify (47 CFR
+97.119(a)). US rules let an automatic device send a CW identification at up
+to 20 WPM (97.119(b)(1)), so the default speed stays there. With both
+defaults, the tail can serve as the station's identification in plain CW.
+The callsign inside Glissando's own frames is not one of the digital formats
+97.119(b)(3) lists for identification. This is a reading of the rules, not
+legal advice: check what applies to your licence. Chat timing and carrier
+sense The tail's length counts toward the chat's air-time estimates in place
+of the closing chord. So the Send button's on-air time, the acknowledgement
+waits and the split before the 180 s transmit time-out all allow for it on
+the transmissions that carry it. The tail stays on the scale's notes, and
+its longest silence is a word space (0.42 s at 20 WPM). A listener's chord
+listener therefore keeps the channel marked busy right through it, and other
+stations hold off until it ends. The receiver finds frames by their motifs,
+and the tail never sings one. A test checks that a tail alone gives no
+decode, clean or in noise, at any tempo and in any scale. Code
+modem/GlissandoCw.h holds the Morse table, the Glorifier (cwTune) and the
+tail's audio (cwTail). modem/test/GlissandoCwTest.cpp covers the Morse
+timing (PARIS is 50 units), the rules above, the audio and the no-decode
+check. TextMessagingModem picks the chord or the tail for each keying, and
+the visi-scope prints the tail's notes as ships while it goes out.  Data2G
+as a chat modem Status: Jeff chose KISS plus the command port (2026-09-26),
+and the operator starts data2g-host, never the app. Phase 1 below is built;
+it has been tested against a fake host, not yet against a real one. Data2G
+is an OFDM/CPM HF data modem with its own gear shifter. This plan adds it to
+the Glissando app as a third way to carry chat, next to Glissando and the
+codec2 data modes. Ground rules - No Data2G code in this repository. No
+vendoring, submodule, linking, or copied snippets. The app talks to a
+separately installed, separately started data2g-host over TCP, on the same
+machine or another one. Everything the app needs (KISS framing, AX.25
+headers, the VARA command lines) is small, public protocol and is written
+here from the protocol descriptions. - This also keeps the AppImage free of
+Python, PyTorch and PyAudio, which Data2G needs to run. - Data2G's
+repository carries no licence file as of commit da4cb0e (2026-09-26), so
+copying from it would not be permitted anyway. Talking to it over a socket
+needs no licence. What Data2G offers a client Read from Data2G at da4cb0e;
+its interfaces are still moving. data2g-host runs two "personalities" on one
+radio, both on by default: Port Protocol What it is --------- 8100 KISS over
+TCP Datagrams. Queued frames go out combined into one burst. Every frame
+heard is sent to every connected client. No resends. 8300 VARA command lines
+(CR-terminated) MYCALL, LISTEN, CONNECT, DISCONNECT, BW500/BW2300, CHAT ON,
+CQFRAME. Notifications: PTT ON/OFF, BUSY ON/OFF, MODE submode, CONNECTED,
+DISCONNECTED, BUFFER n, IAMALIVE. 8301 VARA data The byte stream of one
+connected ARQ session. Things that shape the design: - Data2G owns the audio
+and PTT. It opens the sound card itself (PyAudio) and keys the radio through
+rigctld. - KISS mode shifting follows AX.25. Each KISS burst carries reports
+on the stations it has heard, and connected-mode AX.25 frames (I, S) to a
+station with a fresh report go in the mode that station asked for. UI frames
+and non-AX.25 frames always go in the robust broadcast mode (qpsk-r1/5, or
+n10-qpsk-r1/5 with --kiss-bw 500). - The command port reports PTT and BUSY
+for KISS traffic too (Host.afterstep announces the engine's PTT and
+Receiver.channelbusy whatever sent the burst). - Only one command client at
+a time. A new client replaces the old one, and a client that drops makes the
+host stop listening for ARQ connects. A station running VarAC or Pat against
+the same host would lose its command connection to us. Interface: KISS for
+frames, the command port for status The chat layer already has the right
+seam: TextMessaging::ITextMessagingTransport (transmit, isTransmitting,
+isChannelBusy, poll) plus TextMessagingProtocol::onFrameReceived. Today
+TextMessagingTransport implements it over the in-process modem. A new
+Data2GTransport implements the same interface over sockets, and the protocol
+(fragmenting, acknowledgements, retries, pings, heard list) runs unchanged.
+Frames (port 8100). Each chat frame the protocol emits is wrapped in an
+AX.25 UI frame and written as one KISS data frame: - Source: the callsign
+the chat frame carries (six characters and an SSID, as far as AX.25 allows).
+Destination: always GLISS. Chat frames address stations by a callsign CRC
+inside the frame, and the transport only sees encoded frames, so it has no
+addressee to put here; Data2G sends UI frames in its broadcast mode whoever
+they are for anyway. PID 0xF0 (no layer 3). - Info field: the tag GLS and a
+version byte (1), then the chat frame exactly as FrameCodec::encode builds
+it, so our frames are told apart from APRS or other KISS traffic the host
+passes up. - A keying's fragments go in together, so Data2G combines them
+into one burst. - Received KISS frames that are AX.25 UI with our tag go to
+onFrameReceived; anything else is dropped. - Data2G reports no SNR over
+KISS, so received frames carry NaN and the chat window shows a dash. History
+keeps it as 0, which it leaves blank. Real AX.25 source callsigns are what
+let Data2G see stations at all: its link layer reads them from the frame,
+and every burst we send carries its reception reports. Status (port 8300,
+optional, on by default). The transport also keeps a command connection
+open, sends nothing on it, and reads: - PTT ON/OFF into isTransmitting(),
+which is what starts the acknowledgement timer at the true end of our burst.
+- BUSY ON/OFF into isChannelBusy(), which freezes the protocol while
+somebody else's burst is being received. - MODE submode for the chat
+window's Data2G line. A keying is "transmitting" from the KISS write until
+PTT goes on and off again. If data2g-host never keys for it (it holds KISS
+traffic during an ARQ session), the keying is given up after 60 s. PTT for
+anybody else's traffic on the host also counts, so chat does not queue
+behind it. With the command port turned off (for a station that also runs
+VarAC on the host), the transport treats itself as transmitting for 14 s
+after each write, and never reports the channel busy (Data2G still listens
+before talking on its own side). Timers. Data2G plans broadcast bursts in
+its longest size class (12 s, kisslink.BROADCASTS), and a burst grows past
+it when a frame needs more room; its own turnaround estimate is 1.3 s.
+Data2G::airTiming() treats a whole keying as one 12 s burst decoded within 4
+s (AirTiming::forFrameSeconds), giving an acknowledgement timeout of about
+45 s. These are estimates to tune on a real two-host bench; with the command
+port on, PTT and BUSY keep the protocol from leaning on them in the usual
+case. Frame size. Phase 1 keeps the current 14 and 54 byte frames, so the
+protocol and its tests need no change. Data2G would happily carry a whole
+312-byte message in one frame; larger frames are a follow-up once the basic
+path works. Why not the VARA ARQ session (8300/8301)? It would give reliable
+delivery and full gear shifting, but: - It is connection-oriented, one peer
+at a time: no broadcasts, and a CONNECT/DISCONNECT round per message. - Its
+retries and acknowledgements duplicate the ones our protocol already does,
+so the chat window's delivery states would have to be rebuilt around session
+events. - It fights over the single command connection with VarAC-style
+clients. It remains a good later option for long messages or files to one
+station; the transport interface leaves room for it. Known limitation:
+robust mode only, at first Because chat frames go as UI frames, Data2G sends
+them all in its robust broadcast mode. We expect that mode to be several
+times faster than Glissando's quickest gear, but that is inferred, not
+measured; the bench below measures it. Getting per-station mode shifting
+would need either sending chat as AX.25 I frames outside a real AX.25
+connection (which misuses AX.25 on the air), or a Data2G option to shift UI
+frames addressed to a station with a fresh report. The second is a change
+for Data2G's author to consider; we would ask, not patch. What was built -
+app/src/textmessaging/Data2GLink.{h,cpp}: KISS framing, AX.25 UI frames, the
+chat payload tag, command-line parsing and the timers. No sockets, so it is
+all unit tested. - app/src/textmessaging/Data2GTransport.{h,cpp}: the
+ITextMessagingTransport over TCP, on its own thread, reconnecting every 2 s
+(backing off to 30 s) while data2g-host is not there. - Preferences, Modem
+tab, Text Chat: Send chat through Data2G, host (default 127.0.0.1), KISS
+port (8100), and the command port (8300) with a switch to leave it alone.
+Bandwidth (--kiss-bw) is set when starting data2g-host. - With Data2G
+chosen, chat's transport, timers and received frames all come from
+data2g-host: the app does not key the radio for chat, and frames its own
+modem decodes are left out of the conversation (their replies would go out
+on the other modem). Audio can still run for the waterfall where PulseAudio
+lets both programs open the capture device. - The chat window shows a line
+naming the Data2G host, whether it is reachable, and the submode it last
+sent in. - PTT: run rigctld and point both data2g-host and the app at it, so
+the app keeps the frequency display without a serial-port fight. Tests -
+Unit (fdvtextmessagingdata2gtest, in CI with the other textmessaging tests):
+KISS escaping, AX.25 addresses and UI frames, foreign frames ignored,
+command lines, and two chat protocols exchanging a message and its
+acknowledgement through a fake pair of data2g-hosts on localhost (PTT, BUSY
+and MODE included), plus the no-command-port estimate, a keying that never
+airs, and a lost command connection. Clean under ThreadSanitizer. - Bench
+(manual, on Jeff's Linux box, not yet run): two data2g-host instances on
+PulseAudio null sinks, each with a Glissando app attached; chat both ways, a
+broadcast, and a ping. Data2G needs PyTorch, so this stays out of CI. Next -
+Run the two-host bench and tune Data2G::airTiming() from measured burst
+lengths. - Larger frames: a whole 312-byte message fits one Data2G frame. -
+Per-station gear shifting needs a Data2G option to shift UI frames (see
+above); to ask Data2G's author about.  Glissando: design Status: draft 0.1,
+with a working NumPy prototype in prototype/(../prototype). Every number in
+this document comes from that prototype unless it is marked as an estimate.
+1. What we are building A digital mode for HF amateur radio that 1. sounds
+pretty: a listener hears someone whistling a pentatonic tune, with glides
+between the notes, never a buzz or a siren; 2. fits a standard SSB passband
+(300 to 2700 Hz, one voice uses 330 to 880 Hz); 3. decodes very weak
+signals, in the same league as FT8, JT65 and WSPR, using the ideas that make
+LoRa's chirp spread spectrum work; 4. shifts gears: it measures the path
+(SNR and Doppler spread) and moves between five tempos, from 55 s messages
+that decode near -27 dB to 7 s duets that carry twice the data. "Pretty" is
+an explicit requirement, and it costs something. Section 9 says exactly
+what. 2. The idea that makes this possible LoRa is chirp spread spectrum. A
+LoRa symbol is a linear chirp across the channel, cyclically shifted by one
+of M = 2^SF amounts. The receiver multiplies by a conjugate chirp
+("dechirps"), which turns each possible symbol into a pure tone at a
+different frequency, then takes an FFT and picks the biggest bin. Vangelista
+(2017) calls this frequency shift chirp modulation and shows it is an
+orthogonal M-ary modulation. Its error rate in noise is the error rate of
+non-coherent M-FSK. That observation is the key to Glissando. LoRa's
+sensitivity does not come from the chirp's shape. It comes from having many
+orthogonal symbols, each integrated for a long time, protected by strong
+FEC. The same is true of FT8 (8-FSK), JT65 (65-FSK) and Q65. The chirp shape
+is a free choice as long as the symbol set stays near-orthogonal, and what
+the chirp shape buys you is how the signal occupies time and frequency: how
+it sounds, how it resists narrowband interference, and how it behaves in
+frequency-selective fading. So Glissando keeps LoRa's receiver structure
+(matched filtering against a set of known chirps, dechirp-and-FFT for
+synchronisation) and chooses the chirps for the ear. 3. The waveform 3.1
+Notes One voice uses eight notes of A minor pentatonic, equal temperament,
+A4 = 440 Hz: index 0 1 2 3 4 5 6 7 --------------------------- note E4 G4 A4
+C5 D5 E5 G5 A5 Hz 329.63 392.00 440.00 523.25 587.33 659.26 783.99 880.00
+Why pentatonic: it has no semitones and no tritone, so every pair of notes
+is consonant. Any data sequence is a pleasant melody, and any two notes
+sounding at once are a pleasant interval. That second property matters on
+the air more than it sounds: multipath echoes, a second voice (the duet
+gear), and another Glissando station in the same key all overlap the signal
+in time, and with a pentatonic alphabet they overlap as harmony. The thirds,
+fourths and fifths Jeff asked for are all here: E-G and A-C are minor
+thirds, C-E is a major third, E-A a fourth, A-E a fifth. 3.1a Other scales:
+the devil's interval The modem does not care which eight frequencies it
+glides between, only that the receiver knows them, so the scale is a
+parameter (SCALES in glissando.py, --scale on sim.py and bench.py). Three
+tritone-heavy scales are included for contrast with the pentatonic default.
+All three are symmetric under transposition by a tritone, so the duet's high
+voice is the low voice a tritone plus an octave up and the two voices are
+the devil's interval apart. scale low voice high voice tritones ------------
+wholetone E4 F4 G4 A4 C5 D5 E5 F5 A5 .. C7 notes 3 steps apart; the Costas
+motif has two diminished E4 F4 G4 G4 A4 B4 C5 D5 (half-whole octatonic) A5
+.. G6 every note has its tritone in the scale diabolus E4 G4 A4 B4 D5 E5 F5
+G5 (E major + Bb major triads) A5 .. D7 the two triads are a tritone apart
+What they cost: nothing measurable. The receiver separates symbols by their
+whole frequency trajectory over a symbol, and at G3 a semitone (about 20 Hz
+at E4) is still three times the 6 Hz resolution of a 160 ms symbol, so even
+the diminished scale's templates stay nearly orthogonal. Measured 50 % / 90
+% decode thresholds at G3 Allegro, 20 trials per point, no false decodes in
+2080 trials: scale AWGN CCIR poor --------- pentatonic -20.4 / -18.5 -17.7 /
+-15.6 wholetone -20.5 / -20.0 -17.7 / -15.0 diminished -20.5 / -19.3 -18.2 /
+-15.8 diabolus -20.2 / -19.1 -17.6 / -15.3 The pentatonic scale stays the
+default for the reason in 3.1: it is the one whose overlaps (echoes, the
+duet, a neighbour in the same key) are harmony rather than dissonance. The
+others are there for the ear, and for anyone who wants a mode that sounds
+like it is up to something. 3.1b Hearing every scale at once A receiver can
+listen for all four scales together (receive(..., scales="auto") in the
+prototype, ModemSettings::anyScale and StreamingReceiver::configure(...,
+anyScale) in the C++ modem; the app always does), so a pentatonic station
+and a diabolus station can talk, each singing in its own scale, and every
+decode says which scale it was heard in. The scale is found by the signature
+motif. The coarse sync search runs once per scale, each scale's score grid
+is normalised by its own median, and the best three peaks are taken from all
+four grids together, a peak near one already taken in any scale counting as
+its sidelobe. Only those three are refined, demodulated and put through
+Viterbi and the CRC, exactly as many as a one-scale receiver tries, so the
+false-decode rate does not grow. The extra work is three more coarse
+searches, which are a small part of a search next to the analytic signal,
+the fine sync search and demodulation. Measured with the C++ modem on
+streaming-sized searches (a quarter frame of starts, +/-15 Hz offsets,
+AWGN), the same noise for both receivers: one scale every scale --------- G4
+frames decoded at -19 .. -14 dB, 200 per point 3, 38, 147, 187, 190, 200 3,
+37, 147, 187, 190, 200 G3 frames decoded at -22 .. -18 dB, 120 per point 3,
+20, 91, 106, 115 3, 20, 91, 106, 115 decodes reported in the wrong scale 0
+false decodes in 8000 G4 + 3000 G3 noise-only searches 2 1 one search on
+noise, G4 / G3 (glissandotimingtest) 48 / 94 ms 68 / 126 ms The prototype
+agrees: G3 thresholds with sim.py --rx-scale auto came out identical to the
+scale-known runs for pentatonic and diabolus senders (table in 3.1a), with
+no false decodes. Listening for all five gears in every scale takes 24 % of
+one desktop core against 19 % for one scale. Without it, a strong frame in
+another scale can still decode, sung out of tune, because the data is which
+of eight notes and several notes are shared or a semitone apart; weak ones
+are lost, and the scale is misreported. 3.2 A symbol is a glide, then a
+sustain Symbol n carries one of the eight notes as its target. It starts on
+the previous symbol's note, glides to the target, and sustains it: - the
+glide takes the first 40 % of the symbol; - the glide is linear in
+log-frequency (constant cents per second, which is how a voice or a slide
+whistle moves) with a raised-cosine ease-in and ease-out, so the frequency
+track has no corners; - a repeated note is simply held for the whole symbol.
+The phase is continuous across symbols and the amplitude never changes. The
+whole transmission is one unbroken, constant-envelope melody. Constant
+envelope means a transceiver can run it at full rated power with no
+linearity worries, like FT8. Phase continuity and eased glides mean no
+clicks: 99 % of the power of a solo gear sits between 326 and 884 Hz, barely
+wider than the scale itself. The glide fraction is a real knob. At 0 % the
+mode is plain 8-FSK tuned to a scale; at 100 % every symbol is a pure chirp.
+More glide spreads each symbol across more spectrum (a little frequency
+diversity, more "chirp"), but makes neighbouring glides more alike: the
+worst-case correlation between two glides that start on the same note is
+0.10 at 640 ms symbols and 0.21 at 80 ms. 40 % keeps the notes clearly
+audible as notes, which is what makes the result sound like a tune rather
+than a swanee whistle. 3.3 The melody is a trellis code, for free Because
+each glide starts where the last one ended, the waveform of symbol n depends
+on symbols n-1 and n. The receiver correlates every symbol against all 64
+(from, to) glides and runs BCJR (forward-backward) over an 8-state trellis
+whose state is the current note. The glide into the next note is extra
+evidence about the current one, so the melody's continuity is not a cost to
+decoding; it is a small amount of memory the decoder exploits. (This is the
+same structure as continuous-phase modulation; Anderson, Aulin and Sundberg
+1986.) 3.4 The signature motif (sync) Each transmission contains three
+copies of a seven-note signature motif: FT8's 7x7 Costas array 3 1 4 0 6 5 2
+played on the scale: C5, G4, D5, E4, G5, E5, A4. A Costas array has an ideal
+time-frequency ambiguity function (Costas 1984), which is why FT8 uses it,
+and played on a pentatonic scale it happens to be a nice little tune. Every
+Glissando transmission begins with it, like a call sign in music. Frame
+layout (86 symbols): The receiver finds the motif by dechirping: it
+multiplies each expected sync symbol by the conjugate of its known glide,
+which collapses a correctly timed symbol into a tone at the frequency
+offset, and takes one zero-padded FFT per symbol. Powers are added
+non-coherently across the 21 sync symbols. One FFT pass scores every
+frequency offset at once; the time search steps T/8, then T/256, and a
+parabolic fit refines the offset. The prototype searches +/-1.5 s and +/-25
+Hz blind. One lesson from the prototype: a glide is a chirp, and chirps
+compress in time, exactly as they do in radar and in LoRa. A glide that
+sweeps several hundred Hz has a timing resolution of a few milliseconds,
+whatever the symbol length. At G1 a 1.25 ms timing error costs 1.5 dB, and
+the first version of the receiver, which timed to T/64, lost about 2 dB at
+G1 against a receiver told the true timing. The receiver now refines timing
+to the sample on the known sync glides, then refines the frequency offset on
+the sustained part of every note in the frame (sustains have no
+time-frequency coupling), then re-times. After that, blind sync decodes 36
+of 40 frames that genie sync decodes at G1, -25 dB (and the receiver tries
+the three best sync candidates, which recovers most of the rest). The upside
+is that Glissando timing is precise enough to measure multipath delay; see
+the roadmap. Each keying also opens and closes with a chord of every note in
+the scale. It is there for the ear; the receiver syncs on the motif alone.
+See CHORDS.md for why, with measurements. 3.5 FEC and framing - Payload: 77
+bits, the same size and so the same message set as FT8/FT4 (call signs,
+grid, report, free text), plus a 14-bit CRC = 91 bits. - Prototype code: K =
+7, rate 1/2 convolutional (0o133/0o171), soft Viterbi, 194 bits + 1 pad =
+195 bits = 65 notes of 3 bits (Gray-mapped along the scale), pseudo-random
+bit interleaver across the whole frame. - Target code: FT8's LDPC(174,91).
+It fits the same 91 information bits and would shorten the data section to
+58 notes; the gain over the convolutional code at this block length is an
+estimated 1.5 to 2 dB. It was left out of the prototype only to keep it
+small. 4. Gears A gear is a tempo. Doubling the symbol length doubles the
+energy per symbol (+3 dB) and halves the data rate, and a listener hears the
+gear: the same kind of melody, slower or faster. Gear Tempo Symbol T
+Transmission Slot Payload Voices Band ------------------------ G1 Adagio 640
+ms 55.0 s 60 s 77 bits 1 330-880 Hz G2 Andante 320 ms 27.5 s 30 s 77 bits 1
+330-880 Hz G3 Allegro 160 ms 13.8 s 15 s 77 bits 1 330-880 Hz G4 Presto 80
+ms 6.9 s 7.5 s 77 bits 1 330-880 Hz G5 Presto duet 80 ms 6.9 s 7.5 s 2 x 77
+bits 2 330-880 + 1047-2637 Hz G5 adds a second, higher voice on C6 to E7
+(the same key, an octave and a bit above) carrying a second codeword. Each
+voice gets half the power, and the sum of two tones is no longer
+constant-envelope: its peak-to-average ratio is 3 dB, so at the same peak
+(PEP) power the duet's average power is 3 dB lower than a solo gear's. With
+the per-voice split, G5 needs about 6 dB more SNR per decoded message than
+G4 at equal PEP; it trades that for twice the data in the same 6.9 s. It is
+for strong, clean paths and needs a receive filter that reaches 2.7 kHz.
+(Thresholds in section 7 are quoted at equal average power, the WSJT-X
+convention.) 5. Gear shifting Gear shifting needs two measurements and one
+rule. SNR. Measured on the 21 known sync symbols: signal energy per symbol
+against the noise floor of the wrong-note correlators, converted to the
+WSJT-X convention (2500 Hz noise bandwidth). It reads within about 1 dB from
+-25 to -10 dB and compresses above that (the estimate is only used near
+threshold). Doppler spread, the other half of "path quality". HF fading
+turns a long symbol into a smear: once the channel changes within a symbol,
+a slower gear stops helping and starts hurting. After a good decode the
+receiver knows every note and the waveform's running phase, so each symbol's
+correlation is a sample of the channel at that note's pitch. Pairs of
+symbols on the same note (same pitch, so multipath frequency selectivity
+cancels) at lag d give the channel's time correlation, and a Gaussian
+Doppler fit gives the spread. This is decision-directed channel sounding
+with no overhead: the melody is the sounding signal. A single frame's
+measurement is coarse; see section 7 for how well it tracks the CCIR
+profiles. A gear cannot measure Doppler faster than about 1/(2T), so a slow
+gear reports "at least this much" and the rule steps up. The rule
+(recommendgear in the prototype): choose the fastest gear whose 90 %
+threshold on a moderate path, plus a 2 dB margin, is below the measured SNR
+and whose symbol length times Doppler spread is at most 1. If none fits,
+choose the slowest gear the Doppler spread allows. The simulations (section
+7) showed the Doppler limit matters less than expected: on the CCIR "poor"
+path (1 Hz spread) the 640 ms gear still decodes 2 dB deeper than the 320 ms
+gear, because 58 to 121 Hz note spacing leaves a 1 Hz smear harmless. The
+limit is there for flutter and auroral paths (10 Hz and up), where it pushes
+the mode to faster tempos. The protocol. Stations exchange the measurement
+in the report they already send. A proposed message field: the usual SNR
+report plus a 3-bit "gear request" (G1 to G5, with room for more). Calls
+(CQ) go out in G3 by default, or G1 when the band is dead. After each
+received report a station moves to the requested gear at the start of its
+next slot; if a gear change is followed by a missed decode it falls back one
+gear. Receivers run the sync search for every gear in parallel on every
+slot, so no one needs to be told which gear the other side is in: the tempo
+of the signature motif announces it. 6. Receiver summary 7. Measured
+performance Blind receive: random start time (0.3 to 1.2 s), random
+frequency offset (+/-15 Hz), searched over 1.5 s and +/-25 Hz. 40 trials per
+point, 7000 trials in all (prototype/sim.py, raw data in
+prototype/simresults.json). SNR is average signal power over noise in 2500
+Hz, the WSJT-X convention. Numbers are the SNR (dB) for 50 % and 90 % of
+messages decoded with a correct CRC. Fading paths are the Watterson two-path
+model: moderate = 1 ms delay, 0.5 Hz Doppler spread; poor = 2 ms, 1 Hz
+(ITU-R F.1487 mid-latitude profiles). Gear Length AWGN 50 % / 90 % Moderate
+50 % / 90 % Poor 50 % / 90 % --------------- G1 Adagio 55.0 s -26.5 / -25.2
+-24.0 / -22.2 -23.0 / -21.2 G2 Andante 27.5 s -23.6 / -22.7 -21.0 / -19.1
+-20.8 / -18.8 G3 Allegro 13.8 s -20.4 / -18.6 -18.4 / -15.5 -17.6 / -15.5 G4
+Presto 6.9 s -17.4 / -16.2 -15.2 / -13.0 -14.2 / -12.1 G5 Presto duet 6.9 s,
+2 msgs -14.1 / -13.1 -10.5 / -7.8 -10.8 / -9.3 For comparison, the published
+50 % sensitivities in the WSJT-X documentation are about -21 dB for FT8
+(12.6 s) and -25 dB for JT65 (about 47 s), and WSPR reaches about -31 dB in
+110 s with a much smaller payload. Glissando's G3 sits about 0.5 dB behind
+FT8 at similar length, and G1 matches JT65 territory, with the prototype's
+convolutional code and without FT8's a-priori decoding or averaging. Each
+doubling of tempo costs 2.9 to 3.1 dB in AWGN, as it should. Fading costs 2
+to 4 dB at the 90 % point. The duet loses most on fading paths because each
+voice fades independently and both must decode. False decodes: 1 in 7000
+(G1, moderate path, -25 dB), a wrong message that passed the 14-bit CRC
+after the receiver tried three sync candidates. FT8 handles this with extra
+plausibility checks on decoded messages; the real-time decoder should do the
+same. Path sounding (median over 40 decodes at high SNR, Doppler spread in
+Hz): Gear AWGN (0) Moderate (0.5) Poor (1.0) ------------ G1 0.03 0.42 0.97
+G2 0.04 0.42 0.78 G3 0.04 0.49 1.04 G4 0.04 0.57 1.06 The SNR estimate reads
+within about 1 dB of the truth from threshold up to about -10 dB and reads
+low above that. That is fine for gear decisions, which happen near
+threshold. 8. Multiple stations A solo gear occupies 550 Hz, so the SSB
+passband holds two voice ranges, not the dozens of 50 Hz slots FT8 packs in.
+Glissando shares a frequency the way FT8 does, by even and odd time slots,
+and adds keys as channels. Pentatonic scales a semitone apart share no notes
+(A minor pentatonic and B-flat minor pentatonic are disjoint), so they are
+orthogonal to the matched filters: a station in B-flat is just noise to a
+receiver listening in A. Keys a fifth apart share four notes and collide.
+The price is musical: two simultaneous stations a semitone apart clash. The
+default is A for everyone and time sharing; keys are for busy bands. 9. What
+"pretty" costs, and what it buys Choice Cost Buys --------- 8-note alphabet
+(scale-limited) ~1 dB versus 16-ary, ~2 to 3 dB versus Q65's 65-ary at equal
+energy (textbook non-coherent M-FSK curves; estimate) every symbol is a
+scale note; any sequence is consonant 550 Hz per voice roughly 10x fewer
+stations per passband than FT8 notes spaced 58 to 121 Hz apart shrug off
+Doppler and drift; frequency diversity against selective fading musical
+tuning is absolute a dial error of Hz shifts every note by the same Hz,
+which bends the intervals (20 Hz is ~100 cents at E4 but ~40 cents at A5).
+Needs a calibrated rig or an AFC that also re-tunes playback sounds in tune
+glides (40 %) neighbouring glides correlate up to 0.21 at 80 ms audible
+glissandi, continuous phase, compact spectrum constant envelope none versus
+FT8 full-power operation The honest headline: at a similar transmission
+length G3 lands about 0.5 dB behind FT8 and G1 matches JT65, while sounding
+like music. The LDPC code should more than close that gap (an estimate, not
+yet measured). 10. Roadmap 1. Swap in LDPC(174,91) and a real FT8-compatible
+77-bit message packer. 2. Real-time implementation (C or Rust library, sound
+card I/O, CAT/PTT), decoding every gear every slot, several signals per
+slot. 3. Averaging of repeated transmissions (as Q65 does) for a "Largo"
+gear below G1 without longer symbols, which HF Doppler would punish. 4.
+Over-the-air tests on 40 m and 20 m against the simulator's predictions. 5.
+AFC that also corrects the audible pitch, so a mistuned rig still sounds in
+tune. 6. Explore a glide-fraction and scale per gear (e.g. major pentatonic
+for the duet), and a longer-message / file-transfer gear with ARQ.
+References - L. Vangelista, "Frequency Shift Chirp Modulation: The LoRa
+Modulation," IEEE Signal Processing Letters, 24(12), 2017. - M. Chiani and
+A. Elzanaty, "On the LoRa Modulation for IoT: Waveform Properties and
+Spectral Analysis," IEEE Internet of Things Journal, 2019. - J. Tapparel et
+al., "An Open-Source LoRa Physical Layer Prototype on GNU Radio," IEEE
+SPAWC, 2020. - S. Franke, B. Somerville and J. Taylor, "The FT4 and FT8
+Communication Protocols," QEX, July/August 2020. - WSJT-X User Guide,
+sections on JT65, WSPR and Q65 (Q65 uses Nico Palermo's q-ary
+repeat-accumulate codes). - J. P. Costas, "A study of a class of detection
+waveforms having nearly ideal range-Doppler ambiguity properties," Proc.
+IEEE, 72(8), 1984. - C. C. Watterson, J. R. Juroshek and W. D. Bensema,
+"Experimental confirmation of an HF channel model," IEEE Trans.
+Communication Technology, 18(6), 1970. - ITU-R Recommendation F.1487,
+"Testing of HF modems with bandwidths of up to about 12 kHz using
+ionospheric channel simulators." - J. B. Anderson, T. Aulin and C.-E.
+Sundberg, Digital Phase Modulation, Plenum, 1986. - J. G. Proakis and M.
+Salehi, Digital Communications, 5th ed., chapter on non-coherent orthogonal
+signalling.  How Glissando hears a chirp Does the Glissando receiver detect
+chirps or continuous tones? This page answers that from the C++ modem in
+modem/(../modem/) and then walks through the maths one idea at a time. You
+don't need a DSP background to follow it. Short answer: both, because it
+listens for the whole melody. Every symbol glides for its first 40% and
+holds a note for the other 60%. The receiver compares the audio with a
+stencil of the complete shape, glide and hold together, so the glide's
+energy counts toward every decision. To find where a frame starts, it uses
+the glides the same way LoRa uses chirps. To decide which note was sent, it
+works more like an FT8 tone detector, because most of each symbol is a
+steady note and the note carries the data. !The first four notes of the
+opening motif: C5 held, then glides C5 to G4, G4 to D5 and D5 to E4, each
+followed by a held note The first four notes of the Costas opening motif,
+drawn to scale on a log-frequency axis. At Adagio each symbol lasts 640 ms,
+so each glide takes 256 ms and each hold 384 ms. The shape comes from
+pitchTrack() in GlissandoModem.cpp(../modem/GlissandoModem.cpp). Line
+references below are to GlissandoDemod.cpp(../modem/GlissandoDemod.cpp) as
+of September 2026. The function names will stay put longer than the line
+numbers. Lesson 6 leaves the frame decoder for the listener that hears the
+opening chord, in GlissandoChord.cpp(../modem/GlissandoChord.cpp). Lesson 7
+returns to it, for the bits a receiver can guess before it decodes (October
+2026). Lesson 1: a matched filter is a stencil Suppose you know exactly what
+a signal looks like, sample by sample. The best test for "is it there?" is
+to multiply the received audio by the expected waveform, sample by sample,
+and add up the products. That sum is called a correlation, and a receiver
+built around it is a matched filter. Here is why it works. Where the audio
+matches the stencil, every product points the same way, so after L samples
+the signal has grown L times. Noise points in random directions, so its sum
+wanders like a drunk walking home and grows only as the square root of L.
+One Adagio symbol is 30,720 samples at 48 kHz, so the signal gains on the
+noise by a factor of about 175 in amplitude. That is the whole secret of
+weak-signal modes. The waveform itself holds no magic; what matters is a
+long, patient comparison against something you already know. $$y = \sumn
+rn\cdot\overline{tn} \qquad r = \text{received audio},\; t =
+\text{template}$$ We work with complex (I/Q) audio, so "multiply by the
+expected waveform" means multiply by its complex conjugate. The conjugate
+spins the template's phase backwards, so a matching signal ends up standing
+still, pointing one way, and adds up. In our code that inner loop is
+dotConj() (L71(../modem/GlissandoDemod.cppL71)). Lesson 2: in plain noise,
+the shape does not matter This part surprises most people. Against white
+noise, how well you detect a known waveform depends on only two things: the
+energy in the symbol (power times duration) and how different the candidate
+symbols are from one another. A steady tone, a chirp and a bird call of the
+same energy are equally easy to detect. So LoRa's famous sensitivity does
+not come from chirping. It comes from very long symbols with a large
+time-bandwidth product, detected by a matched filter. FT8 reaches similar
+depths with plain tones for the same reason. That is why our simulated
+thresholds track FT8 and JT65 even though most of each symbol is a held
+note: Allegro sits about 0.5 dB behind FT8 and Adagio matches JT65 ). What
+chirps really buy is protection against things that are not white noise: a
+carrier parked on your frequency, echoes you want to separate in time, and a
+frequency offset you don't know yet. Lesson 3 is about the last one. Lesson
+3: dechirping, the LoRa trick A matched filter needs the template to line up
+in both time and frequency. We don't know when a frame starts or how far off
+tune the other station is, so a naive receiver would try every combination,
+one correlation each. Dechirping gets all the frequency guesses for the
+price of one. Multiply the received glide by the conjugate of the glide you
+expect. If the timing is right, the sweep cancels and what is left is a
+steady tone sitting at the tuning error. One FFT then measures every
+possible tuning error at once, because an FFT is a bank of tone detectors.
+!Received glide times the conjugate of the expected glide gives a steady
+tone at the tuning error Dechirping a C5 to G4 glide. The sweep cancels and
+only the offset survives. The sync search does this for all 21 motif notes
+of a frame. That is exactly our sync search. Each of the 21 known motif
+notes is multiplied by the conjugate of its known glide, the result goes
+through one FFT, and the powers are added across all 21 (SyncSearch,
+L321L392(../modem/GlissandoDemod.cppL321-L392)). The search slides along in
+steps of an eighth of a symbol, keeps the best peaks, then re-searches
+finely around each one (syncSearch(),
+L408L516(../modem/GlissandoDemod.cppL408-L516)). With automatic scale
+detection it does this once per scale. LoRa uses the same trick for its
+data. Every LoRa symbol is the same chirp started at a different point in
+its sweep; dechirp it and the data appears as a tone whose frequency is the
+symbol value. We don't do that for data, because our data symbols are
+different notes rather than shifted copies of one chirp. Lesson 4: why
+chirps are fussy about timing Here is the catch in Lesson 3. A chirp that
+arrives a little late looks almost exactly like a chirp that is a little off
+frequency, because at any instant its pitch is where the on-time chirp's
+pitch was a moment earlier. The sweep couples time and frequency. Radar
+makes use of this; for us it means a glide gives a sharp timing fix but can
+mistake a timing error for a tuning error. The receiver handles this by
+splitting the job (refineSync(),
+L560L630(../modem/GlissandoDemod.cppL560-L630)): - Time is refined to the
+exact sample on the sync glides, where the sweep makes the correlation peak
+narrow. - Frequency is refined on the held part of every note in the frame,
+where a steady tone has no coupling between time and frequency. The glide
+and the hold each do the half they are good at. The prototype showed why
+sample-accurate timing matters: at Adagio, a timing error of 1.25 ms already
+cost 1.5 dB. Lesson 5: deciding the note with 64 stencils and a trellis Once
+the frame is found, each symbol is compared with every possible glide: from
+any of 8 notes to any of 8 notes, 64 stencils in all (correlate(),
+L641L671(../modem/GlissandoDemod.cppL641-L671)). Each stencil covers the
+full symbol, glide plus hold, so it collects all of the symbol's energy. The
+code saves work because every stencil ending on the same note shares the
+same hold, but mathematically each one is a full-length matched filter. Two
+refinements matter: - Non-coherent detection. We never know the absolute
+phase of the other station's audio, so the receiver keeps only the power of
+each correlation, y, and turns it into a likelihood with the Bessel function
+formula for a known shape with unknown phase
+(L788L794(../modem/GlissandoDemod.cppL788-L794)). - The trellis. A glide
+depends on the note before it, so symbols are not independent. The receiver
+runs the BCJR algorithm over the note sequence, which weighs every possible
+path through the melody at once
+(L796L833(../modem/GlissandoDemod.cppL796-L833)). This is how the glide's
+40% of the energy gets used for data: a stencil only matches fully when both
+its start note and its end note are right, and the trellis supplies the
+start note from its neighbour. About 1 in 8 data symbols repeats the
+previous note. When it does, the symbol is a held tone for its whole length
+and the stencil is a plain tone detector. The other 7 in 8 carry a glide.
+Lesson 6: hearing the opening chord, two lamps and an "and" Lessons 1 to 5
+decode a frame. Before any of that, the chat needs a much quicker answer to
+a much simpler question: is somebody keying right now? That is carrier
+sense, and it is what keeps two stations from talking over each other. Every
+transmission opens with two notes played together for 0.6 s, E4 (329.63 Hz)
+and D5 (587.33 Hz), and the chord listener's only job is to notice that pair
+). The interval is a minor seventh: E4 and D5 are the one pair of notes all
+four scales share, so a single test covers every scale. Eleven lamps and a
+stencil Picture it this way: lay out a row of lamps, each one lit by how
+much sound there is at its pitch. Cut a cardboard stencil with two holes the
+chord's distance apart, slide it along the row, and at each position ask
+whether light shows through both holes. That picture is very nearly the
+code. The lamps are the bins of a Fourier transform (the same tone-detector
+bank as in Lesson 3). Every tenth of a second the listener takes the last
+0.6 s of audio, exactly one chord long, and runs an 8192-point FFT on it at
+8 kHz, so each lamp is about 0.98 Hz wide. The two holes are 257.7 Hz apart,
+about 264 lamps. Sliding the stencil is the tuning search: the other station
+may be off tune by up to 25 Hz either way, so the listener reads the pair at
+51 positions one lamp apart. Like the dechirp in Lesson 3, one FFT serves
+all 51; sliding the stencil costs two lookups per position, not another
+transform. Each lamp is measured in units of the noise. The listener takes
+the median lamp between 200 and 3000 Hz, which a handful of loud signals
+can't move, and scales it to the average brightness of a noise-only lamp
+(for noise, the median is ln 2 of the mean). After that, a lamp reading 8 is
+eight times as bright as noise usually makes it, whatever the audio level.
+Where adding the two holes breaks down The obvious test adds the light from
+both holes and compares the total with a threshold. Jeff spotted the flaw:
+what if one lamp is blazing and the other is dark? A carrier on 587 Hz, or
+one FT8 tone, fills a single hole so brightly that the sum clears any
+sensible threshold. Adding is an "or": it says yes if either note is loud
+enough. !Three rows of twelve lamps under a stencil with holes at lamps 4
+and 7. A real chord lights both and both tests hear it. One very bright lamp
+at 7 makes the sum say heard, wrongly, while the dimmer-lamp test stays
+quiet. Noise alone keeps both quiet. The stencil's holes over lamps 4 and 7
+(drawn three lamps apart; on the air they are 264 apart). The two tests are
+set to the same false-alarm rate on noise. Only the dimmer-lamp test rejects
+the single bright lamp. What we want is an "and": E4 is lit and D5 is lit.
+The listener gets one by judging the pair on its dimmer lamp. At each
+stencil position it takes the smaller of the two readings and asks whether
+that is over 8 (CHORDTHRESHOLD). A single blazing lamp can't pass, because
+the other hole is still showing only noise. What the "and" costs, and why it
+is cheap You might expect two separate yes-or-no tests to throw away
+sensitivity compared with pooling the light. A little, but not much. On
+noise, a lamp's reading follows an exponential law: the chance it reaches 8
+is e, about 1 in 3000. Both lamps of one position must do so at once, so a
+false chord at that position has chance e  e = e, about 1 in 9 million. The
+summing test gives the same false-alarm rate with a threshold of 19 on the
+total. With both tests set to that rate, a simulation of a chord in noise
+gives: Sum of both lamps over 19 Dimmer lamp over 8 --------- Chord heard
+half the time each note 9.1 dB over a noise lamp each note 9.8 dB over a
+noise lamp One lamp at 30 dB, noise in the other hole heard every time heard
+0.04 % of the time So the "and" costs about 0.7 dB on a real chord and turns
+the blazing-lamp case from always wrong to almost never. Two things make it
+cheap. The transmitter sends both notes at the same level, so on a clean
+path the lamps really are equal and nothing is lost by looking at the dimmer
+one. And the threshold can be low, 8 rather than something like 16, because
+two coincidences have to happen together before noise can fake a chord. With
+51 positions and ten windows a second, the listener makes about 510 of these
+tests every second. At 1 in 9 million each, noise alone makes a false chord
+roughly once every five hours, before the checks below remove most of those
+too. Four more questions before a chord counts A busy band isn't white
+noise. FT8 tones, RTTY, carriers and voices can light both holes at once by
+accident, and early versions of the listener called that a chord ten times a
+second. So a position that passes the dimmer-lamp test must also pass four
+checks (ChordListener::analyse(), GlissandoChord.cpp
+L224L241(../modem/GlissandoChord.cppL224-L241)): - Nearly even. The brighter
+lamp may be at most 10 times the dimmer (MAXNOTERATIO). A strong carrier
+with a noise spike that happens to reach 8 in the other hole fails here. Ten
+times leaves room for fading to treat the two notes differently. - Just
+switched on. The window that ended where this one starts, all of it from
+before a chord could have begun, must have shown both lamps at under half
+the dimmer reading now (ONSETRATIO). A station keys from silence; a signal
+already sitting on E4 is not a new chord. - A pinpoint, not a lit wall. Each
+lamp must be at least 4 times the average of the lamps 4 to 10 Hz either
+side of it (PURITY, purity()). A held note is a sharp line a couple of lamps
+wide. Voices and the wandering tones of FT8 smear their light across the
+neighbours. - Lit the whole time. Each note must sound in both halves of the
+0.6 s window (STEADYSHARE, steady()). Two short signals that each touch a
+hole for part of the window are not a chord. The position that passes
+everything with the brightest dimmer lamp wins, and its tuning becomes the
+station's tuning for what follows. After the chord: a stencil with eight
+holes Once a chord is heard, the channel stays busy for as long as the
+melody continues. Now the stencil has eight holes, one for each note of a
+scale, at the tuning the chord gave. A melody plays one note at a time, so
+the listener adds the eight lamps (this time the sum is right, since only
+one note sounds at once) and does that for all four scales. The scale that
+has been brightest since the chord is the one being sung. Its total must
+reach 26, about 1.7 times what noise alone makes, and also 1.5 times what
+that same stencil usually showed during the 15 s before the chord, so a
+signal that was already sitting on those notes doesn't count as melody. The
+channel is released 2.5 s after the last bright reading (HOLDSECONDS), which
+spans the gaps between notes. On its own a chord holds the channel for at
+most 75 s, enough for the first frame of an Adagio melody to decode. Every
+frame that does decode starts those 75 s again (heardFrame()), so a long
+keying is followed to its end, while a chord the band made up by accident
+lets go after 75 s. Measured over 20 minutes of a busy band, with a dozen
+FT8 signals and a voice, these checks took the channel from busy all of the
+time to busy 6% of the time, never for more than 7.9 s at once ). Below
+about 14 dB the chord is too faint for the lamps to stand out at all, and
+carrier sense falls back on decoded frames. Lesson 7: filling in some of the
+answers before decoding Lesson 5 ends with a likelihood for every bit of the
+frame. The error-correcting code then picks the most likely 77 payload bits
+and 14 CRC bits. This lesson is about what the receiver can do when it
+already knows some of those bits before it starts. A crossword with some
+squares filled in. Think of the decoder as solving a crossword. The 91 bits
+are the answers, and the convolutional code is the grid of clues: every
+coded bit the radio hears depends on seven neighbouring answer bits, so each
+answer is cross-checked by several clues. Noise smudges some of the clues.
+If someone fills in some answers for you before you start, the smudged clues
+around them stop being ambiguous, and the remaining answers come out right
+even when the handwriting is worse. In the decoder, the Viterbi algorithm
+walks a trellis of 64 states, one step per bit, and at every step each path
+forks two ways: this bit is a 0, or a 1. Where a bit is known, the decoder
+simply closes the fork that disagrees (decodeFrame(), GlissandoFec.cpp
+L141L156(../modem/GlissandoFec.cppL141-L156)). It no longer needs the noisy
+evidence for those bits, and the code's redundancy all goes to the bits
+still in doubt. FT8 decoders use the same trick and call it a priori (AP)
+decoding. !Two rows of 77 boxes, one per payload bit. In the first frame of
+AG7SU's reply, all but 6 bits are shaded as guessable: the frame header,
+three bits of the type byte, your callsign's CRC and AG7SU's packed
+callsign. In the last frame of a message carrying one byte, the 64 bits of
+zero padding are shaded Which payload bits a listener can predict, without
+anything changing on the air. Teal bits are guessed; white bits must be
+decoded. Where the guesses come from. Two kinds of bit are predictable: -
+Zero padding. A message is cut into 9-byte pieces, and the last piece is
+padded out with zero bytes. If the last frame carries one byte of text, 64
+of its 77 bits are zeros. The receiver guesses 64 zero bits, then 48
+(PADDINGHYPOTHESES, GlissandoDemod.cpp
+L67L76(../modem/GlissandoDemod.cppL67-L76)). - Replies. Once you have sent
+something to AG7SU, the first frame of AG7SU's answer must start with a
+known frame header, your callsign's CRC and AG7SU's packed callsign: 71 of
+its 77 bits. Your receiver learns your callsign and who you sent to from
+your own transmissions. It guesses a reply from each of the three stations
+you sent to most recently in the last 15 minutes, then a frame to you from
+anybody, which pins 31 bits (expectedFrames() in
+TextMessagingModem.cpp(../app/src/pipeline/TextMessagingModem.cpp) and
+FrameCodec::expectedFrameStart() in
+FrameCodec.cpp(../app/src/textmessaging/FrameCodec.cpp)). The CRC is the
+referee. A guess is never simply trusted. The receiver first decodes the
+frame with no guesses. Only if the CRC fails does it try each guess in turn
+(GlissandoDemod.cpp L1068L1083(../modem/GlissandoDemod.cppL1068-L1083)). A
+wrong guess forces the decoder onto wrong answers, and the 14-bit CRC
+rejects the result 16,383 times in 16,384. That last 1 in 16,384 is the
+price: every guess is another lottery ticket for pure noise to pass the CRC.
+So the receiver holds only a handful of guesses, never tries them on a
+candidate below the Es/N0 floor, and the cost stays small. In 10,000
+searches of pure noise at Presto with guesses installed there was one false
+decode, about the same as without them. What it buys. Measured at Presto in
+white noise, 200 frames per point, as the drop in signal needed to decode
+half the frames: Frame Bits known Code alone Whole receiver ------------
+Last frame of a message, one byte of text 64 2.1 dB 0.8 dB Last frame of a
+message, three bytes of text 48 1.2 dB 0.45 dB First frame of a reply from
+the station you're working 71 not measured about 1 dB First frame addressed
+to you from a stranger 31 not measured 0.3 dB The whole receiver gains less
+than the code alone because guesses only help once the frame has been found.
+At the weakest signals many frames are lost earlier, at the sync search of
+Lessons 3 and 4, and knowing what a frame says does not help find it. Two
+properties make this safe to add. Nothing on the air changes, so every
+station benefits whatever version the sender runs. And it only ever adds a
+second chance: a frame that decodes plainly decodes exactly as before, and a
+station that fades in mid-message still reads it without any guesses at all.
+What glide-then-hold gains and gives up Pure chirp (LoRa) Glissando glide +
+hold --------- Sensitivity in white noise Set by symbol energy Same rule;
+thresholds near FT8 and JT65 Finding the frame Dechirp and FFT Same trick on
+the 21 motif glides Carrier or whistle on a note Spread over the band,
+barely hurts Lands on a held note and can steal it Tuning error vs timing
+Coupled; needs extra care Holds measure tuning cleanly Bandwidth Whole
+sweep, every symbol 330 to 880 Hz, fits SSB easily How it sounds Buzzing
+sirens A melody The one real thing we give up is resistance to narrowband
+interference. A pure chirp spends only a moment at any one frequency, so a
+carrier at 440 Hz barely touches it. Our notes rest 60% of the time in a
+slot about 3 Hz wide at Adagio, so a carrier sitting on one of our notes
+will hurt the symbols that land there. The error-correcting code covers some
+of that. This is inferred from the design, not measured; a bench run with a
+carrier on A4 would put a number on it. The prototype does the same The C++
+modem is a port of prototype/glissando.py(../prototype/glissando.py) and
+uses the same maths: dechirped sync search, sample-accurate timing on
+glides, frequency on holds, 64 full-symbol stencils and BCJR. The port adds
+speed-ups that don't change the result (summing the dechirped audio in
+blocks before a shorter FFT, sharing hold correlations) and floors that stop
+silence and hum from decoding (see the notes at the top of
+GlissandoDemod.cpp(../modem/GlissandoDemod.cpp)).  Glissando A weak-signal
+amateur radio digital mode that sounds like someone whistling a bright and
+warm tune -- or, alternatively, murderous bleeping robot minions. Every
+symbol is a glide (a chirp) from one note of the selected scales to the
+next, followed by a short sustain. The data is the melody. The signal is
+constant-envelope, phase-continuous and fits inside an ordinary SSB
+passband. Like LoRa, it reaches below the noise by using a large set of
+orthogonal chirps, long integration and strong FEC; unlike LoRa, the chirps
+are chosen so that any sequence of them, and any two of them at once, is
+consonant. It shifts gears (tempo) to match the HF path. Gear Tempo Symbol
+Transmission 50 % decode, AWGN / CCIR poor (dB, 2500 Hz)
+---------------------------------------------------------- G1 Adagio 640 ms
+55 s -26.5 / -23.0 G2 Andante 320 ms 27.5 s -23.6 / -20.8 G3 Allegro 160 ms
+13.8 s -20.4 / -17.6 G4 Presto 80 ms 6.9 s -17.4 / -14.2 G5 Presto duet 80
+ms x 2 voices 6.9 s (2 messages) -14.1 / -10.8 - Design and trade-offs:
+docs/DESIGN.md - How the receiver hears a chirp, explained from first
+principles (matched filters, LoRa-style dechirping, the note trellis):
+docs/HOWITHEARS.md - The chord that opens and closes each transmission, and
+why it is for the ear and not the receiver: docs/CHORDS.md - Listen:
+samples/(samples/) (8 kHz WAV; g3-allegro-moderate-hf-minus10db.wav is what
+it sounds like through a fading HF path at -10 dB SNR) - Modes: see
+Scales(scales) below for the pentatonic default and the three tritone modes
+- Prototype: prototype/(prototype/) (Python 3 + NumPy) - Modem in C++:
+modem/(modem/), a real-time port of the prototype (streaming receiver, all
+gears at once), tested against it - App: app/(app/), a desktop console
+dressed as Chaotica's control room, with a visi-scope waterfall, tuning and
+gear controls, and text chat carried as Glissando melodies. Build and run
+notes: docs/APP.md. It started from FreeDV and keeps FreeDV's LGPL 2.1
+licence (app/COPYING); the rest of the repository is MIT. Scales The
+alphabet of eight notes is a parameter (--scale on sim.py and bench.py,
+SCALES in glissando.py). Two families are included. Pentatonic (the default,
+pentatonic): A minor pentatonic, E4 to A5. It has no semitones and no
+tritone, so every pair of notes is consonant. Any data sequence is a tune,
+and whatever overlaps the signal on an HF band, a multipath echo, the duet's
+second voice, or another Glissando station in the same key, lands on it as
+harmony. Its interference with itself is pleasant, which is the point of the
+mode. Tritone modes (wholetone, diminished, diabolus): the same modem
+gliding between notes built on the devil's interval. They sound like the
+bleeping computers of an evil mastermind's lair in The Adventures of Captain
+Proton: whole-tone runs, diminished scurries, and two major triads a tritone
+apart. Each scale maps onto itself under a tritone, so the duet's two voices
+are a tritone apart as well. scale low voice flavour --------- pentatonic E4
+G4 A4 C5 D5 E5 G5 A5 whistled folk tune; overlaps are harmony wholetone E4
+F4 G4 A4 C5 D5 E5 F5 dreamlike, no centre; notes 3 steps apart are a tritone
+diminished E4 F4 G4 G4 A4 B4 C5 D5 half-whole octatonic; every note has its
+tritone in the scale diabolus E4 G4 A4 B4 D5 E5 F5 G5 E major and Bb major
+triads a tritone apart They cost nothing in sensitivity: at G3 Allegro all
+four scales decode at the same SNR within 0.5 dB . The receiver hears all
+four at once and says which one each station sang in, so the forces of good
+in pentatonic white can chat with Chaotica's diabolus henchmen, each in
+their own key, at no cost in sensitivity or false decodes . Listen in
+samples/: g3-allegro-<scale.wav for a solo and g5-presto-duet-<scale.wav for
+the duet. Intention This work represents a long-standing dream of the
+inventor: to make amateur radio bands sound better, and to encourage
+harmonious interoperability. !Spectrogram

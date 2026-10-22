@@ -21,6 +21,8 @@ from "ragchew". Two ideas frame everything:
 
 Read `docs/PLAN.md` first: it is the full design, with Jeff's decisions
 and open questions. `docs/STAGE1.md` is the work now under way.
+`docs/PROTOCOL.md` is what goes on the air (records, frames, sessions,
+text coding).
 `docs/GEARBOX.md` and `docs/MOCKUPS.md` cover the gearshift and the
 screens.
 
@@ -31,6 +33,13 @@ screens.
   mode, and then some) has started.
 - Package A (skeleton and CI) gives the layout below, a placeholder main
   window with the three tabs, and CI. Packages B, C and D build on it.
+- Package B (protocol v0 and core library): `docs/PROTOCOL.md`, the
+  records and streams (`core/src/protocol/`), HamText table 0
+  (`core/src/text/`, identical to Glissando's), `Data2GLink` and
+  `HostLink` (`core/src/link/`), `Sha256` and `SessionFiles`
+  (`core/src/files/`), and a fake data2g-host for tests
+  (`tests/FakeHost.*`). Ported from Glissando: Data2GLink, Sha256,
+  HamText with its generator, Data2GFileTransfer (now `SessionFiles`).
 - Package D (gearshift) gives `core/src/gearbox/` and the popup
   (`app/src/GearshiftDialog.*`). It reads Data2G's thresholds from the
   operator's own file at run time; none are committed
@@ -100,8 +109,8 @@ screens.
 | --- | --- |
 | `core/` | `ragtime_core`, the socket-free library: no wx, no sockets in the engines, all unit-tested. Headers in `core/include/ragtime/`, sources in `core/src/`, one subfolder per area: `protocol/`, `link/`, `text/`, `files/` (package B), `globus/` (C), `gearbox/` (D). Add sources to `core/CMakeLists.txt` |
 | `app/` | The wxWidgets app (`app/src/`). It draws and wires; logic goes in core. `MainFrame` is the one main window; `app/src/globus/` is the Globus pane (`GlobusPanel`, `GlobusView`, `GlobusToggle`) |
-| `tests/` | ctest unit tests for core, plain executables on `tests/Check.h` (`CHECK`, `CHECK_EQ`). Add one with `ragtime_test(<name> <source>)` in `tests/CMakeLists.txt`. Fake hosts for link tests go here too |
-| `tools/` | Reference scripts: `globe/` (sunlit globe renderer, and the generators of the map tables in `core/src/globus/`: coasts and borders from Natural Earth, state and province lines from `us_canada_admin1_lines.json`), `gearbox/` (ladders), `gcc16/check.py` (GCC 16 check) |
+| `tests/` | ctest unit tests for core, plain executables on `tests/Check.h` (`CHECK`, `CHECK_EQ`). Add one with `ragtime_test(<name> <source>)` in `tests/CMakeLists.txt`. `FakeHost.*` is a fake data2g-host on loopback sockets (POSIX, so its test builds only `if(UNIX)`) |
+| `tools/` | Reference scripts: `globe/` (sunlit globe renderer, and the generators of the map tables in `core/src/globus/`: coasts and borders from Natural Earth, state and province lines from `us_canada_admin1_lines.json`), `gearbox/` (ladders), `ham_table/` (text table 0 generator and corpus: `gen_table.py --check`), `gcc16/check.py` (GCC 16 check) |
 | `cmake/` | CMake helpers. `ragtime_warnings(<target>)` gives every target `-Wall -Wextra` and, with `RAGTIME_WERROR` (on by default), `-Werror` |
 | `docs/` | The plan and specs. Change them in the same PR as the code they describe |
 
