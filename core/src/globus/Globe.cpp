@@ -185,13 +185,6 @@ std::vector<Line> unpackLines(int count, const uint32_t* starts, const int16_t* 
     return unpacked;
 }
 
-const std::vector<Line>& borders()
-{
-    static const std::vector<Line> all = unpackLines(BorderLines::LINE_COUNT, BorderLines::LINE_START,
-                                                     BorderLines::POINTS, BorderLines::UNITS_PER_DEGREE);
-    return all;
-}
-
 const std::vector<Line>& admin1()
 {
     static const std::vector<Line> all = unpackLines(Admin1Lines::LINE_COUNT, Admin1Lines::LINE_START,
@@ -207,6 +200,64 @@ void capLine(Line& line)
     line.centre = length(sum) > 1e-9 ? normalized(sum) : line.points.front();
     line.reach = 0.0;
     for (const Vec3& p : line.points) line.reach = std::max(line.reach, angleOf(line.centre, p));
+}
+
+// The lines with the stretches over the big lakes taken out. The 1:110m
+// countries fill the lakes in as land, so their borders run on across the
+// water, and the 1:110m lakes are drawn more roughly than the borders, so a
+// border down a lake (Tanganyika, Malawi) wanders in and out of it. Drawn
+// in the sea's colour, the lake is the divide: a border stops at its shore.
+std::vector<Line> offLakes(const std::vector<Line>& lines)
+{
+    const int pieces = 8;   // each edge near a lake is looked at in eighths
+    std::vector<Line> kept;
+    for (const Line& line : lines)
+    {
+        Line run;
+        auto finish = [&kept, &run]() {
+            if (run.points.size() >= 2)
+            {
+                capLine(run);
+                kept.push_back(std::move(run));
+            }
+            run = Line();
+        };
+        run.points.push_back(line.points.front());
+        for (size_t i = 0; i + 1 < line.points.size(); i++)
+        {
+            const Vec3& a = line.points[i];
+            const Vec3& b = line.points[i + 1];
+            bool near = false;
+            for (const Ring& lake : lakes()) near = near || angleOf(lake.centre, a) < lake.reach + angleOf(a, b);
+            if (!near)
+            {
+                if (run.points.empty()) run.points.push_back(a);
+                run.points.push_back(b);
+                continue;
+            }
+            for (int k = 0; k < pieces; k++)
+            {
+                Vec3 p = normalized(plus(scaled(a, 1.0 - (double)k / pieces), scaled(b, (double)k / pieces)));
+                Vec3 q = normalized(plus(scaled(a, 1.0 - (double)(k + 1) / pieces), scaled(b, (double)(k + 1) / pieces)));
+                if (isLake(toLatLon(normalized(plus(p, q)))))
+                {
+                    finish();
+                    continue;
+                }
+                if (run.points.empty()) run.points.push_back(p);
+                run.points.push_back(q);
+            }
+        }
+        finish();
+    }
+    return kept;
+}
+
+const std::vector<Line>& borders()
+{
+    static const std::vector<Line> all = offLakes(unpackLines(BorderLines::LINE_COUNT, BorderLines::LINE_START,
+                                                              BorderLines::POINTS, BorderLines::UNITS_PER_DEGREE));
+    return all;
 }
 
 // The coasts: the edges of the land's outlines that only one country has,

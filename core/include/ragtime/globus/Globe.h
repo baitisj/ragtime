@@ -267,7 +267,8 @@ std::vector<Outline> lakeOutlines(const View& view, const Window& window);
 std::vector<Outline> coastLines(const View& view, const Window& window);
 
 // The borders between countries on the near side of the globe, smoothed,
-// as lines to stroke.
+// as lines to stroke. They stop at the shores of the big lakes, which are
+// the divide there: Victoria, Tanganyika, Malawi, the Great Lakes.
 std::vector<Outline> borderLines(const View& view, const Window& window);
 
 // The state and province lines on the near side of the globe, as lines to

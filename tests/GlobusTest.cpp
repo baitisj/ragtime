@@ -784,6 +784,47 @@ void testLakes()
     CHECK(lakeOutlines(pacific, Window{320.0, 320.0}).empty());
 }
 
+void testBordersStopAtLakes()
+{
+    // The 1:110m borders run on across the big lakes, which the countries
+    // fill in as land: through Victoria, down Tanganyika and Malawi, along
+    // the middle of the Great Lakes.
+    int acrossLakes = 0;
+    for (int l = 0; l < BorderLines::LINE_COUNT; l++)
+    {
+        for (uint32_t i = BorderLines::LINE_START[l]; i + 1 < BorderLines::LINE_START[l + 1]; i++)
+        {
+            double lon = (BorderLines::POINTS[2 * i] + BorderLines::POINTS[2 * i + 2]) / 200.0;
+            double lat = (BorderLines::POINTS[2 * i + 1] + BorderLines::POINTS[2 * i + 3]) / 200.0;
+            acrossLakes += isLake(LatLon{lat, lon});
+        }
+    }
+    CHECK(acrossLakes > 10);
+
+    // Drawn, they stop at the shore: the lake, in the sea's colour, is the
+    // divide. The borders round the lakes still show.
+    Window window{400.0, 400.0};
+    for (LatLon centre : {LatLon{-6.0, 31.0}, LatLon{45.0, -82.0}})
+    {
+        View view{lookingAt(toVector(centre)), 1500.0};
+        int edges = 0;
+        int wet = 0;
+        for (const Outline& line : borderLines(view, window))
+        {
+            for (size_t i = 0; i + 1 < line.size(); i++)
+            {
+                Vec3 face{((line[i].x + line[i + 1].x) / 2.0 - 200.0) / 1500.0,
+                          (200.0 - (line[i].y + line[i + 1].y) / 2.0) / 1500.0, 0.0};
+                face.z = std::sqrt(std::max(0.0, 1.0 - face.x * face.x - face.y * face.y));
+                edges++;
+                wet += isLake(toLatLon(toEarth(view.attitude, face)));
+            }
+        }
+        CHECK(edges > 10);
+        CHECK_EQ(wet, 0);
+    }
+}
+
 void testCoastsAreNotBorders()
 {
     // Over the prairies on the 49th parallel, and over Austria, the window
@@ -1164,6 +1205,7 @@ int main()
     testOutlines();
     testBorders();
     testLakes();
+    testBordersStopAtLakes();
     testCoastsAreNotBorders();
     testAdmin1();
     testSubsolar();

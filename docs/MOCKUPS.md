@@ -69,7 +69,11 @@ beside Globus and with Globus off:
   border; and no state or province line along a country border. The big
   lakes (Natural Earth 1:110m, the Great Lakes among them) are filled in
   the ocean's colour with a coast round them, so Lake Michigan parts
-  Wisconsin from Michigan.
+  Wisconsin from Michigan. A country border stops at a lake's shore
+  (2026-10-22): the 1:110m borders run on across Victoria, down
+  Tanganyika and Malawi and along the Great Lakes, and the rougher lake
+  outlines made them wander in and out of the water. The lake is the
+  divide.
 - State and province lines (Jeff, 2026-10-22) for the United States,
   Canada, Mexico, Russia, China, India, Brazil, Argentina and Australia,
   its federal territories included: Natural Earth 1:10m, every line the
