@@ -393,24 +393,81 @@ Broadcasts go on the `D2G` group, opened with `BCAST OPEN D2G FROM
 
 ### Seals and repair
 
-Version 0 defines the records; package H builds the behaviour, and
-`docs/PLAN.md` ("Seals, receipts and repairs") has the reasoning.
+`docs/PLAN.md` ("Seals, receipts and repairs") has the reasoning; this
+is what version 0 does. Every timing is in airtimes of Data2G modes, as
+the host's `MODES` lists them.
 
-- A station sends a **Seal** of the items it broadcast since its last
-  one: at most every 10 minutes, with its CW ID, and whenever it stops
-  sending for a while (the end of an over, or of a file's pieces).
-- After a seal it leaves a **listening window**: 3 × the airtime of a
-  one-codeword burst in its mode, plus 4 s.
-- A listener that lacks something the seal lists, or the seal itself
-  (each seal names the previous one), waits a random time within the
-  window and sends one **RepairRequest**, unless it hears another that
-  already asks for everything it lacks.
-- The station resends the union of what was asked, in sequence order,
-  then opens another window. It stops after a window with no requests, or
-  once the seal leaves its **sensitivity window**: the last 3 seals, and
-  never less than 4 × the airtime of the items sealed, up to 2 hours.
+**The sender.**
 
-The multipliers and the cap are open for Jeff (PLAN.md).
+- It seals the items it has broadcast and not yet sealed: when nothing
+  of its own is on the way and either the last item went 60 s ago or a
+  file's first pass has just ended, and in any case once the oldest
+  unsealed item is 10 minutes old.
+- A seal lists a run of consecutive numbers. An item that never went (its
+  burst was Not sent) is listed with a zero digest, so nobody asks for
+  it; a run that starts with such items starts after them. A run too long
+  for one frame goes as several seals, a frame each, packed into bursts.
+- A seal burst that is Not sent goes again, three tries in all.
+- When a seal burst is Sent, a **listening window** opens: 3 × the
+  airtime of a one-codeword burst in its mode, plus 4 s (52 s in
+  fsk16r25-r1/3, 13 s in qpsk-r1/3).
+- At the window's end it resends the union of what was asked: items and
+  pieces in sequence order (each file's pieces after its announce), cut
+  at 10 minutes of airtime a round, and then the seals asked under,
+  which opens the next window when that last burst is Sent.
+- A window with no requests ends the repairs, except that a seal over a
+  file goes again after it, at most twice more, in case the seal or a
+  request was lost (NORM's flush, repeated).
+- A request that comes with no window open (a listener that pressed
+  Receive late) opens one, so others can join it.
+- It answers a seal while the seal is in its **sensitivity window**: one
+  of its newest 3 seals, or younger than 4 × the airtime of the items it
+  covers, and never past 2 hours, unless the operator keeps it open
+  longer or closes it now.
+
+**A listener.**
+
+- It keeps what it heard of each station (items, seals, and which files
+  it heard pieces of) for 2 hours.
+- On a seal it works out what it lacks: items it never heard or heard
+  differently, the pieces it lacks of files it is receiving, and a seal
+  it missed (each seal names the previous one; the request then has the
+  missed seal's number, a zero digest and flag bit 0).
+- It asks only about overs it was there for: it holds an item of the
+  seal, or a piece of a file the seal lists (the announce may be what it
+  lost), or an older seal or item of that station. A station that just
+  tuned in doesn't ask for what went before.
+- It waits a random time within the window less its own request's
+  airtime and 2 s, reckoned in its own mode. Requests it hears from
+  others to the same station meanwhile are taken off what it lacks; if
+  nothing is left, it stays quiet.
+- A request is one frame. A list of pieces too long for it is halved
+  (the lowest kept), and the rest asked for next round.
+- It stops asking under a seal after 5 requests in a row that brought
+  nothing, and asks for a missed seal at most 5 times.
+
+### Broadcast files
+
+- A file is at most 300 KB. Its pieces fill a frame: three codewords in
+  the FSK modes, otherwise as much as the 255-byte frame takes, with the
+  sender's callsign in each piece's header.
+- The first pass goes one burst at a time with 3 s between bursts, so
+  others can get a word in: the announce, then the pieces, with the
+  announce again ahead of every 20 pieces. A burst Not sent goes once
+  more. The operator sees the estimate (pieces, airtime, when repairs end
+  at the latest) before it goes; Ragtime refuses a file that would take
+  over 2 hours of airtime and warns over 15 minutes.
+- A listener shows a heard announce, and receives it if the operator
+  presses Receive, or without asking if they turned on Receive broadcast
+  files automatically (off by default). Pieces heard before their
+  announce are held, up to 2 MB, until it comes.
+- With every piece in, the whole-file digest is checked. A file that
+  fails it is fetched once more from the start; a second failure ends
+  it. A file announced again with the same size, piece size, digest and
+  name takes over the pieces already heard.
+- A file still missing pieces 2 hours 10 minutes after anything new came
+  is shown as incomplete; it and finished ones are kept on the screen
+  for 24 hours, in memory only.
 
 ## Growing the protocol
 

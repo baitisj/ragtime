@@ -4,6 +4,8 @@
 #include <cstdint>
 #include <functional>
 #include <string>
+#include <utility>
+#include <vector>
 
 #include <wx/panel.h>
 
@@ -14,6 +16,24 @@ class wxButton;
 class wxStaticText;
 class wxTextCtrl;
 class MessageList;
+
+// A broadcast file's card among the messages, as the window describes it
+// (BroadcastFiles holds the file; the card only shows it).
+struct FileCard
+{
+    std::string what;           // "fred.txt · 7,000 bytes"
+    std::string state;          // "Receiving, 12 of 15 pieces", "Saved", "Repairs open until 15:42 (1 h 10 min)"
+    bool good = false;          // shown green: Saved, Sent
+    bool bad = false;           // shown red: Failed
+    // The card's links, in order: (action, label), such as
+    // ("receive", "Receive...") and ("ignore", "Ignore").
+    std::vector<std::pair<std::string, std::string>> actions;
+    // Its right-click menu, the same on the Files tab: a greyed first line
+    // when there is one ("Repairs open until 15:42 (1 h 10 min)"), then
+    // these, or the links when there are none.
+    std::string title;
+    std::vector<std::pair<std::string, std::string>> menu;
+};
 
 // The Broadcast tab (docs/STAGE1.md, package E): the messages on D2G, each
 // of ours showing Queued, Sending, Sent or Not sent; the line to type in,
@@ -33,6 +53,13 @@ public:
     void onGear(std::function<void()> fn) { onGear_ = std::move(fn); }
     void onCancel(std::function<void(uint64_t id)> fn) { onCancel_ = std::move(fn); }
     void onResend(std::function<void(uint64_t id)> fn) { onResend_ = std::move(fn); }
+    // Broadcast files: the File... button, each card's look, and its links.
+    void onBroadcastFile(std::function<void()> fn) { onBroadcastFile_ = std::move(fn); }
+    void fileCards(std::function<bool(uint64_t file, FileCard& card)> fn) { fileCard_ = std::move(fn); }
+    void onFileAction(std::function<void(uint64_t file, const std::string& action)> fn)
+    {
+        onFileAction_ = std::move(fn);
+    }
     // Turns a Data2G mode name into the short name shown to people ("E2C").
     void nameModes(std::function<std::string(const std::string& mode)> fn) { nameMode_ = std::move(fn); }
 
@@ -49,12 +76,14 @@ private:
 
     void send();
     void showMenu(int row);
+    void showFileMenu(const ragtime::broadcast::Message& m);
     void arrange(int width);
 
     const ragtime::broadcast::BroadcastChat& chat_;
     MessageList* list_ = nullptr;
     wxStaticText* paused_ = nullptr;
     wxTextCtrl* compose_ = nullptr;
+    wxButton* file_ = nullptr;
     wxButton* gear_ = nullptr;
     wxButton* send_ = nullptr;
     wxBoxSizer* buttons_ = nullptr;
@@ -66,6 +95,9 @@ private:
     std::function<bool(const std::string&)> onSend_;
     std::function<void()> onGear_;
     std::function<void(uint64_t)> onCancel_, onResend_;
+    std::function<void()> onBroadcastFile_;
+    std::function<bool(uint64_t, FileCard&)> fileCard_;
+    std::function<void(uint64_t, const std::string&)> onFileAction_;
     std::function<std::string(const std::string&)> nameMode_;
 };
 
