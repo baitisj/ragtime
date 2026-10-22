@@ -827,18 +827,34 @@ void testCoastsAreNotBorders()
 
 void testAdmin1()
 {
-    // The US state and Canadian province lines, Natural Earth simplified:
-    // all in North America, and on the land or right beside it (they meet
-    // the coast at their ends, and run down the middle of the Great Lakes,
-    // which the 1:110m land fills in). One point, where Nunavut meets the
-    // Northwest Territories, is out in the channels of the Arctic islands.
-    CHECK_EQ(Admin1Lines::LINE_COUNT, 127);
+    // The state and province lines, Natural Earth's 1:10m set smoothed,
+    // for the United States, Canada, Mexico, Russia, China, India, Brazil,
+    // Argentina and Australia: each point in one of those, and on the land
+    // or right beside it (they meet the coast at their ends, and run down
+    // the middle of the Great Lakes, which the 1:110m land fills in).
+    CHECK_EQ(Admin1Lines::LINE_COUNT, 665);
+    struct Box
+    {
+        double south, north, west, east;
+    };
+    const Box countries[] = {
+        {14.0, 84.0, -170.0, -50.0},    // the United States, Canada and Mexico
+        {5.0, 82.0, 19.0, 180.0},       // Russia, China and India
+        {60.0, 75.0, -180.0, -168.0},   // Chukotka, over the date line
+        {-56.0, 6.0, -75.0, -33.0},     // Brazil and Argentina
+        {-45.0, -9.0, 112.0, 155.0},    // Australia
+    };
+    auto inBox = [](const Box& box, double lat, double lon) {
+        return lat > box.south && lat < box.north && lon > box.west && lon < box.east;
+    };
     int offLand = 0;
     for (int i = 0; i < Admin1Lines::POINT_COUNT; i++)
     {
         double lon = Admin1Lines::POINTS[2 * i] / Admin1Lines::UNITS_PER_DEGREE;
         double lat = Admin1Lines::POINTS[2 * i + 1] / Admin1Lines::UNITS_PER_DEGREE;
-        CHECK(lat > 24.0 && lat < 84.0 && lon > -142.0 && lon < -52.0);
+        bool inside = false;
+        for (const Box& box : countries) inside = inside || inBox(box, lat, lon);
+        CHECK(inside);
         bool land = false;
         for (double dlat : {0.0, -0.5, 0.5})
         {
@@ -846,6 +862,7 @@ void testAdmin1()
         }
         if (!land) offLand++;
     }
+    CHECK_EQ(offLand, 0);
     CHECK(offLand <= 1);
 
     // None runs over a lake, and none runs along a country border, which
@@ -858,7 +875,7 @@ void testAdmin1()
         {
             Point a{BorderLines::POINTS[2 * i] / 100.0, BorderLines::POINTS[2 * i + 1] / 100.0};
             Point b{BorderLines::POINTS[2 * i + 2] / 100.0, BorderLines::POINTS[2 * i + 3] / 100.0};
-            if (a.x < -50.0 && a.y > 20.0) borders.push_back({a, b});
+            borders.push_back({a, b});
         }
     }
     auto toBorder = [&borders](const Point& p) {
@@ -892,8 +909,42 @@ void testAdmin1()
     CHECK_EQ(wet, 0);
     for (int l = 0; l < Admin1Lines::LINE_COUNT; l++) CHECK(Admin1Lines::LINE_START[l + 1] - Admin1Lines::LINE_START[l] >= 2);
 
-    // Over Kansas there are dozens, all on the near side; over the Indian
-    // Ocean none.
+    // Every country has its lines: points in each one's middle. Among
+    // Canada's is British Columbia's with the Northwest Territories, along
+    // the 60th parallel from 120 W to the Rockies, which the 1:50m set
+    // lacks.
+    const Box middles[] = {
+        {30.0, 45.0, -110.0, -85.0},    // the United States
+        {50.0, 60.0, -115.0, -75.0},    // Canada
+        {17.0, 28.0, -110.0, -90.0},    // Mexico
+        {50.0, 70.0, 40.0, 140.0},      // Russia
+        {25.0, 40.0, 100.0, 120.0},     // China
+        {12.0, 28.0, 72.0, 86.0},       // India
+        {-30.0, -5.0, -60.0, -38.0},    // Brazil
+        {-45.0, -25.0, -70.0, -58.0},   // Argentina
+        {-38.0, -15.0, 125.0, 150.0},   // Australia
+    };
+    for (const Box& box : middles)
+    {
+        int points = 0;
+        for (int i = 0; i < Admin1Lines::POINT_COUNT; i++)
+        {
+            points += inBox(box, Admin1Lines::POINTS[2 * i + 1] / Admin1Lines::UNITS_PER_DEGREE,
+                            Admin1Lines::POINTS[2 * i] / Admin1Lines::UNITS_PER_DEGREE);
+        }
+        CHECK(points >= 10);
+    }
+    int alongSixty = 0;
+    for (int i = 0; i < Admin1Lines::POINT_COUNT; i++)
+    {
+        double lon = Admin1Lines::POINTS[2 * i] / Admin1Lines::UNITS_PER_DEGREE;
+        double lat = Admin1Lines::POINTS[2 * i + 1] / Admin1Lines::UNITS_PER_DEGREE;
+        if (std::fabs(lat - 60.0) < 0.05 && lon > -123.5 && lon < -120.5) alongSixty++;
+    }
+    CHECK(alongSixty >= 1);
+
+    // Over Kansas there are dozens, all on the near side; close over the
+    // middle of the Pacific none.
     Window window{320.0, 320.0};
     View kansas{lookingAt(toVector(LatLon{39.0, -98.0})), 148.0};
     std::vector<Outline> lines = admin1Lines(kansas, window);
@@ -902,8 +953,8 @@ void testAdmin1()
     {
         for (const Point& p : line) CHECK(std::hypot(p.x - 160.0, p.y - 160.0) <= 148.0 + 1e-6);
     }
-    View indianOcean{lookingAt(toVector(LatLon{-20.0, 80.0})), 148.0};
-    CHECK(admin1Lines(indianOcean, window).empty());
+    View pacific{lookingAt(toVector(LatLon{0.0, -150.0})), 1184.0};
+    CHECK(admin1Lines(pacific, window).empty());
 }
 
 std::int64_t utc(int year, int month, int day, int hour, int minute)
