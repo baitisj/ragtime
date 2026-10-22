@@ -35,6 +35,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <map>
+#include <random>
 #include <string>
 #include <vector>
 
@@ -81,6 +82,10 @@ public:
     void setIdleBroadcastMs(int ms) { idleBroadcastMs_ = ms; }
     // The next burst is dropped: BCAST <port> DROPPED <frames>, no acks.
     void dropNextBurst() { dropNext_ = true; }
+    // A fading path: each group frame this host hears from another is lost
+    // with this chance (0 to 1); a burst it loses all of is reported LOST.
+    void setLoss(double fraction) { loss_ = fraction; }
+    size_t framesLost() const { return framesLost_; }
     // Closes the command port's client, as a host that stopped would.
     void closeCommand();
 
@@ -145,6 +150,9 @@ private:
     };
     std::vector<Tagged> burst_;
     size_t burstsSent_ = 0;
+    double loss_ = 0.0;
+    size_t framesLost_ = 0;
+    std::mt19937 lossRandom_{12345};
     int airtimeMs_ = 0;
     std::vector<Tagged> onAir_;     // keyed up, not yet heard
     long long onAirUntilMs_ = -1;

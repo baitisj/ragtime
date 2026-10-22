@@ -1,5 +1,6 @@
 #include "Prefs.h"
 
+#include <cstdlib>
 #include <optional>
 
 #include <wx/config.h>
@@ -184,4 +185,33 @@ std::string filesLogPath()
     if (!configPath.empty()) return configPath + ".files";
     wxFileName file(wxStandardPaths::Get().GetUserDataDir(), "files.log");
     return std::string(file.GetFullPath().utf8_str());
+}
+
+broadcast::Seals::Chain loadSealChain(const std::string& callsign)
+{
+    broadcast::Seals::Chain chain;
+    if (callsign.empty()) return chain;
+    wxString saved;
+    if (!config().Read(wxString::FromUTF8("/Broadcast/Seals/" + callsign), &saved)) return chain;
+    // "<number> <digest in hex>"
+    std::string text(saved.utf8_str());
+    size_t space = text.find(' ');
+    if (space == std::string::npos || text.size() - space - 1 != 2 * protocol::DIGEST_BYTES) return chain;
+    long number = std::strtol(text.substr(0, space).c_str(), nullptr, 10);
+    if (number <= 0 || number > 0xFFFF) return chain;
+    for (size_t i = 0; i < protocol::DIGEST_BYTES; i++)
+    {
+        std::string pair = text.substr(space + 1 + 2 * i, 2);
+        chain.digest[i] = (uint8_t)std::strtoul(pair.c_str(), nullptr, 16);
+    }
+    chain.number = (uint16_t)number;
+    return chain;
+}
+
+void saveSealChain(const std::string& callsign, const broadcast::Seals::Chain& chain)
+{
+    if (callsign.empty() || chain.number == 0) return;
+    std::string text = std::to_string(chain.number) + " " + protocol::hex(chain.digest);
+    config().Write(wxString::FromUTF8("/Broadcast/Seals/" + callsign), wxString::FromUTF8(text));
+    config().Flush();
 }

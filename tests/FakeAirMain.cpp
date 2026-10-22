@@ -6,22 +6,32 @@
 // leave after you send 73.
 //
 //   ragtime_fake_air [--bots N] [--airtime MS] [--call CALL] [--fade]
+//                    [--loss PCT] [--files]
 //
 // --call CALL has the first bot that takes sessions call CALL half a
 // minute in, for an incoming session. --fade puts the bots' sessions into
 // a 45 s fade every two minutes, so Link quiet shows. A call from host A
 // or B is answered on its second try, so "try 2 of 5" shows.
 //
+// The bots seal what they broadcast and answer repair requests, and take
+// broadcast files without asking. --loss PCT has hosts A and B lose that
+// share of the group frames they hear, so a Ragtime on them asks for
+// repairs; --files has the first bot broadcast a short bulletin file a
+// minute in and every six minutes after.
+//
 // Host A listens on 127.0.0.1:8100 (KISS) and 8300 (commands), host B on
 // 8110 and 8310, so two Ragtimes (each with its own --config file) can talk
 // to each other through it. Nothing here is Data2G's, and nothing goes on
 // the radio. Ctrl-C stops it.
+#include <algorithm>
 #include <chrono>
 #include <csignal>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
+#include <fstream>
 #include <memory>
 #include <random>
 #include <string>
@@ -34,6 +44,8 @@
 
 #include "FakeHost.h"
 #include "ragtime/broadcast/BroadcastChat.h"
+#include "ragtime/broadcast/BroadcastFiles.h"
+#include "ragtime/broadcast/Seals.h"
 #include "ragtime/link/HostLink.h"
 #include "ragtime/protocol/Records.h"
 #include "ragtime/session/SessionChat.h"
@@ -129,7 +141,8 @@ bool says73(const std::string& text)
 struct Bot
 {
     Bot(FakeAir& air, const Profile& p, int airtimeMs, uint64_t startMs, std::mt19937& random)
-        : host(air), link({p.call, p.sessions, false}), chat(link), session(link), profile(p), random(random)
+        : host(air), link({p.call, p.sessions, false}), chat(link), seals(link, chat), files(link, chat, seals),
+          session(link), profile(p), random(random)
     {
         host.setAirtimeMs(airtimeMs);
         host.setIdleBroadcastMs(3000);
@@ -142,6 +155,13 @@ struct Bot
         s.acceptsSessions = p.sessions;
         s.software = "fake air bot";
         chat.setSettings(s, 0);
+        seals.setChain(p.call, broadcast::Seals::Chain());
+        seals.setRandomSeed((uint32_t)random());
+        chat.onItems([this](const std::vector<protocol::Record>& items, uint64_t burst, const std::string& mode,
+                            uint64_t at) { seals.going(items, burst, mode, at); });
+        folder = std::filesystem::temp_directory_path() / (std::string("ragtime-fake-air-") + p.call);
+        std::filesystem::create_directories(folder);
+        files.setAutoReceive(folder.string());
         session::SessionChat::Settings ss;
         ss.callsign = p.call;
         ss.locator = p.locator;
@@ -221,6 +241,20 @@ struct Bot
         }
     }
 
+    // A short bulletin, broadcast as a file.
+    void share(uint64_t now)
+    {
+        std::filesystem::path path = folder / (std::string(profile.call) + "-bulletin-" + std::to_string(++shared)
+                                               + ".txt");
+        std::ofstream out(path, std::ios::trunc);
+        out << "QST de " << profile.call << ": D2G net bulletin number " << shared << "\n\n";
+        for (int i = 0; i < 40; i++)
+            out << "Line " << (i + 1) << ": the net meets nightly; check in, pass traffic, and 73 to all.\n";
+        out.close();
+        std::string error;
+        if (files.send(path.string(), "", now, error) == 0) std::fprintf(stderr, "%s: %s\n", profile.call, error.c_str());
+    }
+
     void say(const std::string& text, uint64_t atMs)
     {
         sayText = text;
@@ -240,12 +274,20 @@ struct Bot
         if (!in.empty()) session.dataBytes(in.data(), in.size(), now);
         link.tick(now);
         session.tick(now);
+        seals.tick(now);
+        files.tick(now);
+        files.takeEvents();
+        files.takeFinished();
 
         for (const link::HostLink::Event& e : link.takeEvents())
         {
             session.onEvent(e, now);
+            seals.onEvent(e, now);
+            files.onEvent(e, now);
             for (const protocol::Record& r : chat.onEvent(e, now))
             {
+                seals.onRecord(r, now);
+                files.onRecord(r, now);
                 const protocol::Text* text = r.as<protocol::Text>();
                 if (text != nullptr && text->to == profile.call)
                 {
@@ -271,6 +313,11 @@ struct Bot
             std::uniform_int_distribution<int> wait(20000, 90000);
             nextMs = now + (uint64_t)wait(random);
         }
+        if (shareEveryMs != 0 && link.groupOpen() && now >= shareMs)
+        {
+            share(now);
+            shareMs = now + shareEveryMs;
+        }
         if (!replyTo.empty() && now >= replyMs)
         {
             chat.send("@" + replyTo + " copy you fine, thanks. 73 de " + profile.call, "", now);
@@ -289,6 +336,8 @@ struct Bot
     FakeHost host;
     link::HostLink link;
     broadcast::BroadcastChat chat;
+    broadcast::Seals seals;
+    broadcast::BroadcastFiles files;
     session::SessionChat session;
     const Profile& profile;
     std::mt19937& random;
@@ -306,6 +355,10 @@ struct Bot
     size_t line = 0;
     std::string replyTo;
     uint64_t replyMs = 0;
+    std::filesystem::path folder;
+    uint64_t shareEveryMs = 0;
+    uint64_t shareMs = 0;
+    int shared = 0;
 };
 
 } // namespace
@@ -316,6 +369,8 @@ int main(int argc, char** argv)
     int airtimeMs = 1500;
     std::string callWho;
     bool fades = false;
+    int lossPct = 0;
+    bool share = false;
     for (int i = 1; i < argc; i++)
     {
         if (std::strcmp(argv[i], "--bots") == 0 && i + 1 < argc)
@@ -326,9 +381,14 @@ int main(int argc, char** argv)
             callWho = argv[++i];
         else if (std::strcmp(argv[i], "--fade") == 0)
             fades = true;
+        else if (std::strcmp(argv[i], "--loss") == 0 && i + 1 < argc)
+            lossPct = std::atoi(argv[++i]);
+        else if (std::strcmp(argv[i], "--files") == 0)
+            share = true;
         else
         {
-            std::fprintf(stderr, "usage: ragtime_fake_air [--bots N] [--airtime MS] [--call CALL] [--fade]\n");
+            std::fprintf(stderr, "usage: ragtime_fake_air [--bots N] [--airtime MS] [--call CALL] [--fade] "
+                                 "[--loss PCT] [--files]\n");
             return 2;
         }
     }
@@ -356,6 +416,7 @@ int main(int argc, char** argv)
         h->setAirtimeMs(airtimeMs);
         h->setAnswerOnCall(2);
         h->setIdleBroadcastMs(3000);
+        h->setLoss(std::min(100, std::max(0, lossPct)) / 100.0);
     }
 
     std::mt19937 random(12345);
@@ -366,6 +427,11 @@ int main(int argc, char** argv)
         stations.push_back(std::make_unique<Bot>(air, PROFILES[i], airtimeMs, start + 3000 + 2500 * (uint64_t)i,
                                                  random));
         stations.back()->fades = fades;
+    }
+    if (share && !stations.empty())
+    {
+        stations.front()->shareEveryMs = 6 * 60 * 1000;
+        stations.front()->shareMs = start + 60000;
     }
     for (auto& s : stations)
     {

@@ -3,13 +3,18 @@
 #include <algorithm>
 #include <ctime>
 #include <optional>
+#include <string>
 #include <utility>
+#include <vector>
 
 #include <wx/aboutdlg.h>
 #include <wx/button.h>
 #include <wx/checkbox.h>
 #include <wx/clipbrd.h>
 #include <wx/config.h>
+#include <wx/datetime.h>
+#include <wx/filedlg.h>
+#include <wx/filename.h>
 #include <wx/log.h>
 #include <wx/menu.h>
 #include <wx/msgdlg.h>
@@ -22,6 +27,7 @@
 #include <wx/stattext.h>
 #include <wx/textdlg.h>
 #include <wx/tglbtn.h>
+#include <wx/utils.h>
 
 #include "BroadcastPage.h"
 #include "ConnectionBar.h"
@@ -35,6 +41,7 @@
 #include "globus/GlobusPanel.h"
 #include "globus/GlobusToggle.h"
 #include "ragtime/Version.h"
+#include "ragtime/files/FileRows.h"
 #include "ragtime/globus/Sun.h"
 
 using namespace ragtime;
@@ -62,6 +69,8 @@ enum
     ID_LEAVE_NOW,
     ID_STATION_CALL,
     ID_STATION_LEAVE,
+    ID_BROADCAST_FILE,
+    ID_AUTO_RECEIVE,
 };
 
 enum Tab
@@ -116,6 +125,22 @@ long localOffsetSeconds()
     return globus::utcOffsetSeconds(local, *utcNow);
 }
 
+// "45 s", "3 min", "1 h 10 min".
+std::string durationText(double seconds)
+{
+    long s = std::max(1L, (long)(seconds + 0.5));
+    if (s < 60) return std::to_string(s) + " s";
+    long minutes = (s + 30) / 60;
+    if (minutes < 60) return std::to_string(minutes) + " min";
+    return std::to_string(minutes / 60) + " h " + std::to_string(minutes % 60) + " min";
+}
+
+// The local time so many seconds from now: "16:40".
+wxString clockIn(double seconds)
+{
+    return (wxDateTime::Now() + wxTimeSpan::Seconds((wxLongLong)seconds)).Format("%H:%M");
+}
+
 // "From W1AW's QRL, 3 min ago" as the middle of a sentence.
 std::string lowerFirst(std::string text)
 {
@@ -131,6 +156,8 @@ MainFrame::MainFrame()
     , prefs_(loadStationPrefs())
     , link_({prefs_.callsign, loadBool(keys::ACCEPT_SESSIONS, true), false})
     , chat_(link_)
+    , seals_(link_, chat_)
+    , broadcastFiles_(link_, chat_, seals_)
     , session_(link_)
     , clock_(this)
 {
@@ -157,6 +184,11 @@ MainFrame::MainFrame()
         refreshSession();
     };
     host_->setDataSide(std::move(data));
+
+    // Every broadcast item of ours is sealed once it has gone.
+    chat_.onItems([this](const std::vector<protocol::Record>& items, uint64_t burst, const std::string& mode,
+                         uint64_t now) { seals_.going(items, burst, mode, now); });
+    setAutoReceive(loadBool(keys::AUTO_RECEIVE_BROADCAST, false));
 
     loadGearshift();
     setNarrow(gearshift_.width() == gearbox::Width::Hz500);
@@ -209,6 +241,11 @@ MainFrame::~MainFrame()
 void MainFrame::buildMenus()
 {
     auto* file = new wxMenu;
+    file->Append(ID_BROADCAST_FILE, "&Broadcast a file...\tCtrl+Shift+B",
+                 "Sends a file to everyone on D2G, with repairs for stations that miss pieces");
+    file->AppendCheckItem(ID_AUTO_RECEIVE, "&Receive broadcast files automatically",
+                          "Files broadcast on D2G are saved in the received folder without asking");
+    file->AppendSeparator();
     file->Append(wxID_EXIT, "&Quit\tCtrl+Q");
 
     auto* station = new wxMenu;
@@ -258,6 +295,9 @@ void MainFrame::buildMenus()
     SetMenuBar(menus);
 
     Bind(wxEVT_MENU, [this](wxCommandEvent&) { Close(); }, wxID_EXIT);
+    Bind(wxEVT_MENU, [this](wxCommandEvent&) { broadcastFile(); }, ID_BROADCAST_FILE);
+    Bind(wxEVT_MENU, [this](wxCommandEvent& e) { setAutoReceive(e.IsChecked()); }, ID_AUTO_RECEIVE);
+    Bind(wxEVT_UPDATE_UI, [this](wxUpdateUIEvent& e) { e.Enable(!prefs_.callsign.empty()); }, ID_BROADCAST_FILE);
     Bind(wxEVT_MENU, [this](wxCommandEvent&) { showGearshift(); }, ID_GEARSHIFT);
     Bind(wxEVT_MENU, [this](wxCommandEvent&) { showSettings(); }, ID_STATION_SETTINGS);
     Bind(wxEVT_MENU, [this](wxCommandEvent& e) { setNarrow(e.IsChecked()); }, ID_NARROW);
@@ -394,6 +434,9 @@ void MainFrame::buildLayout()
         host_->flush();
         refreshMessages();
     });
+    broadcast_->onBroadcastFile([this]() { broadcastFile(); });
+    broadcast_->fileCards([this](uint64_t id, FileCard& card) { return fileCard(id, card); });
+    broadcast_->onFileAction([this](uint64_t id, const std::string& action) { fileAction(id, action); });
     // The Session tab.
     sessionPage_->onSend([this](const std::string& typed) {
         if (session_.send(typed, HostConnection::nowMs()) == 0) return false;
@@ -437,6 +480,8 @@ void MainFrame::applyPrefs(bool reconnect)
     s.acceptsSessions = link_.settings().acceptSessions;
     s.software = software();
     chat_.setSettings(s, loadNewestItem(protocol::normalCallsign(prefs_.callsign)));
+    seals_.setChain(prefs_.callsign, loadSealChain(protocol::normalCallsign(prefs_.callsign)));
+    savedSeal_ = seals_.chain().number;
     session::SessionChat::Settings ss;
     ss.callsign = prefs_.callsign;
     ss.locator = prefs_.locator;
@@ -519,8 +564,16 @@ void MainFrame::onHostEvents(const std::vector<Event>& events)
             default:
                 break;
         }
-        for (const protocol::Record& r : chat_.onEvent(e, now)) stations_.onRecord(r, now);
+        seals_.onEvent(e, now);
+        broadcastFiles_.onEvent(e, now);
+        for (const protocol::Record& r : chat_.onEvent(e, now))
+        {
+            stations_.onRecord(r, now);
+            seals_.onRecord(r, now);
+            broadcastFiles_.onRecord(r, now);
+        }
     }
+    onBroadcastFiles();
     onSessionEvents();
     showConnection();
     showStatus();
@@ -531,7 +584,12 @@ void MainFrame::onHostEvents(const std::vector<Event>& events)
 
 void MainFrame::onClock()
 {
-    session_.tick(HostConnection::nowMs());
+    uint64_t now = HostConnection::nowMs();
+    seals_.setMode(broadcastMode());
+    seals_.tick(now);
+    broadcastFiles_.tick(now);
+    onBroadcastFiles();
+    session_.tick(now);
     onSessionEvents();
     host_->flush();
     refreshSession();
@@ -905,6 +963,253 @@ void MainFrame::setPaused(bool paused)
     broadcast_->setPaused(paused);
     saveBool(keys::PAUSED, paused);
     if (host_) host_->flush();
+}
+
+//-------------------------------------------------------------------------
+// Broadcast files
+//-------------------------------------------------------------------------
+
+void MainFrame::broadcastFile()
+{
+    if (prefs_.callsign.empty())
+    {
+        showSettings();
+        return;
+    }
+    wxFileDialog pick(this, "Broadcast a file to D2G", "", "", "All files|*",
+                      wxFD_OPEN | wxFD_FILE_MUST_EXIST);
+    if (pick.ShowModal() != wxID_OK) return;
+    wxString path = pick.GetPath();
+    wxString name = wxFileName(path).GetFullName();
+    wxULongLong size = wxFileName::GetSize(path);
+    if (size == wxInvalidSize || size == 0)
+    {
+        wxMessageBox(name + " is empty or can't be read.", "Broadcast a file", wxOK | wxICON_INFORMATION, this);
+        return;
+    }
+    if (size.GetValue() > broadcast::BroadcastFiles::MAX_FILE_BYTES)
+    {
+        wxMessageBox(wxString::Format("%s is %s bytes. A file over HF can be 300 KB at most.", name,
+                                      utf8(files::groupedNumber(size.GetValue()))),
+                     "Broadcast a file", wxOK | wxICON_INFORMATION, this);
+        return;
+    }
+
+    std::string mode = broadcastMode();
+    std::string nameUtf8(name.utf8_str());
+    broadcast::FileEstimate estimate = broadcastFiles_.estimate(size.GetValue(), nameUtf8, mode);
+    std::optional<gearbox::Gear> gear = gearshift_.current();
+    wxString where = gear && !mode.empty() ? utf8(gearbox::gearLabel(*gear))
+                                           : "the group's mode" + (link_.groupMode().empty()
+                                                                       ? wxString()
+                                                                       : " (" + utf8(link_.groupMode()) + ")");
+    // The faster gears the host offers, for a file that would take long.
+    wxString faster;
+    for (const gearbox::Gear& g : gearshift_.ladder())
+    {
+        if (gear && g.number <= gear->number) continue;
+        bool offered = std::any_of(link_.modes().begin(), link_.modes().end(),
+                                   [&](const link::ModeInfo& m) { return m.name == g.mode; });
+        if (!offered) continue;
+        broadcast::FileEstimate at = broadcastFiles_.estimate(size.GetValue(), nameUtf8, g.mode);
+        if (!faster.empty()) faster += ", ";
+        faster += wxString::Format("gear %d: %s", g.number, utf8(durationText(at.airSeconds)));
+    }
+
+    if (estimate.airSeconds > broadcast::BroadcastFiles::REFUSE_AIR_SECONDS)
+    {
+        wxString text = wxString::Format("In %s, %s would take about %s on the air. A broadcast file may take "
+                                         "two hours at most.",
+                                         where, name, utf8(durationText(estimate.airSeconds)));
+        if (!faster.empty()) text += "\n\nFaster: " + faster + ".";
+        wxMessageBox(text, "Broadcast a file", wxOK | wxICON_INFORMATION, this);
+        return;
+    }
+    wxString text = wxString::Format(
+        "%s, %s bytes, %d pieces in %s: about %s on the air (%s with the gaps between bursts), then repairs "
+        "until %s at the latest. Stations will not confirm receipt.",
+        name, utf8(files::groupedNumber(size.GetValue())), estimate.pieces, where,
+        utf8(durationText(estimate.airSeconds)), utf8(durationText(estimate.wallSeconds)),
+        clockIn(estimate.wallSeconds + (double)estimate.repairsMs / 1000.0));
+    bool long_ = estimate.airSeconds > broadcast::BroadcastFiles::WARN_AIR_SECONDS;
+    if (long_)
+    {
+        text += "\n\nThat holds the D2G group for a long time.";
+        if (!faster.empty()) text += " Faster: " + faster + ".";
+    }
+    wxMessageDialog confirm(this, text + "\n\nBroadcast it to D2G?", "Broadcast a file",
+                            wxYES_NO | (long_ ? wxNO_DEFAULT | wxICON_WARNING : wxICON_QUESTION));
+    confirm.SetYesNoLabels("Broadcast", "Cancel");
+    if (confirm.ShowModal() != wxID_YES) return;
+
+    std::string error;
+    uint64_t id = broadcastFiles_.send(std::string(path.utf8_str()), mode, HostConnection::nowMs(), error);
+    if (id == 0)
+    {
+        wxMessageBox(utf8(error) + ".", "Broadcast a file", wxOK | wxICON_INFORMATION, this);
+        return;
+    }
+    saveNewestItem(chat_.settings().callsign, chat_.newestItem());
+    onBroadcastFiles();
+    host_->flush();
+    tabs_->SetSelection(TAB_BROADCAST);
+}
+
+bool MainFrame::fileCard(uint64_t id, FileCard& card)
+{
+    using State = broadcast::BroadcastFile::State;
+    uint64_t now = HostConnection::nowMs();
+    broadcast::BroadcastFile f;
+    if (!broadcastFiles_.find(id, now, f)) return false;
+    card.what = f.name + " \xc2\xb7 " + files::sizeText(f.size);
+    std::string pieces = std::to_string(f.held) + " of " + std::to_string(f.pieces) + " pieces";
+    switch (f.state)
+    {
+        case State::Sending:
+            card.state = "Sending, " + pieces;
+            card.actions = {{"stop", "Stop"}};
+            break;
+        case State::Repairing:
+            if (!f.sealed)
+                card.state = "Sealing";
+            else
+                card.state = "Repairs open until " + files::expiryText(f.repairsUntilMs, now, localOffsetSeconds())
+                             + (f.askers == 0 ? std::string()
+                                              : ", " + std::to_string(f.askers) + (f.askers == 1 ? " station" : " stations")
+                                                    + " asked");
+            if (f.sealed) card.actions = {{"keep", "Keep open 30 min longer"}, {"close", "Close repairs now"}};
+            break;
+        case State::Sent:
+            card.state = "Sent";
+            card.good = true;
+            break;
+        case State::Cancelled:
+            card.state = "Stopped";
+            break;
+        case State::Heard:
+            card.state = f.held == f.pieces ? std::string("All here") : "Heard, " + pieces;
+            card.actions = {{"receive", "Receive..."}, {"ignore", "Ignore"}};
+            break;
+        case State::Receiving:
+            card.state = f.asking ? "Asking for " + std::to_string(f.pieces - f.held) + " pieces"
+                                  : "Receiving, " + pieces;
+            card.actions = {{"ignore", "Stop"}};
+            break;
+        case State::Incomplete:
+            card.state = "Incomplete, " + pieces + " kept";
+            card.actions = {{"ignore", "Delete"}};
+            break;
+        case State::Saved:
+            card.state = f.autoReceived ? "Saved without asking" : "Saved";
+            card.good = true;
+            card.actions = {{"open", "Open"}, {"folder", "Open folder"}};
+            break;
+        case State::Ignored:
+            card.state = "Ignored";
+            break;
+        case State::Failed:
+            card.state = "Failed" + (f.error.empty() ? std::string() : ": " + f.error);
+            card.bad = true;
+            break;
+        case State::Expired:
+            card.state = "Not received";
+            break;
+    }
+    return true;
+}
+
+void MainFrame::receiveFile(uint64_t id)
+{
+    broadcast::BroadcastFile f;
+    if (!broadcastFiles_.find(id, HostConnection::nowMs(), f)) return;
+    wxString folder = utf8(receivedFolder());
+    wxFileName::Mkdir(folder, wxS_DIR_DEFAULT, wxPATH_MKDIR_FULL);
+    wxFileDialog save(this, "Receive " + utf8(f.name) + " from " + utf8(f.from), folder, utf8(f.name),
+                      "All files|*", wxFD_SAVE | wxFD_OVERWRITE_PROMPT);
+    if (save.ShowModal() != wxID_OK) return;
+    std::string error;
+    if (!broadcastFiles_.receive(id, std::string(save.GetPath().utf8_str()), HostConnection::nowMs(), error))
+    {
+        note_ = error;
+        showStatus();
+    }
+}
+
+void MainFrame::fileAction(uint64_t id, const std::string& action)
+{
+    broadcast::BroadcastFile f;
+    uint64_t now = HostConnection::nowMs();
+    if (!broadcastFiles_.find(id, now, f)) return;
+    if (action == "receive")
+        receiveFile(id);
+    else if (action == "ignore")
+        broadcastFiles_.ignore(id);
+    else if (action == "stop")
+        broadcastFiles_.cancel(id);
+    else if (action == "keep")
+        broadcastFiles_.keepOpen(id, std::max(f.repairsUntilMs, now) + 30 * 60 * 1000);
+    else if (action == "close")
+        broadcastFiles_.closeRepairs(id);
+    else if (action == "open" && !f.path.empty())
+        wxLaunchDefaultApplication(utf8(f.path));
+    else if (action == "folder" && !f.path.empty())
+        wxLaunchDefaultApplication(wxFileName(utf8(f.path)).GetPath());
+    onBroadcastFiles();
+    host_->flush();
+}
+
+void MainFrame::setAutoReceive(bool on)
+{
+    broadcastFiles_.setAutoReceive(on ? receivedFolder() : std::string());
+    GetMenuBar()->Check(ID_AUTO_RECEIVE, on);
+    saveBool(keys::AUTO_RECEIVE_BROADCAST, on);
+}
+
+void MainFrame::onBroadcastFiles()
+{
+    using Type = broadcast::BroadcastFiles::Event::Type;
+    uint64_t now = HostConnection::nowMs();
+    for (const broadcast::BroadcastFiles::Event& e : broadcastFiles_.takeEvents())
+    {
+        broadcast::BroadcastFile f;
+        if (!broadcastFiles_.find(e.id, now, f)) continue;
+        switch (e.type)
+        {
+            case Type::Announced:
+                chat_.addFile(f.id, false, f.from, f.name, now);
+                note_ = f.from + " is broadcasting " + f.name;
+                if (!IsActive()) RequestUserAttention(wxUSER_ATTENTION_INFO);
+                break;
+            case Type::Sending:
+                chat_.addFile(f.id, true, f.from, f.name, now);
+                note_ = "Broadcasting " + f.name;
+                break;
+            case Type::Saved:
+                note_ = "Saved " + f.name + " from " + f.from;
+                break;
+            case Type::Ended:
+                if (f.outgoing) note_ = f.name + ": " + broadcast::stateLabel(f.state);
+                break;
+        }
+    }
+    for (files::FinishedFile& done : broadcastFiles_.takeFinished()) finishedFiles_.push_back(std::move(done));
+    if (broadcastFiles_.version() != broadcastFilesVersion_)
+    {
+        broadcastFilesVersion_ = broadcastFiles_.version();
+        chat_.fileChanged();
+        refreshMessages();
+        showStatus();
+    }
+    saveBroadcastState();
+}
+
+void MainFrame::saveBroadcastState()
+{
+    broadcast::Seals::Chain chain = seals_.chain();
+    if (chain.number == savedSeal_) return;
+    savedSeal_ = chain.number;
+    saveSealChain(chat_.settings().callsign, chain);
+    saveNewestItem(chat_.settings().callsign, chat_.newestItem());
 }
 
 //-------------------------------------------------------------------------

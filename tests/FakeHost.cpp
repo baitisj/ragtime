@@ -497,8 +497,21 @@ void FakeHost::finishBurst()
     for (FakeHost* h : air_.hosts_)
     {
         if (h == this || !h->groupOpen_) continue;
+        std::vector<const Tagged*> heard;
+        for (const Tagged& t : burst)
+        {
+            if (h->loss_ > 0.0 && std::uniform_real_distribution<double>(0.0, 1.0)(h->lossRandom_) < h->loss_)
+                h->framesLost_++;
+            else
+                heard.push_back(&t);
+        }
+        if (heard.empty() && !burst.empty())
+        {
+            h->reply("BCAST " + std::to_string(h->groupPort_) + " LOST 1");
+            continue;
+        }
         h->reply("BCAST " + std::to_string(h->groupPort_) + " HEARD " + from_);
-        for (const Tagged& t : burst) h->writeTo(h->kiss_, kissEncode(h->groupPort_, t.frame));
+        for (const Tagged* t : heard) h->writeTo(h->kiss_, kissEncode(h->groupPort_, t->frame));
     }
     for (const Tagged& t : burst)
     {
