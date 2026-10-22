@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Ragtime
+GenericName=Data2G chat
+Comment=Chat and file transfer over HF with Data2G
+Exec=ragtime
+Icon=ragtime
+Terminal=false
+Categories=Network;HamRadio;
+StartupWMClass=Ragtime

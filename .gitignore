@@ -2,3 +2,5 @@
 /.cache/
 compile_commands.json
 __pycache__/
+/packaging/linux/tools/
+/dist/

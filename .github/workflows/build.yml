@@ -47,3 +47,44 @@ jobs:
         cmake --build build -j$(nproc)
     - name: Test
       run: ctest --test-dir build --output-on-failure
+
+  windows:
+    # The portable Windows zip, cross-compiled with MinGW-w64 against a
+    # static wxWidgets, and the unit tests run as Windows programs under Wine.
+    name: Windows (MinGW-w64 cross build, tests under Wine)
+    runs-on: ubuntu-24.04
+    steps:
+    - uses: actions/checkout@v4
+    - name: Install packages
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y --no-install-recommends cmake make git zip \
+          g++-mingw-w64-x86-64-posix wine wine64
+    - name: Build and zip
+      run: packaging/windows/make-zip.sh
+    - name: Test under Wine
+      env:
+        WINEDEBUG: -all
+      run: ctest --test-dir build-win --output-on-failure
+    - uses: actions/upload-artifact@v4
+      with:
+        name: ragtime-windows-x86_64
+        path: dist/*.zip
+        if-no-files-found: error
+
+  appimage:
+    name: Linux AppImage
+    runs-on: ubuntu-24.04
+    steps:
+    - uses: actions/checkout@v4
+    - name: Install packages
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y build-essential cmake curl file libwxgtk3.2-dev
+    - name: Build the AppImage
+      run: packaging/linux/make-appimage.sh
+    - uses: actions/upload-artifact@v4
+      with:
+        name: ragtime-appimage-x86_64
+        path: dist/*.AppImage
+        if-no-files-found: error

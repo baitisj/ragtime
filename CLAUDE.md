@@ -69,7 +69,14 @@ screens.
   and suppression) and `BroadcastFiles` (files on D2G, feeding the Files
   tab through `FileRows.h`); file cards and File... in `BroadcastPage`,
   the File menu items and share menus in `MainFrame`, and the seal chain
-  in `Prefs`. Next is I (packaging and the first release).
+  in `Prefs`.
+- Package I (packaging and the first release) gives the app icon
+  (`app/res/`, rendered by `tools/icon/make_icons.sh`), the Linux
+  AppImage and the portable Windows zip (`packaging/`), the MinGW-w64
+  cross build against a static wxWidgets (`cmake/Toolchain-mingw64.cmake`,
+  `-DRAGTIME_BUILD_WX=ON`), and their CI jobs. 0.1.0-beta is the first
+  release. Stage 1 is done once Jeff has run the two-host bench on
+  Hamlet.
 - The live design draft was the Claude Doc "Data2G client: plan"
   (https://claude.ai/code/artifact/87db2cd2-f5bc-4030-ba8d-99bef19c027d,
   private to Jeff). `docs/PLAN.md` is its 2026-10-22 snapshot and is now
@@ -136,8 +143,9 @@ screens.
 | `core/` | `ragtime_core`, the socket-free library: no wx, no sockets in the engines, all unit-tested. Headers in `core/include/ragtime/`, sources in `core/src/`, one subfolder per area: `protocol/`, `link/`, `text/`, `files/` (package B; G adds `FileRows`, `FileTraffic`), `globus/` (C), `gearbox/` (D), `broadcast/` (E; H adds `Airtime`, `Seals`, `BroadcastFiles`), `session/` (F). Add sources to `core/CMakeLists.txt` |
 | `app/` | The wxWidgets app (`app/src/`). It draws and wires; logic goes in core. `MainFrame` is the one main window and owns the engines; `HostConnection` is the only code with sockets; `Prefs` holds every wxConfig key, and `appDataDir()` is where Ragtime keeps its own files (never wx's `GetUserDataDir()`: on Linux that is `~/.Ragtime`, the settings file); `app/src/globus/` is the Globus pane (`GlobusPanel`, `GlobusView`, `GlobusToggle`) |
 | `tests/` | ctest unit tests for core, plain executables on `tests/Check.h` (`CHECK`, `CHECK_EQ`). Add one with `ragtime_test(<name> <source>)` in `tests/CMakeLists.txt`. `FakeHost.*` is a fake data2g-host on loopback sockets (POSIX, so its test and the bench build only `if(UNIX)`); `FakeAirMain.cpp` is the bench `ragtime_fake_air` |
-| `tools/` | Reference scripts: `globe/` (sunlit globe renderer, and the generators of the map tables in `core/src/globus/`: coasts and borders from Natural Earth, the big lakes from `ne_110m_lakes.geojson`, state and province lines from `us_canada_admin1_lines.json`), `gearbox/` (ladders), `ham_table/` (text table 0 generator and corpus: `gen_table.py --check`), `gcc16/check.py` (GCC 16 check) |
-| `cmake/` | CMake helpers. `ragtime_warnings(<target>)` gives every target `-Wall -Wextra` and, with `RAGTIME_WERROR` (on by default), `-Werror` |
+| `tools/` | Reference scripts: `icon/make_icons.sh` (the icon's PNG and ICO from `app/res/ragtime.svg`), `globe/` (sunlit globe renderer, and the generators of the map tables in `core/src/globus/`: coasts and borders from Natural Earth, the big lakes from `ne_110m_lakes.geojson`, state and province lines from `us_canada_admin1_lines.json`), `gearbox/` (ladders), `ham_table/` (text table 0 generator and corpus: `gen_table.py --check`), `gcc16/check.py` (GCC 16 check) |
+| `cmake/` | CMake helpers. `ragtime_warnings(<target>)` gives every target `-Wall -Wextra` and, with `RAGTIME_WERROR` (on by default), `-Werror`; `Toolchain-mingw64.cmake` (the Windows cross build), `BuildWxWidgets.cmake` (wxWidgets 3.2.9 cloned and built statically with `-DRAGTIME_BUILD_WX=ON`), `EmbedFile.cmake` (the window icon built in) |
+| `packaging/` | Release recipes: `linux/make-appimage.sh` (with `ragtime.desktop`), `windows/make-zip.sh` (with the zip's `README.txt`). Both write to `dist/`, named by `release-name.sh` |
 | `docs/` | The plan and specs. Change them in the same PR as the code they describe |
 
 The version is `project(ragtime VERSION ...)` in the top-level
@@ -156,9 +164,11 @@ every test runs headless, the app included (`ragtime --version`).
 `-DRAGTIME_APP=OFF` builds only core and its tests, with no wx needed.
 
 CI (`.github/workflows/build.yml`) runs on every PR and every push to
-`main`: the Ubuntu 24.04 build with tests, and the same build and tests in
+`main`: the Ubuntu 24.04 build with tests, the same build and tests in
 the `gcc:16` image with `-Werror` at `-O2` (RelWithDebInfo) and `-O3`
-(Release). Before pushing C++, run `tools/gcc16/check.py` (needs docker;
+(Release), the Windows cross build with the unit tests run under Wine,
+and the AppImage. The last two keep the zip and the AppImage as the run's
+artifacts. Before pushing C++, run `tools/gcc16/check.py` (needs docker;
 start `dockerd &` in a cloud session): it compiles every source in
 `gcc:16` at both levels without apt, which the cloud sandbox can't reach.
 
@@ -183,14 +193,38 @@ from host A or B is answered on its second try. Headless:
 `import -window root` for a screenshot. Never point the bench at Jeff's
 radio PC's real host ports while his data2g-host runs.
 
-There is no Windows CI yet. Package I adds the MinGW-w64 cross build;
-keep the CMake free of Linux-only assumptions meanwhile.
+**Windows.** `packaging/windows/make-zip.sh` cross-compiles with Ubuntu's
+`g++-mingw-w64-x86-64-posix`, cloning wxWidgets into `build-win` the
+first time (or set `RAGTIME_WX_SOURCE` to a checkout), and
+`ctest --test-dir build-win` runs the tests under Wine (`wine64`). The exe
+links everything in, so it needs no DLLs beside it. Windows file names
+ignore case: a test that saves `two.bin` beside `TWO.BIN` overwrites it.
+The bench's fake hosts are POSIX, but `wine ragtime.exe` talks to a Linux
+`ragtime_fake_air` on loopback.
+
+## Releases
+
+1. A PR sets the version, `project(ragtime VERSION ...)`, and runs full CI
+   (no `[skip ci]`).
+2. After Jeff merges it, build from the merge commit:
+   `packaging/linux/make-appimage.sh` and `packaging/windows/make-zip.sh`.
+   Files are named `Ragtime-<version>-beta-<hash>-...` (`release-name.sh`).
+3. Write `SHA256SUMS-<version>-beta` beside them (`sha256sum`), and
+   smoke-test headless: the AppImage under Xvfb and `ragtime.exe` under
+   Wine, each against `ragtime_fake_air`. Put the files in the project's
+   `ragtime-release/` folder.
+4. Draft release notes: say whether it talks to the last release (a
+   protocol change breaks that), that data2g-host is the operator's to run
+   (never bundled or started), and how the gearshift finds Data2G's
+   `mode_thresholds.json`.
+5. Jeff tags `v<version>-beta` on the merge commit and publishes.
 
 ## Code
 
-- C++17, wxWidgets, CMake, the same toolchain as Glissando, so its
-  AppImage and MinGW-w64 Windows zip recipes carry over (Glissando
-  `docs/APP.md`). There is no Mac or ARM build yet.
+- C++17, wxWidgets, CMake, the same toolchain as Glissando. The AppImage
+  and the Windows zip follow Glissando's recipes (its `docs/APP.md`),
+  simpler for having no audio, Hamlib or codec2. There is no Mac or ARM
+  build yet.
 - Engines worth porting from Glissando (logic and tests, adapted to the
   new records): `Data2GLink` (KISS, command lines, `MODES`, session
   stream), `Data2GFileTransfer`, `Data2GBroadcast`, `Sha256`, `HamText`

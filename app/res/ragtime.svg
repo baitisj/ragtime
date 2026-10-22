@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <!-- Ragtime's icon: two beamed eighth notes sending on the air. -->
+  <rect x="8" y="8" width="240" height="240" rx="44" fill="#7a2e1f"/>
+  <rect x="8" y="8" width="240" height="240" rx="44" fill="none" stroke="#d9a441" stroke-width="8"/>
+  <g fill="none" stroke="#d9a441" stroke-width="13" stroke-linecap="round">
+    <path d="M163.1 65.2 A58 58 0 0 1 163.1 142.8"/>
+    <path d="M180.9 49.1 A82 82 0 0 1 180.9 158.9"/>
+    <path d="M198.8 33.1 A106 106 0 0 1 198.8 174.9"/>
+  </g>
+  <g fill="#f4e6c4">
+    <ellipse cx="56" cy="192" rx="25" ry="18" transform="rotate(-22 56 192)"/>
+    <ellipse cx="124" cy="174" rx="25" ry="18" transform="rotate(-22 124 174)"/>
+    <rect x="68" y="84" width="11" height="106"/>
+    <rect x="136" y="66" width="11" height="106"/>
+    <polygon points="68,84 147,66 147,94 68,112"/>
+  </g>
+</svg>
