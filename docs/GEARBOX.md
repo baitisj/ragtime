@@ -6,7 +6,8 @@ speeds.
 
 ## What the operator sees
 
-One popup, opened from the width button on the connection bar or the
+One popup, opened from the gearshift button (a speedometer icon) on the
+connection bar or the
 Gear button by Send. The popup *is* the Submode Map:
 
 - Speed across (bits per second, log scale from 20 to 10k), the S/N each
@@ -18,7 +19,8 @@ Gear button by Send. The popup *is* the Submode Map:
 - **Width** chips, narrowest to widest: 200 Hz, 500 Hz, 1.2 kHz, 2.4 kHz
   (the map's four groups). A width is a cap: 2.4 kHz still uses the
   narrow modes. Modes wider than the cap are hollow grey circles. The
-  one-press 500 Hz button stays on the connection bar.
+  500 Hz switch on the connection bar is the quick way: on, data2g-host
+  uses only 500 Hz modes (`BW500`); off, any width (`BW2300`).
 - **Path** chips: Calm (no fading, AWGN), Good, Poor, Disturbed (the ITU
   F.1487 fading channels). The path picks the gearbox, because modes rank
   very differently once the path fades: polar modes rise on a good fading
@@ -37,7 +39,9 @@ Gear button by Send. The popup *is* the Submode Map:
   and on the map (Jeff, 2026-10-22).
 - Leave out the `ack-` modes: they carry the host's own ARQ control.
 
-The connection bar shows `2.4 kHz ▼` and `500 Hz`; the button by Send
+The connection bar shows the gearshift icon (its tooltip names the width
+and gear) and the `500 Hz` switch, to save room (Jeff, 2026-10-22); the
+button by Send
 shows `Gear E2C ▼`, with the Data2G name, speed and S/N in its
 tooltip. FSK, PSK and the rest show only in the popup.
 
@@ -181,7 +185,8 @@ run. The tables below are the Submode Map's.
   chosen mode if it is still a gear, or else takes the fastest gear no
   faster than it, so the gearbox never shifts up on its own. Auto with no
   S/N reports yet holds the chosen gear.
-- `app/src/GearshiftDialog.*`: the popup, opened by the width button, the
+- `app/src/GearshiftDialog.*`: the popup, opened by the gearshift button
+  (`GearshiftIcon.*` draws it; `ToggleSwitch.*` is the 500 Hz switch), the
   Gear button and Settings > Gearshift (Ctrl+G). `app/src/Thresholds.*`:
   finding and reading the file. `Gearshift::shortName` names a mode for
   the status bar and message tooltips.
