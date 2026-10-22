@@ -3,6 +3,7 @@
 
 #include <wx/frame.h>
 
+class GlobusPanel;
 class wxNotebook;
 
 // The one main window. Package E fills it in (docs/STAGE1.md): connection
@@ -14,6 +15,7 @@ public:
 
 private:
     wxNotebook* tabs_ = nullptr;
+    GlobusPanel* globus_ = nullptr;
 };
 
 #endif

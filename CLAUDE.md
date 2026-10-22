@@ -95,9 +95,9 @@ screens.
 | Path | What |
 | --- | --- |
 | `core/` | `ragtime_core`, the socket-free library: no wx, no sockets in the engines, all unit-tested. Headers in `core/include/ragtime/`, sources in `core/src/`, one subfolder per area: `protocol/`, `link/`, `text/`, `files/` (package B), `globus/` (C), `gearbox/` (D). Add sources to `core/CMakeLists.txt` |
-| `app/` | The wxWidgets app (`app/src/`). It draws and wires; logic goes in core. `MainFrame` is the one main window |
+| `app/` | The wxWidgets app (`app/src/`). It draws and wires; logic goes in core. `MainFrame` is the one main window; `app/src/globus/` is the Globus pane (`GlobusPanel`, `GlobusView`, `GlobusToggle`) |
 | `tests/` | ctest unit tests for core, plain executables on `tests/Check.h` (`CHECK`, `CHECK_EQ`). Add one with `ragtime_test(<name> <source>)` in `tests/CMakeLists.txt`. Fake hosts for link tests go here too |
-| `tools/` | Reference scripts: `globe/` (sunlit globe renderer, admin-1 lines), `gearbox/` (ladders), `gcc16/check.py` (GCC 16 check) |
+| `tools/` | Reference scripts: `globe/` (sunlit globe renderer, and the generators of the map tables in `core/src/globus/`: coasts and borders from Natural Earth, state and province lines from `us_canada_admin1_lines.json`), `gearbox/` (ladders), `gcc16/check.py` (GCC 16 check) |
 | `cmake/` | CMake helpers. `ragtime_warnings(<target>)` gives every target `-Wall -Wextra` and, with `RAGTIME_WERROR` (on by default), `-Werror` |
 | `docs/` | The plan and specs. Change them in the same PR as the code they describe |
 
