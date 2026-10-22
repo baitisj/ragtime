@@ -163,6 +163,33 @@ void testAddressee()
     CHECK(!BroadcastChat::addressee("@W1AW_X hi", call, rest)); // not a callsign
 }
 
+void testPhrasesTyped()
+{
+    using ragtime::text::HamText::PhraseSpan;
+    auto has = [](const std::vector<PhraseSpan>& spans, size_t start, size_t length) {
+        for (const PhraseSpan& span : spans)
+            if (span.start == start && span.length == length) return true;
+        return false;
+    };
+    // Unaddressed: the phrases of the whole line.
+    std::vector<PhraseSpan> spans = BroadcastChat::phrases("CQ CQ de AG7EW");
+    CHECK(has(spans, 0, 5));
+    std::vector<PhraseSpan> whole = ragtime::text::HamText::phraseSpans("CQ CQ de AG7EW");
+    CHECK_EQ(spans.size(), whole.size());
+    for (size_t i = 0; i < spans.size() && i < whole.size(); i++)
+        CHECK(spans[i].start == whole[i].start && spans[i].length == whole[i].length);
+    // Addressed: the "@W1AW, " goes in the To, so only the rest is coded,
+    // and the spans stay where the operator sees them.
+    spans = BroadcastChat::phrases("@W1AW, CQ CQ");
+    CHECK_EQ(spans.size(), (size_t)1);
+    CHECK(has(spans, 7, 5));
+    // UTF-8 before a phrase: offsets are bytes, and no phrase starts inside
+    // a character.
+    spans = BroadcastChat::phrases("\xc3\xa9t\xc3\xa9 CQ CQ");
+    CHECK(has(spans, 6, 5));
+    CHECK(BroadcastChat::phrases("").empty());
+}
+
 void testMessageBothWays()
 {
     End a("TEST1", "CN87ux"), b("TEST2", "FN31pr");
@@ -481,6 +508,7 @@ void testReconnect()
 int main()
 {
     testAddressee();
+    testPhrasesTyped();
     testMessageBothWays();
     testAddressedAndAcknowledged();
     testLongMessageSplits();

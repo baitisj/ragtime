@@ -75,6 +75,8 @@ private:
     friend class MessageList;
 
     void send();
+    // The ham phrases on the line, highlighted as they are typed.
+    void showPhrases();
     void showMenu(int row);
     void showFileMenu(const ragtime::broadcast::Message& m);
     void arrange(int width);

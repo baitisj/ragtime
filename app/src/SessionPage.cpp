@@ -17,6 +17,7 @@
 #include <wx/textctrl.h>
 
 #include "Html.h"
+#include "PhraseHighlight.h"
 
 using namespace ragtime::session;
 using ragtime::files::FileRow;
@@ -178,7 +179,7 @@ SessionPage::SessionPage(wxWindow* parent, const SessionChat& session, const rag
                                "Sending is paused: messages wait as Queued until you press Pause sending again.");
     paused_->SetForegroundColour(secondaryText());
     paused_->Hide();
-    compose_ = new wxTextCtrl(this, wxID_ANY, "", wxDefaultPosition, wxDefaultSize, wxTE_PROCESS_ENTER);
+    compose_ = new wxTextCtrl(this, wxID_ANY, "", wxDefaultPosition, wxDefaultSize, wxTE_PROCESS_ENTER | PHRASE_ENTRY_STYLE);
     compose_->SetMaxLength((unsigned long)SessionChat::MAX_TYPED);
     send_ = new wxButton(this, wxID_ANY, "Send");
     sendFile_ = new wxButton(this, wxID_ANY, "Send file...");
@@ -226,6 +227,11 @@ SessionPage::SessionPage(wxWindow* parent, const SessionChat& session, const rag
     SetSizer(sizer);
 
     compose_->Bind(wxEVT_TEXT_ENTER, [this](wxCommandEvent&) { send(); });
+    compose_->Bind(wxEVT_TEXT, [this](wxCommandEvent& e) {
+        std::string typed(compose_->GetValue().utf8_str());
+        highlightPhrases(compose_, typed, ragtime::text::HamText::phraseSpans(typed));
+        e.Skip();
+    });
     send_->Bind(wxEVT_BUTTON, [this](wxCommandEvent&) { send(); });
     sendFile_->Bind(wxEVT_BUTTON, [this](wxCommandEvent&) {
         if (onSendFile_) onSendFile_();

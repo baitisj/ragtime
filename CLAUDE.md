@@ -154,7 +154,8 @@ The version is `project(ragtime VERSION ...)` in the top-level
 
 ## Build and test
 
-Ubuntu 24.04 needs `build-essential cmake libwxgtk3.2-dev`.
+Ubuntu 24.04 needs `build-essential cmake libwxgtk3.2-dev libgtk-3-dev`
+(GTK for the ham phrase highlight in the entry lines, `PhraseHighlight`).
 
     cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
     cmake --build build -j$(nproc)

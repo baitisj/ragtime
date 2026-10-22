@@ -30,6 +30,7 @@ add_executable(ragtime WIN32
     src/GearshiftDialog.cpp
     src/HostConnection.cpp
     src/Html.cpp
+    src/PhraseHighlight.cpp
     src/Prefs.cpp
     src/SessionPage.cpp
     src/SettingsDialog.cpp
@@ -42,6 +43,15 @@ add_executable(ragtime WIN32
     ${RAGTIME_RESOURCES}
 )
 target_include_directories(ragtime PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/generated ${RAGTIME_RESOURCE_DIR})
+
+# The ham phrase highlight in the entry lines talks to GTK itself
+# (PhraseHighlight.cpp): a GtkEntry takes no wx text styles.
+if(UNIX AND NOT APPLE AND NOT RAGTIME_BUILD_WX)
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(GTK3 REQUIRED gtk+-3.0)
+    target_include_directories(ragtime SYSTEM PRIVATE ${GTK3_INCLUDE_DIRS})
+    target_link_libraries(ragtime PRIVATE ${GTK3_LIBRARIES})
+endif()
 
 # wx headers go in as system headers, so a warning in wxWidgets itself never
 # fails a -Werror build of our code.
