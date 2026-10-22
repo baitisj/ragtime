@@ -348,10 +348,11 @@ The brief:
 
 Done in the package I PR (see "Releases" in `CLAUDE.md`):
 
-- An app icon, two beamed eighth notes sending on the air, in brass and
-  cream on ragtime red (`app/res/ragtime.svg`, a first go: Jeff may want
-  another). It is the window icon on both systems, the exe's icon and
-  the AppImage's.
+- An app icon: the leaf from the cover of Scott Joplin's Maple Leaf Rag
+  (1899), tipped as it is there, going digital block by block, on the
+  cover's cream with its red rim (Jeff's pick, 2026-10-22).
+  `tools/icon/make_leaf_svg.py` draws `app/res/ragtime.svg`. It is the
+  window icon on both systems, the exe's icon and the AppImage's.
 - `packaging/linux/make-appimage.sh`: linuxdeploy with its GTK plugin,
   as Glissando, so the AppImage brings its own GTK theme.
 - `packaging/windows/make-zip.sh`: wxWidgets 3.2.9 (the series Ubuntu

@@ -1,5 +1,6 @@
 #!/bin/sh -e
-# Renders Ragtime's icon, app/res/ragtime.svg, into the files the builds use:
+# Renders Ragtime's icon, app/res/ragtime.svg (drawn by make_leaf_svg.py),
+# into the files the builds use:
 #   app/res/ragtime.png  256 px, for the AppImage, the desktop file and the
 #                        window icon on Linux
 #   app/res/ragtime.ico  16 to 256 px, for ragtime.exe and its windows
