@@ -1,0 +1,319 @@
+// Seals and repair on the D2G group (docs/PLAN.md, "Seals, receipts and
+// repairs"; docs/PROTOCOL.md, "Seals and repair"), the way NACK-oriented
+// multicast (NORM) repairs: listeners say only what they lack, after a
+// random wait, and keep quiet when someone else has asked for it already.
+//
+// Ours. Every item we broadcast (a Text, a file's FileAnnounce) is listed
+// in a Seal once its burst has gone: the seal names our first item since
+// the last seal and gives each one's record digest, zeros for a number
+// whose burst never went. Each seal names the one before by its digest,
+// so a listener that missed one sees the gap. A seal goes once an over
+// has ended (QUIET_MS with nothing new of ours), as soon as a file's
+// pieces have all gone, and at the latest SEAL_EVERY_MS after the oldest
+// item it lists.
+//
+// After a seal goes, a listening window (3 one-codeword bursts in its
+// mode, plus 4 s). The requests heard in it are joined, and their union
+// goes again, in sequence order, with the seals it falls under at the end,
+// which opens the next window. A round with no requests ends it. A
+// request heard with no window open (a late joiner, or an operator who
+// pressed Receive later) opens one. Requests are answered while the seal
+// is open: it is one of our NEWEST_OPEN newest seals, or younger than
+// OPEN_AIRTIMES times the airtime its items took, and never older than
+// MAX_OPEN_MS, unless the operator keeps it open longer or closes it now.
+//
+// Theirs. The items and seals heard from every station are kept for
+// MAX_OPEN_MS. When a station's seal comes, what we lack under it (and
+// under its other recent seals, and a missing previous seal) is asked for
+// in one RepairRequest a seal, at a random time within the window; a
+// request heard from another station first takes off what it asks for,
+// and ours goes only if something is left. A file's pieces are asked for
+// only while the operator receives it (BroadcastFiles says which).
+//
+// No sockets and no clock: HostLink is the socket-free one the app feeds,
+// the time is passed in, and the randomness is seeded.
+#ifndef RAGTIME_BROADCAST_SEALS_H
+#define RAGTIME_BROADCAST_SEALS_H
+
+#include <cstddef>
+#include <cstdint>
+#include <deque>
+#include <map>
+#include <random>
+#include <set>
+#include <string>
+#include <vector>
+
+#include "ragtime/broadcast/BroadcastChat.h"
+#include "ragtime/link/HostLink.h"
+#include "ragtime/protocol/Records.h"
+
+namespace ragtime
+{
+namespace broadcast
+{
+
+// What Seals needs from the broadcast files: the pieces of our own files,
+// and which pieces of other stations' files the operator wants.
+class SealedFiles
+{
+public:
+    virtual ~SealedFiles() = default;
+
+    // Ours: the file announced as item seq has this many pieces (0: not a
+    // file of ours, or no longer held).
+    virtual uint16_t pieceCount(uint32_t seq) const = 0;
+    // Ours: its first pass is still going, so its announce isn't sealed yet.
+    virtual bool streaming(uint32_t seq) const = 0;
+    // Ours: piece index of it as a FilePiece record, stamped with time.
+    virtual bool piece(uint32_t seq, uint16_t index, uint32_t time, protocol::Record& out) = 0;
+    // Theirs: the pieces of call's file (announce seq) we want and lack;
+    // false when we want none of it (not receiving it, or it is whole).
+    virtual bool wanted(const std::string& call, uint32_t seq, std::vector<uint16_t>& missing) const = 0;
+};
+
+class Seals
+{
+public:
+    // When a seal goes.
+    static constexpr uint64_t QUIET_MS = 60 * 1000;
+    static constexpr uint64_t SEAL_EVERY_MS = 10 * 60 * 1000;
+    // A seal burst the host doesn't send goes again, this many times in all.
+    static constexpr int SEAL_TRIES = 3;
+    // The sensitivity window.
+    static constexpr size_t NEWEST_OPEN = 3;
+    static constexpr double OPEN_AIRTIMES = 4.0;
+    // One resend round carries at most this much airtime of pieces; the
+    // rest is asked for again next round.
+    static constexpr double RESEND_MAX_SECONDS = 10 * 60;
+    // A listener stops asking under a seal after this many requests that
+    // brought it nothing.
+    static constexpr int MAX_ASKS = 5;
+    // A late request (Receive pressed after the seal) waits up to this long.
+    static constexpr uint64_t LATE_SPREAD_MS = 10 * 1000;
+
+    Seals(link::HostLink& link, BroadcastChat& chat);
+
+    void setFiles(SealedFiles* files) { files_ = files; }
+    void setRandomSeed(uint32_t seed) { random_.seed(seed); }
+    // The mode our requests and seals go in when nothing else says (the
+    // gear's mode, or empty for the group's).
+    void setMode(const std::string& mode) { mode_ = mode; }
+
+    // Our seal chain, kept across restarts with the broadcast numbering:
+    // the newest seal's number and digest. A new callsign starts afresh.
+    struct Chain
+    {
+        uint16_t number = 0;
+        protocol::Digest digest{};
+    };
+    Chain chain() const { return {lastNumber_, lastDigest_}; }
+    void setChain(const std::string& callsign, const Chain& chain);
+
+    //---------------------------------------------------------------------
+    // Ours
+    //---------------------------------------------------------------------
+
+    // Records of ours handed to HostLink as burst, in mode: the items among
+    // them are sealed once it has gone. An item sent again (Send again) is
+    // taken back into its place.
+    void going(const std::vector<protocol::Record>& records, uint64_t burst, const std::string& mode,
+               uint64_t nowMs);
+    // More airtime an item took: a file's pieces, counted to its announce.
+    void addAirtime(uint32_t seq, double seconds);
+    // A file's pieces have all gone: seal now, not after QUIET_MS.
+    void sealSoon() { sealSoon_ = true; }
+
+    // A seal of ours as the screen shows it.
+    struct SealView
+    {
+        bool sealed = false;        // listed in a seal that has gone
+        uint16_t number = 0;
+        bool open = false;          // taking repair requests
+        uint64_t openUntilMs = 0;   // when it closes, as things stand; 0 once closed
+        bool resending = false;     // a round of repairs under it is going
+        size_t askers = 0;          // stations that have asked under it
+        size_t asks = 0;            // their requests
+        bool keptOpen = false;      // the operator set openUntilMs
+    };
+    // The seal our item seq is listed in.
+    SealView sealOf(uint32_t seq, uint64_t nowMs) const;
+    // The operator keeps it open until then, or closes it now.
+    bool keepOpen(uint32_t seq, uint64_t untilMs);
+    bool closeNow(uint32_t seq);
+
+    //---------------------------------------------------------------------
+    // Everything heard and settled
+    //---------------------------------------------------------------------
+
+    void onEvent(const link::HostLink::Event& event, uint64_t nowMs);
+    // Every record heard on the group (BroadcastChat::onEvent gives them).
+    void onRecord(const protocol::Record& record, uint64_t nowMs);
+    void tick(uint64_t nowMs);
+
+    //---------------------------------------------------------------------
+    // Theirs
+    //---------------------------------------------------------------------
+
+    // The operator now wants something under call's seals (pressed
+    // Receive): ask soon, without waiting for the next seal.
+    void askSoon(const std::string& call, uint64_t nowMs);
+    // A seal heard from call lists its item seq.
+    bool sealHeard(const std::string& call, uint32_t seq) const;
+    // A request of ours waits to go to call.
+    bool asking(const std::string& call) const;
+
+    // Counts, for tests and the status line.
+    size_t requestsSent() const { return requestsSent_; }
+    size_t requestsHeld() const { return requestsHeld_; }   // dropped: others asked first
+    size_t requestsHeard() const { return requestsHeard_; } // to us
+    size_t rounds() const { return rounds_; }               // resend rounds of ours
+    size_t sealsSent() const { return sealsSent_; }
+    // Moves with every change the screen shows.
+    uint64_t version() const { return version_; }
+
+private:
+    //----- ours
+
+    enum class Fate
+    {
+        Going,      // with HostLink
+        Sent,
+        Unsent,     // the host dropped it, or it was taken back
+    };
+
+    struct OurItem
+    {
+        uint32_t seq = 0;
+        protocol::Record record;
+        protocol::Digest digest{};
+        uint64_t burst = 0;
+        Fate fate = Fate::Going;
+        uint64_t sentMs = 0;
+        double air = 0.0;
+        std::string mode;
+        bool file = false;
+    };
+
+    struct OurSeal
+    {
+        uint16_t number = 0;
+        protocol::Record record;
+        protocol::Digest digest{};
+        uint32_t first = 0;
+        size_t count = 0;
+        std::string mode;
+        double air = 0.0;
+        uint64_t burst = 0;
+        int tries = 0;
+        bool sent = false;
+        uint64_t sentMs = 0;
+        uint64_t keepUntilMs = 0;   // the operator's: open until then
+        bool closed = false;
+        std::map<std::string, uint64_t> askers;
+        size_t asks = 0;
+    };
+
+    // What the requests in a window asked for under one seal.
+    struct Asked
+    {
+        bool seal = false;
+        std::set<uint32_t> items;
+        std::map<uint32_t, std::set<uint16_t>> pieces;
+    };
+
+    bool open(const OurSeal& seal, uint64_t nowMs) const;
+    uint64_t openUntil(const OurSeal& seal, uint64_t nowMs) const;
+    bool newest(const OurSeal& seal) const;
+    OurSeal* findSeal(uint16_t number);
+    const OurSeal* sealFor(uint32_t seq) const;
+    const OurItem* findItem(uint32_t seq) const;
+    void sealIfDue(uint64_t nowMs);
+    void onRequest(const std::string& from, const protocol::RepairRequest& request, uint64_t nowMs);
+    void resend(uint64_t nowMs);
+    void prune(uint64_t nowMs);
+    link::ModeInfo modeInfo(const std::string& mode) const;
+
+    //----- theirs
+
+    struct HeardItem
+    {
+        protocol::Digest digest{};
+        uint8_t type = 0;
+        uint64_t heardMs = 0;
+    };
+
+    struct HeardSeal
+    {
+        protocol::Seal seal;
+        protocol::Digest digest{};
+        uint64_t heardMs = 0;
+        int asks = 0;               // requests of ours that brought nothing
+        size_t lackWhenAsked = 0;
+        bool givenUp = false;
+    };
+
+    // What one request asks for, or what we lack, under one seal.
+    struct Lack
+    {
+        uint16_t seal = 0;
+        protocol::Digest sealDigest{};  // zeros: the seal itself wasn't heard
+        bool wantSeal = false;
+        std::vector<bool> items;
+        std::map<uint32_t, std::set<uint16_t>> pieces;
+
+        bool any() const;
+        size_t size() const;
+    };
+
+    struct Station
+    {
+        std::map<uint32_t, HeardItem> items;
+        std::map<uint16_t, HeardSeal> seals;
+        uint64_t askAtMs = 0;                   // our request goes then; 0: none waiting
+        std::map<uint16_t, Lack> covered;       // asked for by others since it was set
+        std::map<uint16_t, int> sealAsks;       // requests for a seal never heard
+    };
+
+    std::vector<Lack> lacks(const std::string& call, const Station& station, uint64_t nowMs) const;
+    void armAsk(const std::string& call, Station& station, uint64_t spreadMs, uint64_t nowMs);
+    void ask(const std::string& call, Station& station, uint64_t nowMs);
+    void heardSeal(const std::string& call, const protocol::Record& record, uint64_t nowMs);
+    void heardRequest(const std::string& from, const protocol::RepairRequest& request, uint64_t nowMs);
+    void forget(uint64_t nowMs);
+
+    link::HostLink& link_;
+    BroadcastChat& chat_;
+    SealedFiles* files_ = nullptr;
+    std::mt19937 random_;
+    std::string mode_;
+    std::string callsign_;
+
+    std::deque<OurItem> unsealed_;          // in the order they went
+    std::map<uint32_t, OurItem> sealedItems_;
+    std::deque<OurSeal> seals_;
+    uint16_t lastNumber_ = 0;
+    protocol::Digest lastDigest_{};
+    uint64_t lastItemMs_ = 0;               // our newest item went then
+    bool sealSoon_ = false;
+
+    uint64_t windowEndsMs_ = 0;             // 0: no window open
+    std::map<uint16_t, Asked> asked_;
+    std::set<uint64_t> resendBursts_;
+    uint64_t resendLast_ = 0;               // the round's last burst, with the seals
+
+    std::map<std::string, Station> stations_;
+    uint64_t forgotMs_ = 0;
+
+    size_t requestsSent_ = 0;
+    size_t requestsHeld_ = 0;
+    size_t requestsHeard_ = 0;
+    size_t rounds_ = 0;
+    size_t sealsSent_ = 0;
+    uint64_t version_ = 0;
+};
+
+} // namespace broadcast
+} // namespace ragtime
+
+#endif
