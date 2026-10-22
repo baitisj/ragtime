@@ -12,13 +12,14 @@
 // 1. data2g-host's own data2g/codes_data/mode_thresholds.json, found in a
 //    Data2G checkout in one of the usual folders (findData2GThresholds).
 // 2. The file picked with Load thresholds... (Preferences key
-//    /Gearshift/ThresholdsFile), else submode_thresholds.json in the user
+//    /Gearshift/ThresholdsFile), else submode_thresholds.json in Ragtime's
 //    data folder.
 //
 // Widths and speeds then come from the host's MODES list.
 
 // The file Ragtime looks for when none has been picked: submode_thresholds.json
-// in the user data folder (~/.Ragtime on Linux, %APPDATA%\Ragtime on Windows).
+// in Ragtime's data folder, appDataDir() (~/.local/share/ragtime on Linux,
+// %APPDATA%\Ragtime on Windows).
 wxString defaultThresholdsPath();
 
 // The picked file, else the default one if it exists. Empty when there is

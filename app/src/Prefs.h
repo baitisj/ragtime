@@ -53,8 +53,13 @@ void saveAutoAccept(const std::vector<std::string>& calls);
 
 // --config's file, when one was given ("" for the usual place).
 void setConfigPath(const std::string& path);
+// Where Ragtime keeps its own files (the files log, a thresholds file):
+// ~/.local/share/ragtime on Linux ($XDG_DATA_HOME/ragtime when that is
+// set), %APPDATA%\Ragtime on Windows. Not wx's user data folder, which on
+// Linux is ~/.Ragtime, the settings file itself. It may not exist yet.
+std::string appDataDir();
 // The Files tab's lasting log (finished transfers and kept part files):
-// beside the --config file, or in the user data folder.
+// beside the --config file, or in appDataDir().
 std::string filesLogPath();
 
 namespace keys
