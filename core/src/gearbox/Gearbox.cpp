@@ -246,8 +246,7 @@ std::string formatDb(double dB)
 
 std::string gearLabel(const Gear& gear)
 {
-    return "Gear " + std::to_string(gear.number) + " \xC2\xB7 "
-           + (gear.name.empty() ? gear.mode : gear.name);
+    return "Gear " + (gear.name.empty() ? gear.mode : gear.name);
 }
 
 void PathSnr::record(double dB)
