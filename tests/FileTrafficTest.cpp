@@ -396,12 +396,13 @@ void testLeavingKeepsThePartAndTheQueue()
     p.steps(3);
     const FileTransfer* t = p.b.transfer(false);
     CHECK(t != nullptr && t->name == "TWO.BIN");
-    p.b.files.accept(t->id, scratch.path("two.bin"), error);
+    // Saved under other names: on Windows "two.bin" is TWO.BIN itself.
+    p.b.files.accept(t->id, scratch.path("two.got"), error);
     CHECK(p.until([&]() { return p.a.files.transfer(two)->state == State::Delivered; }));
     p.steps(3);
     t = p.b.transfer(false);
     CHECK(t != nullptr && t->name == "ONE.BIN");
-    std::string saveAs = scratch.path("one.bin");
+    std::string saveAs = scratch.path("one.got");
     p.b.files.accept(t->id, saveAs, error);
     p.steps(4);
     CHECK(p.a.files.transfer(one)->state == State::Sending);

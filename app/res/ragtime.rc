@@ -1,0 +1,7 @@
+// ragtime.exe's resources: its icon (the first icon in the file is the one
+// Explorer shows) and wxWidgets' own, which include the manifest that turns
+// on the modern common controls and per-monitor DPI awareness.
+appicon ICON "ragtime.ico"
+
+#define wxUSE_DPI_AWARE_MANIFEST 2
+#include "wx/msw/wx.rc"

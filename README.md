@@ -7,9 +7,25 @@ Rodland, KC2G. Ragtime is a sibling of
 chirp-mode chat app, and is named for the same musical family and for the
 ragchew.
 
-Status: Stage 1 under way. Ragtime connects to data2g-host and chats on
-the D2G broadcast group, with the station list and Globus; sessions and
-files come next. It hasn't been on the air with a real data2g-host yet.
+Status: 0.1.0-beta, the first release. Ragtime connects to data2g-host,
+chats on the D2G broadcast group with the station list, Globus and the
+gearshift, holds ragchews (sessions) and sends files in them, and
+broadcasts files to the group with repair. It hasn't yet been on the air
+between two real data2g-hosts.
+
+## Downloads
+
+Releases carry a Linux AppImage (x86_64, glibc 2.39 or newer, as on
+Ubuntu 24.04) and a portable Windows zip (64-bit). Ragtime needs a
+[data2g-host](https://github.com/arodland/Data2G) running on your
+computer or your network; it never bundles or starts one. Give its
+address and ports in Settings > Station.
+
+The gearshift reads Data2G's `data2g/codes_data/mode_thresholds.json`
+from your Data2G clone: from `$DATA2G_HOME`, or a `Data2G` or `data2g`
+folder in your home folder or its `src`, `git`, `code`, `projects`,
+`Projects`, `repos` or `dev` folder. Otherwise load the file with **Load
+thresholds...** in the gearshift. See [docs/GEARBOX.md](docs/GEARBOX.md).
 
 ## Building
 
@@ -20,6 +36,16 @@ On Ubuntu 24.04:
     cmake --build build -j$(nproc)
     ctest --test-dir build --output-on-failure
     ./build/app/ragtime
+
+### Packages
+
+    packaging/linux/make-appimage.sh      # dist/Ragtime-<version>-...-x86_64.AppImage
+    packaging/windows/make-zip.sh         # dist/Ragtime-<version>-...-windows-x86_64.zip
+
+The Windows build cross-compiles on Ubuntu 24.04 with
+`g++-mingw-w64-x86-64-posix` and builds its own static wxWidgets; with
+Wine installed, `ctest --test-dir build-win` runs the unit tests as
+Windows programs.
 
 ### Trying it without Data2G
 

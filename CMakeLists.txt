@@ -5,7 +5,8 @@
 #   ctest --test-dir build --output-on-failure
 #
 # -DRAGTIME_APP=OFF builds only the core library and its tests, with no
-# wxWidgets needed.
+# wxWidgets needed. The Windows build cross-compiles with MinGW-w64: see
+# cmake/Toolchain-mingw64.cmake and packaging/windows/make-zip.sh.
 cmake_minimum_required(VERSION 3.16)
 
 project(ragtime VERSION 0.1.0 LANGUAGES CXX)
@@ -21,6 +22,7 @@ endif()
 option(RAGTIME_APP "Build the wxWidgets app (needs wxWidgets 3.2)." ON)
 option(RAGTIME_TESTS "Build the unit tests and register them with ctest." ON)
 option(RAGTIME_WERROR "Treat compiler warnings as errors." ON)
+option(RAGTIME_BUILD_WX "Fetch and build wxWidgets statically instead of using the system's (the Windows build)." OFF)
 
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
 include(RagtimeWarnings)

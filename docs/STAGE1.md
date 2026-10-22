@@ -352,6 +352,25 @@ The brief:
 - Before calling Stage 1 done, Jeff runs the two-host bench on Hamlet:
   two real `data2g-host`s and a Ragtime on each.
 
+Done in the package I PR (see "Releases" in `CLAUDE.md`):
+
+- An app icon: the leaf from the cover of Scott Joplin's Maple Leaf Rag
+  (1899), tipped as it is there, going digital block by block, on the
+  cover's cream with its red rim (Jeff's pick, 2026-10-22).
+  `tools/icon/make_leaf_svg.py` draws `app/res/ragtime.svg`. It is the
+  window icon on both systems, the exe's icon and the AppImage's.
+- `packaging/linux/make-appimage.sh`: linuxdeploy with its GTK plugin,
+  as Glissando, so the AppImage brings its own GTK theme.
+- `packaging/windows/make-zip.sh`: wxWidgets 3.2.9 (the series Ubuntu
+  24.04 ships, so the code sees the same API on both) cloned and built
+  statically, and the MinGW runtime linked in, so the zip holds just
+  `ragtime.exe` (about 12 MB), `README.txt` and `LICENSE.txt`. The exe
+  carries wx's manifest: modern controls, per-monitor DPI awareness.
+- CI jobs for both; the Windows job runs the core unit tests under Wine.
+  That caught one test saving `two.bin` over its own `TWO.BIN`.
+- Smoke-tested headless: the AppImage under Xvfb, and `ragtime.exe` under
+  Wine chatting with `ragtime_fake_air` over loopback.
+
 ## Waiting on Andrew (via Jeff)
 
 - 200 Hz and 1.2 kHz width caps; a TX level command for Auto ALC; SNR

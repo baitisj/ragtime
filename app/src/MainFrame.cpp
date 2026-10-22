@@ -32,6 +32,7 @@
 #include <wx/tglbtn.h>
 #include <wx/utils.h>
 
+#include "AppIcon.h"
 #include "BroadcastPage.h"
 #include "ConnectionBar.h"
 #include "FilesPage.h"
@@ -177,6 +178,7 @@ MainFrame::MainFrame()
     , clock_(this)
 {
     session_.setTraffic(&fileTraffic_);
+    SetIcons(appIcons());
     // Every dialog and the main window must fit Jeff's 1366x768 screen.
     SetMinSize(wxSize(960, 600));
 

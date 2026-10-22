@@ -1,10 +1,28 @@
 # The Ragtime desktop app: wxWidgets on top of ragtime_core. Keep logic in
 # core where it can be tested without a display; the app draws and wires.
 
-find_package(wxWidgets 3.2 REQUIRED COMPONENTS html net core base)
+if(RAGTIME_BUILD_WX)
+    include(BuildWxWidgets)
+else()
+    find_package(wxWidgets 3.2 REQUIRED COMPONENTS html net core base)
+    set(RAGTIME_WX_LIBS ${wxWidgets_LIBRARIES})
+endif()
+
+# The window icon, built in: ragtime.ico from a resource on Windows, the PNG
+# elsewhere. tools/icon/make_icons.sh renders both from res/ragtime.svg.
+if(WIN32)
+    set(RAGTIME_RESOURCES res/ragtime.rc)
+    # windres looks for ragtime.ico on the include path.
+    set(RAGTIME_RESOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/res)
+else()
+    include(EmbedFile)
+    ragtime_embed_file(${CMAKE_CURRENT_SOURCE_DIR}/res/ragtime.png
+        ${CMAKE_CURRENT_BINARY_DIR}/generated/RagtimeIconPng.h RAGTIME_ICON_PNG)
+endif()
 
 add_executable(ragtime WIN32
     src/RagtimeApp.cpp
+    src/AppIcon.cpp
     src/MainFrame.cpp
     src/BroadcastPage.cpp
     src/ConnectionBar.cpp
@@ -21,17 +39,26 @@ add_executable(ragtime WIN32
     src/globus/GlobusPanel.cpp
     src/globus/GlobusToggle.cpp
     src/globus/GlobusView.cpp
+    ${RAGTIME_RESOURCES}
 )
+target_include_directories(ragtime PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/generated ${RAGTIME_RESOURCE_DIR})
 
 # wx headers go in as system headers, so a warning in wxWidgets itself never
 # fails a -Werror build of our code.
-target_include_directories(ragtime SYSTEM PRIVATE ${wxWidgets_INCLUDE_DIRS})
-target_compile_definitions(ragtime PRIVATE ${wxWidgets_DEFINITIONS})
-if(wxWidgets_CXX_FLAGS)
-    separate_arguments(RAGTIME_WX_CXX_FLAGS UNIX_COMMAND "${wxWidgets_CXX_FLAGS}")
-    target_compile_options(ragtime PRIVATE ${RAGTIME_WX_CXX_FLAGS})
+if(RAGTIME_BUILD_WX)
+    foreach(lib ${RAGTIME_WX_LIBS})
+        get_target_property(dirs ${lib} INTERFACE_INCLUDE_DIRECTORIES)
+        target_include_directories(ragtime SYSTEM PRIVATE ${dirs})
+    endforeach()
+else()
+    target_include_directories(ragtime SYSTEM PRIVATE ${wxWidgets_INCLUDE_DIRS})
+    target_compile_definitions(ragtime PRIVATE ${wxWidgets_DEFINITIONS})
+    if(wxWidgets_CXX_FLAGS)
+        separate_arguments(RAGTIME_WX_CXX_FLAGS UNIX_COMMAND "${wxWidgets_CXX_FLAGS}")
+        target_compile_options(ragtime PRIVATE ${RAGTIME_WX_CXX_FLAGS})
+    endif()
 endif()
-target_link_libraries(ragtime PRIVATE ragtime_core ${wxWidgets_LIBRARIES})
+target_link_libraries(ragtime PRIVATE ragtime_core ${RAGTIME_WX_LIBS})
 ragtime_warnings(ragtime)
 
 if(RAGTIME_TESTS AND NOT WIN32)
