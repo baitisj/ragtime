@@ -790,7 +790,7 @@ Each has my recommendation. Type your answer in the last column, or comment on t
 - Can data2g-host answer a CONNECT with "busy, in a session" while it is in one, and report that to the caller's client?
 - Can it report overheard session bursts ("heard AG7EW in a session", and the partner's call if the bursts carry it)?
 - Can it report an SNR for broadcast bursts over KISS, for the station list?
-- Can it take 200 Hz and 1.2 kHz width caps, beside `BW500` and `BW2300`, for the width gearshift?
+- Can it take 200 Hz and 1.2 kHz width caps, beside `BW500` and `BW2300`? (The gearshift's width no longer sends a cap, so this is only for a narrower switch.)
 - Can it take a TX level command, so the client's Auto ALC can hold drive just under ALC?
 - Could data2g-host offer a show-of-hands primitive for the D2G net: send a Hand burst (spec under The D2G net) in a given channel, starting a set delay after the last burst heard and shifted to match that burst's frequency offset, and decode every Hand in a list of channels in that window, reporting each with its SNR and offset?
 - **Answered (2026-10-22):** Andrew will build the Hand into data2g-host, in both the net and stranger forms. His provisional response is folded into the show-of-hands spec above: 3 s lead time, Data2G's CRC-aided polar code with 63 payload bits and a CRC-16, no Hand-25, a near-far-aware channel map, and a second round for missed stations. The `HAND SEND` / `HAND LISTEN` primitive is under "Who builds it".
