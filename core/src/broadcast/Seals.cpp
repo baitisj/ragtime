@@ -446,6 +446,37 @@ void Seals::resend(uint64_t nowMs)
     version_++;
 }
 
+void Seals::flush(uint64_t nowMs)
+{
+    std::vector<OurSeal*> again;
+    for (OurSeal& s : seals_)
+    {
+        if (!s.sent || s.flushes >= FLUSH_REPEATS || !open(s, nowMs)) continue;
+        bool file = false;
+        for (uint32_t seq = s.first; seq < s.first + s.count && !file; seq++)
+        {
+            const OurItem* item = findItem(seq);
+            file = item != nullptr && item->file;
+        }
+        if (file) again.push_back(&s);
+    }
+    if (again.empty()) return;
+    std::vector<std::vector<uint8_t>> frames;
+    for (OurSeal* s : again)
+    {
+        frames.push_back(protocol::encodeFrame({s->record}));
+        s->flushes++;
+    }
+    std::string mode = again.back()->mode;
+    for (const auto& burst : packBursts(frames, modeInfo(mode)))
+    {
+        uint64_t id = link_.broadcast(burst, mode, nowMs);
+        if (id == 0) continue;
+        resendBursts_.insert(id);
+        resendLast_ = id;
+    }
+}
+
 //-------------------------------------------------------------------------
 // Events and records
 //-------------------------------------------------------------------------
@@ -557,8 +588,12 @@ void Seals::tick(uint64_t nowMs)
     if (windowEndsMs_ != 0 && nowMs >= windowEndsMs_ && resendLast_ == 0)
     {
         windowEndsMs_ = 0;
-        // A quiet window ends the repairs; requests start another round.
-        if (!asked_.empty()) resend(nowMs);
+        // Requests start another round; a window with none ends the
+        // repairs, but for a file's seal, which goes again a time or two.
+        if (!asked_.empty())
+            resend(nowMs);
+        else
+            flush(nowMs);
         version_++;
     }
     sealIfDue(nowMs);

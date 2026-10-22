@@ -672,6 +672,41 @@ void testLostAnnounce()
     CHECK(b.seals.requestsSent() >= 1);
 }
 
+// The file's seal lost, or the request for its repair: the seal goes
+// again after a quiet window, and the listener asks again.
+void testLostSealOrRequest()
+{
+    for (int lostRequest = 0; lostRequest < 2; lostRequest++)
+    {
+        Air air;
+        Station& a = air.add("AG7EW", 1);
+        Station& b = air.add("KC2G", 2);
+        std::filesystem::path dir = freshFolder(lostRequest ? "lostrequest" : "lostseal");
+        b.files.setAutoReceive(dir.string());
+        bool sealLost = false, pieceLost = false, requestLost = false;
+        b.lose = [&](protocol::Record& r) {
+            const protocol::FilePiece* p = r.as<protocol::FilePiece>();
+            if (p != nullptr && p->index == 2 && !pieceLost) return pieceLost = true;
+            if (!lostRequest && r.as<protocol::Seal>() != nullptr && !sealLost) return sealLost = true;
+            return false;
+        };
+        a.lose = [&](protocol::Record& r) {
+            if (lostRequest && r.as<protocol::RepairRequest>() != nullptr && !requestLost) return requestLost = true;
+            return false;
+        };
+        air.run(2000);
+        std::string error;
+        std::string path = makeFile("flushed.bin", 1500, 6);
+        CHECK(a.files.send(path, "qpsk-r1/3", now, error) != 0);
+        air.run(240000);
+        CHECK(pieceLost && (lostRequest ? requestLost : sealLost));
+        BroadcastFile f = fileFrom(b, "AG7EW");
+        CHECK(f.id != 0 && f.state == FileState::Saved);
+        if (f.id != 0) CHECK(readAll(f.path) == readAll(path));
+        CHECK_EQ(a.seals.rounds(), (size_t)1);
+    }
+}
+
 // Many pieces lost: the request is cut to fit a frame, and the rest come
 // in later rounds.
 void testManyLost()
@@ -757,6 +792,7 @@ int main()
     testOpenWindow();
     testDigestMismatch();
     testLostAnnounce();
+    testLostSealOrRequest();
     testManyLost();
     testRefused();
     testIgnore();

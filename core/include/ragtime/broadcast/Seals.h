@@ -80,6 +80,10 @@ public:
     static constexpr uint64_t SEAL_EVERY_MS = 10 * 60 * 1000;
     // A seal burst the host doesn't send goes again, this many times in all.
     static constexpr int SEAL_TRIES = 3;
+    // A seal over a file goes again after a window that brought no
+    // requests, this many more times, in case it or a request was lost
+    // (NORM's flush, repeated).
+    static constexpr int FLUSH_REPEATS = 2;
     // The sensitivity window.
     static constexpr size_t NEWEST_OPEN = 3;
     static constexpr double OPEN_AIRTIMES = 4.0;
@@ -212,6 +216,7 @@ private:
         bool closed = false;
         std::map<std::string, uint64_t> askers;
         size_t asks = 0;
+        int flushes = 0;            // sent again after a quiet window
     };
 
     // What the requests in a window asked for under one seal.
@@ -284,6 +289,7 @@ private:
     void heardSeal(const std::string& call, const protocol::Record& record, uint64_t nowMs);
     void heardRequest(const std::string& from, const protocol::RepairRequest& request, uint64_t nowMs);
     void forget(uint64_t nowMs);
+    void flush(uint64_t nowMs);
 
     link::HostLink& link_;
     BroadcastChat& chat_;
