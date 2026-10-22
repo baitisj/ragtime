@@ -341,7 +341,7 @@ void GlobusView::OnPaint(wxPaintEvent&)
     const double radius = view.radius;
 
     // The sea, then all the land in one go, so where two countries meet
-    // there is no seam.
+    // there is no seam, then the lakes.
     gc->SetPen(*wxTRANSPARENT_PEN);
     gc->SetBrush(wxBrush(OCEAN));
     gc->DrawEllipse(cx - radius, cy - radius, 2.0 * radius, 2.0 * radius);
@@ -354,6 +354,17 @@ void GlobusView::OnPaint(wxPaintEvent&)
     }
     gc->SetBrush(wxBrush(LAND));
     gc->FillPath(land, wxWINDING_RULE);
+
+    // The big lakes, which the land fills in, back in the sea's colour.
+    wxGraphicsPath water = gc->CreatePath();
+    for (const Outline& outline : lakeOutlines(view, window_))
+    {
+        water.MoveToPoint(at(outline.front()));
+        for (size_t i = 1; i < outline.size(); i++) water.AddLineToPoint(at(outline[i]));
+        water.CloseSubpath();
+    }
+    gc->SetBrush(wxBrush(OCEAN));
+    gc->FillPath(water, wxWINDING_RULE);
 
     // The sunlight over both, then the lines, which stay crisp at night.
     const wxBitmap& light = lighting(view, GetContentScaleFactor());

@@ -7,6 +7,7 @@
 #include <wx/filename.h>
 #include <wx/stdpaths.h>
 #include <wx/tokenzr.h>
+#include <wx/utils.h>
 
 #include "ragtime/protocol/Fields.h"
 
@@ -185,10 +186,35 @@ void setConfigPath(const std::string& path)
     configPath = path;
 }
 
+std::string appDataDir()
+{
+#if defined(__UNIX__) && !defined(__WXMAC__)
+    // wx's user data folder here is ~/.Ragtime, the very path wxFileConfig
+    // keeps the settings file at, so a folder can't be made there. Data
+    // goes where XDG says instead: $XDG_DATA_HOME/ragtime, by default
+    // ~/.local/share/ragtime.
+    wxString base;
+    if (!wxGetEnv("XDG_DATA_HOME", &base) || !wxIsAbsolutePath(base))
+    {
+        wxFileName share = wxFileName::DirName(wxGetHomeDir());
+        share.AppendDir(".local");
+        share.AppendDir("share");
+        base = share.GetPath();
+    }
+    wxFileName dir = wxFileName::DirName(base);
+    dir.AppendDir("ragtime");
+    return std::string(dir.GetPath().utf8_str());
+#else
+    // %APPDATA%\Ragtime, ~/Library/Application Support/Ragtime: the
+    // settings live elsewhere (the registry, ~/Library/Preferences).
+    return std::string(wxStandardPaths::Get().GetUserDataDir().utf8_str());
+#endif
+}
+
 std::string filesLogPath()
 {
     if (!configPath.empty()) return configPath + ".files";
-    wxFileName file(wxStandardPaths::Get().GetUserDataDir(), "files.log");
+    wxFileName file(wxString::FromUTF8(appDataDir()), "files.log");
     return std::string(file.GetFullPath().utf8_str());
 }
 

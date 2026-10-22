@@ -13,6 +13,7 @@
 
 #include "Admin1Lines.h"
 #include "BorderLines.h"
+#include "LakeOutlines.h"
 #include "Check.h"
 #include "ragtime/globus/Globe.h"
 #include "ragtime/globus/Sun.h"
@@ -731,6 +732,99 @@ void testScaling()
     CHECK(near(roller.view().radius, 200.0, 1e-6));
 }
 
+void testLakes()
+{
+    CHECK_EQ(LakeOutlines::RING_COUNT, 24);
+
+    // The big lakes are water; the 1:110m land has them as land, which is
+    // why they are drawn over it.
+    for (LatLon wet : {LatLon{43.5, -87.0}, LatLon{47.7, -87.5}, LatLon{44.8, -82.3}, LatLon{42.2, -81.2},
+                       LatLon{43.6, -77.8}, LatLon{-1.0, 33.0}, LatLon{61.5, -114.0}})
+    {
+        CHECK(isLake(wet));
+        CHECK(isLand(wet));
+    }
+    for (LatLon dry : {LatLon{44.5, -89.5}, LatLon{43.0, -84.7}, LatLon{39.0, -98.0}, LatLon{30.0, -40.0}})
+    {
+        CHECK(!isLake(dry));
+    }
+
+    // Lake Michigan parts Wisconsin from Michigan's Lower Peninsula.
+    bool crossed = false;
+    for (double lon = -89.5; lon <= -84.7; lon += 0.1) crossed = crossed || isLake(LatLon{43.5, lon});
+    CHECK(crossed);
+
+    // The drawn lakes agree with isLake, point for point.
+    Window window{400.0, 400.0};
+    View greatLakes{lookingAt(toVector(LatLon{45.0, -84.0})), 1500.0};
+    std::vector<Outline> outlines = lakeOutlines(greatLakes, window);
+    CHECK(outlines.size() >= 5);
+    int shown = 0;
+    int wet = 0;
+    int wrong = 0;
+    for (int py = 0; py < 400; py += 4)
+    {
+        for (int px = 0; px < 400; px += 4)
+        {
+            double x = px + 0.5;
+            double y = py + 0.5;
+            Vec3 face{(x - 200.0) / 1500.0, (200.0 - y) / 1500.0, 0.0};
+            face.z = std::sqrt(1.0 - face.x * face.x - face.y * face.y);
+            bool lake = isLake(toLatLon(toEarth(greatLakes.attitude, face)));
+            shown++;
+            wet += lake;
+            if (filled(outlines, x, y) != lake) wrong++;
+        }
+    }
+    CHECK(wet > shown / 20);
+    CHECK(wrong <= shown / 500);
+
+    // Close over the open Pacific, no lake is drawn.
+    View pacific{lookingAt(toVector(LatLon{0.0, -150.0})), 2000.0};
+    CHECK(lakeOutlines(pacific, Window{320.0, 320.0}).empty());
+}
+
+void testCoastsAreNotBorders()
+{
+    // Over the prairies on the 49th parallel, and over Austria, the window
+    // shows no coast, only borders: an edge two countries share is a
+    // border, drawn once, smoothed, not stroked as coast as well.
+    Window window{400.0, 400.0};
+    auto inWindow = [&window](const std::vector<Outline>& lines) {
+        int count = 0;
+        for (const Outline& line : lines)
+        {
+            for (const Point& p : line) count += p.x >= 0.0 && p.x <= window.width && p.y >= 0.0 && p.y <= window.height;
+        }
+        return count;
+    };
+    for (LatLon inland : {LatLon{49.0, -105.0}, LatLon{48.0, 15.0}})
+    {
+        View view{lookingAt(toVector(inland)), 6000.0};
+        CHECK_EQ(inWindow(coastLines(view, window)), 0);
+        CHECK(inWindow(borderLines(view, window)) > 0);
+    }
+
+    // Islands and whole coasts still show: Iceland, all coast, and the
+    // shores of the Great Lakes.
+    View iceland{lookingAt(toVector(LatLon{65.0, -18.5})), 3000.0};
+    CHECK(!coastLines(iceland, window).empty());
+    View erie{lookingAt(toVector(LatLon{42.2, -81.2})), 6000.0};
+    CHECK(!coastLines(erie, window).empty());
+
+    // Over the whole earth, the coasts are far fewer points than the
+    // outlines: about half the outlines' edges are borders.
+    size_t coastPoints = 0;
+    size_t outlinePoints = 0;
+    for (LatLon side : {LatLon{0.0, 0.0}, LatLon{0.0, 90.0}, LatLon{0.0, 180.0}, LatLon{0.0, -90.0}})
+    {
+        View view{lookingAt(toVector(side)), 100.0};
+        for (const Outline& line : coastLines(view, Window{240.0, 240.0})) coastPoints += line.size();
+        for (const Outline& line : landOutlines(view, Window{240.0, 240.0})) outlinePoints += line.size();
+    }
+    CHECK(coastPoints > 0 && coastPoints < outlinePoints * 3 / 4);
+}
+
 void testAdmin1()
 {
     // The US state and Canadian province lines, Natural Earth simplified:
@@ -738,7 +832,7 @@ void testAdmin1()
     // the coast at their ends, and run down the middle of the Great Lakes,
     // which the 1:110m land fills in). One point, where Nunavut meets the
     // Northwest Territories, is out in the channels of the Arctic islands.
-    CHECK_EQ(Admin1Lines::LINE_COUNT, 126);
+    CHECK_EQ(Admin1Lines::LINE_COUNT, 127);
     int offLand = 0;
     for (int i = 0; i < Admin1Lines::POINT_COUNT; i++)
     {
@@ -753,6 +847,49 @@ void testAdmin1()
         if (!land) offLand++;
     }
     CHECK(offLand <= 1);
+
+    // None runs over a lake, and none runs along a country border, which
+    // is drawn heavier already: the Saint John River, where Maine meets
+    // New Brunswick, is in Natural Earth's admin-1 lines too.
+    std::vector<std::pair<Point, Point>> borders;
+    for (int l = 0; l < BorderLines::LINE_COUNT; l++)
+    {
+        for (uint32_t i = BorderLines::LINE_START[l]; i + 1 < BorderLines::LINE_START[l + 1]; i++)
+        {
+            Point a{BorderLines::POINTS[2 * i] / 100.0, BorderLines::POINTS[2 * i + 1] / 100.0};
+            Point b{BorderLines::POINTS[2 * i + 2] / 100.0, BorderLines::POINTS[2 * i + 3] / 100.0};
+            if (a.x < -50.0 && a.y > 20.0) borders.push_back({a, b});
+        }
+    }
+    auto toBorder = [&borders](const Point& p) {
+        double nearest = 1e9;
+        double c = std::cos(p.y * std::acos(-1.0) / 180.0);
+        for (const auto& segment : borders)
+        {
+            double ax = (segment.first.x - p.x) * c, ay = segment.first.y - p.y;
+            double bx = (segment.second.x - p.x) * c, by = segment.second.y - p.y;
+            double dx = bx - ax, dy = by - ay;
+            double length = dx * dx + dy * dy;
+            double t = length > 0.0 ? std::clamp(-(ax * dx + ay * dy) / length, 0.0, 1.0) : 0.0;
+            nearest = std::min(nearest, std::hypot(ax + dx * t, ay + dy * t));
+        }
+        return nearest;
+    };
+    int doubled = 0;
+    int wet = 0;
+    for (int l = 0; l < Admin1Lines::LINE_COUNT; l++)
+    {
+        for (uint32_t i = Admin1Lines::LINE_START[l]; i + 1 < Admin1Lines::LINE_START[l + 1]; i++)
+        {
+            Point a{Admin1Lines::POINTS[2 * i] / 100.0, Admin1Lines::POINTS[2 * i + 1] / 100.0};
+            Point b{Admin1Lines::POINTS[2 * i + 2] / 100.0, Admin1Lines::POINTS[2 * i + 3] / 100.0};
+            Point middle{(a.x + b.x) / 2.0, (a.y + b.y) / 2.0};
+            if (toBorder(a) < 0.3 && toBorder(middle) < 0.3 && toBorder(b) < 0.3) doubled++;
+            if (isLake(LatLon{middle.y, middle.x})) wet++;
+        }
+    }
+    CHECK_EQ(doubled, 0);
+    CHECK_EQ(wet, 0);
     for (int l = 0; l < Admin1Lines::LINE_COUNT; l++) CHECK(Admin1Lines::LINE_START[l + 1] - Admin1Lines::LINE_START[l] >= 2);
 
     // Over Kansas there are dozens, all on the near side; over the Indian
@@ -975,6 +1112,8 @@ int main()
     testSpinning();
     testOutlines();
     testBorders();
+    testLakes();
+    testCoastsAreNotBorders();
     testAdmin1();
     testSubsolar();
     testDaylight();

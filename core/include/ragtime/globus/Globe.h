@@ -255,8 +255,15 @@ using Outline = std::vector<Point>;
 // Where land goes round the back of the globe its outline follows the rim.
 std::vector<Outline> landOutlines(const View& view, const Window& window);
 
-// The coasts on the near side of the globe, as lines to stroke: the land's
-// own edges, without the stretches of rim landOutlines adds to close them.
+// The big lakes the window shows, outlined in the same way, to fill in the
+// sea's colour over the land: the 1:110m land fills them in, Michigan's
+// Lower Peninsula joined to Wisconsin.
+std::vector<Outline> lakeOutlines(const View& view, const Window& window);
+
+// The coasts and lake shores on the near side of the globe, as lines to
+// stroke: the land's own edges, without the stretches of rim landOutlines
+// adds to close them, and without the edges two countries share, which are
+// borders (borderLines).
 std::vector<Outline> coastLines(const View& view, const Window& window);
 
 // The borders between countries on the near side of the globe, smoothed,
@@ -272,8 +279,10 @@ std::vector<Outline> admin1Lines(const View& view, const Window& window);
 // meridians from pole to pole.
 std::vector<Outline> graticule(const View& view, const Window& window, int stepDegrees = 30);
 
-// Whether the outlines have land at a position.
+// Whether the outlines have land at a position, counting the lakes as land
+// as the 1:110m countries do; and whether a big lake is there.
 bool isLand(const LatLon& position);
+bool isLake(const LatLon& position);
 
 } // namespace ragtime::globus
 

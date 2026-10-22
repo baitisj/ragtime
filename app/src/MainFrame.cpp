@@ -463,6 +463,7 @@ void MainFrame::buildLayout()
     // The Broadcast tab.
     broadcast_->onSend([this](const std::string& typed) { return sendTyped(typed); });
     broadcast_->onGear([this]() { showGearshift(); });
+    broadcast_->nameModes([this](const std::string& mode) { return gearshift_.shortName(mode); });
     broadcast_->onCancel([this](uint64_t id) {
         chat_.cancel(id);
         host_->flush();
@@ -683,7 +684,8 @@ void MainFrame::showStatus()
 {
     SetStatusText(link_.busy() ? "Channel busy" : "Channel clear", FIELD_CHANNEL);
     std::string mode = !modeUsed_.empty() ? modeUsed_ : link_.groupMode();
-    SetStatusText(mode.empty() ? wxString("Mode: the host's") : "Mode " + utf8(mode), FIELD_MODE);
+    SetStatusText(mode.empty() ? wxString("Mode: the host's") : "Mode " + utf8(gearshift_.shortName(mode)),
+                  FIELD_MODE);
     SetStatusText(utf8(transfersLine()), FIELD_TRANSFERS);
 }
 
@@ -1027,6 +1029,9 @@ void MainFrame::saveFilesLog(bool force)
     if (!force && state == savedLog_) return;
     savedLog_ = state;
     wxFileName path(utf8(filesLogPath()));
+    // A log that can't be saved says so in the status bar, not in a
+    // dialog every time a transfer changes.
+    wxLogNull quiet;
     path.Mkdir(wxS_DIR_DEFAULT, wxPATH_MKDIR_FULL);
     wxTempFile out(path.GetFullPath());
     std::string text = files::saveFilesText(history_, sessionFiles_.keptParts(), logOther_);
@@ -1394,7 +1399,7 @@ void MainFrame::broadcastFile()
     wxString where = gear && !mode.empty() ? utf8(gearbox::gearLabel(*gear))
                                            : "the group's mode" + (link_.groupMode().empty()
                                                                        ? wxString()
-                                                                       : " (" + utf8(link_.groupMode()) + ")");
+                                                                       : " (" + utf8(gearshift_.shortName(link_.groupMode())) + ")");
     // The faster gears the host offers, for a file that would take long.
     wxString faster;
     for (const gearbox::Gear& g : gearshift_.ladder())
@@ -1711,9 +1716,12 @@ void MainFrame::showGear()
                                  "mode as data2g-host has it.");
         return;
     }
-    wxString tip = "Opens the gearshift";
+    wxString tip = utf8(gear->name.empty() ? gear->mode : gear->name + ", Data2G's " + gear->mode) + ": "
+                   + utf8(gearbox::formatSpeed(gear->bitsPerSecond)) + ", needs "
+                   + utf8(gearbox::formatDb(gear->threshold)) + " on a "
+                   + gearbox::pathLabel(gearshift_.path()) + " path. Opens the gearshift.";
     if (!link_.modes().empty() && broadcastMode().empty())
-        tip += ". data2g-host doesn't offer this mode, so broadcasts go in the group's mode.";
+        tip += " data2g-host doesn't offer this mode, so broadcasts go in the group's mode.";
     broadcast_->setGearLabel(utf8(gearbox::gearLabel(*gear)), tip);
 }
 

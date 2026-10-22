@@ -7,6 +7,7 @@
 #include <array>
 #include <cstddef>
 #include <deque>
+#include <map>
 #include <optional>
 #include <string>
 #include <vector>
@@ -46,12 +47,33 @@ constexpr double AUTO_MARGIN_DB = 3.0;   // Auto's margin below the path's S/N
 struct Gear
 {
     int number = 0;  // from 1, the most robust
-    std::string mode;
+    std::string mode;  // Data2G's name, which host commands use
+    std::string name;  // the short name, "E2C" (empty when unknown)
     int widthHz = 0;
     Modulation modulation = Modulation::Other;
     double bitsPerSecond = 0.0;
     double threshold = 0.0;  // S/N this mode needs on the ladder's path
 };
+
+// Short mode names (docs/GEARBOX.md, "Mode names"): a letter for the S/N
+// the mode needs on a Calm path, then its speed. "E2C" needs about −5 dB
+// and moves about 200 bit/s; "Z8k" needs +18.75 dB or more and moves about
+// 8000. The popup shows Data2G's own names beside them.
+//
+// The letter: A is −12.5 dB, each letter 1.25 dB more, so K is 0 dB and
+// every four letters is 5 dB. Below A reads A, above Z reads Z.
+char snrLetter(double calmDb);
+// The speed: whole bit/s below 100 ("29"), then hundreds as C ("1C" to
+// "9C"), then thousands as k ("1k", "8k"). Empty for no speed.
+std::string speedShorthand(double bitsPerSecond);
+// A mode's name before ties are broken, "E2C". Empty when its Calm S/N or
+// its speed is unknown.
+std::string baseShortName(const Submode& mode);
+// The short name of every mode in the table that has one, by Data2G name.
+// When two modes come out the same, the harder one (higher Calm S/N, then
+// slower, then by name) moves up a letter, again until it is unique; a mode
+// that would pass Z keeps no short name.
+std::map<std::string, std::string> shortNames(const SubmodeTable& table);
 
 // The best modes no wider than capHz on a path: those no other mode beats on
 // both speed and S/N, most robust first. Modes with no threshold on the path
@@ -83,7 +105,8 @@ std::string formatDuration(double seconds);
 std::string formatSpeed(double bitsPerSecond);
 // "+1.1 dB", "−3.0 dB" (a real minus sign, UTF-8).
 std::string formatDb(double dB);
-// The Gear button by Send: "Gear 3 · polar-k96-f4 · 139 bit/s".
+// The Gear button by Send: "Gear 3 · E2C", or Data2G's name when the gear
+// has no short name.
 std::string gearLabel(const Gear& gear);
 
 // The path's S/N, from a station's last few bursts: their mean in dB.
@@ -147,6 +170,11 @@ public:
     std::optional<double> pathSnr() const { return snr_.average(); }
     std::size_t snrBursts() const { return snr_.count(); }
 
+    // A mode's short name, from every mode the table and host know (not
+    // only those offered, so names don't change with what the host offers).
+    // Data2G's name when it has none, as for ack- modes.
+    std::string shortName(const std::string& mode) const;
+
     // The ladder for the current width, path and offered modes.
     const std::vector<Gear>& ladder() const { return ladder_; }
     // The chosen gear (Auto off), even while Auto overrides it.
@@ -166,6 +194,7 @@ private:
     Path path_ = Path::Calm;
     bool auto_ = false;
     PathSnr snr_;
+    std::map<std::string, std::string> names_;
     std::vector<Gear> ladder_;
     int chosen_ = 0;  // index into ladder_
 };

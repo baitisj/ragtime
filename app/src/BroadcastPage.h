@@ -60,6 +60,8 @@ public:
     {
         onFileAction_ = std::move(fn);
     }
+    // Turns a Data2G mode name into the short name shown to people ("E2C").
+    void nameModes(std::function<std::string(const std::string& mode)> fn) { nameMode_ = std::move(fn); }
 
     // Redraws the messages when the chat has changed.
     void refresh();
@@ -96,6 +98,7 @@ private:
     std::function<void()> onBroadcastFile_;
     std::function<bool(uint64_t, FileCard&)> fileCard_;
     std::function<void(uint64_t, const std::string&)> onFileAction_;
+    std::function<std::string(const std::string&)> nameMode_;
 };
 
 #endif
