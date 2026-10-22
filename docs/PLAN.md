@@ -745,7 +745,7 @@ Functionally equivalent means the client does all of this (tick as each lands):
 - [x] Waiting for the session to go idle, shown on broadcast messages held by a session (packages E and F)
 - [x] Incoming sessions, with the caller on the station list at once (package F)
 - [ ] Session files: offer, save or decline, auto-accept list, carrying on from a kept part, whole-file hash check
-- [ ] Broadcast files with repair, received automatically or on request
+- [x] Broadcast files with repair, received automatically or on request (package H)
 - [ ] Progress for each transfer, both directions at once, with a finish estimate
 - [x] The 500 Hz setting, sending `BW500`/`BW2300` (package E)
 - [x] Pause sending (Glissando's Woah!) (package E)
