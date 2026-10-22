@@ -3,7 +3,11 @@
 #include <optional>
 
 #include <wx/config.h>
+#include <wx/filename.h>
+#include <wx/stdpaths.h>
 #include <wx/tokenzr.h>
+
+#include "ragtime/protocol/Fields.h"
 
 using namespace ragtime;
 
@@ -21,6 +25,8 @@ std::string readString(const char* key, const std::string& fallback)
     if (!config().Read(key, &value)) return fallback;
     return std::string(value.utf8_str());
 }
+
+std::string configPath;
 
 } // namespace
 
@@ -129,4 +135,53 @@ void saveGearshift(const gearbox::Gearshift& shift)
     std::optional<gearbox::Gear> chosen = shift.chosen();
     config().Write("/Gearshift/Gear", (long)(chosen ? chosen->number : 0));
     config().Flush();
+}
+
+std::string receivedFolder()
+{
+    std::string folder = readString(keys::RECEIVED_FOLDER, "");
+    if (!folder.empty()) return folder;
+    wxFileName dir = wxFileName::DirName(wxStandardPaths::Get().GetDocumentsDir());
+    dir.AppendDir("Ragtime received");
+    return std::string(dir.GetPath().utf8_str());
+}
+
+void saveReceivedFolder(const std::string& folder)
+{
+    config().Write(keys::RECEIVED_FOLDER, wxString::FromUTF8(folder));
+}
+
+std::vector<std::string> loadAutoAccept()
+{
+    std::vector<std::string> calls;
+    wxStringTokenizer words(wxString::FromUTF8(readString(keys::AUTO_ACCEPT, "")), ", ");
+    while (words.HasMoreTokens())
+    {
+        std::string call = protocol::normalCallsign(std::string(words.GetNextToken().utf8_str()));
+        if (!call.empty()) calls.push_back(call);
+    }
+    return calls;
+}
+
+void saveAutoAccept(const std::vector<std::string>& calls)
+{
+    wxString saved;
+    for (const std::string& call : calls)
+    {
+        if (!saved.empty()) saved += ",";
+        saved += wxString::FromUTF8(call);
+    }
+    config().Write(keys::AUTO_ACCEPT, saved);
+}
+
+void setConfigPath(const std::string& path)
+{
+    configPath = path;
+}
+
+std::string filesLogPath()
+{
+    if (!configPath.empty()) return configPath + ".files";
+    wxFileName file(wxStandardPaths::Get().GetUserDataDir(), "files.log");
+    return std::string(file.GetFullPath().utf8_str());
 }

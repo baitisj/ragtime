@@ -7,6 +7,7 @@
 #include <wx/wx.h>
 
 #include "MainFrame.h"
+#include "Prefs.h"
 #include "ragtime/Version.h"
 
 class RagtimeApp : public wxApp
@@ -50,6 +51,7 @@ public:
         wxString path;
         if (parser.Found("config", &path))
         {
+            setConfigPath(std::string(path.utf8_str()));
             delete wxConfigBase::Set(new wxFileConfig("Ragtime", wxEmptyString, path, wxEmptyString,
                                                       wxCONFIG_USE_LOCAL_FILE));
         }
