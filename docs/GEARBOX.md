@@ -60,11 +60,63 @@ codeword), 200 trials per point, S/N as average transmitted power over
 noise in 2500 Hz. Longer bursts need a little more. Speed is the raw
 payload rate without CRC or burst overhead.
 
-The client should take thresholds from the host's `MODES` report once
-data2g-host offers them (an ask for Andrew); until then the table is
-built in. Whether the polar modes can carry broadcast and session data,
-and be picked with `BCAST MODE`, is also an open ask: they are gears 2 and
-3 on a good fading path.
+Whether the polar modes can carry broadcast and session data, and be
+picked with `BCAST MODE`, is an open ask: they are gears 2 and 3 on a good
+fading path.
+
+## Where Ragtime gets the figures
+
+Nothing of Data2G's is built in: whether Ragtime may carry Data2G's
+figures is still Jeff's call. Ragtime reads them at run time:
+
+1. **A thresholds file**, picked with **Load thresholds...** in the
+   popup (remembered as `/Gearshift/ThresholdsFile`), or else
+   `submode_thresholds.json` in the user data folder (`~/.Ragtime` on
+   Linux, `%APPDATA%\Ragtime` on Windows). Either form works:
+   - data2g-host's own `data2g/codes_data/mode_thresholds.json`, which
+     every operator running data2g-host already has: `{"channels":
+     ["awgn", "mpg", "mpp", "mpd"], "modes": {name: [dB, ...]}}`, 99 for a
+     threshold never reached. It has no widths or speeds; those come from
+     `MODES`.
+   - The Submode Map's JSON, as `tools/gearbox/gearbox_ladder.py` reads it:
+     `{name: {"hz", "mod", "rate", "bps", "th": {"awgn", ...}}}`, null for
+     never. It carries widths and speeds, so it works before the host
+     connects.
+2. **The host's `MODES` list.** Gears use only the modes the host offers.
+   Its width and speed win over the file's: the speed is the payload rate
+   from its airtimes, each codeword past the first adding
+   (time at most codewords − time at one) / (most codewords − 1) seconds
+   for its bytes. Thresholds in `MODES`, once Andrew adds them, win too.
+
+With no file the popup says where Ragtime looks, and there are no gears.
+
+The figures move as Data2G improves. Data2G's own file at `674c268`
+(2026-10-22) differs from the Submode Map by up to a dB or so, enough to
+change some ladders (with the map's speeds): on a Calm path at 500 Hz and
+wider, `n4-qpsk-r1/3` and `n4-qpsk-r2/3` become gears 2 and 3, and on a
+Good path at 1.2 kHz and wider the ladder starts at `polar-k96-f8`, with
+`polar-k192-f8` in place of `polar-k96-f4`, one gear fewer.
+Reading the operator's own file keeps the gears in step with the host they
+run. The tables below are the Submode Map's.
+
+## In the code
+
+- `core/include/ragtime/gearbox/Submodes.h`: `SubmodeTable` (both file
+  forms, `setFacts` and `setThreshold` for `MODES`),
+  `payloadBitsPerSecond`, paths, modulations and their colours.
+- `core/include/ragtime/gearbox/Gearbox.h`: `bestModes`, `gearLadder`
+  (the same ladders as `gearbox_ladder.py`, checked on all 16 gearboxes),
+  `autoGearIndex` with the 3 dB margin, `PathSnr` (the mean of the last
+  5 bursts), the widths and their host commands, the labels, and
+  `Gearshift`, the popup's state. Changing the width or path keeps the
+  chosen mode if it is still a gear, or else takes the fastest gear no
+  faster than it, so the gearbox never shifts up on its own. Auto with no
+  S/N reports yet holds the chosen gear.
+- `app/src/GearshiftDialog.*`: the popup. `app/src/Thresholds.*`: finding
+  and reading the file. Until package E adds the width and Gear buttons,
+  Settings > Gearshift (Ctrl+G) opens it and the status bar shows the gear.
+- `tests/GearboxTest.cpp` uses made-up placeholder figures, never
+  Data2G's.
 
 ## Every gearbox
 

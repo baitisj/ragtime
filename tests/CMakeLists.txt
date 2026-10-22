@@ -13,6 +13,7 @@ function(ragtime_test name)
 endfunction()
 
 ragtime_test(ragtime_version_test VersionTest.cpp)
+ragtime_test(ragtime_gearbox_test GearboxTest.cpp)
 
 ragtime_test(ragtime_globus_test GlobusTest.cpp)
 # The globus test also checks the generated map tables themselves.
