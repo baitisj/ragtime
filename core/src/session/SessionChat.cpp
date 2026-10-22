@@ -226,6 +226,18 @@ uint64_t SessionChat::send(const std::string& typed, uint64_t nowMs)
     return id;
 }
 
+uint64_t SessionChat::resend(uint64_t id, uint64_t nowMs)
+{
+    for (const Message& m : messages_)
+    {
+        if (m.id != id) continue;
+        if (!canResend(m)) return 0;
+        std::string text = m.text;   // send() may trim the list under m
+        return send(text, nowMs);
+    }
+    return 0;
+}
+
 void SessionChat::setPaused(bool paused, uint64_t nowMs)
 {
     paused_ = paused;

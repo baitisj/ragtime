@@ -233,6 +233,12 @@ public:
     // Sends typed text into the session; 0 for blank text, text over
     // MAX_TYPED, or no session up.
     uint64_t send(const std::string& typed, uint64_t nowMs);
+    // Re-send: the text of one of our messages goes again as a new message,
+    // in this session or a later one (the stream already resends what the
+    // link loses, so the same record again would only be a duplicate). 0
+    // for a message still Queued, or no session up.
+    uint64_t resend(uint64_t id, uint64_t nowMs);
+    static bool canResend(const Message& message) { return message.ours && message.state != Message::State::Queued; }
     // Pause sending: new messages wait as Queued.
     void setPaused(bool paused, uint64_t nowMs);
     bool paused() const { return paused_; }

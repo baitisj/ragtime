@@ -319,12 +319,27 @@ void testMessagesDeliveredByTheBufferCount()
     rig.pump();
     CHECK(rig.chat.find(held)->state == MState::Sent && rig.written.size() > before);
 
+    // Re-send: the text again as a new message, with a number of its own;
+    // not while one is still Queued.
+    uint64_t again = rig.chat.resend(id, rig.now);
+    CHECK(again != 0 && again != id);
+    rig.pump();
+    CHECK(rig.chat.find(again)->state == MState::Sent && rig.chat.find(again)->text == rig.chat.find(id)->text);
+    CHECK(rig.chat.find(again)->seq > rig.chat.find(held)->seq);
+    rig.chat.setPaused(true, rig.now);
+    uint64_t waiting = rig.chat.send("still queued", rig.now);
+    CHECK_EQ(rig.chat.resend(waiting, rig.now), (uint64_t)0);
+    CHECK_EQ(rig.chat.resend(12345, rig.now), (uint64_t)0);
+    rig.chat.setPaused(false, rig.now);
+    rig.pump();
+
     // The session ends before it is acknowledged.
     rig.say("DISCONNECTED\r");
     CHECK(rig.chat.find(held)->state == MState::NotDelivered);
     CHECK(rig.chat.find(id)->state == MState::Delivered);
     CHECK(!rig.chat.active());
     CHECK_EQ(rig.chat.send("too late", rig.now), (uint64_t)0);
+    CHECK_EQ(rig.chat.resend(held, rig.now), (uint64_t)0);     // no session up
 }
 
 void testLinkQuiet()

@@ -318,12 +318,17 @@ bool BroadcastChat::cancel(uint64_t id)
     return true;
 }
 
+bool BroadcastChat::canResend(const Message& message)
+{
+    return message.ours && (message.state == State::Sent || message.state == State::NotSent
+                            || message.state == State::Cancelled || message.state == State::Acknowledged);
+}
+
 bool BroadcastChat::resend(uint64_t id, const std::string& mode, uint64_t nowMs)
 {
     Message* m = findMine(id);
     auto record = records_.find(id);
-    if (m == nullptr || record == records_.end()) return false;
-    if (m->state != State::NotSent && m->state != State::Cancelled) return false;
+    if (m == nullptr || record == records_.end() || !canResend(*m)) return false;
     std::vector<uint8_t> frame = protocol::encodeFrame({record->second});
     if (frame.empty()) return false;
     m->state = State::Queued;

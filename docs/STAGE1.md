@@ -122,7 +122,13 @@ bench"). Choices made there, for Jeff to keep or change:
   line starting `@W1AW` is a Text addressed to W1AW asking for an Ack.
   W1AW's Ragtime answers on the group by itself, and the message shows
   "Acknowledged by W1AW", or "Sent, no ack yet". No automatic retries:
-  Send again is on the message's right-click menu once it is Not sent.
+  **Re-send** is on the right-click menu of each of your messages, as in
+  Glissando, once it has settled (Sent, Not sent, Cancelled or
+  Acknowledged). On the Broadcast tab it goes as the same record, so a
+  station that heard it already doesn't list it twice, and W1AW
+  acknowledges it again. On the Session tab it goes as a new message
+  (the session's stream already resends what the link loses), and only
+  while a session is up; with none, the item is greyed and says so.
 - **Check-ins.** A Hello rides along in the first frame of the first
   message after the group opens, after the callsign, locator or Accept
   sessions changes, and every 10 minutes after that; Station > Check in

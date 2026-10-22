@@ -441,6 +441,11 @@ void MainFrame::buildLayout()
     sessionPage_->onLeave([this]() { leaveSession(); });
     sessionPage_->onLeaveNow([this]() { leaveSessionNow(); });
     sessionPage_->onCallAgain([this]() { callStation(session_.peer()); });
+    sessionPage_->onResend([this](uint64_t id) {
+        if (session_.resend(id, HostConnection::nowMs()) == 0) return;
+        host_->flush();
+        refreshSession();
+    });
     sessionPage_->onSendFile([this]() { sendFilePrompt(session_.peer()); });
     sessionPage_->onDropFiles([this](const std::vector<std::string>& paths) {
         if (session_.phase() == session::SessionChat::Phase::Connected)
