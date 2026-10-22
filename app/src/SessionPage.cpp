@@ -433,7 +433,6 @@ wxString SessionPage::cardHtml(const FileTransfer& t, bool picked) const
     std::string size = ragtime::files::sizeText(t.size);
     std::string progress = ragtime::files::progressText(t.handed > t.done && !t.outgoing ? t.handed : t.done, t.size);
     std::string rate = ragtime::files::rateText(row.bytesPerSecond);
-    std::string finish = ragtime::files::finishText(row.finishAtMs, nowMs_, utcOffsetS_);
     wxString name = "<b>" + htmlEscape(t.name) + "</b>";
     wxString who = "<b>" + htmlEscape(t.peer) + "</b>";
     auto grey = [picked](const wxString& text) {
@@ -442,9 +441,8 @@ wxString SessionPage::cardHtml(const FileTransfer& t, bool picked) const
     auto tinted = [picked](const wxString& text, const wxColour& c) {
         return picked ? text : "<font color=\"" + htmlColour(c) + "\">" + text + "</font>";
     };
-    std::string moving = row.state;
+    std::string moving = ragtime::files::stateText(row, nowMs_, utcOffsetS_);
     if (!rate.empty()) moving += DOT + rate;
-    if (!finish.empty()) moving += DOT + finish;
 
     wxString body;
     if (!t.outgoing)

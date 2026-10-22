@@ -63,14 +63,6 @@ long long dayOf(uint64_t ms, long utcOffsetS)
     return (t >= 0 ? t : t - 86399) / 86400;
 }
 
-std::string stateWithFinish(const FileRow& r, uint64_t nowMs, long utcOffsetS)
-{
-    std::string state = r.state;
-    std::string finish = finishText(r.finishAtMs, nowMs, utcOffsetS);
-    if (!finish.empty()) state += ", " + finish;
-    return state;
-}
-
 std::string progressLabel(const FileRow& r)
 {
     std::string text = progressText(r.done, r.size);
@@ -173,7 +165,7 @@ FilesPage::FilesPage(wxWindow* parent, FileHistory& history) : wxPanel(parent), 
     auto* progress = new wxDataViewColumn("Progress", new ProgressRenderer(this), G_PROGRESS, FromDIP(170),
                                           wxALIGN_LEFT, wxDATAVIEW_COL_RESIZABLE);
     going_->AppendColumn(progress, "long");
-    going_->AppendTextColumn("From or To", wxDATAVIEW_CELL_INERT, FromDIP(96), wxALIGN_LEFT, wxDATAVIEW_COL_RESIZABLE);
+    going_->AppendTextColumn("de", wxDATAVIEW_CELL_INERT, FromDIP(96), wxALIGN_LEFT, wxDATAVIEW_COL_RESIZABLE);
     going_->AppendTextColumn("State", wxDATAVIEW_CELL_INERT, FromDIP(200), wxALIGN_LEFT,
                              wxDATAVIEW_COL_RESIZABLE);
     going_->AppendTextColumn("Expiry", wxDATAVIEW_CELL_INERT, FromDIP(120), wxALIGN_LEFT, wxDATAVIEW_COL_RESIZABLE);
@@ -187,7 +179,9 @@ FilesPage::FilesPage(wxWindow* parent, FileHistory& history) : wxPanel(parent), 
     done_->AppendTextColumn("Date", wxDATAVIEW_CELL_INERT, FromDIP(84), wxALIGN_LEFT, wxDATAVIEW_COL_RESIZABLE);
     done_->AppendTextColumn("File", wxDATAVIEW_CELL_INERT, FromDIP(140), wxALIGN_LEFT, wxDATAVIEW_COL_RESIZABLE);
     done_->AppendTextColumn("Size", wxDATAVIEW_CELL_INERT, FromDIP(84), wxALIGN_RIGHT, wxDATAVIEW_COL_RESIZABLE);
-    done_->AppendTextColumn("From or To", wxDATAVIEW_CELL_INERT, FromDIP(96), wxALIGN_LEFT, wxDATAVIEW_COL_RESIZABLE);
+    // Bits a second over the whole transfer, to set beside the gear's speed.
+    done_->AppendTextColumn("bps", wxDATAVIEW_CELL_INERT, FromDIP(64), wxALIGN_RIGHT, wxDATAVIEW_COL_RESIZABLE);
+    done_->AppendTextColumn("de", wxDATAVIEW_CELL_INERT, FromDIP(96), wxALIGN_LEFT, wxDATAVIEW_COL_RESIZABLE);
     done_->AppendTextColumn("Result", wxDATAVIEW_CELL_INERT, FromDIP(220), wxALIGN_LEFT, wxDATAVIEW_COL_RESIZABLE);
     done_->AppendTextColumn("Saved in", wxDATAVIEW_CELL_INERT, FromDIP(240), wxALIGN_LEFT,
                             wxDATAVIEW_COL_RESIZABLE);
@@ -235,7 +229,7 @@ void FilesPage::setRows(std::vector<FileRow> rows, uint64_t nowMs, long utcOffse
         v.push_back(utf8(sizeText(r.size)));
         v.push_back((long)i);
         v.push_back(utf8(peerText(r.outgoing, r.peer)));
-        v.push_back(utf8(stateWithFinish(r, nowMs, utcOffsetS)));
+        v.push_back(utf8(stateText(r, nowMs, utcOffsetS)));
         v.push_back(utf8(expiryText(r.expiresAtMs, nowMs, utcOffsetS)));
         return v;
     };
@@ -287,6 +281,7 @@ void FilesPage::refreshHistory(uint64_t nowMs, long utcOffsetS)
         v.push_back(utf8(dateText(f.atMs, nowMs, utcOffsetS)));
         v.push_back(utf8(f.name));
         v.push_back(utf8(sizeText(f.size)));
+        v.push_back(utf8(bpsText(f)));
         v.push_back(utf8(peerText(f.outgoing, f.peer)));
         v.push_back(utf8(resultLabel(f)));
         bool saved = f.result == FinishedFile::Result::Saved;

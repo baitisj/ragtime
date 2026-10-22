@@ -29,7 +29,7 @@ enum class Via
     Broadcast,  // on the D2G group, with seal-driven repair
 };
 
-// "Broadcast": From or To for a file we broadcast.
+// "Broadcast": the de (From or To) column for a file we broadcast.
 extern const char* const BROADCAST_PEER;
 
 // A broadcast file's pieces in FileRow::pieces.
@@ -95,11 +95,19 @@ struct FinishedFile
     Result result = Result::Saved;
     std::string reason;         // why it failed, when known
     std::string path;           // where it was saved, or the file that was sent (UTF-8)
+    // For the bps column: the bytes that crossed and how long they took,
+    // first byte to last; 0 when not known (not saved or sent, or a log
+    // from before 2026-10-22).
+    uint64_t movedBytes = 0;
+    uint64_t movedMs = 0;
 };
 
 // "Saved", "Sent", "Declined", "Cancelled", "Cancelled by W1AW", "Expired",
 // "Not taken", "Failed: <reason>".
 std::string resultLabel(const FinishedFile& file);
+// The bps column: bits a second over the whole transfer, movedBytes × 8
+// / movedMs, as "236" or "1,180"; "" when unknown or under a second.
+std::string bpsText(const FinishedFile& file);
 
 // The Completed pane's log, newest last. Not thread safe.
 class FileHistory
@@ -160,8 +168,12 @@ std::string sizeText(uint64_t bytes);
 std::string progressText(uint64_t done, uint64_t size);
 // "38 B/s", "1.2 KB/s"; "" for 0.
 std::string rateText(double bytesPerSecond);
-// "about 14:32 (13 min)"; "" for 0. utcOffsetS gives local time.
+// "ETA 14:32", "ETA Oct 29" a day or more off; "" for 0. utcOffsetS gives
+// local time.
 std::string finishText(uint64_t finishAtMs, uint64_t nowMs, long utcOffsetS);
+// A row's state with its finish estimate: "QRL ETA 14:32",
+// "Receiving, ETA 14:32", or the state alone when there is no estimate.
+std::string stateText(const FileRow& row, uint64_t nowMs, long utcOffsetS);
 // When something ends: "3:10" while under an hour away (a countdown),
 // "15:42 (1 h 10 min)" today, "Oct 29" further off; "" for 0.
 std::string expiryText(uint64_t atMs, uint64_t nowMs, long utcOffsetS);

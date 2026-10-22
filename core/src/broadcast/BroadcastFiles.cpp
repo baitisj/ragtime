@@ -261,7 +261,7 @@ void BroadcastFiles::nextBurst(Outgoing& out, uint64_t nowMs)
 
 void BroadcastFiles::firstPassDone(Outgoing& out, uint64_t nowMs)
 {
-    (void)nowMs;
+    out.firstPassMs = nowMs;
     out.file.state = State::Repairing;
     seals_.sealSoon();
     changed();
@@ -287,6 +287,12 @@ void BroadcastFiles::finishOutgoing(Outgoing& out, State state, uint64_t nowMs)
         f.size = out.file.size;
         f.result = state == State::Sent ? files::FinishedFile::Result::Sent : files::FinishedFile::Result::Cancelled;
         f.path = out.file.path;
+        // The first pass, start to end: repairs come later, sometimes hours.
+        if (state == State::Sent && out.firstPassMs > out.file.startedMs)
+        {
+            f.movedBytes = out.file.size;
+            f.movedMs = out.firstPassMs - out.file.startedMs;
+        }
         finished_.push_back(std::move(f));
     }
     emit(Event::Type::Ended, out.file.id);
@@ -595,6 +601,12 @@ void BroadcastFiles::finishIncoming(Incoming& in, State state, uint64_t nowMs, c
             case State::Saved:
                 f.result = Result::Saved;
                 f.path = in.file.path;
+                // First heard to saved, repairs and all.
+                if (nowMs > in.file.startedMs)
+                {
+                    f.movedBytes = in.file.size;
+                    f.movedMs = nowMs - in.file.startedMs;
+                }
                 break;
             case State::Ignored:
                 f.result = Result::Declined;

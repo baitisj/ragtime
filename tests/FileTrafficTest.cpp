@@ -256,6 +256,9 @@ void testAFileGoesAndIsSaved()
         CHECK(got.result == Result::Saved && !got.outgoing && got.peer == "AG7EW" && got.path == saveAs);
         CHECK_EQ(resultLabel(ours), std::string("Sent"));
         CHECK(got.size == 7000 && got.name == "FRED.TXT" && got.via == Via::Session);
+        // The bps column: all of it crossed, over some seconds.
+        CHECK(ours.movedBytes == 7000 && got.movedBytes == 7000);
+        CHECK(got.movedMs >= 1000 && !bpsText(got).empty());
     }
     CHECK_EQ(p.a.events(FileTraffic::Event::Type::Finished).size(), (size_t)1);
 }
@@ -281,7 +284,7 @@ void testFileBytesArePaced()
 
     // The rate settles near 100 bytes a second, and the window with it.
     FileRow row = p.a.traffic.rows(p.now)[0];
-    CHECK(row.look == Look::Moving && row.state == "Moving");
+    CHECK(row.look == Look::Moving && row.state == "QRL");
     CHECK(row.bytesPerSecond > 80 && row.bytesPerSecond < 120);
     CHECK(row.finishAtMs > p.now + 400000 && row.finishAtMs < p.now + 700000);
     CHECK(p.a.traffic.window() >= FileTraffic::MIN_WINDOW && p.a.traffic.window() < FileTraffic::START_WINDOW * 2);
@@ -557,10 +560,19 @@ void testWordsAndNumbers()
     // 2026-10-22 14:19 UTC; local is UTC-7.
     uint64_t now = T0 + (14 * 60 + 19) * 60000ull;
     long pdt = -7 * 3600;
-    CHECK_EQ(finishText(now + 13 * 60000, now, 0), std::string("about 14:32 (13 min)"));
-    CHECK_EQ(finishText(now + 13 * 60000, now, pdt), std::string("about 07:32 (13 min)"));
-    CHECK_EQ(finishText(now + 20000, now, 0), std::string("about 14:19 (under a minute)"));
+    CHECK_EQ(finishText(now + 13 * 60000, now, 0), std::string("ETA 14:32"));
+    CHECK_EQ(finishText(now + 13 * 60000, now, pdt), std::string("ETA 07:32"));
+    CHECK_EQ(finishText(now + 20000, now, 0), std::string("ETA 14:19"));
     CHECK_EQ(finishText(0, now, 0), std::string());
+    CHECK_EQ(finishText(now + 3 * 86400000ull, now, 0), std::string("ETA Oct 25"));
+    FileRow moving;
+    moving.state = "QRL";
+    moving.finishAtMs = now + 13 * 60000;
+    CHECK_EQ(stateText(moving, now, 0), std::string("QRL ETA 14:32"));
+    moving.state = "Receiving";
+    CHECK_EQ(stateText(moving, now, 0), std::string("Receiving, ETA 14:32"));
+    moving.finishAtMs = 0;
+    CHECK_EQ(stateText(moving, now, 0), std::string("Receiving"));
     CHECK_EQ(expiryText(now + 190000, now, 0), std::string("3:10"));
     CHECK_EQ(expiryText(now + 83 * 60000, now, 0), std::string("15:42 (1 h 23 min)"));
     CHECK_EQ(expiryText(now + 7 * 86400000ull, now, 0), std::string("Oct 29 (7 days)"));
@@ -614,6 +626,8 @@ void testTheLogAsText()
     f.name = "net.txt";
     f.result = Result::Sent;
     f.reason.clear();
+    f.movedBytes = 6000;
+    f.movedMs = 60000;
     history.add(f);
     CHECK(history.find(first) != nullptr);
 
@@ -643,7 +657,15 @@ void testTheLogAsText()
         CHECK_EQ(b.path, std::string("/home/op/Ragtime received/tab\there.txt"));
         CHECK(b.result == Result::Failed && !b.outgoing && b.atMs == T0 && b.size == 7000);
         CHECK(back.entries()[1].via == Via::Broadcast && back.entries()[1].peer == "Broadcast");
+        CHECK(b.movedBytes == 0 && bpsText(b).empty());
+        CHECK(back.entries()[1].movedBytes == 6000 && back.entries()[1].movedMs == 60000);
+        CHECK_EQ(bpsText(back.entries()[1]), std::string("800"));
     }
+    // A line from before the bps column still loads, with no rate.
+    FileHistory older;
+    std::vector<KeptPart> none;
+    CHECK(loadFilesText("ragtime-files 1\nF\tsession\t5\tin\tW1AW\ta.txt\t10\tsaved\t\t/tmp/a.txt\n", older, none));
+    CHECK(older.entries().size() == 1 && older.entries()[0].movedMs == 0 && older.entries()[0].path == "/tmp/a.txt");
     CHECK(kept.size() == 1 && kept[0].bytes == 4096 && kept[0].digest[11] == (uint8_t)(11 * 17 + 1));
     CHECK(other.size() == 2 && other[0] == "B\tbroadcast's own line" && other[1] == "Z\tgarbage");
     CHECK(!loadFilesText("something else\n", back, kept));

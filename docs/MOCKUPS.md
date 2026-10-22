@@ -125,7 +125,7 @@ leaves room for the badge but doesn't show it.
 ## Files tab
 
 - Two panes, newest first: "In progress and parts" on top, "Completed"
-  below (columns in `STAGE1.md`). From or To says **Broadcast** for a file
+  below (columns in `STAGE1.md`). The de column (From or To) says **Broadcast** for a file
   you broadcast.
 - Right-click on a broadcast share you are sending: first line greyed,
   "Repairs open until 15:42 (1 h 10 min)", then Keep open 30 min longer,

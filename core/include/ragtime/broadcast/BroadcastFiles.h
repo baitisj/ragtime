@@ -209,6 +209,7 @@ private:
         bool firstBurst = false;        // it carries the announce for the first time
         uint64_t nextMs = 0;            // the next burst goes no sooner
         files::RateMeter rate;
+        uint64_t firstPassMs = 0;       // when the first pass ended, for the bps column
         bool finished = false;          // its FinishedFile is out
     };
 
