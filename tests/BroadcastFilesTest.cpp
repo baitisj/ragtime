@@ -54,6 +54,9 @@ struct Station
         chat.setSettings(s, 0);
         seals.setChain(call, Seals::Chain());
         seals.setRandomSeed(seed);
+        // Most of these tests repair chat, so they seal it; the default is
+        // off (testChatUnsealed).
+        seals.setSealText(true);
         seals.setMode("qpsk-r1/3");
         chat.onItems([this](const std::vector<protocol::Record>& items, uint64_t burst, const std::string& mode,
                             uint64_t at) { seals.going(items, burst, mode, at); });
@@ -122,6 +125,7 @@ struct Air
     std::vector<std::unique_ptr<Station>> stations;
     size_t requestsOnAir = 0;
     size_t framesOnAir = 0;
+    std::vector<uint64_t> sealsOnAir;   // when each Seal went
 
     Station& add(const std::string& call, uint32_t seed)
     {
@@ -175,6 +179,7 @@ struct Air
                 for (const protocol::Record& r : records)
                 {
                     if (r.type() == (uint8_t)protocol::RecordType::RepairRequest) requestsOnAir++;
+                    if (r.type() == (uint8_t)protocol::RecordType::Seal) sealsOnAir.push_back(now);
                 }
                 for (auto& op : stations)
                 {
@@ -780,6 +785,62 @@ void testIgnore()
 
 } // namespace
 
+// Chat seals are off by default (Jeff, 2026-10-22: on a poor link a seal
+// takes 30 to 60 s, and plain chat must never pay for it unasked): a chat
+// over goes with no seal, and a file is still sealed, listing only its
+// announce.
+void testChatUnsealed()
+{
+    Air air;
+    Station& a = air.add("AG7EW", 1);
+    Station& b = air.add("KC2G", 2);
+    a.seals.setSealText(false);
+    air.run(2000);
+    a.chat.send("CQ CQ", "", now);
+    a.chat.send("de AG7EW", "", now);
+    air.run(Seals::QUIET_MS + 60000);
+    CHECK_EQ(b.textsFrom("AG7EW"), (size_t)2);
+    CHECK_EQ(a.seals.sealsSent(), (size_t)0);
+    CHECK_EQ(b.heardFrom("AG7EW", protocol::RecordType::Seal), (size_t)0);
+    CHECK_EQ(air.requestsOnAir, (size_t)0);
+
+    // A file between two lines of chat: its seal lists the announce alone.
+    a.chat.send("a file for the net", "", now);
+    std::string error;
+    CHECK(a.files.send(makeFile("net.txt", 600), "qpsk-r1/3", now, error) != 0);
+    a.chat.send("73", "", now);
+    air.run(Seals::QUIET_MS + 60000);
+    const protocol::Seal* seal = nullptr;
+    uint32_t announce = 0;
+    for (const protocol::Record& r : b.heard)
+    {
+        if (const protocol::Seal* s = r.as<protocol::Seal>()) seal = s;
+        if (isType(r, protocol::RecordType::FileAnnounce)) announce = r.header.seq;
+    }
+    CHECK_EQ(a.seals.sealsSent(), (size_t)1);
+    CHECK(seal != nullptr && announce != 0);
+    if (seal != nullptr)
+    {
+        CHECK_EQ(seal->firstItem, announce);
+        CHECK_EQ(seal->items.size(), (size_t)1);
+    }
+    BroadcastFile file = fileFrom(b, "AG7EW");
+    CHECK(file.id != 0);
+
+    // Chat between two files leaves a gap in the numbers: two seals, made
+    // together and keyed together, not one keying each.
+    air.sealsOnAir.clear();
+    CHECK(a.files.send(makeFile("one.txt", 300), "qpsk-r1/3", now, error) != 0);
+    a.chat.send("and another", "", now);
+    CHECK(a.files.send(makeFile("two.txt", 300), "qpsk-r1/3", now, error) != 0);
+    air.run(Seals::QUIET_MS + 60000);
+    CHECK_EQ(a.seals.sealsSent(), (size_t)3);
+    // Each goes three times (a file's seal is repeated), always as a pair.
+    CHECK_EQ(air.sealsOnAir.size(), (size_t)6);
+    for (size_t i = 0; i + 1 < air.sealsOnAir.size(); i += 2) CHECK_EQ(air.sealsOnAir[i], air.sealsOnAir[i + 1]);
+    CHECK_EQ(air.requestsOnAir, (size_t)0);
+}
+
 int main()
 {
     testAirtime();
@@ -796,6 +857,7 @@ int main()
     testManyLost();
     testRefused();
     testIgnore();
+    testChatUnsealed();
     std::filesystem::remove_all(scratch());
     return ragtime_test::finish();
 }

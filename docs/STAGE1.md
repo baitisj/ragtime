@@ -300,8 +300,12 @@ what goes on the air. Choices made there, for Jeff to keep or change:
 
 - **When a seal goes.** 60 s after our last item when nothing more is on
   the way, at once when a file's first pass ends, and at most 10 minutes
-  after the oldest unsealed item. Every message we broadcast is sealed,
-  not only files, so a lost line can be repaired too.
+  after the oldest unsealed item. Files are always sealed. Chat is not,
+  unless the operator ticks "Seal my broadcast messages" in Settings (off
+  by default, Jeff's pick on 2026-10-22): at Data2G's lowest rungs a seal
+  is 30 to 60 s of air of its own, and plain chat must not wait on one.
+  Chat between files leaves gaps in the numbers a seal lists; the seals
+  either side of a gap are made together and share a keying.
 - **Zero digests** for items whose burst was Not sent, so nobody asks for
   them.
 - **Seals go again.** Each resend round ends with its seals, which opens

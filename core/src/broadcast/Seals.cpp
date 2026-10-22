@@ -101,6 +101,7 @@ link::ModeInfo Seals::modeInfo(const std::string& mode) const
 void Seals::going(const std::vector<protocol::Record>& records, uint64_t burst, const std::string& mode,
                   uint64_t nowMs)
 {
+    bool tracked = false;
     for (const protocol::Record& r : records)
     {
         auto type = (protocol::RecordType)r.type();
@@ -119,7 +120,14 @@ void Seals::going(const std::vector<protocol::Record>& records, uint64_t burst, 
         }
         auto sealed = sealedItems_.find(seq);
         if (sealed != sealedItems_.end() && sealed->second.record.header.time == r.header.time) known = true;
-        if (known) continue;
+        if (known)
+        {
+            tracked = true;
+            continue;
+        }
+        // Chat goes unsealed unless the operator asked for sealed chat.
+        if (!sealText_ && type == protocol::RecordType::Text) continue;
+        tracked = true;
 
         OurItem item;
         item.seq = seq;
@@ -133,6 +141,8 @@ void Seals::going(const std::vector<protocol::Record>& records, uint64_t burst, 
         item.air = info.valid() ? info.burstSeconds({(int)frame.size()}) : UNKNOWN_BURST_SECONDS;
         unsealed_.push_back(std::move(item));
     }
+    // Unsealed chat neither delays a seal nor changes what the screen shows.
+    if (!tracked) return;
     lastItemMs_ = nowMs;
     version_++;
 }
@@ -260,9 +270,9 @@ void Seals::sealIfDue(uint64_t nowMs)
         return;
     }
 
-    // The settled run at the front, of consecutive numbers: a gap (a
-    // number that never reached us, or the numbers wrapping) starts the
-    // next seal.
+    // The settled items at the front. A seal lists consecutive numbers, so
+    // a gap (unsealed chat, a number that never reached us, or the numbers
+    // wrapping) starts another seal, made now and sent in the same bursts.
     size_t n = 0;
     bool anySent = false;
     uint64_t oldestSent = std::numeric_limits<uint64_t>::max();
@@ -271,7 +281,6 @@ void Seals::sealIfDue(uint64_t nowMs)
         const OurItem& item = unsealed_[i];
         if (item.fate == Fate::Going) break;
         if (item.file && files_ != nullptr && files_->streaming(item.seq)) break;
-        if (i > 0 && item.seq != unsealed_[i - 1].seq + 1) break;
         if (item.fate == Fate::Sent)
         {
             anySent = true;
@@ -290,7 +299,21 @@ void Seals::sealIfDue(uint64_t nowMs)
     size_t at = 0;
     while (at < n)
     {
-        size_t k = std::min<size_t>(n - at, 255);
+        // A run after a gap starts after its items that never went, as the
+        // first run does.
+        bool gap = at > 0 && unsealed_[at].seq != unsealed_[at - 1].seq + 1;
+        if (gap && unsealed_[at].fate == Fate::Unsent)
+        {
+            size_t skip = at;
+            while (skip < n && unsealed_[skip].fate == Fate::Unsent &&
+                   (skip == at || unsealed_[skip].seq == unsealed_[skip - 1].seq + 1))
+                skip++;
+            at = skip;
+            continue;
+        }
+        size_t end = at + 1;
+        while (end < n && unsealed_[end].seq == unsealed_[end - 1].seq + 1) end++;
+        size_t k = std::min<size_t>(end - at, 255);
         protocol::Seal seal;
         protocol::Record record;
         uint16_t number = lastNumber_ >= MAX_SEAL_NUMBER ? 1 : (uint16_t)(lastNumber_ + 1);

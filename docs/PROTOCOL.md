@@ -401,14 +401,20 @@ the host's `MODES` lists them.
 
 **The sender.**
 
+- It seals its FileAnnounces, and its Texts only when the operator
+  asks for it (Ragtime's "Seal my broadcast messages", off by default,
+  because a seal costs a transmission of its own). Other records are
+  never sealed.
 - It seals the items it has broadcast and not yet sealed: when nothing
   of its own is on the way and either the last item went 60 s ago or a
   file's first pass has just ended, and in any case once the oldest
   unsealed item is 10 minutes old.
 - A seal lists a run of consecutive numbers. An item that never went (its
   burst was Not sent) is listed with a zero digest, so nobody asks for
-  it; a run that starts with such items starts after them. A run too long
-  for one frame goes as several seals, a frame each, packed into bursts.
+  it; a run that starts with such items starts after them. A gap in the
+  numbers (unsealed chat between files) ends a run, and the next run is
+  another seal. A run too long for one frame goes as several seals, a
+  frame each. The seals made at one time are packed into bursts together.
 - A seal burst that is Not sent goes again, three tries in all.
 - When a seal burst is Sent, a **listening window** opens: 3 × the
   airtime of a one-codeword burst in its mode, plus 4 s (52 s in

@@ -3,6 +3,7 @@
 #include <string>
 
 #include <wx/button.h>
+#include <wx/checkbox.h>
 #include <wx/filepicker.h>
 #include <wx/tokenzr.h>
 #include <wx/sizer.h>
@@ -87,6 +88,15 @@ SettingsDialog::SettingsDialog(wxWindow* parent, const StationPrefs& prefs)
     filesGrid->Add(autoAccept_, 1, wxEXPAND);
     files->Add(filesGrid, 0, wxEXPAND | wxALL, 6);
 
+    auto* broadcast = new wxStaticBoxSizer(wxVERTICAL, this, "Broadcast");
+    box = broadcast->GetStaticBox();
+    sealChat_ = new wxCheckBox(box, wxID_ANY, "Seal my broadcast messages");
+    sealChat_->SetValue(prefs.sealChat);
+    sealChat_->SetToolTip("A minute after you stop sending, a seal goes out listing your messages, so a station "
+                          "that missed one can ask for it again. It is a transmission of its own: 10 to 60 s "
+                          "of airtime on a poor link. Files you broadcast are always sealed.");
+    broadcast->Add(sealChat_, 0, wxALL, 6);
+
     problem_ = new wxStaticText(this, wxID_ANY, "");
     problem_->SetForegroundColour(wxColour(0xb4, 0x23, 0x18));
 
@@ -94,6 +104,7 @@ SettingsDialog::SettingsDialog(wxWindow* parent, const StationPrefs& prefs)
     sizer->Add(station, 0, wxEXPAND | wxLEFT | wxRIGHT | wxTOP, 12);
     sizer->Add(host, 0, wxEXPAND | wxLEFT | wxRIGHT | wxTOP, 12);
     sizer->Add(files, 0, wxEXPAND | wxLEFT | wxRIGHT | wxTOP, 12);
+    sizer->Add(broadcast, 0, wxEXPAND | wxLEFT | wxRIGHT | wxTOP, 12);
     sizer->Add(problem_, 0, wxEXPAND | wxLEFT | wxRIGHT | wxTOP, 12);
     sizer->Add(CreateStdDialogButtonSizer(wxOK | wxCANCEL), 0, wxEXPAND | wxALL, 12);
     SetSizer(sizer);
@@ -126,6 +137,7 @@ StationPrefs SettingsDialog::prefs() const
         std::string call = ragtime::protocol::normalCallsign(std::string(words.GetNextToken().utf8_str()));
         if (!call.empty()) p.autoAccept.push_back(call);
     }
+    p.sealChat = sealChat_->GetValue();
     return p;
 }
 
