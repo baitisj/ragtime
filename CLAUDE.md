@@ -21,6 +21,8 @@ from "ragchew". Two ideas frame everything:
 
 Read `docs/PLAN.md` first: it is the full design, with Jeff's decisions
 and open questions. `docs/STAGE1.md` is the work now under way.
+`docs/PROTOCOL.md` is what goes on the air (records, frames, sessions,
+text coding).
 `docs/GEARBOX.md` and `docs/MOCKUPS.md` cover the gearshift and the
 screens.
 
@@ -31,6 +33,13 @@ screens.
   mode, and then some) has started.
 - Package A (skeleton and CI) gives the layout below, a placeholder main
   window with the three tabs, and CI. Packages B, C and D build on it.
+- Package B (protocol v0 and core library): `docs/PROTOCOL.md`, the
+  records and streams (`core/src/protocol/`), HamText table 0
+  (`core/src/text/`, identical to Glissando's), `Data2GLink` and
+  `HostLink` (`core/src/link/`), `Sha256` and `SessionFiles`
+  (`core/src/files/`), and a fake data2g-host for tests
+  (`tests/FakeHost.*`). Ported from Glissando: Data2GLink, Sha256,
+  HamText with its generator, Data2GFileTransfer (now `SessionFiles`).
 - The live design draft was the Claude Doc "Data2G client: plan"
   (https://claude.ai/code/artifact/87db2cd2-f5bc-4030-ba8d-99bef19c027d,
   private to Jeff). `docs/PLAN.md` is its 2026-10-22 snapshot and is now
@@ -96,8 +105,8 @@ screens.
 | --- | --- |
 | `core/` | `ragtime_core`, the socket-free library: no wx, no sockets in the engines, all unit-tested. Headers in `core/include/ragtime/`, sources in `core/src/`, one subfolder per area: `protocol/`, `link/`, `text/`, `files/` (package B), `globus/` (C), `gearbox/` (D). Add sources to `core/CMakeLists.txt` |
 | `app/` | The wxWidgets app (`app/src/`). It draws and wires; logic goes in core. `MainFrame` is the one main window |
-| `tests/` | ctest unit tests for core, plain executables on `tests/Check.h` (`CHECK`, `CHECK_EQ`). Add one with `ragtime_test(<name> <source>)` in `tests/CMakeLists.txt`. Fake hosts for link tests go here too |
-| `tools/` | Reference scripts: `globe/` (sunlit globe renderer, admin-1 lines), `gearbox/` (ladders), `gcc16/check.py` (GCC 16 check) |
+| `tests/` | ctest unit tests for core, plain executables on `tests/Check.h` (`CHECK`, `CHECK_EQ`). Add one with `ragtime_test(<name> <source>)` in `tests/CMakeLists.txt`. `FakeHost.*` is a fake data2g-host on loopback sockets (POSIX, so its test builds only `if(UNIX)`) |
+| `tools/` | Reference scripts: `globe/` (sunlit globe renderer, admin-1 lines), `gearbox/` (ladders), `ham_table/` (text table 0 generator and corpus: `gen_table.py --check`), `gcc16/check.py` (GCC 16 check) |
 | `cmake/` | CMake helpers. `ragtime_warnings(<target>)` gives every target `-Wall -Wextra` and, with `RAGTIME_WERROR` (on by default), `-Werror` |
 | `docs/` | The plan and specs. Change them in the same PR as the code they describe |
 

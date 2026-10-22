@@ -1,0 +1,257 @@
+// HostLink: Ragtime's side of the conversation with data2g-host, with no
+// sockets. The app connects the KISS and command ports, hands HostLink
+// what arrives on them, and writes what it gives back; the session data
+// port (the command port + 1) is the app's to read and write, through
+// protocol::StreamReader.
+//
+// What it does:
+// - Opening: MYCALL, CHAT ON, LISTEN, BW500 or BW2300, BCAST OPEN D2G FROM
+//   <call>, then MODES.
+// - The host's reports: PTT, BUSY, MODE, the MODES list, BCAST HEARD,
+//   LOST and DROPPED, CONNECTED, DISCONNECTED, BUFFER.
+// - Broadcasts: one burst at a time to the D2G port, each frame with an
+//   ACKMODE tag, after BCAST MODE when the burst wants another mode. A
+//   burst is Sent once the host has acknowledged every tag, and Not sent
+//   if it reports it dropped, the command port closes, or two minutes pass
+//   without it going while no session is up (a session holds the group;
+//   docs/PLAN.md, "Broadcast mode").
+// - Sessions: Call (CONNECT), Leave (DISCONNECT) and Leave now (ABORT).
+//   Nothing else opens or closes one.
+//
+// The time is always passed in, so tests run it on a simulated clock.
+#ifndef RAGTIME_LINK_HOST_LINK_H
+#define RAGTIME_LINK_HOST_LINK_H
+
+#include <cstddef>
+#include <cstdint>
+#include <deque>
+#include <string>
+#include <utility>
+#include <vector>
+
+#include "ragtime/link/Data2GLink.h"
+
+namespace ragtime
+{
+namespace link
+{
+
+class HostLink
+{
+public:
+    struct Settings
+    {
+        std::string callsign;
+        bool acceptSessions = true;     // LISTEN ON
+        bool narrow = false;            // BW500 (the 500 Hz button), else BW2300
+    };
+
+    enum class BurstState
+    {
+        Queued,     // still with us: it can be cancelled
+        Sending,    // written to the host, which sends it when the channel is clear
+        Held,       // written to the host, which holds it while the session is busy
+        Sent,
+        NotSent,
+    };
+
+    enum class SessionState
+    {
+        None,
+        Calling,    // CONNECT sent; the host calls up to five times
+        Connected,
+        Leaving,    // DISCONNECT sent: the host waits for what is unacknowledged
+    };
+
+    enum class SessionEnd
+    {
+        NoAnswer,   // the call was never answered
+        Left,       // we left (Leave or Leave now)
+        Ended,      // the far end left, or the host gave up the link
+        HostLost,   // the command port closed
+    };
+
+    struct Event
+    {
+        enum class Type
+        {
+            GroupOpen,          // the D2G port is open: number
+            GroupClosed,
+            ModesChanged,       // modes() has a new list
+            Ptt,                // on
+            Busy,               // on
+            ModeUsed,           // text: the mode a burst went out in
+            Heard,              // frame: a frame heard on the group
+            HeardFrom,          // text: the call a host heard a group burst from
+            GroupLost,          // count: bursts the host heard but couldn't decode
+            Burst,              // id, burstState
+            SessionCalling,     // peer
+            SessionConnected,   // peer, incoming, number: bandwidth when given
+            SessionEnded,       // peer, sessionEnd
+            Buffer,             // count: our session bytes not yet acknowledged
+            Refused,            // text: a command the host answered WRONG
+        } type = Type::GroupOpen;
+
+        int number = 0;
+        int count = 0;
+        bool on = false;
+        bool incoming = false;
+        std::string text;
+        std::string peer;
+        uint64_t id = 0;
+        BurstState burstState = BurstState::Queued;
+        SessionEnd sessionEnd = SessionEnd::Ended;
+        std::vector<uint8_t> frame;
+    };
+
+    // A broadcast written to the host but not sent is given up after this
+    // much time with no session up.
+    static constexpr uint64_t NOT_SENT_MS = 2 * 60 * 1000;
+    // A command the host hasn't answered in this long is taken as answered.
+    static constexpr uint64_t ANSWER_MS = 10 * 1000;
+
+    explicit HostLink(Settings settings);
+
+    //---------------------------------------------------------------------
+    // The ports
+    //---------------------------------------------------------------------
+
+    // The command port has connected: the opening lines are queued.
+    void commandUp(uint64_t nowMs);
+    // It has closed: the group, any session and any burst with the host end.
+    void commandDown(uint64_t nowMs);
+    void commandBytes(const char* bytes, size_t length, uint64_t nowMs);
+    // Lines to write to the command port, each ending in CR.
+    std::string takeCommandOutput();
+
+    void kissBytes(const uint8_t* bytes, size_t length, uint64_t nowMs);
+    std::vector<uint8_t> takeKissOutput();
+
+    std::vector<Event> takeEvents();
+
+    // Moves the timers on (not-sent, unanswered commands), and hands the
+    // host the next burst when it can take one.
+    void tick(uint64_t nowMs);
+
+    //---------------------------------------------------------------------
+    // Settings
+    //---------------------------------------------------------------------
+
+    // The callsign is sent when the command port next connects: reconnect
+    // it to open the group under a new one.
+    void setCallsign(const std::string& callsign) { settings_.callsign = callsign; }
+    void setAcceptSessions(bool accept, uint64_t nowMs);
+    void setNarrow(bool narrow, uint64_t nowMs);
+    const Settings& settings() const { return settings_; }
+
+    //---------------------------------------------------------------------
+    // Broadcasts
+    //---------------------------------------------------------------------
+
+    // Queues a burst of frames for the D2G group, in mode (empty: the
+    // group's mode as it stands). Returns its id; 0 for no frames.
+    uint64_t broadcast(const std::vector<std::vector<uint8_t>>& frames, const std::string& mode, uint64_t nowMs);
+    // Drops a burst still queued; false once the host has it.
+    bool cancel(uint64_t id);
+    BurstState burstState(uint64_t id) const;
+
+    // Pause sending: queued bursts stay queued. One the host has goes on.
+    void setPaused(bool paused, uint64_t nowMs);
+    bool paused() const { return paused_; }
+
+    //---------------------------------------------------------------------
+    // Sessions
+    //---------------------------------------------------------------------
+
+    // Call: false if the host isn't ready or a session is already up.
+    bool call(const std::string& peer, uint64_t nowMs);
+    // Leave: DISCONNECT, which waits for what is unacknowledged. Leave now:
+    // ABORT. While calling, either stops the call.
+    bool leave(uint64_t nowMs);
+    bool leaveNow(uint64_t nowMs);
+
+    SessionState sessionState() const { return session_; }
+    const std::string& sessionPeer() const { return peer_; }
+    bool sessionIncoming() const { return incoming_; }
+    // The host's latest BUFFER count.
+    int buffer() const { return buffer_; }
+
+    //---------------------------------------------------------------------
+    // What the host has said
+    //---------------------------------------------------------------------
+
+    bool commandConnected() const { return commandUp_; }
+    // The D2G group is open: broadcasts can go.
+    bool groupOpen() const { return groupPort_ >= 0; }
+    int groupPort() const { return groupPort_; }
+    const std::string& groupMode() const { return groupMode_; }
+    const std::vector<ModeInfo>& modes() const { return modes_; }
+    bool ptt() const { return ptt_; }
+    bool busy() const { return busy_; }
+
+private:
+    struct Burst
+    {
+        uint64_t id = 0;
+        std::vector<std::vector<uint8_t>> frames;
+        std::string mode;
+        BurstState state = BurstState::Queued;
+        std::vector<uint16_t> tags;     // written, not yet acknowledged
+        uint64_t unsentMs = 0;          // time with the host, no session up
+    };
+
+    void advance(uint64_t nowMs);
+    void sendLine(const std::string& line, const std::string& answer, uint64_t nowMs);
+    void onLine(const std::string& line, uint64_t nowMs);
+    void answered(bool ok, uint64_t nowMs);
+    void pump(uint64_t nowMs);
+    void writeBurst(Burst& burst);
+    void setBurst(Burst& burst, BurstState state);
+    void finishSession(SessionEnd end);
+    void heldChanged();
+    Burst* current();
+    void emit(Event event) { events_.push_back(std::move(event)); }
+
+    Settings settings_;
+    bool commandUp_ = false;
+    std::string commandOut_;
+    std::vector<uint8_t> kissOut_;
+    LineSplitter lines_;
+    KissDecoder kiss_;
+    std::vector<Event> events_;
+
+    // Answers we wait for, oldest first: "OK" (OK or WRONG), "BCAST PORT"
+    // or "MODES" (MODE lines, then OK).
+    struct Awaiting
+    {
+        std::string command;
+        std::string answer;
+    };
+    std::deque<Awaiting> awaiting_;
+    uint64_t awaitingSinceMs_ = 0;
+    bool modeAsked_ = false;            // BCAST MODE sent for the current burst, not yet answered
+    std::vector<ModeInfo> modesComing_;
+
+    int groupPort_ = -1;
+    std::string groupMode_;
+    std::vector<ModeInfo> modes_;
+    bool ptt_ = false;
+    bool busy_ = false;
+
+    std::deque<Burst> bursts_;          // the first may be with the host; the rest wait
+    std::vector<std::pair<uint64_t, BurstState>> finished_;   // the latest outcomes, for burstState()
+    uint64_t nextId_ = 1;
+    uint16_t nextTag_ = 1;
+    bool paused_ = false;
+    uint64_t lastMs_ = 0;
+
+    SessionState session_ = SessionState::None;
+    std::string peer_;
+    bool incoming_ = false;
+    int buffer_ = 0;
+};
+
+} // namespace link
+} // namespace ragtime
+
+#endif

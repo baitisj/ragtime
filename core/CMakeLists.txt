@@ -7,8 +7,15 @@ configure_file(Version.h.in ${CMAKE_CURRENT_BINARY_DIR}/include/ragtime/Version.
 
 add_library(ragtime_core STATIC
     src/Version.cpp
-    # Package B (protocol v0, Data2G link, file transfer, HamText, SHA-256):
-    # sources under src/protocol/, src/link/, src/text/, src/files/.
+    # Package B: protocol v0, the Data2G link, session files, HamText, SHA-256.
+    src/files/SessionFiles.cpp
+    src/files/Sha256.cpp
+    src/link/Data2GLink.cpp
+    src/link/HostLink.cpp
+    src/protocol/Fields.cpp
+    src/protocol/Records.cpp
+    src/protocol/Stream.cpp
+    src/text/HamText.cpp
     # Package C (Globus projection and map tables): src/globus/.
     # Package D (gearbox model): src/gearbox/.
 )
