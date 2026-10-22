@@ -740,16 +740,16 @@ Decided (2026-10-21): Glissando drops Data2G entirely as soon as the client is j
 
 Functionally equivalent means the client does all of this (tick as each lands):
 
-- [ ] Broadcast ragchew at every speed, with Sending, Sent and Not sent
+- [x] Broadcast ragchew at every speed, with Sending, Sent and Not sent (package E)
 - [x] Messages to one station in a session, delivered by the modem's acknowledgement (package F)
 - [x] Waiting for the session to go idle, shown on broadcast messages held by a session (packages E and F)
 - [x] Incoming sessions, with the caller on the station list at once (package F)
-- [ ] Session files: offer, save or decline, auto-accept list, carrying on from a kept part, whole-file hash check
+- [x] Session files: offer, save or decline, auto-accept list, carrying on from a kept part, whole-file hash check (package G)
 - [x] Broadcast files with repair, received automatically or on request (package H)
-- [ ] Progress for each transfer, both directions at once, with a finish estimate
+- [x] Progress for each transfer, both directions at once, with a finish estimate (packages G and H)
 - [x] The 500 Hz setting, sending `BW500`/`BW2300` (package E)
 - [x] Pause sending (Glissando's Woah!) (package E)
-- [ ] No sending outside the US data segments when receive only is set
+- [ ] No sending outside the US data segments when receive only is set (not in 0.1.0-beta: Ragtime doesn't read the radio's frequency yet)
 
 The Data2G TV scene and the BONKing cat are Glissando art, so they go with the mode rather than to the client. You may want to keep the cat somewhere; that's your call.
 
