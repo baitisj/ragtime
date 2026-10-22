@@ -113,6 +113,9 @@ screens.
   signatures and seals cover the exact UTF-8 bytes typed, with no
   normalisation.
 - Signed, never encrypted (Part 97, 97.113(a)(4)). No TLS on mesh links.
+- Plain chat must work on a poor link with no seal or signature holding
+  it up. Never call seals cheap: at Data2G's lowest working rungs, 350
+  bytes take 30 to 60 s to send reliably (Andrew, 2026-10-22).
 - No chain of custody or relay stamps: the originator's signature is
   enough.
 - Never send an all-zero frame: it passes the CRC.
