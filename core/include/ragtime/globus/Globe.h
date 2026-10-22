@@ -260,11 +260,16 @@ std::vector<Outline> landOutlines(const View& view, const Window& window);
 // Lower Peninsula joined to Wisconsin.
 std::vector<Outline> lakeOutlines(const View& view, const Window& window);
 
-// The coasts and lake shores on the near side of the globe, as lines to
-// stroke: the land's own edges, without the stretches of rim landOutlines
-// adds to close them, and without the edges two countries share, which are
-// borders (borderLines).
+// The coasts on the near side of the globe, as lines to stroke: the land's
+// own edges, without the stretches of rim landOutlines adds to close them,
+// and without the edges two countries share, which are borders
+// (borderLines).
 std::vector<Outline> coastLines(const View& view, const Window& window);
+
+// The shores of the big lakes on the near side of the globe, as lines to
+// stroke: drawn thin, as the state lines are, since a lake divides land
+// rather than ending it.
+std::vector<Outline> lakeShores(const View& view, const Window& window);
 
 // The borders between countries on the near side of the globe, smoothed,
 // as lines to stroke. They stop at the shores of the big lakes, which are

@@ -846,12 +846,14 @@ void testCoastsAreNotBorders()
         CHECK(inWindow(borderLines(view, window)) > 0);
     }
 
-    // Islands and whole coasts still show: Iceland, all coast, and the
-    // shores of the Great Lakes.
+    // Islands and whole coasts still show: Iceland, all coast. The shores
+    // of the Great Lakes are lake shores, drawn thin, not coast.
     View iceland{lookingAt(toVector(LatLon{65.0, -18.5})), 3000.0};
     CHECK(!coastLines(iceland, window).empty());
+    CHECK(lakeShores(iceland, window).empty());
     View erie{lookingAt(toVector(LatLon{42.2, -81.2})), 6000.0};
-    CHECK(!coastLines(erie, window).empty());
+    CHECK_EQ(inWindow(coastLines(erie, window)), 0);
+    CHECK(inWindow(lakeShores(erie, window)) > 0);
 
     // Over the whole earth, the coasts are far fewer points than the
     // outlines: about half the outlines' edges are borders.

@@ -261,7 +261,7 @@ const std::vector<Line>& borders()
 }
 
 // The coasts: the edges of the land's outlines that only one country has,
-// run together into lines, and the shores of the lakes. An edge two
+// run together into lines. An edge two
 // countries' outlines share is a border between them, which borderLines
 // draws, smoothed; stroked as coast as well it would show twice, the
 // smoothed border a hair beside it. Shared edges are the same points in
@@ -325,6 +325,16 @@ const std::vector<Line>& coasts()
                 lines.push_back(std::move(line));
             }
         }
+        return lines;
+    }();
+    return all;
+}
+
+// The shores of the big lakes, each lake's outline closed.
+const std::vector<Line>& shores()
+{
+    static const std::vector<Line> all = []() {
+        std::vector<Line> lines;
         for (const Ring& lake : lakes())
         {
             Line line;
@@ -1109,6 +1119,11 @@ std::vector<Outline> nearLines(const std::vector<Line>& all, const View& view, c
 std::vector<Outline> coastLines(const View& view, const Window& window)
 {
     return nearLines(coasts(), view, window);
+}
+
+std::vector<Outline> lakeShores(const View& view, const Window& window)
+{
+    return nearLines(shores(), view, window);
 }
 
 std::vector<Outline> borderLines(const View& view, const Window& window)

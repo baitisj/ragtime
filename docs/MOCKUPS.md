@@ -60,16 +60,17 @@ beside Globus and with Globus off:
   follows the operator's time zone, with daylight time).
 - Globus off: the toggle moves to the right end of the tab strip, unlit.
 - Theme: oceans `#A8D4F2`, land `#F7F5EE`, coasts and country borders
-  `#143068`, state and province lines the same blue at about half
-  opacity and thinner, graticule every 30° very faint. The path is a red
+  `#143068`, state and province lines and lake shores the same blue at
+  about half opacity and thinner, graticule every 30° very faint. The path is a red
   great circle (`#c8281e`), home a navy dot, stations red dots with white
   rims.
 - Each line is drawn once (Jeff, 2026-10-22): a coast only where the land
   meets the sea, never along an edge two countries share, which is a
   border; and no state or province line along a country border. The big
   lakes (Natural Earth 1:110m, the Great Lakes among them) are filled in
-  the ocean's colour with a coast round them, so Lake Michigan parts
-  Wisconsin from Michigan. A country border stops at a lake's shore
+  the ocean's colour, so Lake Michigan parts Wisconsin from Michigan,
+  and their shores drawn thin like a state line, not heavy like a coast
+  (Jeff, 2026-10-22). A country border stops at a lake's shore
   (2026-10-22): the 1:110m borders run on across Victoria, down
   Tanganyika and Malawi and along the Great Lakes, and the rougher lake
   outlines made them wander in and out of the water. The lake is the
