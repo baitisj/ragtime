@@ -440,7 +440,9 @@ void MainFrame::buildLayout()
     sizer->Add(outer_, 1, wxEXPAND);
     root->SetSizer(sizer);
 
-    CreateStatusBar(STATUS_FIELDS);
+    // Our own tooltips, not wx's wxSTB_SHOW_TIPS: with it on, wx asserts
+    // on any tooltip set by hand.
+    CreateStatusBar(STATUS_FIELDS, wxSTB_DEFAULT_STYLE & ~wxSTB_SHOW_TIPS);
     sizeStatusFields();
     GetStatusBar()->Bind(wxEVT_LEFT_DOWN, [this](wxMouseEvent& e) {
         wxRect files;
@@ -448,12 +450,22 @@ void MainFrame::buildLayout()
             tabs_->SetSelection(TAB_FILES);
         e.Skip();
     });
-    // The host's field explains itself (or the last error) on hover.
+    // On hover the host's field explains itself (or gives the last error),
+    // and a field cut short shows its whole text, as wxSTB_SHOW_TIPS would.
     GetStatusBar()->Bind(wxEVT_MOTION, [this](wxMouseEvent& e) {
-        wxRect host;
-        bool over = GetStatusBar()->GetFieldRect(FIELD_HOST, host) && host.Contains(e.GetPosition());
-        wxString tip = over ? hostTip_ : wxString();
-        if (GetStatusBar()->GetToolTipText() != tip) GetStatusBar()->SetToolTip(tip);
+        wxStatusBar* bar = GetStatusBar();
+        wxString tip;
+        for (int i = 0; i < STATUS_FIELDS; i++)
+        {
+            wxRect field;
+            if (!bar->GetFieldRect(i, field) || !field.Contains(e.GetPosition())) continue;
+            wxString text = bar->GetStatusText(i);
+            if (i == FIELD_HOST)
+                tip = hostTip_;
+            else if (bar->GetTextExtent(text).x > field.width - FromDIP(8))
+                tip = text;
+        }
+        if (bar->GetToolTipText() != tip) bar->SetToolTip(tip);
         e.Skip();
     });
 

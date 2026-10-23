@@ -28,6 +28,7 @@ add_executable(ragtime WIN32
     src/ConnectionBar.cpp
     src/FilesPage.cpp
     src/GearshiftDialog.cpp
+    src/DrawnIcon.cpp
     src/GearshiftIcon.cpp
     src/HostConnection.cpp
     src/Html.cpp

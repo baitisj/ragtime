@@ -5,6 +5,7 @@
 #include <string>
 #include <utility>
 
+#include <wx/bmpbuttn.h>
 #include <wx/button.h>
 #include <wx/clipbrd.h>
 #include <wx/datetime.h>
@@ -17,6 +18,7 @@
 #include <wx/stattext.h>
 #include <wx/textctrl.h>
 
+#include "DrawnIcon.h"
 #include "Html.h"
 #include "PhraseHighlight.h"
 
@@ -204,9 +206,15 @@ SessionPage::SessionPage(wxWindow* parent, const SessionChat& session, const rag
     compose_ = new wxTextCtrl(this, wxID_ANY, "", wxDefaultPosition, wxDefaultSize, wxTE_PROCESS_ENTER | PHRASE_ENTRY_STYLE);
     compose_->SetMaxLength((unsigned long)SessionChat::MAX_TYPED);
     send_ = new wxButton(this, wxID_ANY, "Send");
-    sendFile_ = new wxButton(this, wxID_ANY, "Send file...");
-    sendFile_->SetToolTip("Offers files to the station you're in a session with; you can also drop files on this tab. "
-                          "They go one at a time, in the order queued.");
+    // A floppy disk rather than "Send file...", as on the Broadcast tab.
+    sendFile_ = new wxBitmapButton(this, wxID_ANY, floppyIcon(wxSystemSettings::GetColour(wxSYS_COLOUR_BTNTEXT)));
+    sendFile_->SetToolTip("Send a file: offers files to the station you're in a session with; you can also drop "
+                          "files on this tab. They go one at a time, in the order queued.");
+    sendFile_->SetMinSize(wxSize(-1, std::max(sendFile_->GetBestSize().y, send_->GetBestSize().y)));
+    Bind(wxEVT_SYS_COLOUR_CHANGED, [this](wxSysColourChangedEvent& e) {
+        sendFile_->SetBitmap(floppyIcon(wxSystemSettings::GetColour(wxSYS_COLOUR_BTNTEXT)));
+        e.Skip();
+    });
     auto* row = new wxBoxSizer(wxHORIZONTAL);
     row->Add(compose_, 1, wxALIGN_CENTER_VERTICAL);
     row->Add(send_, 0, wxALIGN_CENTER_VERTICAL | wxLEFT, 6);

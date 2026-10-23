@@ -4,6 +4,7 @@
 #include <ctime>
 #include <utility>
 
+#include <wx/bmpbuttn.h>
 #include <wx/button.h>
 #include <wx/clipbrd.h>
 #include <wx/datetime.h>
@@ -14,6 +15,7 @@
 #include <wx/stattext.h>
 #include <wx/textctrl.h>
 
+#include "DrawnIcon.h"
 #include "Html.h"
 #include "PhraseHighlight.h"
 
@@ -201,11 +203,13 @@ BroadcastPage::BroadcastPage(wxWindow* parent, const BroadcastChat& chat)
     compose_ = new wxTextCtrl(this, wxID_ANY, "", wxDefaultPosition, wxDefaultSize, wxTE_PROCESS_ENTER | PHRASE_ENTRY_STYLE);
     compose_->SetHint("Message to everyone on D2G; start with @CALL for one station");
     compose_->SetMaxLength((unsigned long)MAX_TYPED);
-    file_ = new wxButton(this, wxID_ANY, "File...", wxDefaultPosition, wxDefaultSize, wxBU_EXACTFIT);
-    file_->SetToolTip("Broadcasts a file to everyone on D2G (300 KB at most), with repairs for stations that "
+    // A floppy disk rather than "File...", to save room (Jeff, 2026-10-23).
+    file_ = new wxBitmapButton(this, wxID_ANY, floppyIcon(wxSystemSettings::GetColour(wxSYS_COLOUR_BTNTEXT)));
+    file_->SetToolTip("Broadcast a file to everyone on D2G (300 KB at most), with repairs for stations that "
                       "miss pieces");
     gear_ = new wxButton(this, wxID_ANY, "Gear", wxDefaultPosition, wxDefaultSize, wxBU_EXACTFIT);
     send_ = new wxButton(this, wxID_ANY, "Send");
+    file_->SetMinSize(wxSize(-1, std::max(file_->GetBestSize().y, send_->GetBestSize().y)));
 
     buttons_ = new wxBoxSizer(wxHORIZONTAL);
     buttons_->Add(file_, 0, wxALIGN_CENTER_VERTICAL | wxLEFT, 6);
@@ -241,6 +245,11 @@ BroadcastPage::BroadcastPage(wxWindow* parent, const BroadcastChat& chat)
     });
     file_->Bind(wxEVT_BUTTON, [this](wxCommandEvent&) {
         if (onBroadcastFile_) onBroadcastFile_();
+    });
+    // The icon follows the theme's text colour, light or dark.
+    Bind(wxEVT_SYS_COLOUR_CHANGED, [this](wxSysColourChangedEvent& e) {
+        file_->SetBitmap(floppyIcon(wxSystemSettings::GetColour(wxSYS_COLOUR_BTNTEXT)));
+        e.Skip();
     });
     list_->Bind(wxEVT_CONTEXT_MENU, [this](wxContextMenuEvent& e) {
         wxPoint at = list_->ScreenToClient(e.GetPosition());
