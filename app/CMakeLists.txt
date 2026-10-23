@@ -39,6 +39,7 @@ add_executable(ragtime WIN32
     src/StationList.cpp
     src/Thresholds.cpp
     src/ToggleSwitch.cpp
+    src/Theme.cpp
     src/TxLamp.cpp
     src/globus/GlobusPanel.cpp
     src/globus/GlobusToggle.cpp

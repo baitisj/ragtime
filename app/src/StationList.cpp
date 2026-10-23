@@ -12,6 +12,7 @@
 #include <wx/stattext.h>
 
 #include "Html.h"
+#include "Theme.h"
 
 using namespace ragtime::broadcast;
 
@@ -52,6 +53,11 @@ public:
     }
 
 protected:
+    wxString OnGetItemMarkup(size_t n) const override
+    {
+        return listText(OnGetItem(n), IsSelected(n));
+    }
+
     wxString OnGetItem(size_t n) const override
     {
         const Station* s = owner_->stationAt(n);
@@ -116,14 +122,16 @@ StationList::StationList(wxWindow* parent, const Stations& stations)
     columns_ = defaultColumns();
     book_ = new wxSimplebook(this);
     narrowView_ = new NarrowStations(this);
+    followThemeBackground(narrowView_, wxSYS_COLOUR_LISTBOX);
     table_ = new StationTable(this);
+    followThemeBackground(table_, wxSYS_COLOUR_LISTBOX);
 
     auto* empty = new wxPanel(book_);
-    empty->SetBackgroundColour(wxSystemSettings::GetColour(wxSYS_COLOUR_LISTBOX));
+    followThemeBackground(empty, wxSYS_COLOUR_LISTBOX);
     auto* hint = new wxStaticText(empty, wxID_ANY,
                                   "No stations heard yet. They appear here as their broadcasts are heard.",
                                   wxDefaultPosition, wxDefaultSize, wxALIGN_CENTRE_HORIZONTAL);
-    hint->SetForegroundColour(secondaryText());
+    followThemeText(hint, secondaryText);
     hint->Wrap(FromDIP(180));
     auto* emptySizer = new wxBoxSizer(wxVERTICAL);
     emptySizer->Add(hint, 0, wxEXPAND | wxALL, 16);

@@ -8,6 +8,7 @@
 #include <vector>
 
 #include <wx/aboutdlg.h>
+#include <wx/bmpbuttn.h>
 #include <wx/button.h>
 #include <wx/checkbox.h>
 #include <wx/clipbrd.h>
@@ -24,6 +25,7 @@
 #include <wx/notifmsg.h>
 #include <wx/panel.h>
 #include <wx/persist/toplevel.h>
+#include <wx/settings.h>
 #include <wx/sizer.h>
 #include <wx/splitter.h>
 #include <wx/statusbr.h>
@@ -35,12 +37,14 @@
 #include "AppIcon.h"
 #include "BroadcastPage.h"
 #include "ConnectionBar.h"
+#include "DrawnIcon.h"
 #include "FilesPage.h"
 #include "GearshiftDialog.h"
 #include "HostConnection.h"
 #include "SessionPage.h"
 #include "SettingsDialog.h"
 #include "StationList.h"
+#include "Theme.h"
 #include "Thresholds.h"
 #include "ToggleSwitch.h"
 #include "TxLamp.h"
@@ -112,9 +116,10 @@ enum StatusField
     FIELD_CHANNEL,
     FIELD_MODE,
     FIELD_TRANSFERS,
-    FIELD_HOST,     // data2g-host's address and state, at the right end
+    FIELD_HOST,     // data2g-host's address and state
+    FIELD_THEME,    // the light and dark button, at the right end where it can switch
 };
-constexpr int STATUS_FIELDS = 4;
+const int STATUS_FIELDS = canSwitchTheme() ? 5 : 4;
 
 constexpr int CLOCK_MS = 1000;
 constexpr int MIN_PANE = 200;
@@ -442,8 +447,25 @@ void MainFrame::buildLayout()
     // Our own tooltips, not wx's wxSTB_SHOW_TIPS: with it on, wx asserts
     // on any tooltip set by hand.
     CreateStatusBar(STATUS_FIELDS, wxSTB_DEFAULT_STYLE & ~wxSTB_SHOW_TIPS);
+    if (canSwitchTheme())
+    {
+        themeButton_ = new wxBitmapButton(GetStatusBar(), wxID_ANY, wxBitmapBundle(), wxDefaultPosition,
+                                          wxDefaultSize, wxBU_EXACTFIT | wxBORDER_NONE);
+        showThemeButton();
+        themeButton_->Bind(wxEVT_BUTTON, [this](wxCommandEvent&) {
+            ThemeChoice choice = themeIsDark() ? ThemeChoice::Light : ThemeChoice::Dark;
+            saveInt(keys::THEME, (int)choice);
+            applyTheme(choice);
+        });
+        // From the button, or the desktop switching under us.
+        Bind(wxEVT_SYS_COLOUR_CHANGED, [this](wxSysColourChangedEvent& e) {
+            e.Skip();
+            showThemeButton();
+        });
+    }
     sizeStatusFields();
-    // Maximizing hides the size grip and restoring brings it back.
+    // The theme button sits in its field, which moves as the window resizes
+    // (and maximizing hides the size grip beside it).
     GetStatusBar()->Bind(wxEVT_SIZE, [this](wxSizeEvent& e) {
         e.Skip();
         CallAfter([this]() { sizeStatusFields(); });
@@ -459,7 +481,7 @@ void MainFrame::buildLayout()
     GetStatusBar()->Bind(wxEVT_MOTION, [this](wxMouseEvent& e) {
         wxStatusBar* bar = GetStatusBar();
         wxString tip;
-        for (int i = 0; i < STATUS_FIELDS; i++)
+        for (int i = 0; i < FIELD_THEME; i++)
         {
             wxRect field;
             if (!bar->GetFieldRect(i, field) || !field.Contains(e.GetPosition())) continue;
@@ -738,19 +760,38 @@ void MainFrame::showConnection()
 
 void MainFrame::sizeStatusFields()
 {
-    // The transfers line takes what the host's field leaves, and the
-    // host's field is as wide as its text. On GTK the last field also
-    // holds the size grip, a square as tall as the bar, shown unless the
-    // window is maximized; wx cuts the text short rather than draw over
-    // it, so the field makes room for it.
+    // The transfers line takes what the other fields leave, and the host's
+    // field is as wide as its text. The theme button's field comes last:
+    // on GTK the size grip, shown unless the window is maximized, sits to
+    // its right, and wx cuts the last field's text short to clear it, so
+    // the host's text keeps clear of the last field.
     wxStatusBar* bar = GetStatusBar();
     if (bar == nullptr) return;
     wxString shown = hostText_.empty() ? utf8(std::string("data2g-host 127.0.0.1:8300") + DOT + "Not connected")
                                        : hostText_;
     int host = bar->GetTextExtent(shown).x + 2 * bar->GetBorderX() + FromDIP(12);
-    if (!IsMaximized()) host += bar->GetClientSize().y;
-    const int widths[STATUS_FIELDS] = {FromDIP(150), FromDIP(260), -1, host};
+    if (themeButton_ == nullptr && !IsMaximized()) host += bar->GetClientSize().y;
+    const int theme = themeButton_ != nullptr ? bar->GetClientSize().y + 2 * bar->GetBorderX() : 0;
+    const int widths[5] = {FromDIP(150), FromDIP(260), -1, host, theme};
     bar->SetStatusWidths(STATUS_FIELDS, widths);
+
+    wxRect field;
+    if (themeButton_ != nullptr && bar->GetFieldRect(FIELD_THEME, field))
+    {
+        // Not while the bar is still too small to hold it: GTK complains.
+        const int side = std::min(field.width, field.height);
+        if (side >= FromDIP(12))
+            themeButton_->SetSize(field.x + (field.width - side) / 2, field.y + (field.height - side) / 2, side,
+                                  side);
+    }
+}
+
+void MainFrame::showThemeButton()
+{
+    if (themeButton_ == nullptr) return;
+    const bool dark = themeIsDark();
+    themeButton_->SetBitmap(themeIcon(dark, wxSystemSettings::GetColour(wxSYS_COLOUR_BTNTEXT)));
+    themeButton_->SetToolTip(dark ? "Light mode" : "Dark mode");
 }
 
 void MainFrame::showStatus()

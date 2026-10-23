@@ -1,5 +1,6 @@
 #include "DrawnIcon.h"
 
+#include <cmath>
 #include <memory>
 
 #include <wx/bitmap.h>
@@ -7,7 +8,7 @@
 #include <wx/graphics.h>
 #include <wx/image.h>
 
-wxBitmapBundle drawnIcon(const DrawIcon& draw, int sizeDip)
+wxBitmapBundle drawnIcon(const IconDrawing& draw, int sizeDip)
 {
     wxVector<wxBitmap> bitmaps;
     for (int scale : {1, 2})
@@ -68,4 +69,44 @@ void drawFloppyIcon(wxGraphicsContext& gc, double size, const wxColour& ink)
 wxBitmapBundle floppyIcon(const wxColour& ink, int sizeDip)
 {
     return drawnIcon([ink](wxGraphicsContext& gc, double size) { drawFloppyIcon(gc, size, ink); }, sizeDip);
+}
+
+void drawMoonIcon(wxGraphicsContext& gc, double size, const wxColour& ink)
+{
+    // A disc with a smaller one, up and to the right, cut out of it.
+    const double u = size / 24.0;
+    gc.SetPen(*wxTRANSPARENT_PEN);
+    gc.SetBrush(wxBrush(ink));
+    gc.DrawEllipse(3.5 * u, 3.5 * u, 17 * u, 17 * u);
+    gc.SetCompositionMode(wxCOMPOSITION_CLEAR);
+    gc.DrawEllipse(9 * u, 0.5 * u, 15 * u, 15 * u);
+    gc.SetCompositionMode(wxCOMPOSITION_OVER);
+}
+
+void drawSunIcon(wxGraphicsContext& gc, double size, const wxColour& ink)
+{
+    // A disc and eight rays.
+    const double u = size / 24.0;
+    gc.SetPen(*wxTRANSPARENT_PEN);
+    gc.SetBrush(wxBrush(ink));
+    gc.DrawEllipse(7 * u, 7 * u, 10 * u, 10 * u);
+    gc.SetPen(gc.CreatePen(wxGraphicsPenInfo(ink, 2 * u).Cap(wxCAP_ROUND)));
+    for (int i = 0; i < 8; i++)
+    {
+        const double a = i * 3.14159265358979323846 / 4;
+        gc.StrokeLine(12 * u + 7.5 * u * std::cos(a), 12 * u + 7.5 * u * std::sin(a),
+                      12 * u + 10.5 * u * std::cos(a), 12 * u + 10.5 * u * std::sin(a));
+    }
+}
+
+wxBitmapBundle themeIcon(bool dark, const wxColour& ink, int sizeDip)
+{
+    return drawnIcon(
+        [dark, ink](wxGraphicsContext& gc, double size) {
+            if (dark)
+                drawSunIcon(gc, size, ink);
+            else
+                drawMoonIcon(gc, size, ink);
+        },
+        sizeDip);
 }

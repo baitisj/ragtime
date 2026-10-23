@@ -21,6 +21,7 @@
 #include "DrawnIcon.h"
 #include "Html.h"
 #include "PhraseHighlight.h"
+#include "Theme.h"
 
 using namespace ragtime::session;
 using ragtime::files::FileRow;
@@ -119,6 +120,11 @@ protected:
         owner_->CallAfter([owner, what, id]() { owner->onFileAction_(what, (uint64_t)id); });
     }
 
+    wxString OnGetItemMarkup(size_t n) const override
+    {
+        return listText(OnGetItem(n), IsSelected(n));
+    }
+
     wxString OnGetItem(size_t n) const override
     {
         if (const FileTransfer* t = fileAt(n)) return owner_->cardHtml(*t, IsSelected(n));
@@ -199,9 +205,10 @@ SessionPage::SessionPage(wxWindow* parent, const SessionChat& session, const rag
     strip_->SetSizer(stripSizer);
 
     list_ = new SessionMessages(this);
+    followThemeBackground(list_, wxSYS_COLOUR_LISTBOX);
     paused_ = new wxStaticText(this, wxID_ANY,
                                "Sending is paused: messages wait as Queued until you press Pause sending again.");
-    paused_->SetForegroundColour(secondaryText());
+    followThemeText(paused_, secondaryText);
     paused_->Hide();
     compose_ = new wxTextCtrl(this, wxID_ANY, "", wxDefaultPosition, wxDefaultSize, wxTE_PROCESS_ENTER | PHRASE_ENTRY_STYLE);
     compose_->SetMaxLength((unsigned long)SessionChat::MAX_TYPED);
@@ -213,6 +220,7 @@ SessionPage::SessionPage(wxWindow* parent, const SessionChat& session, const rag
     sendFile_->SetMinSize(wxSize(-1, std::max(sendFile_->GetBestSize().y, send_->GetBestSize().y)));
     Bind(wxEVT_SYS_COLOUR_CHANGED, [this](wxSysColourChangedEvent& e) {
         sendFile_->SetBitmap(floppyIcon(wxSystemSettings::GetColour(wxSYS_COLOUR_BTNTEXT)));
+        shownPhase_ = -1;   // the strip takes its colours again at the next refresh
         e.Skip();
     });
     auto* row = new wxBoxSizer(wxHORIZONTAL);
@@ -223,7 +231,7 @@ SessionPage::SessionPage(wxWindow* parent, const SessionChat& session, const rag
     // The send queue: files waiting their turn, to reorder or remove.
     queue_ = new wxPanel(this);
     queueTitle_ = new wxStaticText(queue_, wxID_ANY, "Waiting their turn");
-    queueTitle_->SetForegroundColour(secondaryText());
+    followThemeText(queueTitle_, secondaryText);
     queueList_ = new wxListBox(queue_, wxID_ANY, wxDefaultPosition, wxSize(-1, FromDIP(64)));
     auto* up = new wxButton(queue_, wxID_UP, "Up", wxDefaultPosition, wxDefaultSize, wxBU_EXACTFIT);
     auto* down = new wxButton(queue_, wxID_DOWN, "Down", wxDefaultPosition, wxDefaultSize, wxBU_EXACTFIT);

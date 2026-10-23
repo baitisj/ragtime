@@ -15,6 +15,9 @@ wxString htmlColour(const wxColour& colour);
 wxColour blendColour(const wxColour& a, const wxColour& b, double t);
 // Secondary text: the theme's text blended toward its background.
 wxColour secondaryText();
+// A row's markup in the theme's list text colour: wxHTML starts in black,
+// whatever the theme. A picked row is left to the selection's colours.
+wxString listText(const wxString& html, bool picked);
 
 const wxColour ACCENT_BLUE(0x1f, 0x5f, 0xbf);
 

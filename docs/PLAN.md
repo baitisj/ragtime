@@ -299,7 +299,7 @@ One ordinary window in the system theme, laid out like a messaging app: connecti
 - **The gearshift** (your ask, 2026-10-22, built on the Data2G Submode Map you sent). One popup, opened from the Gear button by Send (a speedometer over the gear's name). A 500 Hz slide switch on the connection bar holds data2g-host to 500 Hz modes while on. Details under "The gearshift", below.
 - **Auto ALC** beside TX Off: a small checkbox with a level meter that keeps transmit drive just under the rig's ALC. The client never touches audio, so this needs a host command to set the TX level. The client can read ALC through Hamlib on many rigs (Asks for Andrew).
 - **Tabs:** Broadcast, Session and Files, always in that order (Stage 1). Session is greyed out when no session is active. A tab badge counts unread messages and waiting offers.
-- **Status bar:** channel busy (`BUSY`), current mode, and the newest transfer in one line (clicking it opens Files); at its right end, data2g-host's address and state (Connected, Reconnecting in 8 s), moved there from the connection bar (your ask, 2026-10-23).
+- **Status bar:** channel busy (`BUSY`), current mode, and the newest transfer in one line (clicking it opens Files); at its right end, data2g-host's address and state (Connected, Reconnecting in 8 s), moved there from the connection bar (your ask, 2026-10-23); and last, beside the size grip, the light and dark button (a moon in the light, a sun in the dark; your ask, 2026-10-23).
 - **Menus:** File (Send file, Files, Open received folder, Quit), Station (Call, Leave, Send file), View, Settings, Help. Every action has a keyboard shortcut.
 
 **The gearshift.** The popup *is* the Submode Map: speed across (bits per second, log scale), the S/N each mode needs down the side, one dot per mode, coloured by modulation. The `ack-` modes are left out, because they carry the host's own ARQ control. Three choices sit above the map:
@@ -323,7 +323,7 @@ One ordinary window in the system theme, laid out like a messaging app: connecti
 
 The gear list beside the map gives each gear's short name, Data2G mode, speed, its S/N on this path and how long 1 KB takes; gears the path can't carry (less the 3 dB margin) are red. The figures are the map's: 10% failure of the smallest ARQ burst, with S/N measured in 2500 Hz. Longer bursts need a little more. Glissando's five speeds sit near the Calm ladder, and two of them (fsk16r25-r1/3 and w48-16qam-r1/2) are gears on it. The new ladder replaces them.
 
-The window opens at its last size and place, works at 1280×720, and uses the system font, so it reads well on a small laptop at the operating position. Dark mode follows the system.
+The window opens at its last size and place, works at 1280×720, and uses the system font, so it reads well on a small laptop at the operating position. Dark mode follows the system until the operator picks light or dark with the status bar's button, which Ragtime then keeps. The button switches the GTK theme's own dark variant (Adwaita's, where the desktop's theme has none); wxWidgets 3.2 has no dark mode for Windows, so there it isn't shown.
 
 ## Pictures and voice, *later*
 

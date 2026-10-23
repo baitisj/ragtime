@@ -149,6 +149,14 @@ bench"). Choices made there, for Jeff to keep or change:
   At its right end, data2g-host's address and state (Connected,
   Reconnecting in 8 s), with the last error as its tooltip. It sat at the
   connection bar's left end until Jeff moved it (2026-10-23).
+- **Light or dark (Jeff, 2026-10-23).** A button at the status bar's right
+  end, beside the size grip, switches: a moon in the light, a sun in the
+  dark. The choice is kept (`/Window/Theme`); until the first click the
+  desktop's theme stands. On GTK it is the theme's own dark variant,
+  falling back to Adwaita's when the theme has none; windows that keep a
+  colour from when they were made take it again (`followThemeBackground`,
+  `followThemeText` in `Theme.h`). wxWidgets 3.2 has no dark mode on
+  Windows, so the button isn't there.
 - **The Broadcast tab carries on (Jeff, 2026-10-23).** What is said on
   D2G is kept on disk (`broadcast::BroadcastLog`, one file,
   `<data folder>/broadcast.log`, or `<config>.broadcast.log` beside a

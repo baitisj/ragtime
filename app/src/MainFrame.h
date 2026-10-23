@@ -33,6 +33,7 @@ class GlobusToggle;
 class HostConnection;
 class SessionPage;
 class StationList;
+class wxBitmapButton;
 class wxMenu;
 class wxNotebook;
 class wxPanel;
@@ -63,6 +64,7 @@ private:
     void onClock();
     void showConnection();
     void sizeStatusFields();
+    void showThemeButton();     // its icon and tooltip, for the theme showing
     void showStatus();
     void refreshMessages();
     void refreshStations();
@@ -182,6 +184,7 @@ private:
     std::string note_;          // the latest thing worth a line in the status bar
     wxString hostText_;         // the status bar's host field, as shown
     wxString hostTip_;          // and its tooltip
+    wxBitmapButton* themeButton_ = nullptr;     // light and dark, where the build can switch
 
     uint64_t broadcastFilesVersion_ = 0;
     uint16_t savedSeal_ = 0;    // the seal chain's number last saved
