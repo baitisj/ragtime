@@ -49,16 +49,16 @@ struct BroadcastFile
     {
         // Ours.
         Sending,        // the first pass of pieces
-        Repairing,      // sealed: taking repair requests
+        Repairing,      // sealed: taking repair requests (stopped: the first pass cut short)
         Sent,           // repairs closed
-        Cancelled,      // stopped by the operator before its pieces had all gone
+        Cancelled,      // stopped before its pieces had all gone, and repairs closed
 
         // Theirs.
         Heard,          // pieces kept as they come; the operator has not said
         Receiving,      // Receive pressed, or received automatically
         Ignored,
         Saved,
-        Incomplete,     // repairs have ended with pieces missing; what came is kept a while
+        Incomplete,     // stopped, or repairs ended with pieces missing; what came is kept a while
         Failed,         // the digest didn't match twice, or it couldn't be saved
         Expired,        // heard, never answered, and dropped
     };
@@ -79,6 +79,9 @@ struct BroadcastFile
     bool sealed = false;        // ours: its seal has gone; theirs: its seal was heard
     bool asking = false;        // theirs: a repair request of ours waits to go
     bool complete = false;      // theirs: every piece is here and the digest matched
+    // Ours: the operator stopped the first pass (held of pieces went);
+    // theirs: the operator stopped asking for it.
+    bool stopped = false;
     std::string path;           // the file sent, or where it is saved (or is to be); UTF-8
     std::string error;
     uint64_t repairsUntilMs = 0;// ours: when repairs close, as things stand; 0 once closed
@@ -134,16 +137,22 @@ public:
     // What send would take, without sending.
     FileEstimate estimate(uint64_t size, const std::string& name, const std::string& mode) const;
 
-    // Ours: stops the first pass (what has gone is sealed, repairs closed),
-    // or closes repairs once sealed.
+    // Ours: stops the first pass. What has gone is sealed and repairs stay
+    // open as for any share, so a station that asks for the rest on the
+    // group gets it, all of it if need be, while the seal is fresh; with
+    // nothing gone yet it simply ends. Once repairing: closes repairs.
     bool cancel(uint64_t id);
     // Ours, sealed: repairs stay open until then, or close now.
     bool keepOpen(uint64_t id, uint64_t untilMs);
     bool closeRepairs(uint64_t id);
 
     // Theirs: save it at path once all of it is here (at once if it is),
-    // asking for what is missing until then. Ignore: throw away what came.
+    // asking for what is missing until then; an empty path keeps the one
+    // given before (Ask again on an Incomplete one). Stop: no more asking,
+    // what came is kept as Incomplete. Ignore (Reject file): throw away
+    // what came, logged as Declined.
     bool receive(uint64_t id, const std::string& path, uint64_t nowMs, std::string& error);
+    bool stop(uint64_t id, uint64_t nowMs);
     bool ignore(uint64_t id);
     // Ours or theirs, finished: off the list.
     bool remove(uint64_t id);

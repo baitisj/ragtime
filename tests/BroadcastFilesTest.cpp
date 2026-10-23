@@ -712,6 +712,103 @@ void testLostSealOrRequest()
     }
 }
 
+// The sender stops a share part way: what went is sealed, and a listener
+// that asks for the rest on the group gets all of it there, with nothing
+// for the sender's operator to do. Closing repairs ends it as Cancelled.
+void testStoppedShare()
+{
+    Air air;
+    Station& a = air.add("AG7EW", 1);
+    Station& b = air.add("KC2G", 2);
+    std::filesystem::path dir = freshFolder("stopped");
+    b.files.setAutoReceive(dir.string());
+    air.run(2000);
+    std::string error;
+    std::string path = makeFile("stopped.bin", 2500, 8);
+    uint64_t id = a.files.send(path, "qpsk-r1/3", now, error);
+    CHECK(id != 0);
+    BroadcastFile mine;
+    for (int i = 0; i < 2000 && a.files.find(id, now, mine) && mine.held < 3; i++) air.run(250);
+    CHECK(mine.held >= 3 && mine.held < mine.pieces);
+    CHECK(a.files.cancel(id));
+    CHECK(a.files.find(id, now, mine));
+    CHECK(mine.state == FileState::Repairing && mine.stopped);
+    air.run(240000);
+    BroadcastFile f = fileFrom(b, "AG7EW");
+    CHECK(f.id != 0 && f.state == FileState::Saved);
+    if (f.id != 0) CHECK(readAll(f.path) == readAll(path));
+    CHECK(b.seals.requestsSent() >= 1);
+    CHECK(a.files.find(id, now, mine) && mine.state == FileState::Repairing);
+    CHECK(a.files.closeRepairs(id));
+    CHECK(a.files.find(id, now, mine) && mine.state == FileState::Cancelled);
+    std::vector<files::FinishedFile> done = a.files.takeFinished();
+    CHECK(!done.empty() && done.back().result == files::FinishedFile::Result::Cancelled);
+
+    // Stopped before anything went: it just ends.
+    uint64_t second = a.files.send(makeFile("never.bin", 2500, 9), "qpsk-r1/3", now, error);
+    CHECK(a.files.cancel(second));
+    CHECK(a.files.find(second, now, mine) && mine.state == FileState::Cancelled);
+}
+
+// The listener stops asking: the file goes back to Incomplete with what
+// came kept, no requests go, and Ask again carries on to Saved. Reject
+// (ignore) throws it away and is logged as Declined.
+void testStopAndAskAgain()
+{
+    Air air;
+    Station& a = air.add("AG7EW", 1);
+    Station& b = air.add("KC2G", 2);
+    std::filesystem::path dir = freshFolder("askagain");
+    b.files.setAutoReceive(dir.string());
+    b.lose = [](protocol::Record& r) {
+        const protocol::FilePiece* p = r.as<protocol::FilePiece>();
+        return p != nullptr && p->index >= 4;
+    };
+    air.run(2000);
+    std::string error;
+    std::string path = makeFile("askagain.bin", 2500, 10);
+    CHECK(a.files.send(path, "qpsk-r1/3", now, error) != 0);
+    // The first pass, with B hearing only its first pieces.
+    for (int i = 0; i < 4000; i++)
+    {
+        BroadcastFile f = fileFrom(b, "AG7EW");
+        if (f.id != 0 && f.held >= 4) break;
+        air.run(250);
+    }
+    BroadcastFile f = fileFrom(b, "AG7EW");
+    CHECK(f.id != 0 && f.state == FileState::Receiving);
+    CHECK(b.files.stop(f.id, now));
+    f = fileFrom(b, "AG7EW");
+    CHECK(f.state == FileState::Incomplete && f.stopped && f.held == 4);
+    size_t asked = b.seals.requestsSent();
+    air.run(180000);
+    CHECK_EQ(b.seals.requestsSent(), asked);
+    f = fileFrom(b, "AG7EW");
+    CHECK(f.state == FileState::Incomplete);
+    CHECK(b.files.takeFinished().empty());
+
+    // Ask again: it hears the rest now.
+    b.lose = nullptr;
+    CHECK(b.files.receive(f.id, "", now, error));
+    air.run(180000);
+    f = fileFrom(b, "AG7EW");
+    CHECK(f.state == FileState::Saved);
+    if (f.state == FileState::Saved) CHECK(readAll(f.path) == readAll(path));
+
+    // Reject: thrown away, logged as Declined.
+    b.files.takeFinished();
+    CHECK(a.files.send(makeFile("reject.bin", 1200, 11), "qpsk-r1/3", now, error) != 0);
+    air.run(3000);
+    BroadcastFile r;
+    for (const BroadcastFile& x : b.files.files(now))
+    {
+        if (!x.outgoing && x.name == "reject.bin") r = x;
+    }
+    CHECK(r.id != 0 && b.files.ignore(r.id));
+    std::vector<files::FinishedFile> done = b.files.takeFinished();
+    CHECK(!done.empty() && done.back().result == files::FinishedFile::Result::Declined);
+}
+
 // Many pieces lost: the request is cut to fit a frame, and the rest come
 // in later rounds.
 void testManyLost()
@@ -854,6 +951,8 @@ int main()
     testDigestMismatch();
     testLostAnnounce();
     testLostSealOrRequest();
+    testStoppedShare();
+    testStopAndAskAgain();
     testManyLost();
     testRefused();
     testIgnore();

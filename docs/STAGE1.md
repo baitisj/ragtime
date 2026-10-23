@@ -341,7 +341,14 @@ what goes on the air. Choices made there, for Jeff to keep or change:
 - **Pacing.** 3 s between a file's bursts, the announce again every 20
   pieces, a Not sent burst tried once more.
 - **Receive automatically** is off by default (File menu), into the
-  received folder. Ignore is logged as Declined.
+  received folder.
+- **Stop and Reject** (Jeff's test with Andrew, 2026-10-22). Stopping our
+  share ends its first pass but leaves repairs open, so a fresh request
+  on the group for the rest is answered there without asking ("fresh" is
+  the seal's sensitivity window). On theirs, Stop goes back to
+  Incomplete with what came kept, and Ask again carries on; Reject
+  file... is only on the right-click menu, asks first, and is logged as
+  Declined.
 - **Incomplete.** A file still missing pieces 2 h 10 min after anything
   new came is shown incomplete. Broadcast parts are kept in memory only
   (24 hours on screen), not in the files log across restarts.

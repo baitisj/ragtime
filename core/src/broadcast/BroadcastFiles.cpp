@@ -305,10 +305,19 @@ bool BroadcastFiles::cancel(uint64_t id)
     if (out == nullptr || !out->file.live()) return false;
     if (out->file.state == State::Sending)
     {
-        // What has gone is still sealed; nothing more of it goes, and
-        // requests for it bring nothing.
-        finishOutgoing(*out, State::Cancelled, out->file.lastMs);
-        seals_.sealSoon();
+        if (out->file.held == 0)
+        {
+            // Nothing of it went: nobody can ask for it.
+            finishOutgoing(*out, State::Cancelled, out->file.lastMs);
+            seals_.sealSoon();
+            return true;
+        }
+        // The first pass ends here. What went is sealed, and a fresh
+        // request on the group for the rest is answered there.
+        if (out->burst != 0) link_.cancel(out->burst);
+        out->burst = 0;
+        out->file.stopped = true;
+        firstPassDone(*out, out->file.lastMs);
         return true;
     }
     return closeRepairs(id);
@@ -328,7 +337,7 @@ bool BroadcastFiles::closeRepairs(uint64_t id)
     Outgoing* out = findOutgoing(id);
     if (out == nullptr || out->file.state != State::Repairing) return false;
     seals_.closeNow(out->file.seq);
-    finishOutgoing(*out, State::Sent, out->file.lastMs);
+    finishOutgoing(*out, out->file.stopped ? State::Cancelled : State::Sent, out->file.lastMs);
     return true;
 }
 
@@ -368,7 +377,7 @@ bool BroadcastFiles::wanted(const std::string& call, uint32_t seq, std::vector<u
     {
         if (in.file.from != call || in.file.seq != seq) continue;
         if (!in.announced || in.file.complete) return false;
-        if (in.file.state != State::Receiving && in.file.state != State::Incomplete) return false;
+        if (in.file.state != State::Receiving) return false;
         missing.clear();
         for (uint16_t i = 0; i < in.file.pieces; i++)
         {
@@ -507,8 +516,9 @@ void BroadcastFiles::heardPiece(const protocol::Record& record, uint64_t nowMs)
     in->bytes += p->bytes.size();
     in->pieces.emplace(p->index, p->bytes);
     in->file.held = (uint16_t)in->pieces.size();
-    if (in->file.state == State::Incomplete)
+    if (in->file.state == State::Incomplete && !in->file.stopped)
     {
+        // Repairs came after all.
         in->file.state = State::Receiving;
         in->file.expiresAtMs = 0;
     }
@@ -644,6 +654,7 @@ bool BroadcastFiles::receive(uint64_t id, const std::string& path, uint64_t nowM
         return false;
     }
     in->file.state = State::Receiving;
+    in->file.stopped = false;
     in->file.expiresAtMs = 0;
     in->file.lastMs = nowMs;
     changed();
@@ -655,6 +666,17 @@ bool BroadcastFiles::receive(uint64_t id, const std::string& path, uint64_t nowM
         return true;
     }
     seals_.askSoon(in->file.from, nowMs);
+    return true;
+}
+
+bool BroadcastFiles::stop(uint64_t id, uint64_t nowMs)
+{
+    Incoming* in = findIncoming(id);
+    if (in == nullptr || in->file.state != State::Receiving) return false;
+    in->file.state = State::Incomplete;
+    in->file.stopped = true;
+    in->file.expiresAtMs = nowMs + KEEP_MS;
+    changed();
     return true;
 }
 
@@ -800,7 +822,8 @@ void BroadcastFiles::tick(uint64_t nowMs)
         {
             Seals::SealView seal = seals_.sealOf(out.file.seq, nowMs);
             if (seal.sealed) out.file.sealed = true;
-            if (out.file.sealed && !seal.open) finishOutgoing(out, State::Sent, nowMs);
+            if (out.file.sealed && !seal.open)
+                finishOutgoing(out, out.file.stopped ? State::Cancelled : State::Sent, nowMs);
         }
     }
     for (auto it = incoming_.begin(); it != incoming_.end();)
@@ -977,6 +1000,11 @@ std::vector<files::FileRow> BroadcastFiles::rows(uint64_t nowMs) const
             row.state = !f.sealed ? std::string("Sealing")
                                   : f.askers == 0 ? std::string("Repairing, no requests yet")
                                                   : "Repairing, " + countText(f.askers, "station", "stations") + " asked";
+            if (f.stopped)
+                row.state = "Stopped at " + std::to_string(f.held) + " of " + std::to_string(f.pieces) + ", "
+                            + (!f.sealed ? std::string("sealing")
+                                         : f.askers == 0 ? std::string("repairs open")
+                                                         : countText(f.askers, "station", "stations") + " asked");
             row.look = Look::Repairing;
             row.expiresAtMs = f.repairsUntilMs;
         }
@@ -992,13 +1020,14 @@ std::vector<files::FileRow> BroadcastFiles::rows(uint64_t nowMs) const
         size_t missing = (size_t)f.pieces - in.pieces.size();
         if (f.state == State::Heard)
         {
-            row.state = "Heard: Receive or Ignore";
+            row.state = "Heard: Receive or Reject";
             row.look = Look::Waiting;
             row.expiresAtMs = f.expiresAtMs;
         }
         else if (f.state == State::Incomplete)
         {
-            row.state = "Part kept, " + std::to_string(in.pieces.size()) + " of " + countText(f.pieces, "piece", "pieces");
+            row.state = std::string(f.stopped ? "Stopped, " : "Part kept, ") + std::to_string(in.pieces.size()) + " of "
+                        + countText(f.pieces, "piece", "pieces");
             row.look = Look::Kept;
             row.expiresAtMs = f.expiresAtMs;
         }

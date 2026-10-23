@@ -1492,6 +1492,7 @@ bool MainFrame::fileCard(uint64_t id, FileCard& card)
         case State::Sending:
             card.state = "Sending, " + pieces;
             card.actions = {{"stop", "Stop"}};
+            card.menu = {{"stop", "Stop sending (repairs stay open)"}};
             break;
         case State::Repairing:
             if (!f.sealed)
@@ -1501,6 +1502,9 @@ bool MainFrame::fileCard(uint64_t id, FileCard& card)
                              + (f.askers == 0 ? std::string()
                                               : ", " + std::to_string(f.askers) + (f.askers == 1 ? " station" : " stations")
                                                     + " asked");
+            // Stopped part way: what went is sealed, and the rest goes to
+            // a station that asks for it while repairs are open.
+            if (f.stopped) card.state = "Stopped at " + pieces + ". " + card.state;
             if (f.sealed)
             {
                 card.actions = {{"keep", "Keep open 30 min longer"}, {"close", "Close repairs now"}};
@@ -1518,18 +1522,23 @@ bool MainFrame::fileCard(uint64_t id, FileCard& card)
         case State::Cancelled:
             card.state = "Stopped";
             break;
+        // Theirs. Rejecting throws away what came, so it is only on the
+        // right-click menu, and asks first.
         case State::Heard:
             card.state = f.held == f.pieces ? std::string("All here") : "Heard, " + pieces;
-            card.actions = {{"receive", "Receive..."}, {"ignore", "Ignore"}};
+            card.actions = {{"receive", "Receive..."}};
+            card.menu = {{"receive", "Receive..."}, {"reject", "Reject file..."}};
             break;
         case State::Receiving:
             card.state = f.asking ? "Asking for " + std::to_string(f.pieces - f.held) + " pieces"
                                   : "Receiving, " + pieces;
-            card.actions = {{"ignore", "Stop"}};
+            card.actions = {{"stopasking", "Stop"}};
+            card.menu = {{"stopasking", "Stop (keep what came)"}, {"reject", "Reject file..."}};
             break;
         case State::Incomplete:
-            card.state = "Incomplete, " + pieces + " kept";
-            card.actions = {{"ignore", "Delete"}};
+            card.state = std::string(f.stopped ? "Stopped, " : "Incomplete, ") + pieces + " kept";
+            card.actions = {{"askagain", "Ask again"}};
+            card.menu = {{"askagain", "Ask again for the rest"}, {"reject", "Reject file..."}};
             break;
         case State::Saved:
             card.state = f.autoReceived ? "Saved without asking" : "Saved";
@@ -1537,7 +1546,7 @@ bool MainFrame::fileCard(uint64_t id, FileCard& card)
             card.actions = {{"open", "Open"}, {"folder", "Open folder"}};
             break;
         case State::Ignored:
-            card.state = "Ignored";
+            card.state = "Rejected";
             break;
         case State::Failed:
             card.state = "Failed" + (f.error.empty() ? std::string() : ": " + f.error);
@@ -1574,8 +1583,12 @@ void MainFrame::broadcastFileAction(uint64_t id, const std::string& action)
     if (!broadcastFiles_.find(id, now, f)) return;
     if (action == "receive")
         receiveFile(id);
-    else if (action == "ignore")
-        broadcastFiles_.ignore(id);
+    else if (action == "reject")
+        rejectFile(id);
+    else if (action == "stopasking")
+        broadcastFiles_.stop(id, now);
+    else if (action == "askagain")
+        askAgainOnBroadcast(id);
     else if (action == "stop")
         broadcastFiles_.cancel(id);
     else if (action == "keep")
@@ -1593,6 +1606,33 @@ void MainFrame::broadcastFileAction(uint64_t id, const std::string& action)
     onBroadcastFiles();
     host_->flush();
     refreshFiles();
+}
+
+void MainFrame::rejectFile(uint64_t id)
+{
+    broadcast::BroadcastFile f;
+    if (!broadcastFiles_.find(id, HostConnection::nowMs(), f)) return;
+    wxString what = utf8(f.name) + " from " + utf8(f.from);
+    wxString kept = f.held == 0 ? wxString()
+                                : wxString::Format(" The %d of %d pieces here are thrown away.", (int)f.held,
+                                                   (int)f.pieces);
+    wxMessageDialog ask(this, "Reject " + what + "?" + kept + " Ragtime stops asking for it, and it can't be "
+                              "received again unless " + utf8(f.from) + " broadcasts it again.",
+                        "Reject file", wxYES_NO | wxNO_DEFAULT | wxICON_QUESTION);
+    ask.SetYesNoLabels("Reject", "Keep it");
+    if (ask.ShowModal() != wxID_YES) return;
+    broadcastFiles_.ignore(id);
+}
+
+void MainFrame::askAgainOnBroadcast(uint64_t id)
+{
+    // The same file carries on where it was saved to, or would have been.
+    broadcast::BroadcastFile f;
+    uint64_t now = HostConnection::nowMs();
+    if (!broadcastFiles_.find(id, now, f)) return;
+    std::string error;
+    if (!f.path.empty() && broadcastFiles_.receive(id, "", now, error)) return;
+    receiveFile(id);
 }
 
 void MainFrame::keepRepairsUntil(uint64_t id, uint64_t untilMs)

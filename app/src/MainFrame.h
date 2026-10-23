@@ -113,6 +113,8 @@ private:
     void broadcastFileAction(uint64_t id, const std::string& action);
     void broadcastFileMenu(const ragtime::files::FileRow& row, wxMenu& menu);
     void keepRepairsUntil(uint64_t id, uint64_t untilMs);
+    void rejectFile(uint64_t id);
+    void askAgainOnBroadcast(uint64_t id);
     void receiveFile(uint64_t id);
     void setAutoReceive(bool on);
     void onBroadcastFiles();
