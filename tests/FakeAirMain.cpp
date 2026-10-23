@@ -6,7 +6,7 @@
 // leave after you send 73.
 //
 //   ragtime_fake_air [--bots N] [--airtime MS] [--call CALL] [--fade] [--rate BPS]
-//                    [--loss PCT] [--files]
+//                    [--loss PCT] [--files] [--no-snr]
 //
 // --call CALL has the first bot that takes sessions call CALL half a
 // minute in, for an incoming session, and offer you its bulletin, a small
@@ -23,6 +23,11 @@
 // share of the group frames they hear, so a Ragtime on them asks for
 // repairs; --files has the first bot broadcast a short bulletin file a
 // minute in and every six minutes after.
+//
+// The hosts report SNRs as data2g-host has since Data2G PR #98: each bot
+// is heard at its own strength, from +12 dB down to -11 dB, give or take
+// 2 dB a burst, and hosts A and B at +5 dB. --no-snr has them report none,
+// as hosts before it did.
 //
 // Host A listens on 127.0.0.1:8100 (KISS) and 8300 (commands), host B on
 // 8110 and 8310, so two Ragtimes (each with its own --config file) can talk
@@ -445,6 +450,7 @@ int main(int argc, char** argv)
     int lossPct = 0;
     bool share = false;
     int rate = 400;
+    bool snr = true;
     for (int i = 1; i < argc; i++)
     {
         if (std::strcmp(argv[i], "--bots") == 0 && i + 1 < argc)
@@ -461,10 +467,12 @@ int main(int argc, char** argv)
             lossPct = std::atoi(argv[++i]);
         else if (std::strcmp(argv[i], "--files") == 0)
             share = true;
+        else if (std::strcmp(argv[i], "--no-snr") == 0)
+            snr = false;
         else
         {
             std::fprintf(stderr, "usage: ragtime_fake_air [--bots N] [--airtime MS] [--call CALL] [--fade] "
-                                 "[--rate BPS] [--loss PCT] [--files]\n");
+                                 "[--rate BPS] [--loss PCT] [--files] [--no-snr]\n");
             return 2;
         }
     }
@@ -494,6 +502,8 @@ int main(int argc, char** argv)
         h->setAnswerOnCall(2);
         h->setIdleBroadcastMs(3000);
         h->setLoss(std::min(100, std::max(0, lossPct)) / 100.0);
+        h->setReportsSnr(snr);
+        h->setSignalDb(5.0, 2.0);
     }
 
     std::mt19937 random(12345);
@@ -505,6 +515,10 @@ int main(int argc, char** argv)
                                                  random));
         stations.back()->fades = fades;
         stations.back()->host.setSessionRate(rate);
+        // Each bot its own strength, strong to weak.
+        static const double SIGNAL_DB[] = {12.0, -6.0, 3.0, -11.0, 8.0, -2.0, 15.0, -8.0};
+        stations.back()->host.setReportsSnr(snr);
+        stations.back()->host.setSignalDb(SIGNAL_DB[(size_t)i % (sizeof(SIGNAL_DB) / sizeof(SIGNAL_DB[0]))], 2.0);
     }
     if (share && !stations.empty())
     {

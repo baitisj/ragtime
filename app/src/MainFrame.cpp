@@ -223,7 +223,7 @@ MainFrame::MainFrame()
     stationList_->setColumns(loadColumns());
     broadcast::Column sort = broadcast::Column::Heard;
     if (int saved = loadInt(keys::SORT_COLUMN, (int)sort); saved >= 0 && saved < broadcast::COLUMN_COUNT)
-        sort = broadcast::ALL_COLUMNS[(size_t)saved];
+        sort = static_cast<broadcast::Column>(saved);
     stationList_->setSort(sort, loadBool(keys::SORT_ASCENDING, true));
 
     loadFilesLog();
@@ -307,9 +307,7 @@ void MainFrame::buildMenus()
     auto* columns = new wxMenu;
     for (broadcast::Column c : broadcast::ALL_COLUMNS)
     {
-        wxString label = broadcast::columnLabel(c);
-        if (!broadcast::columnAvailable(c)) label += " (needs a host report)";
-        columns->AppendCheckItem(StationList::ID_COLUMN_FIRST + (int)c, label);
+        columns->AppendCheckItem(StationList::ID_COLUMN_FIRST + (int)c, broadcast::columnLabel(c));
     }
     viewMenu_->AppendSubMenu(columns, "Station &columns",
                              "The station table's columns, shown while Globus is off");
@@ -373,10 +371,10 @@ void MainFrame::buildMenus()
          StationList::ID_COLUMN_FIRST, StationList::ID_COLUMN_FIRST + broadcast::COLUMN_COUNT - 1);
     Bind(wxEVT_UPDATE_UI, [this](wxUpdateUIEvent& e) {
         int index = e.GetId() - StationList::ID_COLUMN_FIRST;
-        broadcast::Column c = broadcast::ALL_COLUMNS[(size_t)index];
+        broadcast::Column c = static_cast<broadcast::Column>(index);
         const auto& shown = stationList_->columns();
         e.Check(std::find(shown.begin(), shown.end(), c) != shown.end());
-        e.Enable(broadcast::columnAvailable(c) && c != broadcast::Column::Call);
+        e.Enable(c != broadcast::Column::Call);
     }, StationList::ID_COLUMN_FIRST, StationList::ID_COLUMN_FIRST + broadcast::COLUMN_COUNT - 1);
     Bind(wxEVT_UPDATE_UI, [this](wxUpdateUIEvent& e) { e.Enable(!stationList_->selected().empty()); },
          ID_MESSAGE_STATION);
@@ -620,8 +618,21 @@ void MainFrame::onHostEvents(const std::vector<Event>& events)
                 modeUsed_ = e.text;
                 break;
             case Event::Type::HeardFrom:
-                stations_.heard(e.text, now);
+                stations_.heard(e.text, now, e.snr);
+                updatePathSnr(now);
                 break;
+            case Event::Type::SessionSnr:
+                stations_.heard(e.peer, now, e.snr);
+                updatePathSnr(now);
+                break;
+            case Event::Type::Missed:
+            {
+                // Any group's burst, maybe not D2G's: only a hint.
+                std::string snr = e.snr ? " at " + gearbox::formatDb(*e.snr) : std::string();
+                note_ = "Heard a " + gearshift_.shortName(e.text) + " burst" + snr
+                        + " that didn't decode; it may not be D2G's";
+                break;
+            }
             case Event::Type::ModesChanged:
             {
                 std::vector<gearbox::HostMode> modes;
@@ -670,6 +681,7 @@ void MainFrame::onHostEvents(const std::vector<Event>& events)
 void MainFrame::onClock()
 {
     uint64_t now = HostConnection::nowMs();
+    updatePathSnr(now);
     seals_.setMode(broadcastMode());
     seals_.tick(now);
     broadcastFiles_.tick(now);
@@ -973,6 +985,8 @@ void MainFrame::onSessionData(const uint8_t* bytes, size_t length)
     // The far end's Hello tells the station list its locator; anything
     // heard in the session says it was heard.
     for (const protocol::Record& r : session_.dataBytes(bytes, length, now)) stations_.onRecord(r, now);
+    // A burst of the partner's decoded: ask data2g-host how strong it was.
+    link_.sessionHeard(now);
     onSessionEvents();
     onFileEvents();
     refreshSession();
@@ -1814,6 +1828,17 @@ void MainFrame::showGear()
     if (!link_.modes().empty() && broadcastMode().empty())
         tip += " data2g-host doesn't offer this mode, so broadcasts go in the group's mode.";
     broadcast_->setGearLabel(utf8(gearbox::gearLabel(*gear)), tip);
+}
+
+void MainFrame::updatePathSnr(uint64_t nowMs)
+{
+    std::optional<broadcast::PathReport> path = stations_.weakestPath(nowMs);
+    std::optional<double> dB = path ? std::optional<double>(path->dB) : std::nullopt;
+    size_t bursts = path ? path->bursts : 0;
+    std::string from = path ? path->call : std::string();
+    if (dB == gearshift_.pathSnr() && bursts == gearshift_.snrBursts() && from == gearshift_.snrFrom()) return;
+    gearshift_.setPathSnr(dB, bursts, from);
+    showGear();
 }
 
 void MainFrame::setNarrow(bool narrow)

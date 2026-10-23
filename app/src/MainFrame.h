@@ -127,6 +127,8 @@ private:
     void showGearshift();
     void gearChanged();
     void showGear();
+    // Auto's path S/N: the weakest station heard lately (Stations::weakestPath).
+    void updatePathSnr(uint64_t nowMs);
     void setNarrow(bool narrow);
 
     // Globus on or off, and the toggle on the tab strip.

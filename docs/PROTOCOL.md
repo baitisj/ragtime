@@ -378,7 +378,14 @@ Broadcasts go on the `D2G` group, opened with `BCAST OPEN D2G FROM
   them; timings follow that list's airtimes, never Glissando tempos.
 - The host reports `BCAST <port> HEARD <call>` for a burst it decoded
   and `LOST` for one it couldn't. The records inside name their senders
-  anyway.
+  anyway. Since Data2G PR #98 HEARD ends with the burst's SNR (dB,
+  average power in 2500 Hz, the gearshift's scale), always the last word;
+  a callsign always has a letter, so the two never mix. `BCAST * MISSED
+  <submode> <codewords> [snr]` is a burst no port could claim, maybe
+  another group's. In a session, `SN` answers `SN <snr>` for the partner's
+  last burst, or WRONG before one. A host from before PR #98 sends no
+  SNR and answers SN with WRONG, and Ragtime works the same with it,
+  less the SNR column and Auto.
 - **A message too long for one frame** goes as several Texts, each an
   item of its own in a frame of its own, all in one burst. The sender
   splits between words where it can (at a space, which is dropped) and

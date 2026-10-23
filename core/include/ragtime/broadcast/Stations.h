@@ -3,7 +3,7 @@
 // (docs/PLAN.md, "Sometimes we ragchew" and "Main window").
 //
 // It is fed the records heard on the group and the host's "BCAST HEARD"
-// calls; it never transmits. Status always pairs a word with a filled or
+// calls and SNRs (and the session partner's, from SN); it never transmits. Status always pairs a word with a filled or
 // hollow dot, so it never relies on colour alone. No wx and no clock here:
 // the time is passed in.
 #ifndef RAGTIME_BROADCAST_STATIONS_H
@@ -16,6 +16,7 @@
 #include <string>
 #include <vector>
 
+#include "ragtime/gearbox/Gearbox.h"
 #include "ragtime/protocol/Records.h"
 
 namespace ragtime
@@ -23,7 +24,9 @@ namespace ragtime
 namespace broadcast
 {
 
-// The station list's columns, in the order the table shows them.
+// The station list's columns. Their numbers are saved (the sort column)
+// and are menu ids, so they never change; ALL_COLUMNS is the order the
+// table shows them in.
 enum class Column
 {
     Call,
@@ -34,13 +37,13 @@ enum class Column
     Bearing,
     Key,        // the seal badge; signing comes in Stage 2
     Services,
-    Snr,        // needs a host report (an ask for Andrew): listed, never on
+    Snr,        // the last burst's, from data2g-host since Data2G PR #98
 };
 
 constexpr int COLUMN_COUNT = 9;
 constexpr std::array<Column, COLUMN_COUNT> ALL_COLUMNS = {
-    Column::Call, Column::Status, Column::Heard, Column::Locator, Column::Distance,
-    Column::Bearing, Column::Key, Column::Services, Column::Snr,
+    Column::Call, Column::Status, Column::Heard, Column::Snr, Column::Locator,
+    Column::Distance, Column::Bearing, Column::Key, Column::Services,
 };
 
 // "Call", "Status", "Heard", ..., "SNR".
@@ -48,9 +51,7 @@ const char* columnLabel(Column column);
 // "call", "status", ...: the name a saved column list uses.
 const char* columnKey(Column column);
 bool columnFromKey(const std::string& key, Column& out);
-// False for SNR, which data2g-host doesn't report for broadcast bursts yet.
-bool columnAvailable(Column column);
-// The columns shown before the operator picks: all that can be.
+// The columns shown before the operator picks: all of them.
 std::vector<Column> defaultColumns();
 
 // How long ago, for the Heard column: "just now", "45 s ago", "12 min ago",
@@ -59,6 +60,8 @@ std::string heardAgo(uint64_t thenMs, uint64_t nowMs);
 
 // A QRL older than this, with nothing since, shows as "QRL? 25 min ago".
 constexpr uint64_t QRL_STALE_MS = 20 * 60 * 1000;
+// The gearshift's Auto serves the weakest station heard this recently.
+constexpr uint64_t PATH_WINDOW_MS = 15 * 60 * 1000;
 
 struct Station
 {
@@ -82,6 +85,22 @@ struct Station
     uint64_t statusMs = 0;
     // Traffic after a QRT: it is back.
     uint64_t lastTrafficMs = 0;
+
+    // Its bursts' SNR as data2g-host heard them (dB, average power in
+    // 2500 Hz): the last one, and the last few for the gearshift. None from
+    // a host older than Data2G PR #98.
+    std::optional<double> snrDb;
+    uint64_t snrMs = 0;
+    gearbox::PathSnr path;
+};
+
+// The path the gearshift's Auto shifts for: the weakest station heard
+// lately, by the mean of its last few bursts.
+struct PathReport
+{
+    std::string call;
+    double dB = 0.0;
+    size_t bursts = 0;
 };
 
 // What the Status column shows.
@@ -104,8 +123,13 @@ public:
 
     // A record heard on the group.
     void onRecord(const protocol::Record& record, uint64_t nowMs);
-    // The host heard a burst from this call ("BCAST <port> HEARD <call>").
-    void heard(const std::string& call, uint64_t nowMs);
+    // The host heard a burst from this call ("BCAST <port> HEARD <call>
+    // [snr]", or SN for the session partner), with its SNR when it gave one.
+    void heard(const std::string& call, uint64_t nowMs, std::optional<double> snr = std::nullopt);
+
+    // The weakest of the stations whose SNR came in the last
+    // PATH_WINDOW_MS; none when no station has one.
+    std::optional<PathReport> weakestPath(uint64_t nowMs) const;
 
     void clear();
 
@@ -131,7 +155,7 @@ public:
     std::optional<double> bearingDegrees(const Station& station) const;
 
     // A cell's text: "W1AW", "● QRV", "3 min ago", "FN31", "3,951 km",
-    // "81°", "" for Key until Stage 2, "automatic" for Services.
+    // "81°", "" for Key until Stage 2, "automatic" for Services, "+3.5 dB" for SNR.
     std::string cell(const Station& station, Column column, uint64_t nowMs) const;
 
     // Under the last-heard time in the narrow list: "FN31 · 3,951 km", or

@@ -249,6 +249,13 @@ std::optional<double> PathSnr::average() const
            / static_cast<double>(bursts_.size());
 }
 
+void Gearshift::setPathSnr(std::optional<double> dB, std::size_t bursts, std::string from)
+{
+    pathSnr_ = dB && std::isfinite(*dB) ? dB : std::nullopt;
+    snrBursts_ = pathSnr_ ? bursts : 0;
+    snrFrom_ = pathSnr_ ? std::move(from) : std::string();
+}
+
 void Gearshift::setTable(SubmodeTable table)
 {
     table_ = std::move(table);
@@ -310,7 +317,7 @@ std::optional<Gear> Gearshift::chosen() const
 
 std::optional<Gear> Gearshift::suggestion() const
 {
-    const std::optional<double> snr = snr_.average();
+    const std::optional<double> snr = pathSnr_;
     if (!snr || ladder_.empty())
         return std::nullopt;
     return ladder_[static_cast<std::size_t>(autoGearIndex(ladder_, *snr))];

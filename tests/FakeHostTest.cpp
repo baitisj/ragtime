@@ -3,6 +3,7 @@
 // called and answered, Hellos, a text and a file through the session, a
 // burst held by the session and sent after it, and the host's refusals,
 // drops and reports.
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <filesystem>
@@ -123,6 +124,7 @@ struct Station
         readSome(data, in);
         if (!in.empty())
         {
+            link.sessionHeard(now);
             std::vector<protocol::Record> records;
             reader.feed(in, records);
             for (const protocol::Record& r : records)
@@ -257,8 +259,8 @@ void testTwoStations()
         CHECK(heard[0].as<protocol::Text>() && heard[0].as<protocol::Text>()->text == "CQ CQ de AG7EW");
     }
     bool from = false;
-    for (const auto& e : b.events) from = from || (e.type == Type::HeardFrom && e.text == "AG7EW");
-    CHECK(from);
+    for (const auto& e : b.events) from = from || (e.type == Type::HeardFrom && e.text == "AG7EW" && !e.snr);
+    CHECK(from);  // a host from before Data2G PR #98: no SNR
     CHECK(a.heard(Type::Ptt) && a.heard(Type::ModeUsed));
     CHECK(heardRecords(a).empty()); // a host doesn't hear itself
 
@@ -339,6 +341,43 @@ void testTwoStations()
     fs::remove_all(dir, ec);
 }
 
+// Hosts since Data2G PR #98: an SNR on HEARD, and SN in a session.
+void testSnrs()
+{
+    FakeAir air;
+    FakeHost hostA(air), hostB(air);
+    hostA.setReportsSnr(true);
+    hostB.setReportsSnr(true);
+    hostA.setSignalDb(4.0);
+    hostB.setSignalDb(-3.0);
+    Station a("AG7EW", hostA), b("W1AW", hostB);
+    CHECK(run(air, a, b, [&] { return a.link.groupOpen() && b.link.groupOpen(); }));
+
+    a.link.broadcast({textFrame("AG7EW", 1, "CQ CQ de AG7EW")}, "", now);
+    auto heardAt = [](const Station& s, Type type, const std::string& call, double dB) {
+        for (const auto& e : s.events)
+        {
+            const std::string& who = type == Type::HeardFrom ? e.text : e.peer;
+            if (e.type == type && who == call && e.snr && std::fabs(*e.snr - dB) < 0.05) return true;
+        }
+        return false;
+    };
+    CHECK(run(air, a, b, [&] { return heardAt(b, Type::HeardFrom, "AG7EW", 4.0); }));
+
+    // Each end asks SN once the other's burst is in: B on A's Hello, A
+    // on B's acknowledging it.
+    CHECK(a.link.call("W1AW", now));
+    CHECK(run(air, a, b, [&] {
+        return heardAt(b, Type::SessionSnr, "AG7EW", 4.0) && heardAt(a, Type::SessionSnr, "W1AW", -3.0);
+    }));
+    bool refused = false;
+    for (const Station* s : {&a, &b})
+    {
+        for (const auto& e : s->events) refused = refused || e.type == Type::Refused;
+    }
+    CHECK(!refused);
+}
+
 void testTheHostSaysNo()
 {
     FakeAir air;
@@ -399,6 +438,7 @@ void testTheHostSaysNo()
 int main()
 {
     testTwoStations();
+    testSnrs();
     testTheHostSaysNo();
     return ragtime_test::finish();
 }

@@ -2,8 +2,10 @@
 // BroadcastChat on its own HostLink, joined by a little host in memory
 // that answers the command lines and carries every ACKMODE frame to the
 // other station. No sockets, so it runs everywhere the core builds.
+#include <cmath>
 #include <cstdint>
 #include <filesystem>
+#include <optional>
 #include <string>
 #include <system_error>
 #include <vector>
@@ -568,12 +570,46 @@ void testStations()
     s = list.sorted(Column::Status, true, t);
     CHECK_EQ(s[2]->call, std::string("KC2G"));      // No sessions after QRV
 
-    // Columns by key, and SNR waits on a host report.
+    // Columns by key; every column shows at first.
     Column c = Column::Call;
     CHECK(broadcast::columnFromKey("distance", c) && c == Column::Distance);
+    CHECK(broadcast::columnFromKey("snr", c) && c == Column::Snr);
     CHECK(!broadcast::columnFromKey("nope", c));
-    CHECK(!broadcast::columnAvailable(Column::Snr));
-    CHECK_EQ(broadcast::defaultColumns().size(), (size_t)broadcast::COLUMN_COUNT - 1);
+    CHECK_EQ(broadcast::defaultColumns().size(), (size_t)broadcast::COLUMN_COUNT);
+
+    // SNR: none until a host since Data2G PR #98 reports one.
+    CHECK(!list.weakestPath(t));
+    CHECK_EQ(list.cell(*w1aw, Column::Snr, t), std::string());
+    list.heard("W1AW", t, 9.0);
+    list.heard("W1AW", t, 7.0);
+    list.heard("KC2G", t, -4.04);
+    list.heard("JA1XYZ", t);                    // an older host: no SNR
+    CHECK_EQ(list.cell(*w1aw, Column::Snr, t), std::string("+7.0 dB"));
+    CHECK_EQ(list.cell(*list.find("KC2G"), Column::Snr, t), std::string("\xe2\x88\x92" "4.0 dB"));
+    s = list.sorted(Column::Snr, true, t);
+    CHECK_EQ(s[0]->call, std::string("KC2G"));
+    CHECK_EQ(s[1]->call, std::string("W1AW"));
+    CHECK_EQ(s[2]->call, std::string("JA1XYZ"));  // no SNR last either way
+    s = list.sorted(Column::Snr, false, t);
+    CHECK_EQ(s[0]->call, std::string("W1AW"));
+    CHECK_EQ(s[2]->call, std::string("JA1XYZ"));
+
+    // Auto's path: the weakest station heard lately, by its mean.
+    std::optional<broadcast::PathReport> path = list.weakestPath(t);
+    CHECK(path && path->call == "KC2G" && path->bursts == 1);
+    t += 10 * 60000;
+    list.heard("W1AW", t, -8.0);                // W1AW's mean: (9 + 7 - 8) / 3
+    path = list.weakestPath(t);
+    CHECK(path && path->call == "KC2G");
+    t += 6 * 60000;                             // KC2G's report is 16 min old
+    path = list.weakestPath(t);
+    CHECK(path && path->call == "W1AW" && path->bursts == 3 && std::fabs(path->dB - 8.0 / 3.0) < 1e-9);
+    t += broadcast::PATH_WINDOW_MS;
+    CHECK(!list.weakestPath(t));
+    // Heard again after so long, the old bursts are forgotten.
+    list.heard("W1AW", t, 2.0);
+    path = list.weakestPath(t);
+    CHECK(path && path->bursts == 1 && path->dB == 2.0);
 }
 
 void testReconnect()

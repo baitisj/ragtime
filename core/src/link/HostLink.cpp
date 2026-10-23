@@ -16,6 +16,7 @@ constexpr size_t FINISHED_KEPT = 256;
 const char* const OK = "OK";
 const char* const BCAST_PORT = "BCAST PORT";
 const char* const MODES = "MODES";
+const char* const SN = "SN";
 
 } // namespace
 
@@ -170,6 +171,8 @@ void HostLink::tick(uint64_t nowMs)
     if (session_ == SessionState::Leaving && abortMs_ != 0 && nowMs >= abortMs_ + ABORT_WAIT_MS)
         finishSession(SessionEnd::Left);
 
+    askSn(nowMs);
+
     Burst* burst = current();
     bool withHost = burst != nullptr && (burst->state == BurstState::Sending || burst->state == BurstState::Held);
     if (withHost && burst->unsentMs >= NOT_SENT_MS)
@@ -225,6 +228,8 @@ void HostLink::onLine(const std::string& line, uint64_t nowMs)
         {
             bool ok = c.type == Type::Ok;
             Awaiting a = popAwaiting();
+            // No SNR yet, or a host from before Data2G PR #98: nothing refused.
+            if (a.answer == SN) break;
             if (a.answer == MODES && ok)
             {
                 modes_ = modesComing_;
@@ -289,6 +294,32 @@ void HostLink::onLine(const std::string& line, uint64_t nowMs)
             Event e;
             e.type = Event::Type::HeardFrom;
             e.text = c.text;
+            e.snr = c.snr;
+            emit(e);
+            break;
+        }
+        case Type::BcastMissed:
+        {
+            // Any open port's, maybe another group's: only a hint.
+            if (groupPort_ < 0) break;
+            Event e;
+            e.type = Event::Type::Missed;
+            e.text = c.text;
+            e.count = c.count;
+            e.snr = c.snr;
+            emit(e);
+            break;
+        }
+        case Type::Sn:
+        {
+            if (!awaiting_.empty() && awaiting_.front().answer == SN) popAwaiting();
+            // The same figure again is the same burst, asked twice.
+            if (session_ == SessionState::None || session_ == SessionState::Calling || c.snr == sessionSnr_) break;
+            sessionSnr_ = c.snr;
+            Event e;
+            e.type = Event::Type::SessionSnr;
+            e.peer = peer_;
+            e.snr = c.snr;
             emit(e);
             break;
         }
@@ -316,6 +347,9 @@ void HostLink::onLine(const std::string& line, uint64_t nowMs)
             peer_ = incoming_ ? c.text : c.peer;
             session_ = SessionState::Connected;
             buffer_ = 0;
+            snWanted_ = false;
+            snAskedMs_ = 0;
+            sessionSnr_.reset();
             Event e;
             e.type = Event::Type::SessionConnected;
             e.peer = peer_;
@@ -334,7 +368,10 @@ void HostLink::onLine(const std::string& line, uint64_t nowMs)
         {
             // After DISCONNECTED, BUFFER 0 is the host listening again.
             if (session_ == SessionState::None) break;
+            // Fewer bytes waiting: the partner's acknowledgement came in a burst.
+            if (c.count < buffer_) snWanted_ = true;
             buffer_ = c.count;
+            askSn(nowMs);
             Event e;
             e.type = Event::Type::Buffer;
             e.count = c.count;
@@ -533,6 +570,24 @@ bool HostLink::leaveNow(uint64_t nowMs)
     return true;
 }
 
+void HostLink::sessionHeard(uint64_t nowMs)
+{
+    if (session_ != SessionState::Connected && session_ != SessionState::Leaving) return;
+    snWanted_ = true;
+    askSn(nowMs);
+}
+
+void HostLink::askSn(uint64_t nowMs)
+{
+    if (!snWanted_ || !commandUp_) return;
+    if (session_ != SessionState::Connected && session_ != SessionState::Leaving) return;
+    if (snAskedMs_ != 0 && nowMs < snAskedMs_ + SN_GAP_MS) return;
+    if (std::any_of(awaiting_.begin(), awaiting_.end(), [](const Awaiting& a) { return a.answer == SN; })) return;
+    snWanted_ = false;
+    snAskedMs_ = nowMs;
+    sendLine(SN, SN, nowMs);
+}
+
 void HostLink::finishSession(SessionEnd end)
 {
     Event e;
@@ -542,6 +597,8 @@ void HostLink::finishSession(SessionEnd end)
     session_ = SessionState::None;
     buffer_ = 0;
     abortMs_ = 0;
+    snWanted_ = false;
+    sessionSnr_.reset();
     emit(e);
     heldChanged();
 }

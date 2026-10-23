@@ -164,6 +164,55 @@ void testReports()
     CHECK_EQ(heard, 1);
 }
 
+void testSnrReports()
+{
+    HostLink link = opened(0);
+    // A host since Data2G PR #98 ends HEARD and MISSED with an SNR.
+    say(link, "BCAST 2 HEARD W1AW 12.3\rBCAST * MISSED qpsk-r1/3 4 -2.5\rBCAST 2 HEARD K1ABC\r", 10);
+    std::vector<HostLink::Event> events = link.takeEvents();
+    CHECK_EQ(events.size(), (size_t)3);
+    if (events.size() == 3)
+    {
+        CHECK(events[0].type == Type::HeardFrom && events[0].text == "W1AW" && events[0].snr == 12.3);
+        CHECK(events[1].type == Type::Missed && events[1].text == "qpsk-r1/3" && events[1].count == 4 &&
+              events[1].snr == -2.5);
+        CHECK(events[2].type == Type::HeardFrom && events[2].text == "K1ABC" && !events[2].snr);
+    }
+
+    // In a session, SN once the partner's burst has likely come.
+    CHECK(link.call("W1AW", 100));
+    say(link, "OK\rCONNECTED AG7EW W1AW 2300\r", 200);
+    link.takeCommandOutput();
+    link.takeEvents();
+    say(link, "BUFFER 300\r", 300);    // our own bytes going in: no
+    CHECK(link.takeCommandOutput().empty());
+    say(link, "BUFFER 100\r", 400);    // acknowledged: the partner sent
+    CHECK(linesOf(link.takeCommandOutput()) == std::vector<std::string>({"SN"}));
+    // Not before the partner's first burst, nor from an older host: no refusal.
+    say(link, "WRONG\r", 410);
+    CHECK(!hasEvent(link.takeEvents(), Type::Refused));
+
+    // At most every SN_GAP_MS: asked again once it has passed.
+    link.sessionHeard(500);
+    CHECK(link.takeCommandOutput().empty());
+    link.tick(400 + HostLink::SN_GAP_MS);
+    CHECK(linesOf(link.takeCommandOutput()) == std::vector<std::string>({"SN"}));
+    say(link, "SN 6.5\r", 5500);
+    events = link.takeEvents();
+    CHECK(events.size() == 1 && events[0].type == Type::SessionSnr && events[0].peer == "W1AW" &&
+          events[0].snr == 6.5);
+    // The same figure again is the same burst.
+    link.sessionHeard(20000);
+    CHECK(linesOf(link.takeCommandOutput()) == std::vector<std::string>({"SN"}));
+    say(link, "SN 6.5\r", 20010);
+    CHECK(!hasEvent(link.takeEvents(), Type::SessionSnr));
+    // Nothing to ask once the session is over.
+    say(link, "DISCONNECTED\r", 21000);
+    link.sessionHeard(40000);
+    link.tick(40000);
+    CHECK(link.takeCommandOutput().empty());
+}
+
 void testABurstGoesInItsMode()
 {
     HostLink link = opened(0);
@@ -422,6 +471,7 @@ int main()
 {
     testTheOpening();
     testReports();
+    testSnrReports();
     testABurstGoesInItsMode();
     testAModeTheHostRefuses();
     testTheModeWaitsForEarlierAnswers();

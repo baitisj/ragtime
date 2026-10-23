@@ -573,16 +573,21 @@ void GearshiftDialog::refresh()
         inGear_->SetLabel("No gears");
     if (snr)
     {
+        // The weakest station heard lately, as data2g-host heard it.
         const int bursts = static_cast<int>(shift_.snrBursts());
-        snr_->SetLabel("Path S/N " + utf8(formatDb(*snr))
-                       + (bursts == 1 ? wxString(", from the last burst")
-                                      : wxString::Format(", the mean of the last %d bursts",
-                                                         bursts)));
+        snr_->SetLabel("Path S/N " + utf8(formatDb(*snr)) + ", " + utf8(shift_.snrFrom())
+                       + (bursts == 1 ? wxString(", from its last burst")
+                                      : wxString::Format(", the mean of its last %d bursts", bursts)));
+        snr_->SetToolTip("The weakest station whose bursts data2g-host heard in the last 15 minutes. "
+                         "Broadcasts go to every station, so Auto shifts for the weakest. This is how "
+                         "well you hear them; they may hear you a little better or worse.");
     }
     else
     {
         snr_->SetLabel(shift_.isAuto() ? "No S/N reports yet: Auto holds the chosen gear"
                                        : "No S/N reports yet");
+        snr_->SetToolTip("data2g-host reports an S/N with each burst it hears from a station "
+                         "(since Data2G PR #98). None has come in the last 15 minutes.");
     }
 
     gears_->DeleteAllItems();

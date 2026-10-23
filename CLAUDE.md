@@ -81,6 +81,12 @@ screens.
   `-DRAGTIME_BUILD_WX=ON`), and their CI jobs. 0.1.0-beta is the first
   release. Stage 1 is done once Jeff has run the two-host bench on
   Hamlet.
+- Data2G PR #98 (merged 2026-10-23) gives SNRs: on `BCAST HEARD` and
+  `MISSED`, and `SN` for the session partner. Ragtime shows them in the
+  station list's SNR column and feeds the gearshift's Auto the weakest
+  station heard in 15 minutes (`Stations::weakestPath`). Hosts from
+  before it still work, without either (`docs/STAGE1.md`, "SNR from
+  data2g-host").
 - The live design draft was the Claude Doc "Data2G client: plan"
   (https://claude.ai/code/artifact/87db2cd2-f5bc-4030-ba8d-99bef19c027d,
   private to Jeff). `docs/PLAN.md` is its 2026-10-22 snapshot and is now
@@ -201,7 +207,9 @@ and take broadcast files without asking; `--loss PCT` has hosts A and B
 lose that share of the group frames they hear, so repairs happen, and
 `--files` has the first bot broadcast a bulletin file a minute in and
 every 6 minutes. A call
-from host A or B is answered on its second try. Headless:
+from host A or B is answered on its second try. The hosts report SNRs,
+each bot at its own strength; `--no-snr` plays a host from before Data2G
+PR #98. Headless:
 `Xvfb :91 &`, `DISPLAY=:91 ragtime ...`, `xdotool` to click and type,
 `import -window root` for a screenshot. Never point the bench at Jeff's
 radio PC's real host ports while his data2g-host runs.

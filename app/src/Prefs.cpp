@@ -103,9 +103,7 @@ std::vector<broadcast::Column> loadColumns()
     while (words.HasMoreTokens())
     {
         broadcast::Column c;
-        if (broadcast::columnFromKey(std::string(words.GetNextToken().utf8_str()), c)
-            && broadcast::columnAvailable(c))
-            out.push_back(c);
+        if (broadcast::columnFromKey(std::string(words.GetNextToken().utf8_str()), c)) out.push_back(c);
     }
     // The call is always there: it names the row.
     bool hasCall = false;

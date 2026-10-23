@@ -407,10 +407,10 @@ void testGearshift()
     shift.setAuto(true);
     CHECK(!shift.suggestion());
     CHECK_EQ(shift.current()->mode, std::string("p-qpsk-2"));
-    shift.recordBurstSnr(9.0);
-    shift.recordBurstSnr(7.0);
+    shift.setPathSnr(8.0, 2, "W1AW");
     CHECK(shift.pathSnr() == std::optional<double>(8.0));
     CHECK_EQ(shift.snrBursts(), 2u);
+    CHECK_EQ(shift.snrFrom(), std::string("W1AW"));
     CHECK_EQ(shift.suggestion()->mode, std::string("p-64qam"));
     CHECK_EQ(shift.current()->mode, std::string("p-64qam"));
     CHECK_EQ(shift.chosen()->mode, std::string("p-qpsk-2"));
@@ -419,8 +419,9 @@ void testGearshift()
     CHECK(!shift.isAuto());
     CHECK_EQ(shift.current()->mode, std::string("p-fsk-2"));
     CHECK_EQ(shift.suggestion()->mode, std::string("p-64qam"));
-    shift.clearSnr();
+    shift.setPathSnr(std::nullopt);
     CHECK(!shift.suggestion());
+    CHECK_EQ(shift.snrBursts(), 0u);
 
     // Only what the host offers, with the host's own figures.
     shift.selectGear(2);

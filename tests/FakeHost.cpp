@@ -293,6 +293,10 @@ void FakeHost::onCommand(const std::string& line)
         }
         reply("OK");
     }
+    else if (verb == "SN" && reportsSnr_ && partner_ != nullptr && partnerSnr_)
+    {
+        reply("SN" + snrSuffix(*partnerSnr_));
+    }
     else if (verb == "CONNECT" && w.size() >= 3)
     {
         reply("OK");
@@ -388,6 +392,7 @@ void FakeHost::connected(FakeHost& caller, FakeHost& called)
         h->waiting_ = 0;
         h->disconnectPending_ = false;
         h->lastSessionMs_ = nowMs();
+        h->partnerSnr_.reset();
     }
     std::string line = "CONNECTED " + caller.call_ + " " + called.call_ + " 2300";
     caller.reply(line);
@@ -474,12 +479,28 @@ void FakeHost::stepSession(long long now)
         Crossing& c = crossing_[carried++];
         partner_->writeTo(partner_->data_, c.bytes);
         waiting_ -= c.bytes.size();
+        // The partner heard our data, and we its acknowledgement.
+        partner_->partnerSnr_ = heardAtDb();
+        partnerSnr_ = partner_->heardAtDb();
         lastSessionMs_ = partner_->lastSessionMs_ = now;
     }
     if (carried == 0) return;
     crossing_.erase(crossing_.begin(), crossing_.begin() + (long)carried);
     reply("BUFFER " + std::to_string(waiting_));
     if (disconnectPending_ && waiting_ == 0) disconnected();
+}
+
+double FakeHost::heardAtDb()
+{
+    if (jitterDb_ <= 0.0) return signalDb_;
+    return signalDb_ + std::uniform_real_distribution<double>(-jitterDb_, jitterDb_)(snrRandom_);
+}
+
+std::string FakeHost::snrSuffix(double dB) const
+{
+    char text[32];
+    std::snprintf(text, sizeof text, " %.1f", dB);
+    return text;
 }
 
 bool FakeHost::sessionIdle(long long now) const
@@ -527,7 +548,8 @@ void FakeHost::finishBurst()
             h->reply("BCAST " + std::to_string(h->groupPort_) + " LOST 1");
             continue;
         }
-        h->reply("BCAST " + std::to_string(h->groupPort_) + " HEARD " + from_);
+        h->reply("BCAST " + std::to_string(h->groupPort_) + " HEARD " + from_
+                 + (h->reportsSnr_ ? h->snrSuffix(heardAtDb()) : std::string()));
         for (const Tagged* t : heard) h->writeTo(h->kiss_, kissEncode(h->groupPort_, t->frame));
     }
     for (const Tagged& t : burst)

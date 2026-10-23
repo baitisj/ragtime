@@ -88,6 +88,29 @@ void testCommandLines()
     CHECK(parseCommandLine("MODE qpsk-r1/3 wide 76 64 1.78 74.36").type == Type::Other);
     CHECK(parseCommandLine("BUFFER lots").type == Type::Other);
 
+    // SNRs, from hosts since Data2G PR #98: the last word of HEARD (a
+    // callsign always has a letter), and of MISSED once the noise floor
+    // is known. A HEARD without one, as before, has none.
+    CHECK(!e.snr);
+    e = parseCommandLine("BCAST 2 HEARD W1AW 12.3");
+    CHECK(e.type == Type::BcastHeard && e.number == 2 && e.text == "W1AW" && e.snr && *e.snr == 12.3);
+    e = parseCommandLine("BCAST 2 HEARD -7.5");
+    CHECK(e.type == Type::BcastHeard && e.text.empty() && e.snr && *e.snr == -7.5);
+    e = parseCommandLine("BCAST 2 HEARD 4X1AB");
+    CHECK(e.type == Type::BcastHeard && e.text == "4X1AB" && !e.snr);
+    e = parseCommandLine("BCAST 2 HEARD");
+    CHECK(e.type == Type::BcastHeard && e.text.empty() && !e.snr);
+    e = parseCommandLine("BCAST 2 HEARD W1AW nan");
+    CHECK(e.type == Type::BcastHeard && e.text == "W1AW" && !e.snr);
+    e = parseCommandLine("BCAST * MISSED w48-qpsk-r1/2 6 -3.1");
+    CHECK(e.type == Type::BcastMissed && e.text == "w48-qpsk-r1/2" && e.count == 6 && e.snr && *e.snr == -3.1);
+    e = parseCommandLine("BCAST * MISSED qpsk-r1/3 2");
+    CHECK(e.type == Type::BcastMissed && e.count == 2 && !e.snr);
+    e = parseCommandLine("SN 8.4");
+    CHECK(e.type == Type::Sn && e.snr && *e.snr == 8.4);
+    CHECK(parseCommandLine("SN").type == Type::Other);
+    CHECK(parseCommandLine("SN loud").type == Type::Other);
+
     // LF too, and blank lines are dropped.
     lines.clear();
     const char* part3 = "OK\n\r\nPTT OFF\n";

@@ -172,10 +172,12 @@ public:
     // is no such gear.
     bool selectGear(int number);
 
-    void recordBurstSnr(double dB) { snr_.record(dB); }
-    void clearSnr() { snr_.clear(); }
-    std::optional<double> pathSnr() const { return snr_.average(); }
-    std::size_t snrBursts() const { return snr_.count(); }
+    // The path's S/N (dB, average power in 2500 Hz), the mean of `bursts`
+    // bursts from the station `from`; none until data2g-host reports one.
+    void setPathSnr(std::optional<double> dB, std::size_t bursts = 0, std::string from = std::string());
+    std::optional<double> pathSnr() const { return pathSnr_; }
+    std::size_t snrBursts() const { return snrBursts_; }
+    const std::string& snrFrom() const { return snrFrom_; }
 
     // A mode's short name, from every mode the table and host know (not
     // only those offered, so names don't change with what the host offers).
@@ -201,7 +203,9 @@ private:
     bool narrowOnly_ = false;
     Path path_ = Path::Calm;
     bool auto_ = false;
-    PathSnr snr_;
+    std::optional<double> pathSnr_;
+    std::size_t snrBursts_ = 0;
+    std::string snrFrom_;
     std::map<std::string, std::string> names_;
     std::vector<Gear> ladder_;
     int chosen_ = 0;  // index into ladder_
