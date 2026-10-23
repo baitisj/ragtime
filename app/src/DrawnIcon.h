@@ -15,8 +15,9 @@ class wxGraphicsContext;
 // Draws an icon in a square size wide at the context's origin.
 using DrawIcon = std::function<void(wxGraphicsContext& gc, double size)>;
 
-// The icon at 1x and 2x, sizeDip across.
-wxBitmapBundle drawnIcon(const DrawIcon& draw, int sizeDip);
+// The icon at 1x and 2x, sizeDip across and heightDip tall (square when
+// heightDip is 0; a shorter one trims the foot of the square).
+wxBitmapBundle drawnIcon(const DrawIcon& draw, int sizeDip, int heightDip = 0);
 
 // A floppy disk, for the buttons that send a file (Jeff, 2026-10-23).
 void drawFloppyIcon(wxGraphicsContext& gc, double size, const wxColour& ink);

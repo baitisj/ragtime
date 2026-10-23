@@ -47,5 +47,13 @@ void drawGearshiftIcon(wxGraphicsContext& gc, double size, const wxColour& ink)
 
 wxBitmapBundle gearshiftIcon(const wxColour& ink, int sizeDip)
 {
-    return drawnIcon([ink](wxGraphicsContext& gc, double size) { drawGearshiftIcon(gc, size, ink); }, sizeDip);
+    // The dial fills rows 2 to 20 of its 24: lift it 2 and trim the foot,
+    // so the gear's name sits close under it (Jeff, 2026-10-23).
+    const int heightDip = (sizeDip * 18 + 23) / 24;
+    return drawnIcon(
+        [ink](wxGraphicsContext& gc, double size) {
+            gc.Translate(0, -size * 2 / 24);
+            drawGearshiftIcon(gc, size, ink);
+        },
+        sizeDip, heightDip);
 }

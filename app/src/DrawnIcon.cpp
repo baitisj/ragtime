@@ -7,16 +7,17 @@
 #include <wx/graphics.h>
 #include <wx/image.h>
 
-wxBitmapBundle drawnIcon(const DrawIcon& draw, int sizeDip)
+wxBitmapBundle drawnIcon(const DrawIcon& draw, int sizeDip, int heightDip)
 {
+    if (heightDip <= 0) heightDip = sizeDip;
     wxVector<wxBitmap> bitmaps;
     for (int scale : {1, 2})
     {
-        const int px = sizeDip * scale;
-        wxImage image(px, px);
+        const int px = sizeDip * scale, tall = heightDip * scale;
+        wxImage image(px, tall);
         image.InitAlpha();
         unsigned char* alpha = image.GetAlpha();
-        for (int i = 0; i < px * px; i++) alpha[i] = 0;
+        for (int i = 0; i < px * tall; i++) alpha[i] = 0;
         {
             std::unique_ptr<wxGraphicsContext> gc(wxGraphicsContext::Create(image));
             if (gc)

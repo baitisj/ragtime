@@ -13,7 +13,8 @@ class wxGraphicsContext;
 // Draws the icon in a square size wide at the context's origin.
 void drawGearshiftIcon(wxGraphicsContext& gc, double size, const wxColour& ink);
 
-// The icon at 1x and 2x, sizeDip across.
-wxBitmapBundle gearshiftIcon(const wxColour& ink, int sizeDip = 20);
+// The icon at 1x and 2x, sizeDip across and three quarters of that tall:
+// the empty band under the dial is trimmed off.
+wxBitmapBundle gearshiftIcon(const wxColour& ink, int sizeDip = 24);
 
 #endif

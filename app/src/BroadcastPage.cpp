@@ -32,9 +32,9 @@ const wxColour NOT_SENT(0xb4, 0x23, 0x18);    // red, as the Mismatch badge
 // Room for the seal badge (16 px) in every row.
 constexpr int BADGE_ROOM = 20;
 
-// The Gear button's speedometer, small enough that the button with its
-// gear name stays near the height of the entry line.
-constexpr int GEAR_ICON_DIP = 16;
+// The Gear button's speedometer, wide enough to fill the button over the
+// gear's name.
+constexpr int GEAR_ICON_DIP = 24;
 
 // "14:32" today, "22 Oct 14:32" on another day (from the log).
 wxString clock(uint64_t ms)
