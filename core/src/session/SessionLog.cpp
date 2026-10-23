@@ -13,6 +13,8 @@
 
 #include "ragtime/files/SessionFiles.h"
 
+#include "../LogLines.h"
+
 namespace ragtime
 {
 namespace session
@@ -23,50 +25,13 @@ namespace
 
 using State = Message::State;
 using Kind = Message::Kind;
+using loglines::escape;
+using loglines::fields;
+using loglines::join;
+using loglines::number;
+using loglines::unescape;
 
 const char* const FIRST_LINE = "ragtime session log 1";
-
-std::string escape(const std::string& text)
-{
-    std::string out;
-    out.reserve(text.size());
-    for (char c : text)
-    {
-        switch (c)
-        {
-            case '\\': out += "\\\\"; break;
-            case '\t': out += "\\t"; break;
-            case '\r': out += "\\r"; break;
-            case '\n': out += "\\n"; break;
-            default: out += c; break;
-        }
-    }
-    return out;
-}
-
-std::string unescape(const std::string& text)
-{
-    std::string out;
-    out.reserve(text.size());
-    for (size_t i = 0; i < text.size(); i++)
-    {
-        char c = text[i];
-        if (c != '\\' || i + 1 == text.size())
-        {
-            out += c;
-            continue;
-        }
-        char next = text[++i];
-        switch (next)
-        {
-            case 't': out += '\t'; break;
-            case 'r': out += '\r'; break;
-            case 'n': out += '\n'; break;
-            default: out += next; break;
-        }
-    }
-    return out;
-}
 
 char stateLetter(State state)
 {
@@ -93,39 +58,6 @@ bool letterState(const std::string& field, State& state)
         case 'N': state = State::NotDelivered; return true;
         default: return false;
     }
-}
-
-std::vector<std::string> fields(const std::string& line)
-{
-    std::vector<std::string> out;
-    size_t start = 0;
-    while (true)
-    {
-        size_t tab = line.find('\t', start);
-        out.push_back(line.substr(start, tab == std::string::npos ? std::string::npos : tab - start));
-        if (tab == std::string::npos) break;
-        start = tab + 1;
-    }
-    return out;
-}
-
-bool number(const std::string& field, uint64_t& value)
-{
-    if (field.empty() || field.size() > 20) return false;
-    if (!std::all_of(field.begin(), field.end(), [](char c) { return c >= '0' && c <= '9'; })) return false;
-    value = std::strtoull(field.c_str(), nullptr, 10);
-    return true;
-}
-
-std::string join(std::initializer_list<std::string> parts)
-{
-    std::string line;
-    for (const std::string& p : parts)
-    {
-        if (!line.empty()) line += '\t';
-        line += p;
-    }
-    return line;
 }
 
 } // namespace

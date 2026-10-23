@@ -113,7 +113,9 @@ enum StatusField
     FIELD_CHANNEL,
     FIELD_MODE,
     FIELD_TRANSFERS,
+    FIELD_HOST,     // data2g-host's address and state, at the right end
 };
+constexpr int STATUS_FIELDS = 4;
 
 constexpr int CLOCK_MS = 1000;
 constexpr int MIN_PANE = 200;
@@ -182,6 +184,8 @@ MainFrame::MainFrame()
     session_.setTraffic(&fileTraffic_);
     sessionLog_.setFolder(sessionLogDir());
     session_.setLog(&sessionLog_);
+    broadcastLog_.setPath(broadcastLogPath());
+    chat_.setLog(&broadcastLog_, HostConnection::nowMs());
     SetIcons(appIcons());
     // Every dialog and the main window must fit Jeff's 1366x768 screen.
     SetMinSize(wxSize(960, 600));
@@ -238,6 +242,7 @@ MainFrame::MainFrame()
         sessionFiles_.stopAll("Ragtime was closed");
         fileTraffic_.update(HostConnection::nowMs());
         saveFilesLog(true);
+        chat_.closeLog(HostConnection::nowMs());
         rememberDividers();
         saveBool(keys::GLOBUS, globusOn_);
         saveInt(keys::LIST_WIDTH, listWidth_);
@@ -437,13 +442,20 @@ void MainFrame::buildLayout()
     sizer->Add(outer_, 1, wxEXPAND);
     root->SetSizer(sizer);
 
-    CreateStatusBar(3);
-    const int widths[] = {FromDIP(150), FromDIP(260), -1};
-    GetStatusBar()->SetStatusWidths(3, widths);
+    CreateStatusBar(STATUS_FIELDS);
+    sizeStatusFields();
     GetStatusBar()->Bind(wxEVT_LEFT_DOWN, [this](wxMouseEvent& e) {
         wxRect files;
         if (GetStatusBar()->GetFieldRect(FIELD_TRANSFERS, files) && files.Contains(e.GetPosition()))
             tabs_->SetSelection(TAB_FILES);
+        e.Skip();
+    });
+    // The host's field explains itself (or the last error) on hover.
+    GetStatusBar()->Bind(wxEVT_MOTION, [this](wxMouseEvent& e) {
+        wxRect host;
+        bool over = GetStatusBar()->GetFieldRect(FIELD_HOST, host) && host.Contains(e.GetPosition());
+        wxString tip = over ? hostTip_ : wxString();
+        if (GetStatusBar()->GetToolTipText() != tip) GetStatusBar()->SetToolTip(tip);
         e.Skip();
     });
 
@@ -689,7 +701,23 @@ void MainFrame::showConnection()
     }
     if (host_ && !host_->lastError().empty()) tip = utf8(host_->lastError());
     if (tip.empty()) tip = "Ragtime talks to a data2g-host you run; it never starts one. Settings > Station";
-    bar_->setHost(utf8(prefs_.host + ":" + std::to_string(prefs_.commandPort)), state, tip);
+    hostTip_ = tip;
+    wxString text = "data2g-host " + utf8(prefs_.host + ":" + std::to_string(prefs_.commandPort)) + utf8(DOT) + state;
+    if (text == hostText_) return;
+    hostText_ = text;
+    SetStatusText(text, FIELD_HOST);
+    sizeStatusFields();
+}
+
+void MainFrame::sizeStatusFields()
+{
+    // The transfers line takes what the host's field leaves.
+    wxStatusBar* bar = GetStatusBar();
+    wxString shown = hostText_.empty() ? utf8(std::string("data2g-host 127.0.0.1:8300") + DOT + "Not connected")
+                                       : hostText_;
+    int host = bar->GetTextExtent(shown).x + FromDIP(24);
+    const int widths[STATUS_FIELDS] = {FromDIP(150), FromDIP(260), -1, host};
+    bar->SetStatusWidths(STATUS_FIELDS, widths);
 }
 
 void MainFrame::showStatus()
@@ -1705,9 +1733,11 @@ void MainFrame::onBroadcastFiles()
                 break;
             case Type::Saved:
                 note_ = "Saved " + f.name + " from " + f.from;
+                chat_.fileEnded(f.id, "Saved");
                 break;
             case Type::Ended:
                 if (f.outgoing) note_ = f.name + ": " + broadcast::stateLabel(f.state);
+                chat_.fileEnded(f.id, broadcast::stateLabel(f.state));
                 break;
         }
     }

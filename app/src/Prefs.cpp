@@ -230,6 +230,13 @@ std::string sessionLogDir()
     return std::string(dir.GetPath().utf8_str());
 }
 
+std::string broadcastLogPath()
+{
+    if (!configPath.empty()) return configPath + ".broadcast.log";
+    wxFileName file(wxString::FromUTF8(appDataDir()), "broadcast.log");
+    return std::string(file.GetFullPath().utf8_str());
+}
+
 broadcast::Seals::Chain loadSealChain(const std::string& callsign)
 {
     broadcast::Seals::Chain chain;

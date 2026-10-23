@@ -29,6 +29,7 @@ add_library(ragtime_core STATIC
     src/gearbox/Submodes.cpp
     # Package E: the station list and the Broadcast tab's engine.
     src/broadcast/BroadcastChat.cpp
+    src/broadcast/BroadcastLog.cpp
     src/broadcast/Stations.cpp
     # Package H: broadcast files, seals and repair.
     src/broadcast/Airtime.cpp

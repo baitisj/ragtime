@@ -12,6 +12,7 @@
 
 #include "Prefs.h"
 #include "ragtime/broadcast/BroadcastChat.h"
+#include "ragtime/broadcast/BroadcastLog.h"
 #include "ragtime/broadcast/BroadcastFiles.h"
 #include "ragtime/broadcast/Seals.h"
 #include "ragtime/broadcast/Stations.h"
@@ -61,6 +62,7 @@ private:
     void onHostEvents(const std::vector<ragtime::link::HostLink::Event>& events);
     void onClock();
     void showConnection();
+    void sizeStatusFields();
     void showStatus();
     void refreshMessages();
     void refreshStations();
@@ -139,6 +141,7 @@ private:
     ragtime::broadcast::BroadcastFiles broadcastFiles_;
     ragtime::session::SessionChat session_;
     ragtime::session::SessionLog sessionLog_;
+    ragtime::broadcast::BroadcastLog broadcastLog_;
     ragtime::broadcast::Stations stations_;
     ragtime::gearbox::Gearshift gearshift_;
     std::unique_ptr<HostConnection> host_;
@@ -175,6 +178,8 @@ private:
     uint64_t stationsVersion_ = 0;
     std::string modeUsed_;      // the mode the host last sent in
     std::string note_;          // the latest thing worth a line in the status bar
+    wxString hostText_;         // the status bar's host field, as shown
+    wxString hostTip_;          // and its tooltip
 
     uint64_t broadcastFilesVersion_ = 0;
     uint16_t savedSeal_ = 0;    // the seal chain's number last saved

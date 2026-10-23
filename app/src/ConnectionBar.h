@@ -13,8 +13,7 @@ class wxStaticText;
 class wxToggleButton;
 
 // The bar across the top of the window (docs/MOCKUPS.md, "Connection
-// bar"), left to right: data2g-host's address and state, my callsign, the
-// group D2G, the gearshift button (a speedometer icon) and the 500 Hz
+// bar"), left to right: my callsign, the group D2G, the gearshift button (a speedometer icon) and the 500 Hz
 // switch, Accept sessions, Pause sending, Auto ALC with
 // its level meter, and the TX light. The window wires the controls; the
 // bar only lays them out and keeps their looks.
@@ -23,7 +22,6 @@ class ConnectionBar : public wxPanel
 public:
     explicit ConnectionBar(wxWindow* parent);
 
-    void setHost(const wxString& address, const wxString& state, const wxString& tooltip);
     void setCallsign(const wxString& callsign);
     void setGearshiftTip(const wxString& tip);
     void setNarrow(bool narrow);
@@ -48,8 +46,6 @@ private:
     wxBoxSizer* second_ = nullptr;
     bool twoRows_ = false;
 
-    wxStaticText* host_ = nullptr;
-    wxStaticText* state_ = nullptr;
     wxStaticText* callsign_ = nullptr;
 };
 

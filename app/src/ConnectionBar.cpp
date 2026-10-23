@@ -30,9 +30,6 @@ wxStaticLine* divider(wxWindow* parent)
 ConnectionBar::ConnectionBar(wxWindow* parent)
     : wxPanel(parent)
 {
-    host_ = new wxStaticText(this, wxID_ANY, "data2g-host");
-    state_ = new wxStaticText(this, wxID_ANY, "Not connected");
-    state_->SetFont(state_->GetFont().Bold());
     callsign_ = new wxStaticText(this, wxID_ANY, "No callsign");
     callsign_->SetFont(callsign_->GetFont().Bold());
     callsign_->SetToolTip("Your callsign: Settings > Station");
@@ -70,9 +67,6 @@ ConnectionBar::ConnectionBar(wxWindow* parent)
     auto add = [this](wxSizer* to, wxWindow* w, int left) {
         to->Add(w, 0, wxALIGN_CENTER_VERTICAL | wxLEFT, FromDIP(left));
     };
-    add(left_, host_, 8);
-    add(left_, state_, 6);
-    left_->Add(divider(this), 0, wxEXPAND | wxLEFT | wxTOP | wxBOTTOM, FromDIP(8));
     add(left_, callsign_, 8);
     add(left_, group, 12);
     left_->Add(divider(this), 0, wxEXPAND | wxLEFT | wxTOP | wxBOTTOM, FromDIP(8));
@@ -137,15 +131,6 @@ void ConnectionBar::arrange(int width)
         return;
     }
     GetParent()->Layout();
-}
-
-void ConnectionBar::setHost(const wxString& address, const wxString& state, const wxString& tooltip)
-{
-    host_->SetLabel("data2g-host " + address);
-    state_->SetLabel(state);
-    host_->SetToolTip(tooltip);
-    state_->SetToolTip(tooltip);
-    Layout();
 }
 
 void ConnectionBar::setCallsign(const wxString& callsign)

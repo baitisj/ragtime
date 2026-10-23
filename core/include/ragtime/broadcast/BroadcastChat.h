@@ -14,6 +14,8 @@
 // - A Hello rides along in the first frame after the group opens, after
 //   the station's settings change, and at most every 10 minutes after
 //   that, so the station list learns locators without a burst of its own.
+// - History: with a BroadcastLog, the tab opens with what was said before,
+//   a rule where Ragtime last closed, and the log carries on below.
 //
 // No sockets and no clock: the time is passed in, and HostLink is the
 // socket-free one the app feeds.
@@ -54,7 +56,17 @@ struct Message
         Acknowledged,   // addressed, and the station's Ack came back
     };
 
+    // A row is a message, a broadcast file (a live card, or one line from
+    // the log), or the rule drawn where Ragtime last closed.
+    enum class Kind
+    {
+        Text,
+        File,
+        Rule,
+    };
+
     uint64_t id = 0;            // this list's own number
+    Kind kind = Kind::Text;
     bool ours = false;
     std::string from;
     std::string to;             // addressed to one station, or empty
@@ -67,8 +79,10 @@ struct Message
     uint64_t burst = 0;         // ours: HostLink's burst id
     std::string mode;           // the mode it went (or is going) out in, when known
     // A broadcast file's card rather than a message: BroadcastFiles' id
-    // for it, with text the file's name.
+    // for it, with text the file's name. 0 for a file line from the log.
     uint64_t file = 0;
+    bool past = false;          // from before Ragtime last closed, read from the BroadcastLog
+    std::string outcome;        // a file line from the log: how it ended, when known
 };
 
 // "Queued", "Sending", "Waiting for the session to go idle", "Sent",
@@ -82,6 +96,8 @@ constexpr uint64_t HELLO_EVERY_MS = 10 * 60 * 1000;
 constexpr size_t MAX_TYPED = 2000;
 // Messages kept in the list; the oldest go first.
 constexpr size_t MAX_MESSAGES = 2000;
+
+class BroadcastLog;
 
 class BroadcastChat
 {
@@ -100,6 +116,13 @@ public:
     // its own numbering at newestItem.
     void setSettings(const Settings& settings, uint32_t newestItem);
     const Settings& settings() const { return settings_; }
+
+    // Where the chat is kept: what it holds already goes in front of
+    // what this run says, which is added as it happens. None: the tab
+    // starts empty.
+    void setLog(BroadcastLog* log, uint64_t nowMs);
+    // Ragtime is closing: the log's rule goes here.
+    void closeLog(uint64_t nowMs);
 
     // The newest broadcast item's number, for the app to keep.
     uint32_t newestItem() const { return numbering_.newestItem(); }
@@ -120,6 +143,9 @@ public:
     uint64_t addFile(uint64_t file, bool ours, const std::string& from, const std::string& name, uint64_t nowMs);
     // Something a file card shows has changed.
     void fileChanged() { version_++; }
+    // A file card's file has ended, as outcome ("Saved", "Sent"), for the
+    // log to show next time.
+    void fileEnded(uint64_t file, const std::string& outcome);
 
     // "@W1AW" at the start of typed text: the station, and the text after
     // it. False when it isn't addressed.
@@ -152,8 +178,10 @@ public:
     // Not sent, Cancelled or Acknowledged). It goes as the same record, so
     // a station that heard it the first time doesn't list it twice, and an
     // addressed one is acknowledged again. False while it is still going.
+    // One from the log goes again too, if it was sent under the callsign
+    // set now.
     bool resend(uint64_t id, const std::string& mode, uint64_t nowMs);
-    static bool canResend(const Message& message);
+    bool canResend(const Message& message) const;
 
     // Every HostLink event goes here: bursts settling, frames heard, the
     // group opening.
@@ -180,9 +208,11 @@ private:
     std::vector<std::string> split(const std::string& text, const std::string& to, size_t firstRoom);
     void trim();
     void flushAcks(const std::string& mode, uint64_t nowMs);
+    void logState(const Message& m);
 
     link::HostLink& link_;
     ItemsFn onItems_;
+    BroadcastLog* log_ = nullptr;
     Settings settings_;
     protocol::Numbering numbering_;
     std::deque<Message> messages_;

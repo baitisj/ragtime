@@ -31,7 +31,7 @@ from them, so the canvas is never the only copy.
 
 ## Connection bar
 
-Left to right: host address and state, my callsign, group `D2G`, the
+Left to right: my callsign, group `D2G`, the
 gearshift button (a speedometer icon; it opens the gearshift) and the
 `500 Hz` slide switch (on: 500 Hz modes only; off: any width),
 Accept sessions, Pause sending, **Auto ALC** (checkbox, a small level
