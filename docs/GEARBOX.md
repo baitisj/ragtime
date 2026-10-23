@@ -48,6 +48,7 @@ gear's short name under it) or Settings > Gearshift (Ctrl+G). The popup *is* the
 
 The Gear button by Send is the one way in (Jeff, 2026-10-23): a
 speedometer with the gear's short name under it in small type (`E2C`),
+the dial's foot 2 px over the name and the button no taller than Send,
 and the Data2G name, speed, S/N and width in its tooltip. The connection
 bar keeps only the `500 Hz` switch. FSK, PSK and the rest show only in the popup.
 
@@ -193,7 +194,7 @@ run. The tables below are the Submode Map's.
   faster than it, so the gearbox never shifts up on its own. Auto with no
   S/N reports yet holds the chosen gear.
 - `app/src/GearshiftDialog.*`: the popup, opened by the Gear button
-  (`GearshiftIcon.*` draws its speedometer) and Settings > Gearshift
+  (`GearshiftIcon.*` draws its speedometer and name as one picture) and Settings > Gearshift
   (Ctrl+G). `ToggleSwitch.*` is the 500 Hz switch. `app/src/Thresholds.*`:
   finding and reading the file. `Gearshift::shortName` names a mode for
   the status bar and message tooltips.

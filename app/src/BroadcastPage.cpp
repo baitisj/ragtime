@@ -15,6 +15,10 @@
 #include <wx/stattext.h>
 #include <wx/textctrl.h>
 
+#if defined(__WXGTK3__)
+#include <gtk/gtk.h>
+#endif
+
 #include "DrawnIcon.h"
 #include "GearshiftIcon.h"
 #include "Html.h"
@@ -32,9 +36,28 @@ const wxColour NOT_SENT(0xb4, 0x23, 0x18);    // red, as the Mismatch badge
 // Room for the seal badge (16 px) in every row.
 constexpr int BADGE_ROOM = 20;
 
-// The Gear button's speedometer, wide enough to fill the button over the
-// gear's name.
-constexpr int GEAR_ICON_DIP = 24;
+// The Gear button's speedometer, as wide as fits over the gear's name
+// with the button no taller than Send.
+constexpr int GEAR_ICON_DIP = 30;
+
+// Trims a button's padding off top and foot, so a tall picture fits it at the
+// height of the buttons beside it. GTK pads an image button generously;
+// elsewhere the padding is slim already.
+void snugButton(wxWindow* button)
+{
+#if defined(__WXGTK3__)
+    GtkWidget* widget = reinterpret_cast<GtkWidget*>(button->GetHandle());
+    if (widget == nullptr || !GTK_IS_BUTTON(widget)) return;
+    GtkCssProvider* css = gtk_css_provider_new();
+    gtk_css_provider_load_from_data(css, "button { padding: 0 4px; min-height: 0; }", -1, nullptr);
+    gtk_style_context_add_provider(gtk_widget_get_style_context(widget), GTK_STYLE_PROVIDER(css),
+                                   GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
+    g_object_unref(css);
+    button->InvalidateBestSize();
+#else
+    (void)button;
+#endif
+}
 
 // "14:32" today, "22 Oct 14:32" on another day (from the log).
 wxString clock(uint64_t ms)
@@ -213,15 +236,13 @@ BroadcastPage::BroadcastPage(wxWindow* parent, const BroadcastChat& chat)
     file_->SetToolTip("Broadcast a file to everyone on D2G (300 KB at most), with repairs for stations that "
                       "miss pieces");
     // The gearshift: a speedometer with the gear's short name under it
-    // ("A29") in small type.
-    gear_ = new wxButton(this, wxID_ANY, "Gear", wxDefaultPosition, wxDefaultSize, wxBU_EXACTFIT);
-    gear_->SetFont(gear_->GetFont().Smaller());
-    gear_->SetBitmap(gearshiftIcon(wxSystemSettings::GetColour(wxSYS_COLOUR_BTNTEXT), GEAR_ICON_DIP));
-    gear_->SetBitmapPosition(wxTOP);
-    gear_->SetBitmapMargins(0, 0);
-    gear_->SetMinSize(wxSize(FromDIP(48), -1));
+    // ("A29") in small type, both drawn in the button's picture.
+    gear_ = new wxBitmapButton(this, wxID_ANY, wxBitmapBundle(), wxDefaultPosition, wxDefaultSize, wxBU_EXACTFIT);
+    snugButton(gear_);
+    drawGearButton();
     send_ = new wxButton(this, wxID_ANY, "Send");
     file_->SetMinSize(wxSize(-1, std::max(file_->GetBestSize().y, send_->GetBestSize().y)));
+    gear_->SetMinSize(wxSize(FromDIP(48), send_->GetBestSize().y));
 
     buttons_ = new wxBoxSizer(wxHORIZONTAL);
     buttons_->Add(file_, 0, wxALIGN_CENTER_VERTICAL | wxLEFT, 6);
@@ -262,7 +283,7 @@ BroadcastPage::BroadcastPage(wxWindow* parent, const BroadcastChat& chat)
     Bind(wxEVT_SYS_COLOUR_CHANGED, [this](wxSysColourChangedEvent& e) {
         const wxColour ink = wxSystemSettings::GetColour(wxSYS_COLOUR_BTNTEXT);
         file_->SetBitmap(floppyIcon(ink));
-        gear_->SetBitmap(gearshiftIcon(ink, GEAR_ICON_DIP));
+        drawGearButton();
         e.Skip();
     });
     list_->Bind(wxEVT_CONTEXT_MENU, [this](wxContextMenuEvent& e) {
@@ -332,10 +353,17 @@ void BroadcastPage::refresh()
 
 void BroadcastPage::setGearLabel(const wxString& label, const wxString& tooltip)
 {
-    gear_->SetLabel(label);
+    gearName_ = label;
+    drawGearButton();
     gear_->SetToolTip(tooltip);
     arrange(GetSize().x);
     Layout();
+}
+
+void BroadcastPage::drawGearButton()
+{
+    gear_->SetBitmap(gearButtonIcon(wxSystemSettings::GetColour(wxSYS_COLOUR_BTNTEXT), GetFont().Smaller(),
+                                    gearName_, GEAR_ICON_DIP));
 }
 
 void BroadcastPage::setPaused(bool paused)

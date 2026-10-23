@@ -11,6 +11,7 @@
 
 #include "ragtime/broadcast/BroadcastChat.h"
 
+class wxBitmapButton;
 class wxBoxSizer;
 class wxButton;
 class wxStaticText;
@@ -81,13 +82,16 @@ private:
     void showMenu(int row);
     void showFileMenu(const ragtime::broadcast::Message& m);
     void arrange(int width);
+    // Redraws the Gear button's speedometer and gear name, in the theme's colours.
+    void drawGearButton();
 
     const ragtime::broadcast::BroadcastChat& chat_;
     MessageList* list_ = nullptr;
     wxStaticText* paused_ = nullptr;
     wxTextCtrl* compose_ = nullptr;
     wxButton* file_ = nullptr;
-    wxButton* gear_ = nullptr;
+    wxBitmapButton* gear_ = nullptr;
+    wxString gearName_ = "Gear";
     wxButton* send_ = nullptr;
     wxBoxSizer* buttons_ = nullptr;
     wxBoxSizer* row_ = nullptr;
