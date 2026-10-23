@@ -8,6 +8,7 @@
 
 #include "MainFrame.h"
 #include "Prefs.h"
+#include "Theme.h"
 #include "ragtime/Version.h"
 
 class RagtimeApp : public wxApp
@@ -21,6 +22,9 @@ public:
 
         // wxSocket wants initialising on the main thread before any socket.
         wxSocketBase::Initialize();
+        // Light or dark, as the operator last picked (the desktop's until then).
+        int theme = loadInt(keys::THEME, (int)ThemeChoice::System);
+        if (theme == (int)ThemeChoice::Light || theme == (int)ThemeChoice::Dark) applyTheme((ThemeChoice)theme);
         auto* frame = new MainFrame();
         frame->Show();
         return true;

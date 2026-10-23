@@ -23,6 +23,7 @@
 #include "GearshiftIcon.h"
 #include "Html.h"
 #include "PhraseHighlight.h"
+#include "Theme.h"
 
 using namespace ragtime::broadcast;
 using State = Message::State;
@@ -97,6 +98,11 @@ protected:
         const Message* m = at(n);
         if (m != nullptr && m->file != 0 && owner_->onFileAction_)
             owner_->onFileAction_(m->file, std::string(link.GetHref().utf8_str()));
+    }
+
+    wxString OnGetItemMarkup(size_t n) const override
+    {
+        return listText(OnGetItem(n), IsSelected(n));
     }
 
     wxString OnGetItem(size_t n) const override
@@ -223,9 +229,10 @@ BroadcastPage::BroadcastPage(wxWindow* parent, const BroadcastChat& chat)
     , chat_(chat)
 {
     list_ = new MessageList(this);
+    followThemeBackground(list_, wxSYS_COLOUR_LISTBOX);
     paused_ = new wxStaticText(this, wxID_ANY,
                                "Sending is paused: messages wait as Queued until you press Pause sending again.");
-    paused_->SetForegroundColour(secondaryText());
+    followThemeText(paused_, secondaryText);
     paused_->Hide();
 
     compose_ = new wxTextCtrl(this, wxID_ANY, "", wxDefaultPosition, wxDefaultSize, wxTE_PROCESS_ENTER | PHRASE_ENTRY_STYLE);

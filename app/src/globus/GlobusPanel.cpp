@@ -11,6 +11,7 @@
 
 #include "GlobusToggle.h"
 #include "GlobusView.h"
+#include "../Theme.h"
 #include "ragtime/globus/Globe.h"
 #include "ragtime/globus/Sun.h"
 
@@ -33,7 +34,7 @@ GlobusPanel::GlobusPanel(wxWindow* parent, wxWindowID id)
     , clock_(this)
 {
     // The pane is a surface, like the tabs' pages beside it.
-    SetBackgroundColour(wxSystemSettings::GetColour(wxSYS_COLOUR_WINDOW));
+    followThemeBackground(this, wxSYS_COLOUR_WINDOW);
     toggle_ = new GlobusToggle(this);
     time_ = new wxStaticText(this, wxID_ANY, "");
     time_->SetToolTip("The time the globe is lit for, in UTC and your local time");

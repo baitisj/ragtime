@@ -48,6 +48,12 @@ wxColour blendColour(const wxColour& a, const wxColour& b, double t)
     return wxColour(mix(a.Red(), b.Red()), mix(a.Green(), b.Green()), mix(a.Blue(), b.Blue()));
 }
 
+wxString listText(const wxString& html, bool picked)
+{
+    if (picked) return html;
+    return "<font color=\"" + htmlColour(wxSystemSettings::GetColour(wxSYS_COLOUR_LISTBOXTEXT)) + "\">" + html + "</font>";
+}
+
 wxColour secondaryText()
 {
     return blendColour(wxSystemSettings::GetColour(wxSYS_COLOUR_LISTBOXTEXT),
