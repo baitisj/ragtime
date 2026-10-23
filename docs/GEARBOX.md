@@ -46,7 +46,8 @@ gear's short name under it) or Settings > Gearshift (Ctrl+G). The popup *is* the
   and on the map (Jeff, 2026-10-22).
 - Leave out the `ack-` modes: they carry the host's own ARQ control.
 
-The Gear button by Send is the one way in (Jeff, 2026-10-23): a
+The Gear button by Send is the one way in (Jeff, 2026-10-23), last in
+the row after Send and the file button, as on the Session tab: a
 speedometer with the gear's short name under it in small type (`E2C`),
 the dial's foot 2 px over the name and the button no taller than Send,
 and the Data2G name, speed, S/N and width in its tooltip. The connection
