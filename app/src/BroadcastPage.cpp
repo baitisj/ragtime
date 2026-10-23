@@ -244,10 +244,14 @@ BroadcastPage::BroadcastPage(wxWindow* parent, const BroadcastChat& chat)
     file_->SetMinSize(wxSize(-1, std::max(file_->GetBestSize().y, send_->GetBestSize().y)));
     gear_->SetMinSize(wxSize(FromDIP(48), send_->GetBestSize().y));
 
+    // Send, the file button, then the gearshift, as on the Session tab
+    // (Jeff, 2026-10-23); Tab moves through them in the same order.
+    file_->MoveAfterInTabOrder(send_);
+    gear_->MoveAfterInTabOrder(file_);
     buttons_ = new wxBoxSizer(wxHORIZONTAL);
+    buttons_->Add(send_, 0, wxALIGN_CENTER_VERTICAL | wxLEFT, 6);
     buttons_->Add(file_, 0, wxALIGN_CENTER_VERTICAL | wxLEFT, 6);
     buttons_->Add(gear_, 0, wxALIGN_CENTER_VERTICAL | wxLEFT, 6);
-    buttons_->Add(send_, 0, wxALIGN_CENTER_VERTICAL | wxLEFT, 6);
     row_ = new wxBoxSizer(wxHORIZONTAL);
     row_->Add(compose_, 1, wxALIGN_CENTER_VERTICAL);
     row_->Add(buttons_, 0, wxEXPAND);
