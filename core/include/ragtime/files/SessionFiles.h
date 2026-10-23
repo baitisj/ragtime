@@ -80,6 +80,9 @@ struct FileTransfer
     uint64_t kept = 0;
     std::string keptPath;
     uint64_t resumedFrom = 0;   // either way: where in the file this transfer started
+    // Theirs, ended unfinished: what came is kept (keptParts()), so the
+    // file isn't finished yet; it may be carried on.
+    bool partKept = false;
     uint64_t atMs = 0;          // ours: when queued, then when offered; theirs: when offered to us
     protocol::Digest digest{};  // the whole file's
 
@@ -183,6 +186,13 @@ public:
     // whichever is later), and Delete part.
     bool keepLonger(uint64_t keptId, uint64_t ms, uint64_t nowMs);
     bool deleteKept(uint64_t keptId);
+    // How the transfer that left a part ended (by the transfer's id), to
+    // hand back from takeEnded() if the part goes without being carried
+    // on. A part carried on ends with the transfer that carries it on.
+    void setKeptEnding(uint64_t transferId, const FinishedFile& ending);
+    // The endings of parts gone since the last call (deleted, past their
+    // time or over KEPT_MAX), for Completed. atMs is left for the caller.
+    std::vector<FinishedFile> takeEnded();
 
     // Moves whenever anything transfers() shows changes.
     uint64_t changes() const { return changes_; }
@@ -292,6 +302,9 @@ private:
         uint64_t bytes = 0;
         uint64_t keptAtMs = 0;
         uint64_t keepUntilMs = 0;       // 0: KEPT_MS from keptAtMs
+        uint64_t transferId = 0;        // the transfer that left it, this run
+        bool hasEnding = false;
+        FinishedFile ending;            // see KeptPart
     };
 
     Entry* find(uint64_t id);
@@ -305,7 +318,9 @@ private:
     bool resumePart(Entry& entry, const std::string& path);
     std::list<Kept>::iterator findKept(const Entry& entry);
     void keep(Entry& entry);
-    void dropKept(std::list<Kept>::iterator it);
+    // ended: the file is done for (deleted, too old, too many), so its
+    // ending goes to takeEnded(); otherwise another transfer carries on.
+    void dropKept(std::list<Kept>::iterator it, bool ended);
     void limitKept(uint64_t nowMs);
     void receive(Entry& entry, const protocol::FileData& data);
     void completeReceive(Entry& entry);
@@ -316,6 +331,7 @@ private:
     std::list<Entry> entries_;
     std::list<Kept> kept_;
     uint64_t nowMs_ = 0;    // the latest time given
+    std::vector<FinishedFile> ended_;   // for takeEnded()
     std::map<std::string, std::vector<protocol::Body>> pending_;   // records waiting for each station's session
     uint64_t nextId_ = 1;
     uint64_t changes_ = 0;

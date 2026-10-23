@@ -262,6 +262,7 @@ const FinishedFile* FileHistory::find(uint64_t id) const
 //   F <tab> via <tab> at ms <tab> in|out <tab> peer <tab> name <tab> size <tab> result <tab> reason <tab> path
 //     [<tab> moved bytes <tab> moved ms]   (added 2026-10-22; older readers ignore them)
 //   K <tab> peer <tab> name <tab> size <tab> digest (hex) <tab> path <tab> part <tab> bytes <tab> kept ms <tab> until ms
+//     [<tab> ending result <tab> ending reason]   (added 2026-10-23; empty result: none)
 //-------------------------------------------------------------------------
 
 std::string saveFilesText(const FileHistory& history, const std::vector<KeptPart>& kept,
@@ -296,7 +297,9 @@ std::string saveFilesText(const FileHistory& history, const std::vector<KeptPart
                                            k.part,
                                            std::to_string(k.bytes),
                                            std::to_string(k.keptAtMs),
-                                           std::to_string(k.keepUntilMs)};
+                                           std::to_string(k.keepUntilMs),
+                                           k.hasEnding ? resultKey(k.ending.result) : "",
+                                           k.hasEnding ? k.ending.reason : ""};
         for (size_t i = 0; i < fields.size(); i++) out += (i ? "\t" : "") + escape(fields[i]);
         out += "\n";
     }
@@ -307,6 +310,7 @@ std::string saveFilesText(const FileHistory& history, const std::vector<KeptPart
 bool loadFilesText(const std::string& text, FileHistory& history, std::vector<KeptPart>& kept,
                    std::vector<std::string>* other)
 {
+    const size_t keptFrom = kept.size();
     size_t start = 0;
     bool first = true;
     while (start < text.size())
@@ -351,6 +355,11 @@ bool loadFilesText(const std::string& text, FileHistory& history, std::vector<Ke
             k.part = f[6];
             if (!number(f[7], k.bytes) || !number(f[8], k.keptAtMs) || !number(f[9], k.keepUntilMs)) continue;
             if (k.peer.empty() || k.part.empty()) continue;
+            if (f.size() >= 12 && !f[10].empty() && resultFromKey(f[10], k.ending.result))
+            {
+                k.hasEnding = true;
+                k.ending.reason = f[11];
+            }
             kept.push_back(std::move(k));
         }
         else if (other != nullptr && f[0] != "F" && f[0] != "K")
@@ -358,7 +367,37 @@ bool loadFilesText(const std::string& text, FileHistory& history, std::vector<Ke
             other->push_back(line);
         }
     }
-    return !first;
+    if (first) return false;
+
+    for (size_t i = keptFrom; i < kept.size(); i++)
+    {
+        KeptPart& k = kept[i];
+        if (!k.hasEnding)
+        {
+            // A log from before 2026-10-23 put the file in Completed when
+            // its part was kept; it comes out until the part goes.
+            for (const FinishedFile& f : history.entries())
+            {
+                uint64_t apart = f.atMs > k.keptAtMs ? f.atMs - k.keptAtMs : k.keptAtMs - f.atMs;
+                if (f.via != Via::Session || f.outgoing || f.peer != k.peer || f.name != k.name || f.size != k.size
+                    || f.result == FinishedFile::Result::Saved || apart > 60000)
+                    continue;
+                k.hasEnding = true;
+                k.ending = f;
+                history.remove(f.id);
+                break;
+            }
+        }
+        // The rest of the ending is the part's own.
+        k.ending.via = Via::Session;
+        k.ending.outgoing = false;
+        k.ending.peer = k.peer;
+        k.ending.name = k.name;
+        k.ending.size = k.size;
+        k.ending.path.clear();
+        k.ending.id = 0;
+    }
+    return true;
 }
 
 //-------------------------------------------------------------------------

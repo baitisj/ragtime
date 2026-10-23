@@ -233,9 +233,20 @@ void FileTraffic::collect(uint64_t nowMs)
         e.type = Event::Type::Finished;
         e.id = t.id;
         e.peer = t.peer;
-        e.historyId = history_.add(std::move(f));
+        e.finished = f;
+        e.partKept = t.partKept;
+        if (t.partKept)
+            files_.setKeptEnding(t.id, f);
+        else
+            e.historyId = history_.add(std::move(f));
         events_.push_back(e);
         meters_.erase(t.id);
+    }
+    // Files whose kept parts went unused are done now.
+    for (FinishedFile& f : files_.takeEnded())
+    {
+        f.atMs = nowMs;
+        history_.add(std::move(f));
     }
     // Forget what the engine has let go of.
     for (std::set<uint64_t>* ids : {&recorded_, &announced_})

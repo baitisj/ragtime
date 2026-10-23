@@ -1212,21 +1212,22 @@ void MainFrame::onFileEvents()
         }
         else if (e.type == Type::Finished)
         {
-            if (const files::FinishedFile* f = history_.find(e.historyId))
+            // A file whose part is kept is still in progress, in the
+            // Files tab, and not yet in Completed.
+            const files::FinishedFile* f = &e.finished;
+            std::string result = files::resultLabel(*f) + (e.partKept ? ", part kept" : "");
+            note_ = f->name + (f->outgoing ? " to " : " from ") + f->peer + ": " + result;
+            if (f->via == files::Via::Session)
             {
-                note_ = f->name + (f->outgoing ? " to " : " from ") + f->peer + ": " + files::resultLabel(*f);
-                if (f->via == files::Via::Session)
-                {
-                    // One line in the station's session log, for the
-                    // next session with it to show.
-                    session::Message line;
-                    line.kind = session::Message::Kind::File;
-                    line.ours = f->outgoing;
-                    line.from = f->outgoing ? session_.settings().callsign : f->peer;
-                    line.atMs = f->atMs;
-                    line.text = f->name + ", " + files::sizeText(f->size) + ": " + files::resultLabel(*f);
-                    sessionLog_.file(f->peer, line);
-                }
+                // One line in the station's session log, for the
+                // next session with it to show.
+                session::Message line;
+                line.kind = session::Message::Kind::File;
+                line.ours = f->outgoing;
+                line.from = f->outgoing ? session_.settings().callsign : f->peer;
+                line.atMs = f->atMs;
+                line.text = f->name + ", " + files::sizeText(f->size) + ": " + result;
+                sessionLog_.file(f->peer, line);
             }
         }
     }

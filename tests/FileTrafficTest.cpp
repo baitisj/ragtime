@@ -433,7 +433,14 @@ void testLeavingKeepsThePartAndTheQueue()
     rows = p.a.traffic.rows(p.now);
     CHECK(rows.size() == 1 && rows[0].state == "Waiting for a session with W1AW");
     CHECK(!p.a.history.entries().empty() && p.a.history.entries().back().result == Result::Cancelled);
-    CHECK(!p.b.history.entries().empty() && p.b.history.entries().back().result == Result::CancelledThere);
+    // B's file isn't finished while its part is kept: Completed has only
+    // TWO.BIN, and the ending waits with the part.
+    CHECK(p.b.history.entries().size() == 1 && p.b.history.entries().back().name == "TWO.BIN");
+    std::vector<FileTraffic::Event> ended = p.b.events(FileTraffic::Event::Type::Finished);
+    CHECK(!ended.empty() && ended.back().partKept && ended.back().historyId == 0
+          && ended.back().finished.result == Result::CancelledThere);
+    CHECK(p.b.files.keptParts().size() == 1 && p.b.files.keptParts()[0].hasEnding
+          && p.b.files.keptParts()[0].ending.result == Result::CancelledThere);
 
     // B restarts: its log keeps the part, and the same file carries on
     // from it next time.
@@ -441,7 +448,8 @@ void testLeavingKeepsThePartAndTheQueue()
     FileHistory history;
     std::vector<KeptPart> kept;
     CHECK(loadFilesText(log, history, kept));
-    CHECK(kept.size() == 1 && history.entries().size() == 2);
+    CHECK(kept.size() == 1 && history.entries().size() == 1);
+    CHECK(!kept.empty() && kept[0].hasEnding && resultLabel(kept[0].ending) == "Cancelled by AG7EW");
     SessionFiles restarted;
     restarted.restoreKept(kept, p.now + 3600000);
     CHECK_EQ(restarted.keptCount(), (size_t)1);
@@ -461,6 +469,9 @@ void testLeavingKeepsThePartAndTheQueue()
     CHECK_EQ(q.b.transfer(false)->resumedFrom, keptBytes);
     CHECK_EQ(readFile(saveAs), readFile(first));
     CHECK_EQ(q.b.files.keptCount(), (size_t)0);
+    // Carried on and saved: one entry in Completed, Saved.
+    q.steps(2);
+    CHECK(q.b.history.entries().size() == 1 && q.b.history.entries()[0].result == Result::Saved);
 }
 
 void testKeptPartsMenu()
@@ -484,9 +495,14 @@ void testKeptPartsMenu()
     // Gone when its time is up.
     p.b.traffic.tick(until + 1000);
     CHECK_EQ(p.b.files.keptCount(), (size_t)1);
+    CHECK(p.b.history.entries().empty());
     p.b.traffic.tick(until + SessionFiles::KEPT_MS);
     CHECK_EQ(p.b.files.keptCount(), (size_t)0);
     CHECK(!fs::exists(pathFromUtf8(scratch.path("k.bin") + ".part")));
+    // Its file is done for now, and goes into Completed as it ended.
+    CHECK(p.b.history.entries().size() == 1 && p.b.history.entries()[0].name == "K.BIN"
+          && p.b.history.entries()[0].result == Result::Failed
+          && p.b.history.entries()[0].atMs == until + SessionFiles::KEPT_MS);
 
     // Delete part.
     Pair q;
@@ -498,8 +514,11 @@ void testKeptPartsMenu()
     q.steps(5);
     q.disconnect();
     rows = q.b.traffic.rows(q.now);
+    CHECK(q.b.history.entries().empty());
     CHECK(rows.size() == 1 && q.b.files.deleteKept(rows[0].id));
     CHECK(q.b.traffic.rows(q.now).empty() && !fs::exists(pathFromUtf8(scratch.path("l.bin") + ".part")));
+    q.b.traffic.tick(q.now);
+    CHECK(q.b.history.entries().size() == 1 && q.b.history.entries()[0].name == "L.BIN");
 
     // A part restored whose file has gone is dropped.
     KeptPart gone;
@@ -666,6 +685,18 @@ void testTheLogAsText()
     std::vector<KeptPart> none;
     CHECK(loadFilesText("ragtime-files 1\nF\tsession\t5\tin\tW1AW\ta.txt\t10\tsaved\t\t/tmp/a.txt\n", older, none));
     CHECK(older.entries().size() == 1 && older.entries()[0].movedMs == 0 && older.entries()[0].path == "/tmp/a.txt");
+
+    // A log from before 2026-10-23 put a file in Completed as its part was
+    // kept: the entry moves to the part, until the part goes.
+    FileHistory tidied;
+    std::vector<KeptPart> parts;
+    CHECK(loadFilesText("ragtime-files 1\n"
+                        "F\tsession\t100000\tin\tKC2G\teq.py\t23446\tcancelled-there\t\t\n"
+                        "F\tsession\t5000\tin\tKC2G\teq.py\t23446\tsaved\t\t/tmp/eq.py\n"
+                        "K\tKC2G\teq.py\t23446\t000102030405060708090a0b\t/tmp/eq.py\t/tmp/eq.py.part\t1476\t100400\t0\n",
+                        tidied, parts));
+    CHECK(tidied.entries().size() == 1 && tidied.entries()[0].result == Result::Saved);
+    CHECK(parts.size() == 1 && parts[0].hasEnding && resultLabel(parts[0].ending) == "Cancelled by KC2G");
     CHECK(kept.size() == 1 && kept[0].bytes == 4096 && kept[0].digest[11] == (uint8_t)(11 * 17 + 1));
     CHECK(other.size() == 2 && other[0] == "B\tbroadcast's own line" && other[1] == "Z\tgarbage");
     CHECK(!loadFilesText("something else\n", back, kept));
