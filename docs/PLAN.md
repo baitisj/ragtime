@@ -203,9 +203,9 @@ A quiet link is still a session: only Leave, a lost link, or the far end leaving
 | Status | Shown as | We know it from |
 | --- | --- | --- |
 | Available | ● QRV | Its QRV, or any broadcast traffic with no QRL since |
-| In a session | ● QRL with KC2G | Its QRL message, or its busy answer to our CONNECT |
+| In a session | ● QSO w/ KC2G | Its QRL message, or its busy answer to our CONNECT |
 | In a session, partner unknown | ● QRL | Overheard session bursts from it (needs the host report) |
-| In a session with you | ● In session with you | Our own session |
+| In a session with you | ● QSO w/ AG7EW (our own call, so every session reads alike; your ask, 2026-10-23) | Our own session |
 | Probably free again | ○ QRL? 25 min ago | A QRL older than 20 minutes with no session bursts heard since |
 | Not taking sessions | ○ No sessions | Its announce says Accept sessions is off |
 | Automatic services | Badge: board, mail, pages | Its signed announce |
@@ -323,7 +323,7 @@ One ordinary window in the system theme, laid out like a messaging app: connecti
 
 The gear list beside the map gives each gear's short name, Data2G mode, speed, its S/N on this path and how long 1 KB takes; gears the path can't carry (less the 3 dB margin) are red. The figures are the map's: 10% failure of the smallest ARQ burst, with S/N measured in 2500 Hz. Longer bursts need a little more. Glissando's five speeds sit near the Calm ladder, and two of them (fsk16r25-r1/3 and w48-16qam-r1/2) are gears on it. The new ladder replaces them.
 
-The window opens at its last size and place, works at 1280×720, and uses the system font, so it reads well on a small laptop at the operating position. Dark mode follows the system until the operator picks light or dark with the status bar's button, which Ragtime then keeps. The button switches the GTK theme's own dark variant (Adwaita's, where the desktop's theme has none); wxWidgets 3.2 has no dark mode for Windows, so there it isn't shown.
+The window opens at its last size and place, works at 1280×720, and uses the system font, so it reads well on a small laptop at the operating position. Dark mode follows the system until the operator picks light or dark with the status bar's button, which Ragtime then keeps. Every colour that means something (delivered, not delivered, Link quiet, links) has a light and a dark shade. The button switches the GTK theme's own dark variant (Adwaita's, where the desktop's theme has none); wxWidgets 3.2 has no dark mode for Windows, so there it isn't shown.
 
 ## Pictures and voice, *later*
 

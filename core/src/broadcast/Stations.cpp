@@ -224,7 +224,9 @@ StatusView Stations::status(const Station& s, uint64_t nowMs) const
     StatusView view;
     if (!partner_.empty() && s.call == partner_)
     {
-        view.word = partnerConnected_ ? "In session with you" : "Calling";
+        // "QSO w/" and the other end's call, ours here, as on every row in
+        // a session (Jeff, 2026-10-23).
+        view.word = partnerConnected_ ? (me_.empty() ? std::string("QSO") : "QSO w/ " + me_) : "Calling";
         view.how = partnerConnected_ ? "Our own session with " + s.call : "We're calling " + s.call;
         return view;
     }
@@ -240,7 +242,7 @@ StatusView Stations::status(const Station& s, uint64_t nowMs) const
         }
         else
         {
-            view.word = s.partner.empty() ? "QRL" : "QRL with " + s.partner;
+            view.word = s.partner.empty() ? "QRL" : "QSO w/ " + s.partner;
             view.how = "From " + s.call + "'s QRL, " + ago;
         }
         return view;

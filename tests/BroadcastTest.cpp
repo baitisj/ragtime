@@ -539,7 +539,7 @@ void testStations()
 
     // A QRL names the partner; stale after 20 minutes; QRV clears it.
     status("W1AW", protocol::Status::State::Qrl, "KC2G");
-    CHECK_EQ(list.status(*w1aw, t).word, std::string("QRL with KC2G"));
+    CHECK_EQ(list.status(*w1aw, t).word, std::string("QSO w/ KC2G"));
     CHECK_EQ(list.cell(*w1aw, Column::Status, t + 25 * 60000), std::string("\xe2\x97\x8b QRL? 25 min ago"));
     status("W1AW", protocol::Status::State::Qrv, "");
     CHECK_EQ(list.status(*w1aw, t).word, std::string("QRV"));

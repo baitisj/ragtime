@@ -488,6 +488,8 @@ void MainFrame::buildLayout()
             wxString text = bar->GetStatusText(i);
             if (i == FIELD_HOST)
                 tip = hostTip_;
+            else if (i == FIELD_CHANNEL)
+                tip = channelTip_;
             else if (bar->GetTextExtent(text).x > field.width - FromDIP(8))
                 tip = text;
         }
@@ -732,6 +734,7 @@ void MainFrame::onClock()
     saveFilesLog(false);
     refreshSession();
     showConnection();
+    showStatus();
     stationList_->refresh(HostConnection::nowMs());
     if (!stationList_->selected().empty()) stationPicked(stationList_->selected());
 }
@@ -772,7 +775,7 @@ void MainFrame::sizeStatusFields()
     int host = bar->GetTextExtent(shown).x + 2 * bar->GetBorderX() + FromDIP(12);
     if (themeButton_ == nullptr && !IsMaximized()) host += bar->GetClientSize().y;
     const int theme = themeButton_ != nullptr ? bar->GetClientSize().y + 2 * bar->GetBorderX() : 0;
-    const int widths[5] = {FromDIP(150), FromDIP(260), -1, host, theme};
+    const int widths[5] = {FromDIP(270), FromDIP(260), -1, host, theme};
     bar->SetStatusWidths(STATUS_FIELDS, widths);
 
     wxRect field;
@@ -796,7 +799,11 @@ void MainFrame::showThemeButton()
 
 void MainFrame::showStatus()
 {
-    SetStatusText(link_.busy() ? "Channel busy" : "Channel clear", FIELD_CHANNEL);
+    // Channel clear or busy, or what of ours is going out, and on hover
+    // all of it.
+    wxString channel = utf8(link::channelLine(link_));
+    if (GetStatusBar()->GetStatusText(FIELD_CHANNEL) != channel) SetStatusText(channel, FIELD_CHANNEL);
+    channelTip_ = utf8(link::channelTip(link_));
     std::string mode = !modeUsed_.empty() ? modeUsed_ : link_.groupMode();
     SetStatusText(mode.empty() ? wxString("Mode: the host's") : "Mode " + utf8(gearshift_.shortName(mode)),
                   FIELD_MODE);

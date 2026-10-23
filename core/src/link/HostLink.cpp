@@ -1,6 +1,7 @@
 #include "ragtime/link/HostLink.h"
 
 #include <algorithm>
+#include <string>
 #include <utility>
 
 namespace ragtime
@@ -414,7 +415,7 @@ HostLink::Burst* HostLink::current()
 }
 
 uint64_t HostLink::broadcast(const std::vector<std::vector<uint8_t>>& frames, const std::string& mode,
-                             uint64_t nowMs)
+                             uint64_t nowMs, const std::string& label)
 {
     if (frames.empty()) return 0;
     advance(nowMs);
@@ -422,6 +423,7 @@ uint64_t HostLink::broadcast(const std::vector<std::vector<uint8_t>>& frames, co
     burst.id = nextId_++;
     burst.frames = frames;
     burst.mode = mode;
+    burst.label = label;
     Event e;
     e.type = Event::Type::Burst;
     e.id = burst.id;
@@ -465,6 +467,21 @@ bool HostLink::burstWithHost() const
     if (bursts_.empty()) return false;
     BurstState state = bursts_.front().state;
     return state == BurstState::Sending || state == BurstState::Held;
+}
+
+std::vector<HostLink::Outgoing> HostLink::outgoing() const
+{
+    std::vector<Outgoing> out;
+    for (const Burst& burst : bursts_)
+    {
+        Outgoing o;
+        o.id = burst.id;
+        o.label = burst.label;
+        o.state = burst.state;
+        o.frames = burst.frames.size();
+        out.push_back(std::move(o));
+    }
+    return out;
 }
 
 void HostLink::setPaused(bool paused, uint64_t nowMs)
@@ -601,6 +618,79 @@ void HostLink::finishSession(SessionEnd end)
     sessionSnr_.reset();
     emit(e);
     heldChanged();
+}
+
+//-------------------------------------------------------------------------
+// What is going out
+//-------------------------------------------------------------------------
+
+std::string snippet(const std::string& text, size_t chars)
+{
+    // On one line, its spaces run together.
+    std::string flat;
+    for (char c : text)
+    {
+        if (c == '\n' || c == '\r' || c == '\t') c = ' ';
+        if (c == ' ' && (flat.empty() || flat.back() == ' ')) continue;
+        flat += c;
+    }
+    while (!flat.empty() && flat.back() == ' ') flat.pop_back();
+
+    // Where the chars-th character ends, counting UTF-8 lead bytes.
+    size_t at = 0, count = 0;
+    while (at < flat.size() && count < chars)
+    {
+        at++;
+        while (at < flat.size() && ((unsigned char)flat[at] & 0xc0) == 0x80) at++;
+        count++;
+    }
+    if (at >= flat.size()) return "\xe2\x80\x9c" + flat + "\xe2\x80\x9d";
+    // Between words, if there is a space in the second half.
+    size_t space = flat.rfind(' ', at);
+    if (space != std::string::npos && space > at / 2) at = space;
+    return "\xe2\x80\x9c" + flat.substr(0, at) + "\xe2\x80\xa6\xe2\x80\x9d";
+}
+
+namespace
+{
+
+// Short for the field, in full for its tooltip.
+std::string described(const HostLink::Outgoing& o, const HostLink& link, bool full)
+{
+    const std::string what = o.label.empty() ? std::string("a burst") : o.label;
+    switch (o.state)
+    {
+        case HostLink::BurstState::Sending:
+            if (!link.busy()) return "Sending: " + what;
+            return (full ? "Waiting for a clear channel: " : "Busy, next: ") + what;
+        case HostLink::BurstState::Held:
+            return (full ? "Held while the session is busy: " : "Held: ") + what;
+        default:
+            return (link.paused() ? "Paused: " : "Queued: ") + what;
+    }
+}
+
+} // namespace
+
+std::string channelLine(const HostLink& link)
+{
+    std::vector<HostLink::Outgoing> out = link.outgoing();
+    if (out.empty()) return link.busy() ? "Channel busy" : "Channel clear";
+    std::string line = described(out.front(), link, false);
+    if (out.size() > 1) line += " (+" + std::to_string(out.size() - 1) + ")";
+    return line;
+}
+
+std::string channelTip(const HostLink& link)
+{
+    std::string tip = link.busy() ? "Channel busy: data2g-host hears a signal" : "Channel clear";
+    std::vector<HostLink::Outgoing> out = link.outgoing();
+    if (out.empty()) tip += "\nNothing of ours waits to go on D2G";
+    for (const HostLink::Outgoing& o : out) tip += "\n" + described(o, link, true);
+    if (link.sessionState() != HostLink::SessionState::None && link.buffer() > 0)
+        tip += "\nSession: " + std::to_string(link.buffer()) + " byte" + (link.buffer() == 1 ? "" : "s")
+               + " not yet acknowledged by " + link.sessionPeer();
+    return tip;
 }
 
 } // namespace link

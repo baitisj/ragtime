@@ -467,6 +467,60 @@ void testNothingWithoutTheHost()
 
 } // namespace
 
+// The status bar's first field says what of ours is going out (Jeff,
+// 2026-10-23), and its tooltip lists it all.
+void testWhatIsGoingOut()
+{
+    HostLink link = opened(0);
+    CHECK_EQ(channelLine(link), std::string("Channel clear"));
+    say(link, "BUSY ON\r", 5);
+    CHECK_EQ(channelLine(link), std::string("Channel busy"));
+    say(link, "BUSY OFF\r", 6);
+
+    uint64_t seal = link.broadcast({{0xA0, 1}}, "", 10, "seal");
+    link.broadcast({{0xA0, 2}}, "", 10, snippet("CQ CQ de AG7EW"));
+    std::vector<uint16_t> tags = tagsWritten(link, 2);
+    CHECK_EQ(link.outgoing().size(), (size_t)2);
+    CHECK(link.outgoing().front().id == seal && link.outgoing().front().state == BurstState::Sending);
+    CHECK_EQ(channelLine(link), std::string("Sending: seal (+1)"));
+    say(link, "BUSY ON\r", 20);
+    CHECK_EQ(channelLine(link), std::string("Busy, next: seal (+1)"));
+    CHECK_EQ(channelTip(link), std::string("Channel busy: data2g-host hears a signal\nWaiting for a clear channel: seal\n"
+                                           "Queued: \xe2\x80\x9c" "CQ CQ de AG7EW\xe2\x80\x9d"));
+    say(link, "BUSY OFF\r", 30);
+    ackTags(link, 2, tags, 40);
+    CHECK_EQ(channelLine(link), std::string("Sending: \xe2\x80\x9c" "CQ CQ de AG7EW\xe2\x80\x9d"));
+    ackTags(link, 2, tagsWritten(link, 2), 50);
+    CHECK(link.outgoing().empty());
+    CHECK_EQ(channelLine(link), std::string("Channel clear"));
+
+    // Paused, and held for a session; one with no label still shows.
+    link.setPaused(true, 60);
+    link.broadcast({{0xA0, 3}}, "", 60, "QRV");
+    CHECK_EQ(channelLine(link), std::string("Paused: QRV"));
+    link.setPaused(false, 70);
+    tagsWritten(link, 2);
+    say(link, "CONNECTED W1AW AG7EW 2300\rBUFFER 56\r", 80);
+    link.broadcast({{0xA0, 4}}, "", 90);
+    CHECK_EQ(channelLine(link), std::string("Held: QRV (+1)"));
+    CHECK_EQ(channelTip(link), std::string("Channel clear\nHeld while the session is busy: QRV\nQueued: a burst\n"
+                                           "Session: 56 bytes not yet acknowledged by W1AW"));
+}
+
+// A message's start: on one line, cut between words, UTF-8 kept whole.
+void testSnippets()
+{
+    CHECK_EQ(snippet("hi"), std::string("\xe2\x80\x9chi\xe2\x80\x9d"));
+    CHECK_EQ(snippet("  two\nlines  "), std::string("\xe2\x80\x9ctwo lines\xe2\x80\x9d"));
+    CHECK_EQ(snippet("CQ CQ CQ de AG7EW AG7EW K", 12),
+             std::string("\xe2\x80\x9c" "CQ CQ CQ de\xe2\x80\xa6\xe2\x80\x9d"));
+    // No space in the second half: cut where the count ends.
+    CHECK_EQ(snippet("abcdefghijklmnop", 5), std::string("\xe2\x80\x9c" "abcde\xe2\x80\xa6\xe2\x80\x9d"));
+    // Five characters, the last two of them two bytes each.
+    CHECK_EQ(snippet("abc\xc3\xa9\xc3\xa9xyz", 5),
+             std::string("\xe2\x80\x9c" "abc\xc3\xa9\xc3\xa9\xe2\x80\xa6\xe2\x80\x9d"));
+}
+
 int main()
 {
     testTheOpening();
@@ -482,5 +536,7 @@ int main()
     testCallingAndLeaving();
     testAnUnansweredCommandIsNotWaitedOnForEver();
     testNothingWithoutTheHost();
+    testWhatIsGoingOut();
+    testSnippets();
     return ragtime_test::finish();
 }

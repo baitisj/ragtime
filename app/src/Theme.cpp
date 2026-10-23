@@ -101,6 +101,17 @@ void applyTheme(ThemeChoice choice)
 #endif
 }
 
+void scrollbarBeside(wxWindow* window)
+{
+#if defined(__WXGTK3__)
+    GtkWidget* widget = static_cast<GtkWidget*>(window->GetHandle());
+    if (widget != nullptr && GTK_IS_SCROLLED_WINDOW(widget))
+        gtk_scrolled_window_set_overlay_scrolling(GTK_SCROLLED_WINDOW(widget), FALSE);
+#else
+    (void)window;
+#endif
+}
+
 void followThemeBackground(wxWindow* window, wxSystemColour colour)
 {
     window->SetBackgroundColour(wxSystemSettings::GetColour(colour));

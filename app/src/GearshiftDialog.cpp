@@ -22,6 +22,7 @@
 #include <wx/stattext.h>
 #include <wx/tglbtn.h>
 
+#include "Html.h"
 #include "Thresholds.h"
 
 using namespace ragtime::gearbox;
@@ -49,8 +50,6 @@ wxColour blend(const wxColour& a, const wxColour& b, double t)
 }
 
 const wxColour ACCENT(0x1f, 0x5f, 0xbf);      // the current gear, as the mock-ups
-const wxColour SUGGESTION(0x1e, 0x6b, 0x34);  // Auto's pick while Auto is off
-const wxColour TOO_HARD(0xc0, 0x26, 0x1a);    // a gear the path can't carry
 
 constexpr double PI = 3.14159265358979323846;
 constexpr double MIN_BPS = 20.0;
@@ -337,7 +336,9 @@ private:
             const double y = yFor(p, gear.threshold);
             const bool isCurrent = current && current->number == gear.number;
             const bool tooHard = snr && dbShort(gear.threshold, *snr) > 0;
-            const wxColour& line = isCurrent ? ACCENT : tooHard ? TOO_HARD : ink;
+            // A gear the path can't carry in red; Auto's pick, while Auto is off,
+            // ringed in green.
+            const wxColour line = isCurrent ? ACCENT : tooHard ? badText() : ink;
             // The gear number only for a mode with no short name.
             const wxString label = gear.name.empty() ? wxString::Format("%d", gear.number)
                                                      : utf8(gear.name);
@@ -348,7 +349,7 @@ private:
             const double half = std::max(KNOB_HALF_WIDTH, w / 2 + 5);
             if (!shift_.isAuto() && suggestion && suggestion->number == gear.number)
             {
-                setPen(*gc, SUGGESTION, 2.5);
+                setPen(*gc, goodText(), 2.5);
                 gc->SetBrush(*wxTRANSPARENT_BRUSH);
                 gc->DrawRoundedRectangle(x - half - 4, y - r - 4, 2 * (half + 4), 2 * (r + 4), r + 4);
             }
@@ -601,7 +602,7 @@ void GearshiftDialog::refresh()
         gears_->SetItem(row, 3, utf8(formatDb(gear.threshold)));
         gears_->SetItem(row, 4, utf8(formatDuration(secondsPerKilobyte(gear.bitsPerSecond))));
         if (snr && dbShort(gear.threshold, *snr) > 0)
-            gears_->SetItemTextColour(row, TOO_HARD);
+            gears_->SetItemTextColour(row, badText());
         if (current && current->number == gear.number)
         {
             gears_->SetItemState(row, wxLIST_STATE_SELECTED, wxLIST_STATE_SELECTED);
