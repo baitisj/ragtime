@@ -263,7 +263,7 @@ Session files keep the ideas that worked on the air (offer and answer, carrying 
 
 **Sending.**
 
-- In a session: drag a file onto the tab, or press **Send file...**. Several files queue in order, shown as a list you can reorder or remove before each starts. One moves at a time, as now.
+- In a session: drag a file onto the tab, or press the file button (a floppy disk, beside Send). Several files queue in order, shown as a list you can reorder or remove before each starts. One moves at a time, as now.
 - Outside a session, Send file to a station offers to **Call** first. There is no hidden session for a file.
 - In broadcast mode: **Broadcast a file...**, with today's estimate box (airtime at the chosen speed, repair time, "stations will not confirm receipt") and the 300 KB cap.
 

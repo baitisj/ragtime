@@ -314,7 +314,7 @@ window and resend rounds; on the listening side, asking with backoff and
 suppression), `broadcast::BroadcastFiles` (sending and receiving files on
 D2G; its rows and finished files feed the Files tab through
 `files/FileRows.h`), all in core/src/broadcast/ with
-`tests/BroadcastFilesTest.cpp`; in the window, File... on the Broadcast
+`tests/BroadcastFilesTest.cpp`; in the window, the file button (a floppy disk since 2026-10-23) on the Broadcast
 tab, file cards among the messages, File > Broadcast a file... and
 Receive broadcast files automatically, and the share's menu on its card
 and its Files row; the seal chain kept per callsign across restarts. The
