@@ -3,11 +3,14 @@
 // that answers the command lines and carries every ACKMODE frame to the
 // other station. No sockets, so it runs everywhere the core builds.
 #include <cstdint>
+#include <filesystem>
 #include <string>
+#include <system_error>
 #include <vector>
 
 #include "Check.h"
 #include "ragtime/broadcast/BroadcastChat.h"
+#include "ragtime/broadcast/BroadcastLog.h"
 #include "ragtime/broadcast/Stations.h"
 #include "ragtime/link/Data2GLink.h"
 #include "ragtime/link/HostLink.h"
@@ -373,6 +376,97 @@ void testPauseCancelResend()
     CHECK(m->state == State::NotSent);
 }
 
+void testHistory()
+{
+    std::filesystem::path dir = std::filesystem::temp_directory_path() / "ragtime-broadcast-history-test";
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
+    std::string path = (dir / "broadcast.log").string();
+
+    uint32_t newest = 0;
+    {
+        End a("TEST1", "CN87"), b("TEST2", "FN31");
+        broadcast::BroadcastLog log(path);
+        a.chat.setLog(&log, now);
+        CHECK(a.chat.messages().empty());
+        a.link.commandUp(now);
+        b.link.commandUp(now);
+        settle(a, b);
+        a.chat.send("CQ CQ de TEST1", "", now);
+        settle(a, b);
+        b.chat.send("@TEST1 gm, QRV", "", now);
+        settle(a, b);
+        a.chat.addFile(7, false, "TEST2", "net.txt", now);
+        a.chat.fileEnded(7, "Saved");
+        a.dropNext = true;
+        a.chat.send("lost in the noise", "", now);
+        settle(a, b);
+        CHECK_EQ(a.chat.messages().size(), (size_t)4);
+        newest = a.chat.newestItem();
+        now += 60000;
+        a.chat.closeLog(now);
+    }
+
+    // Ragtime opens again: what was said, greyed, a rule, and on below.
+    End a("TEST1", "CN87"), b("TEST2", "FN31");
+    BroadcastChat::Settings s = a.chat.settings();
+    a.chat.setSettings(s, newest);
+    broadcast::BroadcastLog log(path);
+    now += 60000;
+    a.chat.setLog(&log, now);
+    const auto& rows = a.chat.messages();
+    CHECK_EQ(rows.size(), (size_t)5);
+    if (rows.size() == 5)
+    {
+        CHECK(rows[0].past && rows[0].ours && rows[0].state == State::Sent);
+        CHECK_EQ(rows[0].text, std::string("CQ CQ de TEST1"));
+        CHECK(rows[1].past && !rows[1].ours && rows[1].to == "TEST1" && rows[1].ackWanted);
+        CHECK(rows[2].kind == Message::Kind::File && rows[2].outcome == "Saved" && rows[2].file == 0);
+        CHECK(rows[3].state == State::NotSent);
+        CHECK(rows[4].kind == Message::Kind::Rule);
+        CHECK(a.chat.canResend(rows[3]));
+        CHECK(!a.chat.canResend(rows[1]) && !a.chat.canResend(rows[2]) && !a.chat.canResend(rows[4]));
+    }
+    a.link.commandUp(now);
+    b.link.commandUp(now);
+    settle(a, b);
+
+    // TEST2 says it again: not listed twice.
+    b.chat.send("@TEST1 gm, QRV", "", now);
+    settle(a, b);
+    CHECK_EQ(a.chat.messages().size(), (size_t)6);
+    CHECK_EQ(a.chat.messages().back().text, std::string("gm, QRV"));
+    CHECK(!a.chat.messages().back().past);
+
+    // Our lost line from last time goes again, as the same item.
+    uint64_t lost = rows[3].id;
+    CHECK(a.chat.resend(lost, "", now));
+    settle(a, b);
+    const Message* m = a.chat.find(lost);
+    CHECK(m != nullptr && m->state == State::Sent && !m->past);
+    const Message* there = last(b);
+    CHECK(there != nullptr && there->text == "lost in the noise" && there->seq == newest);
+
+    // A past line of ours under another callsign stays put.
+    s.callsign = "TEST3";
+    a.chat.setSettings(s, 0);
+    CHECK(!a.chat.canResend(rows[0]));
+
+    // This run's lines are in the log for next time, the re-sent one too.
+    a.chat.closeLog(now);
+    std::vector<Message> again = log.load(100);
+    CHECK_EQ(again.size(), (size_t)8);
+    if (again.size() == 8)
+    {
+        CHECK(again[4].kind == Message::Kind::Rule);
+        CHECK_EQ(again[5].text, std::string("gm, QRV"));
+        CHECK_EQ(again[6].text, std::string("lost in the noise"));
+        CHECK(again[6].state == State::Sent);
+        CHECK(again[7].kind == Message::Kind::Rule);
+    }
+    std::filesystem::remove_all(dir, ec);
+}
+
 void testDuplicateFrame()
 {
     End a("TEST1", "CN87"), b("TEST2", "FN31");
@@ -514,6 +608,7 @@ int main()
     testLongMessageSplits();
     testPauseCancelResend();
     testDuplicateFrame();
+    testHistory();
     testStations();
     testReconnect();
     return ragtime_test::finish();

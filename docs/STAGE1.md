@@ -146,6 +146,20 @@ bench"). Choices made there, for Jeff to keep or change:
 - The **status bar**: channel clear or busy, the mode the host last sent
   in, and a line that will show the newest transfer (clicking it opens
   Files); until then it shows the host's refusals and undecoded bursts.
+  At its right end, data2g-host's address and state (Connected,
+  Reconnecting in 8 s), with the last error as its tooltip. It sat at the
+  connection bar's left end until Jeff moved it (2026-10-23).
+- **The Broadcast tab carries on (Jeff, 2026-10-23).** What is said on
+  D2G is kept on disk (`broadcast::BroadcastLog`, one file,
+  `<data folder>/broadcast.log`, or `<config>.broadcast.log` beside a
+  `--config` file), so Ragtime opens with the earlier lines, greyed, a
+  rule where it last closed ("Ragtime closed 01:15"), and carries on
+  below. Broadcast files show as one line each with how they ended.
+  Earlier messages of ours can be re-sent, as the same item, while the
+  callsign is the same; a line heard again isn't listed twice. Ours that
+  were still going when Ragtime closed come back Not sent. The file is
+  cut to its later half when it passes 1 MB, and the tab shows the newest
+  2000 rows.
 
 Left for F: Call and Leave on the Station menu and the station's
 right-click menu, the session partner pinned at the top of the list and
@@ -157,8 +171,7 @@ The brief:
 - One main window: connection bar, station list on the left, tabs in the
   middle, Globus on the right, status bar. Both dividers drag and are
   remembered; Globus off gives the messages the full width.
-- Connection bar: host address and state (Connected, Reconnecting in
-  8 s), my callsign, group `D2G`, the gearshift button and the 500 Hz
+- Connection bar: my callsign, group `D2G`, the gearshift button and the 500 Hz
   switch, Accept sessions, Pause sending, TX light from `PTT`, and
   an **Auto ALC** checkbox with a level meter (disabled until the host
   takes a TX level command).

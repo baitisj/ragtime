@@ -72,6 +72,9 @@ std::string filesLogPath();
 // The Session tab's lasting log, a file per station: beside the --config
 // file (<config>.sessions), or appDataDir()/sessions.
 std::string sessionLogDir();
+// The Broadcast tab's lasting log: beside the --config file
+// (<config>.broadcast.log), or appDataDir()/broadcast.log.
+std::string broadcastLogPath();
 
 namespace keys
 {

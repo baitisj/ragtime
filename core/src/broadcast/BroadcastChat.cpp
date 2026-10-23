@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <utility>
 
+#include "ragtime/broadcast/BroadcastLog.h"
+
 namespace ragtime
 {
 namespace broadcast
@@ -254,7 +256,9 @@ std::vector<uint64_t> BroadcastChat::send(const std::string& typed, const std::s
     uint64_t burst = link_.broadcast(frames, mode, nowMs);
     for (Message& m : messages_)
     {
-        if (std::find(made.begin(), made.end(), m.id) != made.end()) m.burst = burst;
+        if (std::find(made.begin(), made.end(), m.id) == made.end()) continue;
+        m.burst = burst;
+        if (log_ != nullptr) log_->added(m);
     }
     if (onItems_ && burst != 0) onItems_(items, burst, mode, nowMs);
     trim();
@@ -324,29 +328,60 @@ bool BroadcastChat::cancel(uint64_t id)
     if (!link_.cancel(burst)) return false;
     for (Message& other : messages_)
     {
-        if (other.ours && other.burst == burst) other.state = State::Cancelled;
+        if (!other.ours || other.burst != burst) continue;
+        other.state = State::Cancelled;
+        logState(other);
     }
     version_++;
     return true;
 }
 
-bool BroadcastChat::canResend(const Message& message)
+bool BroadcastChat::canResend(const Message& message) const
 {
-    return message.ours && (message.state == State::Sent || message.state == State::NotSent
-                            || message.state == State::Cancelled || message.state == State::Acknowledged);
+    if (message.kind != Message::Kind::Text || !message.ours) return false;
+    // One from the log is rebuilt under its own callsign and number.
+    if (message.past && (message.from != settings_.callsign || message.seq == 0)) return false;
+    return message.state == State::Sent || message.state == State::NotSent || message.state == State::Cancelled
+           || message.state == State::Acknowledged;
 }
 
 bool BroadcastChat::resend(uint64_t id, const std::string& mode, uint64_t nowMs)
 {
     Message* m = findMine(id);
+    if (m == nullptr || !canResend(*m)) return false;
     auto record = records_.find(id);
-    if (m == nullptr || record == records_.end() || !canResend(*m)) return false;
+    if (record == records_.end())
+    {
+        if (!m->past) return false;
+        // The same record as the first time: the same callsign, number,
+        // time and text, so a station that heard it lists it once.
+        protocol::Text t;
+        t.text = m->text;
+        t.to = m->to;
+        t.ackWanted = m->ackWanted;
+        protocol::Record r;
+        r.body = t;
+        r.header.callsign = m->from;
+        r.header.seq = m->seq;
+        r.header.time = m->time;
+        record = records_.emplace(id, std::move(r)).first;
+    }
     std::vector<uint8_t> frame = protocol::encodeFrame({record->second});
     if (frame.empty()) return false;
     m->state = State::Queued;
     m->mode = mode;
     m->burst = link_.broadcast({frame}, mode, nowMs);
     if (onItems_ && m->burst != 0) onItems_({record->second}, m->burst, mode, nowMs);
+    if (m->past)
+    {
+        // It goes again in this run, so this run's log has it.
+        m->past = false;
+        if (log_ != nullptr) log_->added(*m);
+    }
+    else
+    {
+        logState(*m);
+    }
     version_++;
     return true;
 }
@@ -367,11 +402,22 @@ uint64_t BroadcastChat::addFile(uint64_t file, bool ours, const std::string& fro
     m.time = seconds(nowMs);
     m.atMs = nowMs;
     m.state = State::Heard;
+    m.kind = Message::Kind::File;
     m.file = file;
+    if (log_ != nullptr) log_->added(m);
     messages_.push_back(std::move(m));
     trim();
     version_++;
     return messages_.back().id;
+}
+
+void BroadcastChat::fileEnded(uint64_t file, const std::string& outcome)
+{
+    if (log_ == nullptr || file == 0) return;
+    for (const Message& m : messages_)
+    {
+        if (m.file == file) log_->fileEnded(m, outcome);
+    }
 }
 
 std::vector<protocol::Record> BroadcastChat::onEvent(const Event& event, uint64_t nowMs)
@@ -395,7 +441,10 @@ std::vector<protocol::Record> BroadcastChat::onEvent(const Event& event, uint64_
             {
                 if (!m.ours || m.burst != event.id) continue;
                 if (m.state == State::Cancelled || m.state == State::Acknowledged) continue;
-                m.state = fromBurst(event.burstState);
+                State state = fromBurst(event.burstState);
+                if (state == m.state) continue;
+                m.state = state;
+                logState(m);
                 version_++;
             }
             break;
@@ -451,6 +500,7 @@ void BroadcastChat::onRecord(const protocol::Record& record, uint64_t nowMs)
         m.time = record.header.time;
         m.atMs = nowMs;
         m.state = State::Heard;
+        if (log_ != nullptr) log_->added(m);
         messages_.push_back(std::move(m));
         trim();
         version_++;
@@ -460,9 +510,10 @@ void BroadcastChat::onRecord(const protocol::Record& record, uint64_t nowMs)
         if (ack->to != settings_.callsign) return;
         for (Message& m : messages_)
         {
-            if (m.ours && m.to == from && m.seq == ack->item && m.state != State::Acknowledged)
+            if (m.ours && !m.past && m.to == from && m.seq == ack->item && m.state != State::Acknowledged)
             {
                 m.state = State::Acknowledged;
+                logState(m);
                 version_++;
             }
         }
@@ -495,9 +546,45 @@ void BroadcastChat::flushAcks(const std::string& mode, uint64_t nowMs)
     if (id != 0) ackBursts_.insert(id);
 }
 
+void BroadcastChat::setLog(BroadcastLog* log, uint64_t nowMs)
+{
+    log_ = log;
+    if (log_ == nullptr) return;
+    std::deque<Message> rows;
+    for (Message& m : log_->load(MAX_MESSAGES))
+    {
+        m.id = nextId_++;
+        // Heard again (a station re-sending it), it isn't listed twice.
+        if (m.kind == Message::Kind::Text && !m.ours) seen_.insert(ItemKey{m.from, m.seq, m.time});
+        rows.push_back(std::move(m));
+    }
+    for (Message& m : messages_) rows.push_back(std::move(m));
+    messages_ = std::move(rows);
+    trim();
+    log_->began(nowMs);
+    for (const Message& m : messages_)
+    {
+        if (!m.past && m.kind != Message::Kind::Rule) log_->added(m);
+    }
+    version_++;
+}
+
+void BroadcastChat::closeLog(uint64_t nowMs)
+{
+    if (log_ == nullptr) return;
+    log_->ended(nowMs);
+    log_ = nullptr;
+}
+
+void BroadcastChat::logState(const Message& m)
+{
+    if (log_ != nullptr && !m.past) log_->settled(m);
+}
+
 void BroadcastChat::trim()
 {
-    while (messages_.size() > MAX_MESSAGES)
+    while (messages_.size() > MAX_MESSAGES
+           || (!messages_.empty() && messages_.front().kind == Message::Kind::Rule))
     {
         records_.erase(messages_.front().id);
         messages_.pop_front();

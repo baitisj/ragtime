@@ -29,9 +29,11 @@ const wxColour NOT_SENT(0xb4, 0x23, 0x18);    // red, as the Mismatch badge
 // Room for the seal badge (16 px) in every row.
 constexpr int BADGE_ROOM = 20;
 
+// "14:32" today, "22 Oct 14:32" on another day (from the log).
 wxString clock(uint64_t ms)
 {
-    return wxDateTime((time_t)(ms / 1000)).Format("%H:%M");
+    wxDateTime at((time_t)(ms / 1000));
+    return at.Format(at.IsSameDate(wxDateTime::Today()) ? "%H:%M" : "%d %b %H:%M");
 }
 
 const int ID_REPLY = wxID_HIGHEST + 401;
@@ -75,16 +77,23 @@ protected:
         auto colour = [picked](const wxColour& c) {
             return picked ? wxString() : " color=\"" + htmlColour(c) + "\"";
         };
+        if (m->kind == Message::Kind::Rule) return ruleItem(*m, picked);
         if (m->file != 0) return fileItem(*m, picked);
+        if (m->kind == Message::Kind::File) return pastFileItem(*m, picked);
         const std::string& me = owner_->chat_.settings().callsign;
+        // What came before Ragtime last closed reads in grey.
+        wxString body = m->past ? colour(secondaryText()) : wxString();
 
         wxString state;
         if (m->ours)
         {
             wxColour c = secondaryText();
-            if (m->state == State::Sent || m->state == State::Acknowledged) c = SENT;
-            if (m->state == State::Sending) c = ACCENT_BLUE;
-            if (m->state == State::NotSent) c = NOT_SENT;
+            if (!m->past)
+            {
+                if (m->state == State::Sent || m->state == State::Acknowledged) c = SENT;
+                if (m->state == State::Sending) c = ACCENT_BLUE;
+                if (m->state == State::NotSent) c = NOT_SENT;
+            }
             wxString label = stateLabel(m->state);
             if (m->state == State::Acknowledged) label = "Acknowledged by " + wxString::FromUTF8(m->to);
             else if (m->state == State::Sent && m->ackWanted) label = "Sent, no ack yet";
@@ -95,7 +104,7 @@ protected:
         if (!m->to.empty())
         {
             bool toMe = !me.empty() && m->to == me;
-            to << "<font" << colour(ACCENT_BLUE) << ">@" << htmlEscape(m->to) << (toMe ? " (you)" : "")
+            to << "<font" << colour(m->past ? secondaryText() : ACCENT_BLUE) << ">@" << htmlEscape(m->to) << (toMe ? " (you)" : "")
                << "</font> ";
         }
 
@@ -104,14 +113,45 @@ protected:
              << "<td width=\"" << BADGE_ROOM << "\"></td>"
              << "<td valign=\"top\" nowrap><font" << colour(secondaryText()) << ">" << clock(m->atMs)
              << "</font></td>"
-             << "<td valign=\"top\" width=\"100%\"><b>" << htmlEscape(m->from) << "</b>&nbsp; " << to
-             << htmlEscape(m->text) << "</td>"
+             << "<td valign=\"top\" width=\"100%\"><font" << body << "><b>" << htmlEscape(m->from) << "</b>&nbsp; "
+             << to << htmlEscape(m->text) << "</font></td>"
              << "<td valign=\"top\" nowrap align=\"right\">" << state << "</td>"
              << "</tr></table>";
         return html;
     }
 
 private:
+    // Where Ragtime last closed: what is above came before.
+    wxString ruleItem(const Message& m, bool picked) const
+    {
+        wxString font = picked ? wxString() : " color=\"" + htmlColour(secondaryText()) + "\"";
+        wxString html;
+        html << "<table width=\"100%\" cellspacing=\"0\" cellpadding=\"2\"><tr>"
+             << "<td width=\"50%\" valign=\"middle\"><hr></td>"
+             << "<td nowrap valign=\"middle\"><font size=\"-1\"" << font << ">Ragtime closed " << clock(m.atMs)
+             << "</font></td>"
+             << "<td width=\"50%\" valign=\"middle\"><hr></td>"
+             << "</tr></table>";
+        return html;
+    }
+
+    // A broadcast file from the log: one line, greyed, and how it ended.
+    wxString pastFileItem(const Message& m, bool picked) const
+    {
+        wxString font = picked ? wxString() : " color=\"" + htmlColour(secondaryText()) + "\"";
+        wxString who = m.ours ? wxString("You broadcast") : htmlEscape(m.from) + " broadcast";
+        wxString html;
+        html << "<table width=\"100%\" cellspacing=\"0\" cellpadding=\"2\"><tr>"
+             << "<td width=\"" << BADGE_ROOM << "\"></td>"
+             << "<td valign=\"top\" nowrap><font" << font << ">" << clock(m.atMs) << "</font></td>"
+             << "<td valign=\"top\" width=\"100%\"><font" << font << "><b>" << who << "</b> a file: "
+             << htmlEscape(m.text) << "</font></td>"
+             << "<td valign=\"top\" nowrap align=\"right\"><font" << font << ">" << htmlEscape(m.outcome)
+             << "</font></td>"
+             << "</tr></table>";
+        return html;
+    }
+
     // A broadcast file: who, the file, its state, and its links.
     wxString fileItem(const Message& m, bool picked) const
     {
@@ -211,7 +251,7 @@ BroadcastPage::BroadcastPage(wxWindow* parent, const BroadcastChat& chat)
     list_->Bind(wxEVT_MOTION, [this](wxMouseEvent& e) {
         const Message* m = list_->at((size_t)std::max(0, list_->VirtualHitTest(e.GetPosition().y)));
         wxString tip;
-        if (m != nullptr && list_->VirtualHitTest(e.GetPosition().y) != wxNOT_FOUND)
+        if (m != nullptr && m->kind == Message::Kind::Text && list_->VirtualHitTest(e.GetPosition().y) != wxNOT_FOUND)
         {
             tip = wxDateTime((time_t)m->time).FormatISOCombined(' ') + wxString::Format(", item %u", m->seq);
             if (!m->mode.empty()) tip += ", " + wxString::FromUTF8(nameMode_ ? nameMode_(m->mode) : m->mode);
@@ -311,8 +351,8 @@ void BroadcastPage::focusCompose()
 void BroadcastPage::showMenu(int row)
 {
     const Message* m = row == wxNOT_FOUND ? nullptr : list_->at((size_t)row);
-    if (m == nullptr) return;
-    if (m->file != 0)
+    if (m == nullptr || m->kind == Message::Kind::Rule) return;
+    if (m->file != 0 || m->kind == Message::Kind::File)
     {
         showFileMenu(*m);
         return;
@@ -324,7 +364,7 @@ void BroadcastPage::showMenu(int row)
     wxMenu menu;
     if (!m->ours) menu.Append(ID_REPLY, "Reply to " + wxString::FromUTF8(from));
     if (m->ours && m->state == State::Queued) menu.Append(ID_CANCEL, "Cancel");
-    if (ragtime::broadcast::BroadcastChat::canResend(*m)) menu.Append(ID_RESEND, "Re-send");
+    if (chat_.canResend(*m)) menu.Append(ID_RESEND, "Re-send");
     if (menu.GetMenuItemCount() > 0) menu.AppendSeparator();
     menu.Append(ID_COPY, "Copy text");
     menu.Bind(wxEVT_MENU, [=](wxCommandEvent& e) {
@@ -344,7 +384,7 @@ void BroadcastPage::showFileMenu(const Message& m)
 {
     uint64_t file = m.file;
     FileCard card;
-    if (fileCard_) fileCard_(file, card);
+    if (fileCard_ && file != 0) fileCard_(file, card);
     wxString name = wxString::FromUTF8(m.text);
 
     const auto& actions = card.menu.empty() ? card.actions : card.menu;
