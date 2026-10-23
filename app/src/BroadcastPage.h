@@ -37,8 +37,9 @@ struct FileCard
 
 // The Broadcast tab (docs/STAGE1.md, package E): the messages on D2G, each
 // of ours showing Queued, Sending, Sent or Not sent; the line to type in,
-// where "@W1AW" at the start addresses one station; the Gear button, which
-// shows the gear and opens the gearshift; and Send.
+// where "@W1AW" at the start addresses one station; the Gear button, a
+// speedometer over the gear's short name, which opens the gearshift; and
+// Send.
 //
 // Each message row leaves room on its left for the seal badge. Signing
 // comes in Stage 2, so the badge stays hidden until then rather than

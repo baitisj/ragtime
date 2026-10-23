@@ -6,9 +6,8 @@ speeds.
 
 ## What the operator sees
 
-One popup, opened from the gearshift button (a speedometer icon) on the
-connection bar or the
-Gear button by Send. The popup *is* the Submode Map:
+One popup, opened from the Gear button by Send (a speedometer with the
+gear's short name under it) or Settings > Gearshift (Ctrl+G). The popup *is* the Submode Map:
 
 - Speed across (bits per second, log scale from 20 to 10k), the S/N each
   mode needs down the side (harder further down), one dot per mode,
@@ -47,11 +46,10 @@ Gear button by Send. The popup *is* the Submode Map:
   and on the map (Jeff, 2026-10-22).
 - Leave out the `ack-` modes: they carry the host's own ARQ control.
 
-The connection bar shows the gearshift icon (its tooltip names the width
-and gear) and the `500 Hz` switch, to save room (Jeff, 2026-10-22); the
-button by Send
-shows `Gear E2C ▼`, with the Data2G name, speed and S/N in its
-tooltip. FSK, PSK and the rest show only in the popup.
+The Gear button by Send is the one way in (Jeff, 2026-10-23): a
+speedometer with the gear's short name under it in small type (`E2C`),
+and the Data2G name, speed, S/N and width in its tooltip. The connection
+bar keeps only the `500 Hz` switch. FSK, PSK and the rest show only in the popup.
 
 ## How the gears are chosen
 
@@ -194,9 +192,9 @@ run. The tables below are the Submode Map's.
   chosen mode if it is still a gear, or else takes the fastest gear no
   faster than it, so the gearbox never shifts up on its own. Auto with no
   S/N reports yet holds the chosen gear.
-- `app/src/GearshiftDialog.*`: the popup, opened by the gearshift button
-  (`GearshiftIcon.*` draws it; `ToggleSwitch.*` is the 500 Hz switch), the
-  Gear button and Settings > Gearshift (Ctrl+G). `app/src/Thresholds.*`:
+- `app/src/GearshiftDialog.*`: the popup, opened by the Gear button
+  (`GearshiftIcon.*` draws its speedometer) and Settings > Gearshift
+  (Ctrl+G). `ToggleSwitch.*` is the 500 Hz switch. `app/src/Thresholds.*`:
   finding and reading the file. `Gearshift::shortName` names a mode for
   the status bar and message tooltips.
 - `tests/GearboxTest.cpp` uses made-up placeholder figures, never

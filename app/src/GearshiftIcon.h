@@ -6,9 +6,9 @@
 
 class wxGraphicsContext;
 
-// The connection bar's gearshift button: a speedometer, a dial and its
-// needle well up the scale, in the theme's text colour. Jeff asked for an
-// icon that stands for picking a speed, to save room (2026-10-22).
+// The Gear button's speedometer, a dial and its needle well up the scale,
+// in the theme's text colour. Jeff picked it to stand for picking a speed
+// (2026-10-22); the button shows the gear's short name under it.
 
 // Draws the icon in a square size wide at the context's origin.
 void drawGearshiftIcon(wxGraphicsContext& gc, double size, const wxColour& ink);

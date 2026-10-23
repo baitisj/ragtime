@@ -14,6 +14,7 @@
 #include <wx/stattext.h>
 #include <wx/textctrl.h>
 
+#include "GearshiftIcon.h"
 #include "Html.h"
 #include "PhraseHighlight.h"
 
@@ -28,6 +29,10 @@ const wxColour NOT_SENT(0xb4, 0x23, 0x18);    // red, as the Mismatch badge
 
 // Room for the seal badge (16 px) in every row.
 constexpr int BADGE_ROOM = 20;
+
+// The Gear button's speedometer, small enough that the button with its
+// gear name stays near the height of the entry line.
+constexpr int GEAR_ICON_DIP = 16;
 
 // "14:32" today, "22 Oct 14:32" on another day (from the log).
 wxString clock(uint64_t ms)
@@ -204,7 +209,14 @@ BroadcastPage::BroadcastPage(wxWindow* parent, const BroadcastChat& chat)
     file_ = new wxButton(this, wxID_ANY, "File...", wxDefaultPosition, wxDefaultSize, wxBU_EXACTFIT);
     file_->SetToolTip("Broadcasts a file to everyone on D2G (300 KB at most), with repairs for stations that "
                       "miss pieces");
+    // The gearshift: a speedometer with the gear's short name under it
+    // ("A29") in small type.
     gear_ = new wxButton(this, wxID_ANY, "Gear", wxDefaultPosition, wxDefaultSize, wxBU_EXACTFIT);
+    gear_->SetFont(gear_->GetFont().Smaller());
+    gear_->SetBitmap(gearshiftIcon(wxSystemSettings::GetColour(wxSYS_COLOUR_BTNTEXT), GEAR_ICON_DIP));
+    gear_->SetBitmapPosition(wxTOP);
+    gear_->SetBitmapMargins(0, 0);
+    gear_->SetMinSize(wxSize(FromDIP(48), -1));
     send_ = new wxButton(this, wxID_ANY, "Send");
 
     buttons_ = new wxBoxSizer(wxHORIZONTAL);
@@ -238,6 +250,11 @@ BroadcastPage::BroadcastPage(wxWindow* parent, const BroadcastChat& chat)
     send_->Bind(wxEVT_BUTTON, [this](wxCommandEvent&) { send(); });
     gear_->Bind(wxEVT_BUTTON, [this](wxCommandEvent&) {
         if (onGear_) onGear_();
+    });
+    // The speedometer follows the theme's text colour, light or dark.
+    Bind(wxEVT_SYS_COLOUR_CHANGED, [this](wxSysColourChangedEvent& e) {
+        gear_->SetBitmap(gearshiftIcon(wxSystemSettings::GetColour(wxSYS_COLOUR_BTNTEXT), GEAR_ICON_DIP));
+        e.Skip();
     });
     file_->Bind(wxEVT_BUTTON, [this](wxCommandEvent&) {
         if (onBroadcastFile_) onBroadcastFile_();

@@ -100,8 +100,7 @@ std::string formatDuration(double seconds);
 std::string formatSpeed(double bitsPerSecond);
 // "+1.1 dB", "−3.0 dB" (a real minus sign, UTF-8).
 std::string formatDb(double dB);
-// The Gear button by Send: "Gear E2C", or Data2G's name when the gear has
-// no short name. Gears go by their names; the numbers stay internal.
+// "Gear E2C", or Data2G's name when the gear has no short name. Gears go by their names; the numbers stay internal.
 std::string gearLabel(const Gear& gear);
 
 // The path's S/N, from a station's last few bursts: their mean in dB.

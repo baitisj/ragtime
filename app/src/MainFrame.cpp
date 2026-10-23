@@ -17,7 +17,6 @@
 #include <wx/file.h>
 #include <wx/filedlg.h>
 #include <wx/filename.h>
-#include <wx/bmpbuttn.h>
 #include <wx/log.h>
 #include <wx/menu.h>
 #include <wx/msgdlg.h>
@@ -458,7 +457,6 @@ void MainFrame::buildLayout()
     });
 
     // The connection bar.
-    bar_->gearshift->Bind(wxEVT_BUTTON, [this](wxCommandEvent&) { showGearshift(); });
     bar_->narrow->Bind(wxEVT_TOGGLEBUTTON, [this](wxCommandEvent& e) { setNarrow(e.IsChecked()); });
     bar_->pause->Bind(wxEVT_TOGGLEBUTTON, [this](wxCommandEvent& e) { setPaused(e.IsChecked()); });
     bar_->acceptSessions->Bind(wxEVT_CHECKBOX, [this](wxCommandEvent& e) {
@@ -1811,23 +1809,21 @@ void MainFrame::gearChanged()
 void MainFrame::showGear()
 {
     std::optional<gearbox::Gear> gear = gearshift_.current();
-    bar_->setGearshiftTip(wxString("The gearshift: pick the speed, width and path. Now up to ")
-                          + gearbox::widthLabel(gearshift_.effectiveWidth())
-                          + (gear ? ", " + utf8(gearbox::gearLabel(*gear)) : wxString()));
+    const wxString width = wxString(" Up to ") + gearbox::widthLabel(gearshift_.effectiveWidth())
+                           + ". Opens the gearshift: speed, width and path.";
     if (!gear)
     {
-        broadcast_->setGearLabel("Gear: the host's mode",
-                                 "No gears yet: the gearshift says why. Until then broadcasts go in the group's "
-                                 "mode as data2g-host has it.");
+        broadcast_->setGearLabel("host", "No gears yet: the gearshift says why. Until then broadcasts go in "
+                                         "the group's mode as data2g-host has it." + width);
         return;
     }
-    wxString tip = utf8(gear->name.empty() ? gear->mode : gear->name + ", Data2G's " + gear->mode) + ": "
-                   + utf8(gearbox::formatSpeed(gear->bitsPerSecond)) + ", needs "
+    wxString tip = "Gear " + utf8(gear->name.empty() ? gear->mode : gear->name + ", Data2G's " + gear->mode)
+                   + ": " + utf8(gearbox::formatSpeed(gear->bitsPerSecond)) + ", needs "
                    + utf8(gearbox::formatDb(gear->threshold)) + " on a "
-                   + gearbox::pathLabel(gearshift_.path()) + " path. Opens the gearshift.";
+                   + gearbox::pathLabel(gearshift_.path()) + " path." + width;
     if (!link_.modes().empty() && broadcastMode().empty())
         tip += " data2g-host doesn't offer this mode, so broadcasts go in the group's mode.";
-    broadcast_->setGearLabel(utf8(gearbox::gearLabel(*gear)), tip);
+    broadcast_->setGearLabel(utf8(gear->name.empty() ? gear->mode : gear->name), tip);
 }
 
 void MainFrame::updatePathSnr(uint64_t nowMs)

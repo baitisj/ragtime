@@ -5,7 +5,6 @@
 
 class TxLamp;
 class ToggleSwitch;
-class wxBitmapButton;
 class wxBoxSizer;
 class wxCheckBox;
 class wxGauge;
@@ -13,8 +12,8 @@ class wxStaticText;
 class wxToggleButton;
 
 // The bar across the top of the window (docs/MOCKUPS.md, "Connection
-// bar"), left to right: my callsign, the group D2G, the gearshift button (a speedometer icon) and the 500 Hz
-// switch, Accept sessions, Pause sending, Auto ALC with
+// bar"), left to right: my callsign, the group D2G, the 500 Hz switch,
+// Accept sessions, Pause sending, Auto ALC with
 // its level meter, and the TX light. The window wires the controls; the
 // bar only lays them out and keeps their looks.
 class ConnectionBar : public wxPanel
@@ -23,11 +22,9 @@ public:
     explicit ConnectionBar(wxWindow* parent);
 
     void setCallsign(const wxString& callsign);
-    void setGearshiftTip(const wxString& tip);
     void setNarrow(bool narrow);
     void setPaused(bool paused);
 
-    wxBitmapButton* gearshift = nullptr;
     ToggleSwitch* narrow = nullptr;  // on: 500 Hz modes only (BW500)
     wxCheckBox* acceptSessions = nullptr;
     wxToggleButton* pause = nullptr;
