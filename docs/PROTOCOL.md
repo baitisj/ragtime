@@ -483,16 +483,21 @@ the host's `MODES` lists them.
   files automatically (off by default). Pieces heard before their
   announce are held, up to 2 MB, until it comes.
 - A listener that stops receiving keeps what came as Incomplete and asks
-  for nothing more; Ask again carries on asking while the sender's seal
-  is fresh. Rejecting a file throws away what came and is logged as
-  Declined.
+  for nothing more. One that has given up asking (5 requests that
+  brought nothing, above) shows the file as Incomplete too. Ask again
+  starts asking afresh under the file's seal, whatever earlier requests
+  brought, as long as that seal was heard in the last 2 hours; it can
+  also be asked while the file is still being received. With no such
+  seal there is nothing to ask under, and the screen says why; the
+  pieces kept still count if the sender broadcasts the file again.
+  Rejecting a file throws away what came and is logged as Declined.
 - With every piece in, the whole-file digest is checked. A file that
   fails it is fetched once more from the start; a second failure ends
   it. A file announced again with the same size, piece size, digest and
   name takes over the pieces already heard.
-- A file still missing pieces 2 hours 10 minutes after anything new came
-  is shown as incomplete; it and finished ones are kept on the screen
-  for 24 hours, in memory only.
+- A file still missing pieces once its seal is over 2 hours old, or 2
+  hours 10 minutes after anything new came, is shown as incomplete; it
+  and finished ones are kept on the screen for 24 hours, in memory only.
 
 ## Growing the protocol
 

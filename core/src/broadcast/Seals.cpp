@@ -890,6 +890,36 @@ void Seals::askSoon(const std::string& call, uint64_t nowMs)
     armAsk(found->first, found->second, LATE_SPREAD_MS, nowMs);
 }
 
+bool Seals::askAgain(const std::string& call, uint32_t seq, uint64_t nowMs)
+{
+    auto found = stations_.find(protocol::normalCallsign(call));
+    if (found == stations_.end()) return false;
+    bool listed = false;
+    for (auto& entry : found->second.seals)
+    {
+        HeardSeal& h = entry.second;
+        if (!covers(h.seal, seq) || nowMs >= h.heardMs + MAX_OPEN_MS) continue;
+        h.givenUp = false;
+        h.asks = 0;
+        h.lackWhenAsked = 0;
+        listed = true;
+    }
+    if (listed) armAsk(found->first, found->second, LATE_SPREAD_MS, nowMs);
+    version_++;
+    return listed;
+}
+
+bool Seals::gaveUp(const std::string& call, uint32_t seq) const
+{
+    auto found = stations_.find(call);
+    if (found == stations_.end()) return false;
+    for (const auto& entry : found->second.seals)
+    {
+        if (covers(entry.second.seal, seq) && entry.second.givenUp) return true;
+    }
+    return false;
+}
+
 bool Seals::sealHeard(const std::string& call, uint32_t seq) const
 {
     auto found = stations_.find(call);

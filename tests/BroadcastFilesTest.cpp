@@ -809,6 +809,83 @@ void testStopAndAskAgain()
     CHECK(!done.empty() && done.back().result == files::FinishedFile::Result::Declined);
 }
 
+// Requests that bring nothing: the listener gives up asking, and the file
+// goes to Incomplete with what came kept, rather than looking as if it is
+// still being repaired. Ask again starts asking afresh under the seal (a
+// request goes, and the rest comes); once the seal is over 2 hours old
+// there is nothing to ask under, and the file says so (sealAged).
+void testGiveUpAndAskAgain()
+{
+    Air air;
+    Station& a = air.add("AG7EW", 1);
+    Station& b = air.add("KC2G", 2);
+    std::filesystem::path dir = freshFolder("giveup");
+    b.files.setAutoReceive(dir.string());
+    bool deaf = true;
+    b.lose = [&deaf](protocol::Record& r) {
+        const protocol::FilePiece* p = r.as<protocol::FilePiece>();
+        return deaf && p != nullptr && p->index >= 3;
+    };
+    air.run(2000);
+    std::string error;
+
+    // The sender stops part way, as in Jeff's test, and B hears none of
+    // the repairs.
+    auto share = [&](const std::string& name, uint8_t pattern) {
+        std::string path = makeFile(name, 2500, pattern);
+        uint64_t id = a.files.send(path, "qpsk-r1/3", now, error);
+        BroadcastFile mine;
+        for (int i = 0; i < 2000 && a.files.find(id, now, mine) && mine.held < 5; i++) air.run(250);
+        CHECK(a.files.cancel(id));
+        return path;
+    };
+    auto fileNamed = [&](const std::string& name) {
+        BroadcastFile f;
+        for (const BroadcastFile& x : b.files.files(now))
+        {
+            if (!x.outgoing && x.name == name) f = x;
+        }
+        return f;
+    };
+
+    std::string path = share("giveup.bin", 12);
+    air.run(5 * 60 * 1000, 500);
+    BroadcastFile f = fileNamed("giveup.bin");
+    CHECK(f.id != 0 && f.state == FileState::Incomplete && !f.stopped);
+    CHECK(f.sealed && !f.sealAged && f.held == 3);
+    size_t asked = b.seals.requestsSent();
+    CHECK(asked >= (size_t)Seals::MAX_ASKS);
+    air.run(3 * 60 * 1000, 500);
+    CHECK_EQ(b.seals.requestsSent(), asked);
+
+    // Ask again on a clear link: a request goes, and the rest comes.
+    deaf = false;
+    CHECK(b.files.receive(f.id, "", now, error));
+    air.run(Seals::LATE_SPREAD_MS + 1000);
+    CHECK(b.seals.requestsSent() > asked);
+    air.run(5 * 60 * 1000, 500);
+    f = fileNamed("giveup.bin");
+    CHECK(f.state == FileState::Saved);
+    if (f.state == FileState::Saved) CHECK(readAll(f.path) == readAll(path));
+
+    // Given up, and then the seal ages out: Ask again has nothing to ask
+    // under, and nothing goes.
+    deaf = true;
+    share("aged.bin", 13);
+    air.run(5 * 60 * 1000, 500);
+    f = fileNamed("aged.bin");
+    CHECK(f.state == FileState::Incomplete && f.sealed);
+    air.run(broadcast::MAX_OPEN_MS, 5000);
+    f = fileNamed("aged.bin");
+    CHECK(f.state == FileState::Incomplete && !f.sealed && f.sealAged);
+    asked = b.seals.requestsSent();
+    CHECK(b.files.receive(f.id, "", now, error));
+    air.run(60000);
+    CHECK_EQ(b.seals.requestsSent(), asked);
+    f = fileNamed("aged.bin");
+    CHECK(f.state == FileState::Incomplete && f.held == 3);
+}
+
 // Many pieces lost: the request is cut to fit a frame, and the rest come
 // in later rounds.
 void testManyLost()
@@ -953,6 +1030,7 @@ int main()
     testLostSealOrRequest();
     testStoppedShare();
     testStopAndAskAgain();
+    testGiveUpAndAskAgain();
     testManyLost();
     testRefused();
     testIgnore();

@@ -397,8 +397,16 @@ what goes on the air. Choices made there, for Jeff to keep or change:
   Incomplete with what came kept, and Ask again carries on; Reject
   file... is only on the right-click menu, asks first, and is logged as
   Declined.
-- **Incomplete.** A file still missing pieces 2 h 10 min after anything
-  new came is shown incomplete. Broadcast parts are kept in memory only
+- **Asking again** (Jeff's test, 2026-10-23). A listener that gave up
+  asking sat at "Repairing, 9 pieces missing" for good: Ask again
+  couldn't undo the give-up, and the file never went Incomplete, since
+  that waited for a seal already forgotten. Now a give-up shows the file
+  as Incomplete, Ask again (also on a file still being received) starts
+  asking afresh under its seal, and once the seal is over 2 hours old
+  the item is greyed with the reason.
+- **Incomplete.** A file still missing pieces after a give-up, once its
+  seal is over 2 hours old, or 2 h 10 min after anything new came, is
+  shown incomplete. Broadcast parts are kept in memory only
   (24 hours on screen), not in the files log across restarts.
 
 The brief:
