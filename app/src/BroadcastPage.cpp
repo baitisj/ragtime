@@ -456,7 +456,10 @@ void BroadcastPage::showFileMenu(const Message& m)
         menu.Enable(ID_FILE_TITLE, false);
     }
     for (size_t i = 0; i < actions.size(); i++)
+    {
         menu.Append(ID_FILE_ACTION + (int)i, wxString::FromUTF8(actions[i].second));
+        if (actions[i].first.empty()) menu.Enable(ID_FILE_ACTION + (int)i, false);
+    }
     if (menu.GetMenuItemCount() > 0) menu.AppendSeparator();
     menu.Append(ID_COPY, "Copy file name");
     menu.Bind(wxEVT_MENU, [=](wxCommandEvent& e) {

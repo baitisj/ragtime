@@ -1646,11 +1646,27 @@ bool MainFrame::fileCard(uint64_t id, FileCard& card)
                                   : "Receiving, " + pieces;
             card.actions = {{"stopasking", "Stop"}};
             card.menu = {{"stopasking", "Stop (keep what came)"}, {"reject", "Reject file..."}};
+            // Under its seal, the rest can be asked for now, rather than
+            // at the next seal.
+            if (f.sealed && !f.asking && f.held < f.pieces)
+                card.menu.insert(card.menu.begin(), {"askagain", "Ask again for the rest"});
             break;
         case State::Incomplete:
             card.state = std::string(f.stopped ? "Stopped, " : "Incomplete, ") + pieces + " kept";
-            card.actions = {{"askagain", "Ask again"}};
             card.menu = {{"askagain", "Ask again for the rest"}, {"reject", "Reject file..."}};
+            if (f.sealed)
+            {
+                card.actions = {{"askagain", "Ask again"}};
+            }
+            else
+            {
+                // Nothing to ask under: say why, greyed, and how it can
+                // still come.
+                std::string why = f.sealAged ? f.from + "'s repairs have closed (its seal is over 2 hours old)"
+                                             : "no seal from " + f.from + " lists it";
+                card.state += ". It comes whole if " + f.from + " sends it again";
+                card.menu[0] = {"", "Can't ask again: " + why};
+            }
             break;
         case State::Saved:
             card.state = f.autoReceived ? "Saved without asking" : "Saved";
@@ -1783,6 +1799,11 @@ void MainFrame::broadcastFileMenu(const files::FileRow& row, wxMenu& menu)
         int itemId = ID_BROADCAST_FILE_ACTION + (int)i;
         menu.Append(itemId, utf8(actions[i].second));
         std::string action = actions[i].first;
+        if (action.empty())
+        {
+            menu.Enable(itemId, false);
+            continue;
+        }
         menu.Bind(wxEVT_MENU, [this, id, action](wxCommandEvent&) {
             CallAfter([this, id, action]() { broadcastFileAction(id, action); });
         }, itemId);

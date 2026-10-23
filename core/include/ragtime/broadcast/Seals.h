@@ -170,6 +170,14 @@ public:
     // The operator now wants something under call's seals (pressed
     // Receive): ask soon, without waiting for the next seal.
     void askSoon(const std::string& call, uint64_t nowMs);
+    // The operator asks again for what we lack of call's item seq (Ask
+    // again): asking under the seal that lists it starts afresh, though
+    // earlier requests brought nothing. False when no seal heard in the
+    // last MAX_OPEN_MS lists it, so there is nothing to ask under.
+    bool askAgain(const std::string& call, uint32_t seq, uint64_t nowMs);
+    // We gave up asking under the seal that lists call's item seq: MAX_ASKS
+    // requests in a row brought nothing.
+    bool gaveUp(const std::string& call, uint32_t seq) const;
     // A seal heard from call lists its item seq.
     bool sealHeard(const std::string& call, uint32_t seq) const;
     // A request of ours waits to go to call.

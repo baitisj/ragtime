@@ -676,7 +676,9 @@ bool BroadcastFiles::receive(uint64_t id, const std::string& path, uint64_t nowM
         tryComplete(*in, nowMs);
         return true;
     }
-    seals_.askSoon(in->file.from, nowMs);
+    // Asking starts afresh under its seal, though earlier requests
+    // brought nothing.
+    if (!seals_.askAgain(in->file.from, in->file.seq, nowMs)) seals_.askSoon(in->file.from, nowMs);
     return true;
 }
 
@@ -847,8 +849,13 @@ void BroadcastFiles::tick(uint64_t nowMs)
             changed();
             continue;
         }
-        if (in.file.state == State::Receiving && !in.file.complete && seals_.sealHeard(in.file.from, in.file.seq)
-            && nowMs >= in.file.lastMs + INCOMPLETE_MS)
+        bool sealed = in.announced && seals_.sealHeard(in.file.from, in.file.seq);
+        if (sealed) in.sealSeen = true;
+        // Repairs are over for it: we gave up asking (requests brought
+        // nothing), its seal has aged out, or nothing has come for long.
+        if (in.file.state == State::Receiving && !in.file.complete && in.announced
+            && ((sealed && seals_.gaveUp(in.file.from, in.file.seq)) || (in.sealSeen && !sealed)
+                || nowMs >= in.file.lastMs + INCOMPLETE_MS))
         {
             in.file.state = State::Incomplete;
             in.file.expiresAtMs = nowMs + KEEP_MS;
@@ -929,6 +936,7 @@ BroadcastFile BroadcastFiles::view(const Incoming& in, uint64_t nowMs) const
     if (!f.live()) return f;
     f.sealed = seals_.sealHeard(f.from, f.seq);
     f.asking = seals_.asking(f.from) && f.state == State::Receiving;
+    f.sealAged = in.sealSeen && !f.sealed;
     if (in.announced)
     {
         // Missed: its turn has gone by (a later piece is here, or the seal).

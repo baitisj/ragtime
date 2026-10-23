@@ -31,7 +31,8 @@ struct FileCard
     std::vector<std::pair<std::string, std::string>> actions;
     // Its right-click menu, the same on the Files tab: a greyed first line
     // when there is one ("Repairs open until 15:42 (1 h 10 min)"), then
-    // these, or the links when there are none.
+    // these, or the links when there are none. An item with no action is
+    // greyed: it says why something can't be done.
     std::string title;
     std::vector<std::pair<std::string, std::string>> menu;
 };

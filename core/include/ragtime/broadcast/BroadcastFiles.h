@@ -79,6 +79,9 @@ struct BroadcastFile
     bool sealed = false;        // ours: its seal has gone; theirs: its seal was heard
     bool asking = false;        // theirs: a repair request of ours waits to go
     bool complete = false;      // theirs: every piece is here and the digest matched
+    // Theirs: its seal was heard, but over MAX_OPEN_MS ago, so the sender's
+    // repairs have closed and Ask again has nothing to ask under.
+    bool sealAged = false;
     // Ours: the operator stopped the first pass (held of pieces went);
     // theirs: the operator stopped asking for it.
     bool stopped = false;
@@ -233,6 +236,7 @@ private:
         bool chosenPath = false;        // the operator gave the path
         files::RateMeter rate;
         bool finished = false;
+        bool sealSeen = false;          // a seal listing it was heard
     };
 
     Outgoing* findOutgoing(uint64_t id);
