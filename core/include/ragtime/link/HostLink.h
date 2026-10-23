@@ -164,14 +164,27 @@ public:
     //---------------------------------------------------------------------
 
     // Queues a burst of frames for the D2G group, in mode (empty: the
-    // group's mode as it stands). Returns its id; 0 for no frames.
-    uint64_t broadcast(const std::vector<std::vector<uint8_t>>& frames, const std::string& mode, uint64_t nowMs);
+    // group's mode as it stands). Returns its id; 0 for no frames. The
+    // label says what it is, for the status bar: "seal", "QRV", or the
+    // start of a message (snippet()).
+    uint64_t broadcast(const std::vector<std::vector<uint8_t>>& frames, const std::string& mode, uint64_t nowMs,
+                       const std::string& label = std::string());
     // Drops a burst still queued; false once the host has it.
     bool cancel(uint64_t id);
     BurstState burstState(uint64_t id) const;
     // A burst of ours is with the host (Sending or Held), so a MODE report
     // may be its.
     bool burstWithHost() const;
+
+    // Our bursts not yet sent, the one with the host (if any) first.
+    struct Outgoing
+    {
+        uint64_t id = 0;
+        std::string label;
+        BurstState state = BurstState::Queued;
+        size_t frames = 0;
+    };
+    std::vector<Outgoing> outgoing() const;
 
     // Pause sending: queued bursts stay queued. One the host has goes on.
     void setPaused(bool paused, uint64_t nowMs);
@@ -217,6 +230,7 @@ private:
         uint64_t id = 0;
         std::vector<std::vector<uint8_t>> frames;
         std::string mode;
+        std::string label;
         BurstState state = BurstState::Queued;
         std::vector<uint16_t> tags;     // written, not yet acknowledged
         uint64_t unsentMs = 0;          // time with the host, no session up
@@ -277,6 +291,23 @@ private:
     uint64_t snAskedMs_ = 0;
     std::optional<double> sessionSnr_;  // the last SN answer this session
 };
+
+//-------------------------------------------------------------------------
+// What is going out, in the status bar's first field (Jeff, 2026-10-23:
+// "indicate if we're sending a seal ... just a little snippet")
+//-------------------------------------------------------------------------
+
+// The start of text, in quotes, cut between words after at most chars
+// characters (UTF-8 kept whole), with an ellipsis when cut.
+std::string snippet(const std::string& text, size_t chars = 20);
+
+// The field's line: "Channel clear" or "Channel busy" with nothing going
+// out; else the first burst and how it stands ("Sending: seal",
+// "Busy, next: seal", "Held: QRV" while the session holds the group,
+// "Paused: “CQ de AG7EW…”"), and how many wait behind it.
+std::string channelLine(const HostLink& link);
+// Its tooltip: every burst going out, one a line.
+std::string channelTip(const HostLink& link);
 
 } // namespace link
 } // namespace ragtime

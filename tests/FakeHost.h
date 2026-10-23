@@ -82,7 +82,7 @@ public:
     // Calls: the host called answers on this call, 1 to 5 (default 1).
     void setAnswerOnCall(int call) { answerOn_ = call; }
     // A deep fade: session bytes are read and counted, but neither carried
-    // nor acknowledged until it lifts.
+    // nor acknowledged until it lifts, this host's or its partner's.
     void fadeSession(bool fade) { fading_ = fade; }
     // Session bytes cross at most this fast, bytes a second, after the
     // airtime (0, the default: all at once).

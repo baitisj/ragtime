@@ -21,8 +21,6 @@ const int StationList::ID_COLUMN_FIRST = wxID_HIGHEST + 300;
 namespace
 {
 
-const wxColour AVAILABLE(0x1e, 0x6b, 0x34);   // the seal's green
-const wxColour BUSY(0xb5, 0x47, 0x08);        // the seal's orange
 
 wxString utf8(const std::string& text)
 {
@@ -67,7 +65,7 @@ protected:
         wxString grey = picked ? wxString() : " color=\"" + htmlColour(secondaryText()) + "\"";
         // Green for available, orange for busy, blue for our own session.
         bool ours = s->call == owner_->stations_.partner();
-        wxColour dot = !status.filled ? secondaryText() : ours ? ACCENT_BLUE : status.word == "QRV" ? AVAILABLE : BUSY;
+        wxColour dot = !status.filled ? secondaryText() : ours ? accentText() : status.word == "QRV" ? goodText() : busyText();
         wxString tint = picked ? wxString() : " color=\"" + htmlColour(dot) + "\"";
         wxString html;
         html << "<table width=\"100%\" cellspacing=\"0\" cellpadding=\"1\">"
@@ -123,6 +121,7 @@ StationList::StationList(wxWindow* parent, const Stations& stations)
     book_ = new wxSimplebook(this);
     narrowView_ = new NarrowStations(this);
     followThemeBackground(narrowView_, wxSYS_COLOUR_LISTBOX);
+    scrollbarBeside(narrowView_);
     table_ = new StationTable(this);
     followThemeBackground(table_, wxSYS_COLOUR_LISTBOX);
 

@@ -98,7 +98,7 @@ SettingsDialog::SettingsDialog(wxWindow* parent, const StationPrefs& prefs)
     broadcast->Add(sealChat_, 0, wxALL, 6);
 
     problem_ = new wxStaticText(this, wxID_ANY, "");
-    problem_->SetForegroundColour(wxColour(0xb4, 0x23, 0x18));
+    problem_->SetForegroundColour(badText());
 
     auto* sizer = new wxBoxSizer(wxVERTICAL);
     sizer->Add(station, 0, wxEXPAND | wxLEFT | wxRIGHT | wxTOP, 12);

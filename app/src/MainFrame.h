@@ -184,6 +184,7 @@ private:
     std::string note_;          // the latest thing worth a line in the status bar
     wxString hostText_;         // the status bar's host field, as shown
     wxString hostTip_;          // and its tooltip
+    wxString channelTip_;       // the channel field's tooltip: what is going out
     wxBitmapButton* themeButton_ = nullptr;     // light and dark, where the build can switch
 
     uint64_t broadcastFilesVersion_ = 0;

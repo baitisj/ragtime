@@ -39,4 +39,10 @@ void applyTheme(ThemeChoice choice);
 void followThemeBackground(wxWindow* window, wxSystemColour colour);
 void followThemeText(wxWindow* window, std::function<wxColour()> colour);
 
+// GTK draws a list's scrollbar over its rows, fading in as they change, and
+// it covered the "Sent" and "Delivered" at their right ends (Jeff,
+// 2026-10-23). This gives the list a scrollbar beside its rows instead.
+// Nothing elsewhere, where scrollbars already sit aside.
+void scrollbarBeside(wxWindow* window);
+
 #endif

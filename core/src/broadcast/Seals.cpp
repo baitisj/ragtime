@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <limits>
+#include <string>
 #include <utility>
 
 #include "ragtime/broadcast/Airtime.h"
@@ -356,7 +357,8 @@ void Seals::sealIfDue(uint64_t nowMs)
     size_t index = 0;
     for (const auto& burst : packBursts(frames, modeInfo(mode)))
     {
-        uint64_t id = link_.broadcast(burst, mode, nowMs);
+        uint64_t id = link_.broadcast(burst, mode, nowMs, burst.size() == 1 ? std::string("seal")
+                                                                            : std::to_string(burst.size()) + " seals");
         for (size_t i = 0; i < burst.size(); i++, index++)
         {
             made[index].burst = id;
@@ -461,7 +463,7 @@ void Seals::resend(uint64_t nowMs)
 
     for (const auto& burst : bursts)
     {
-        uint64_t id = link_.broadcast(burst, mode, nowMs);
+        uint64_t id = link_.broadcast(burst, mode, nowMs, "repairs");
         if (id == 0) continue;
         resendBursts_.insert(id);
         resendLast_ = id;
@@ -493,7 +495,7 @@ void Seals::flush(uint64_t nowMs)
     std::string mode = again.back()->mode;
     for (const auto& burst : packBursts(frames, modeInfo(mode)))
     {
-        uint64_t id = link_.broadcast(burst, mode, nowMs);
+        uint64_t id = link_.broadcast(burst, mode, nowMs, "seal again");
         if (id == 0) continue;
         resendBursts_.insert(id);
         resendLast_ = id;
@@ -550,7 +552,7 @@ void Seals::onEvent(const Event& event, uint64_t nowMs)
     {
         std::vector<std::vector<uint8_t>> frames;
         for (OurSeal* s : again) frames.push_back(protocol::encodeFrame({s->record}));
-        uint64_t id = link_.broadcast(frames, again.back()->mode, nowMs);
+        uint64_t id = link_.broadcast(frames, again.back()->mode, nowMs, "seal again");
         for (OurSeal* s : again)
         {
             s->burst = id;
@@ -877,7 +879,7 @@ void Seals::ask(const std::string& call, Station& station, uint64_t nowMs)
     station.covered.clear();
     if (records.empty()) return;
     link::ModeInfo info = modeInfo(mode_);
-    for (const auto& burst : packBursts(packFrames(records), info)) link_.broadcast(burst, mode_, nowMs);
+    for (const auto& burst : packBursts(packFrames(records), info)) link_.broadcast(burst, mode_, nowMs, "repair request");
     version_++;
 }
 

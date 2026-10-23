@@ -31,8 +31,6 @@ using State = Message::State;
 namespace
 {
 
-const wxColour SENT(0x1e, 0x6b, 0x34);        // green, as the Sealed badge
-const wxColour NOT_SENT(0xb4, 0x23, 0x18);    // red, as the Mismatch badge
 
 // Room for the seal badge (16 px) in every row.
 constexpr int BADGE_ROOM = 20;
@@ -126,9 +124,9 @@ protected:
             wxColour c = secondaryText();
             if (!m->past)
             {
-                if (m->state == State::Sent || m->state == State::Acknowledged) c = SENT;
-                if (m->state == State::Sending) c = ACCENT_BLUE;
-                if (m->state == State::NotSent) c = NOT_SENT;
+                if (m->state == State::Sent || m->state == State::Acknowledged) c = goodText();
+                if (m->state == State::Sending) c = accentText();
+                if (m->state == State::NotSent) c = badText();
             }
             wxString label = stateLabel(m->state);
             if (m->state == State::Acknowledged) label = "Acknowledged by " + wxString::FromUTF8(m->to);
@@ -140,7 +138,7 @@ protected:
         if (!m->to.empty())
         {
             bool toMe = !me.empty() && m->to == me;
-            to << "<font" << colour(m->past ? secondaryText() : ACCENT_BLUE) << ">@" << htmlEscape(m->to) << (toMe ? " (you)" : "")
+            to << "<font" << colour(m->past ? secondaryText() : accentText()) << ">@" << htmlEscape(m->to) << (toMe ? " (you)" : "")
                << "</font> ";
         }
 
@@ -197,13 +195,13 @@ private:
         FileCard card;
         if (!owner_->fileCard_ || !owner_->fileCard_(m.file, card)) card.what = m.text;
         wxColour c = secondaryText();
-        if (card.good) c = SENT;
-        if (card.bad) c = NOT_SENT;
+        if (card.good) c = goodText();
+        if (card.bad) c = badText();
         wxString links;
         for (const auto& action : card.actions)
         {
             if (!links.empty()) links << " &middot; ";
-            links << "<a href=\"" << htmlEscape(action.first) << "\">" << htmlEscape(action.second) << "</a>";
+            links << htmlLink(htmlEscape(action.first), htmlEscape(action.second), picked);
         }
         wxString who = m.ours ? wxString("You broadcast") : htmlEscape(m.from) + " broadcasts";
         wxString html;
@@ -230,6 +228,7 @@ BroadcastPage::BroadcastPage(wxWindow* parent, const BroadcastChat& chat)
 {
     list_ = new MessageList(this);
     followThemeBackground(list_, wxSYS_COLOUR_LISTBOX);
+    scrollbarBeside(list_);
     paused_ = new wxStaticText(this, wxID_ANY,
                                "Sending is paused: messages wait as Queued until you press Pause sending again.");
     followThemeText(paused_, secondaryText);

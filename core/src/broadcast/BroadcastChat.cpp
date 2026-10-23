@@ -1,6 +1,7 @@
 #include "ragtime/broadcast/BroadcastChat.h"
 
 #include <algorithm>
+#include <string>
 #include <utility>
 
 #include "ragtime/broadcast/BroadcastLog.h"
@@ -253,7 +254,7 @@ std::vector<uint64_t> BroadcastChat::send(const std::string& typed, const std::s
         helloSent_ = true;
         helloMs_ = nowMs;
     }
-    uint64_t burst = link_.broadcast(frames, mode, nowMs);
+    uint64_t burst = link_.broadcast(frames, mode, nowMs, link::snippet(typed));
     for (Message& m : messages_)
     {
         if (std::find(made.begin(), made.end(), m.id) == made.end()) continue;
@@ -273,7 +274,7 @@ bool BroadcastChat::checkIn(const std::string& mode, uint64_t nowMs)
     if (frame.empty()) return false;
     helloSent_ = true;
     helloMs_ = nowMs;
-    return link_.broadcast({frame}, mode, nowMs) != 0;
+    return link_.broadcast({frame}, mode, nowMs, "check-in") != 0;
 }
 
 bool BroadcastChat::announce(protocol::Status::State state, const std::string& partner, const std::string& mode,
@@ -293,7 +294,7 @@ bool BroadcastChat::announce(protocol::Status::State state, const std::string& p
     if (state == StatusState::Qrl) status.partner = protocol::normalCallsign(partner);
     std::vector<uint8_t> frame = protocol::encodeFrame({numbering_.record(status, seconds(nowMs))});
     if (frame.empty()) return false;
-    uint64_t id = link_.broadcast({frame}, mode, nowMs);
+    uint64_t id = link_.broadcast({frame}, mode, nowMs, state == StatusState::Qrl ? "QRL" : "QRV");
     if (state == StatusState::Qrl)
     {
         qrlBurst_ = id;
@@ -370,7 +371,7 @@ bool BroadcastChat::resend(uint64_t id, const std::string& mode, uint64_t nowMs)
     if (frame.empty()) return false;
     m->state = State::Queued;
     m->mode = mode;
-    m->burst = link_.broadcast({frame}, mode, nowMs);
+    m->burst = link_.broadcast({frame}, mode, nowMs, link::snippet(m->to.empty() ? m->text : "@" + m->to + " " + m->text) + " again");
     if (onItems_ && m->burst != 0) onItems_({record->second}, m->burst, mode, nowMs);
     if (m->past)
     {
@@ -539,10 +540,11 @@ void BroadcastChat::flushAcks(const std::string& mode, uint64_t nowMs)
         bytes += size;
     }
     frames.push_back(protocol::encodeFrame(frame));
+    const std::string label = acksDue_.size() == 1 ? std::string("ack") : std::to_string(acksDue_.size()) + " acks";
     acksDue_.clear();
     frames.erase(std::remove_if(frames.begin(), frames.end(), [](const std::vector<uint8_t>& f) { return f.empty(); }),
                  frames.end());
-    uint64_t id = link_.broadcast(frames, mode, nowMs);
+    uint64_t id = link_.broadcast(frames, mode, nowMs, label);
     if (id != 0) ackBursts_.insert(id);
 }
 

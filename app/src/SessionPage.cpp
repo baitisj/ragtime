@@ -33,9 +33,6 @@ using FState = FileTransfer::State;
 namespace
 {
 
-const wxColour DELIVERED(0x1e, 0x6b, 0x34);    // green, as the Sealed badge
-const wxColour NOT_DELIVERED(0xb4, 0x23, 0x18); // red, as the Mismatch badge
-const wxColour QUIET(0x8a, 0x4b, 0x00);         // amber, as the Repair Asked badge
 
 // Room for the seal badge (16 px) in every row, as in the Broadcast tab.
 constexpr int BADGE_ROOM = 20;
@@ -55,9 +52,9 @@ wxString utf8(const std::string& text)
     return wxString::FromUTF8(text);
 }
 
-wxString link(const char* action, uint64_t id, const wxString& label)
+wxString link(bool picked, const char* action, uint64_t id, const wxString& label)
 {
-    return wxString::Format("<a href=\"%s:%llu\">", action, (unsigned long long)id) + label + "</a>";
+    return htmlLink(wxString::Format("%s:%llu", action, (unsigned long long)id), label, picked);
 }
 
 const char* const DOT = " \xc2\xb7 ";
@@ -161,8 +158,8 @@ protected:
         if (m->ours)
         {
             wxColour c = secondaryText();
-            if (m->state == State::Delivered) c = DELIVERED;
-            if (m->state == State::NotDelivered) c = NOT_DELIVERED;
+            if (m->state == State::Delivered) c = goodText();
+            if (m->state == State::NotDelivered) c = badText();
             state << "<font" << colour(c) << ">" << stateLabel(m->state) << "</font>";
         }
 
@@ -206,6 +203,7 @@ SessionPage::SessionPage(wxWindow* parent, const SessionChat& session, const rag
 
     list_ = new SessionMessages(this);
     followThemeBackground(list_, wxSYS_COLOUR_LISTBOX);
+    scrollbarBeside(list_);
     paused_ = new wxStaticText(this, wxID_ANY,
                                "Sending is paused: messages wait as Queued until you press Pause sending again.");
     followThemeText(paused_, secondaryText);
@@ -323,12 +321,12 @@ void SessionPage::refresh(uint64_t nowMs, long utcOffsetS)
         // the greyed one that has ended.
         wxColour surface = wxSystemSettings::GetColour(wxSYS_COLOUR_LISTBOX);
         if (strip.amber)
-            strip_->SetBackgroundColour(blendColour(surface, wxColour(0xf7, 0xc6, 0x00), 0.30));
+            strip_->SetBackgroundColour(quietSurface());
         else if (strip.live)
             strip_->SetBackgroundColour(blendColour(surface, ACCENT_BLUE, 0.10));
         else
             strip_->SetBackgroundColour(wxNullColour);
-        stripText_->SetForegroundColour(strip.amber ? QUIET : strip.live ? wxNullColour : secondaryText());
+        stripText_->SetForegroundColour(strip.amber ? quietText() : strip.live ? wxNullColour : secondaryText());
 
         Phase p = session_.phase();
         bool calling = p == Phase::Calling || (p == Phase::Leaving && session_.connectedMs() == 0);
@@ -473,8 +471,8 @@ wxString SessionPage::cardHtml(const FileTransfer& t, bool picked) const
                     body << "<br>" << htmlEscape(ragtime::files::progressText(t.kept, t.size))
                          << " kept from before: Save carries on from there.";
                 if (!t.error.empty()) body << "<br>" << grey(htmlEscape(t.error));
-                body << "<br>" << link("save", t.id, "Save") << "&nbsp;&nbsp; " << link("saveas", t.id, "Save as...")
-                     << "&nbsp;&nbsp; " << link("decline", t.id, "Decline");
+                body << "<br>" << link(picked, "save", t.id, "Save") << "&nbsp;&nbsp; " << link(picked, "saveas", t.id, "Save as...")
+                     << "&nbsp;&nbsp; " << link(picked, "decline", t.id, "Decline");
                 break;
             case FState::Receiving:
                 body << "Receiving " << name << " from " << who << grey(utf8(DOT + progress + DOT + moving));
@@ -482,12 +480,12 @@ wxString SessionPage::cardHtml(const FileTransfer& t, bool picked) const
                 if (t.resumedFrom > 0)
                     body << "<br>" << grey("Carrying on from " + htmlEscape(ragtime::files::groupedNumber(t.resumedFrom))
                                            + " bytes kept from before");
-                body << "&nbsp;&nbsp; " << link("cancel", t.id, "Cancel");
+                body << "&nbsp;&nbsp; " << link(picked, "cancel", t.id, "Cancel");
                 break;
             case FState::Saved:
-                body << name << " from " << who << ": " << tinted("saved", DELIVERED) << " as "
-                     << htmlEscape(t.path) << "&nbsp;&nbsp; " << link("open", t.id, "Open") << "&nbsp;&nbsp; "
-                     << link("folder", t.id, "Open folder");
+                body << name << " from " << who << ": " << tinted("saved", goodText()) << " as "
+                     << htmlEscape(t.path) << "&nbsp;&nbsp; " << link(picked, "open", t.id, "Open") << "&nbsp;&nbsp; "
+                     << link(picked, "folder", t.id, "Open folder");
                 break;
             default:
             {
@@ -501,7 +499,7 @@ wxString SessionPage::cardHtml(const FileTransfer& t, bool picked) const
                            : t.state == FState::Expired        ? ragtime::files::FinishedFile::Result::Expired
                                                                : ragtime::files::FinishedFile::Result::Failed;
                 body << name << " from " << who << ": " << tinted(htmlEscape(ragtime::files::resultLabel(f)),
-                                                                  NOT_DELIVERED);
+                                                                  badText());
                 if (t.done > 0 && t.done < t.size && t.state != FState::Declined)
                     body << grey(utf8(DOT + ragtime::files::progressText(t.done, t.size) + " kept, to carry on next time"));
                 break;
@@ -515,17 +513,17 @@ wxString SessionPage::cardHtml(const FileTransfer& t, bool picked) const
             case FState::Offered:
                 body << "You offered " << name << ", " << htmlEscape(size) << grey(utf8(DOT + std::string("waiting for an answer")));
                 if (t.expiresInMs != 0) body << grey(utf8(DOT + ragtime::session::clockLength(t.expiresInMs)));
-                body << "&nbsp;&nbsp; " << link("cancel", t.id, "Cancel");
+                body << "&nbsp;&nbsp; " << link(picked, "cancel", t.id, "Cancel");
                 break;
             case FState::Sending:
                 body << "Sending " << name << grey(utf8(DOT + progress + DOT + moving));
                 if (t.resumedFrom > 0)
                     body << "<br>" << grey(who + " had " + htmlEscape(ragtime::files::groupedNumber(t.resumedFrom))
                                            + " bytes from before; the rest is going");
-                body << "&nbsp;&nbsp; " << link("cancel", t.id, "Cancel");
+                body << "&nbsp;&nbsp; " << link(picked, "cancel", t.id, "Cancel");
                 break;
             case FState::Delivered:
-                body << name << ": " << tinted(htmlEscape(t.peer + " saved it"), DELIVERED);
+                body << name << ": " << tinted(htmlEscape(t.peer + " saved it"), goodText());
                 break;
             default:
             {
@@ -539,7 +537,7 @@ wxString SessionPage::cardHtml(const FileTransfer& t, bool picked) const
                            : t.state == FState::Expired        ? ragtime::files::FinishedFile::Result::Expired
                            : t.state == FState::NotTaken       ? ragtime::files::FinishedFile::Result::NotTaken
                                                                : ragtime::files::FinishedFile::Result::Failed;
-                body << name << ": " << tinted(htmlEscape(ragtime::files::resultLabel(f)), NOT_DELIVERED);
+                body << name << ": " << tinted(htmlEscape(ragtime::files::resultLabel(f)), badText());
                 break;
             }
         }

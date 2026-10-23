@@ -4,6 +4,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <string>
 #include <system_error>
 #include <utility>
 
@@ -63,6 +64,16 @@ std::string clockText(uint64_t ms)
 {
     uint64_t s = ms / 1000;
     return std::to_string(s / 60) + ":" + (s % 60 < 10 ? "0" : "") + std::to_string(s % 60);
+}
+
+// The status bar's line for a burst of a file's pieces: "map.png, 5-8 of 30".
+std::string fileLabel(const BroadcastFile& file, const std::vector<uint16_t>& pieces)
+{
+    std::string label = file.name;
+    if (pieces.empty() || file.pieces == 0) return label;
+    label += ", " + std::to_string(pieces.front() + 1);
+    if (pieces.back() != pieces.front()) label += "\xe2\x80\x93" + std::to_string(pieces.back() + 1);
+    return label + " of " + std::to_string(file.pieces);
 }
 
 } // namespace
@@ -255,7 +266,7 @@ void BroadcastFiles::nextBurst(Outgoing& out, uint64_t nowMs)
     out.burstPieces = pieces;
     out.tries = 1;
     out.firstBurst = first;
-    out.burst = link_.broadcast(frames, out.file.mode, nowMs);
+    out.burst = link_.broadcast(frames, out.file.mode, nowMs, fileLabel(out.file, out.burstPieces));
     if (first) seals_.going({out.announce}, out.burst, out.file.mode, nowMs);
 }
 
@@ -778,7 +789,7 @@ void BroadcastFiles::onEvent(const HostEvent& event, uint64_t nowMs)
             if (out.tries < BURST_TRIES && out.file.state == State::Sending)
             {
                 out.tries++;
-                out.burst = link_.broadcast(out.frames, out.file.mode, nowMs);
+                out.burst = link_.broadcast(out.frames, out.file.mode, nowMs, fileLabel(out.file, out.burstPieces));
                 // The announce's own fate follows its first burst; once
                 // that is retried, it follows this one.
                 if (out.firstBurst)

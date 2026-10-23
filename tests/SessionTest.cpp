@@ -734,7 +734,7 @@ void testTheSessionPartnerOnTheStationList()
     stations.setPartner("vk3abc", true, T0 + 2000);
     const broadcast::Station* s = stations.find("VK3ABC");
     CHECK(s != nullptr);
-    if (s != nullptr) CHECK_EQ(stations.status(*s, T0 + 2000).word, std::string("In session with you"));
+    if (s != nullptr) CHECK_EQ(stations.status(*s, T0 + 2000).word, std::string("QSO w/ AG7EW"));
     for (broadcast::Column c : {broadcast::Column::Heard, broadcast::Column::Call, broadcast::Column::Status})
     {
         for (bool up : {true, false})

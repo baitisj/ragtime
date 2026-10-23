@@ -143,7 +143,15 @@ bench"). Choices made there, for Jeff to keep or change:
   sight, "Broadcast (3)".
 - **Auto ALC** and its meter are there, greyed, with a tooltip saying why.
   **SNR** is a column (below, "SNR from data2g-host").
-- The **status bar**: channel clear or busy, the mode the host last sent
+- The **status bar**: channel clear or busy, or what of ours is going
+  out (Jeff, 2026-10-23: "indicate if we're sending a seal ... just a
+  little snippet"): "Sending: seal", "Sending: “CQ CQ de AG7EW…”",
+  "Sending: map.png, 5–8 of 30", "Busy, next: ack", "Held: QRV" while a
+  session holds the group, "Paused: …", with "(+2)" for bursts waiting
+  behind it. Each burst is labelled where it is made
+  (`HostLink::broadcast`'s label; `link::channelLine`), and the tooltip
+  lists them all, with the session's bytes not yet acknowledged. Then the
+  mode the host last sent
   in, and a line that will show the newest transfer (clicking it opens
   Files); until then it shows the host's refusals and undecoded bursts.
   At its right end, data2g-host's address and state (Connected,
@@ -156,7 +164,18 @@ bench"). Choices made there, for Jeff to keep or change:
   falling back to Adwaita's when the theme has none; windows that keep a
   colour from when they were made take it again (`followThemeBackground`,
   `followThemeText` in `Theme.h`). wxWidgets 3.2 has no dark mode on
-  Windows, so the button isn't there.
+  Windows, so the button isn't there. The colours that mean something
+  (delivered and sent green, not delivered red, the Link quiet strip's
+  amber, links, the station dots, the gearshift's too-hard gears) come in
+  a light and a dark shade (`goodText`, `badText`, `quietText`,
+  `accentText`, `quietSurface`, `htmlLink` in `Html.h`), so they read on
+  both (Jeff found the Link quiet strip and Delivered hard to see in the
+  dark, 2026-10-23).
+- **The chat lists' scrollbar sits beside the rows (Jeff, 2026-10-23).**
+  GTK's overlay scrollbar faded in over the rows' right ends whenever a
+  message came, covering "Sent" and "Delivered"; the Broadcast and
+  Session lists and the narrow station list turn overlay scrolling off
+  (`scrollbarBeside` in `Theme.h`).
 - **The Broadcast tab carries on (Jeff, 2026-10-23).** What is said on
   D2G is kept on disk (`broadcast::BroadcastLog`, one file,
   `<data folder>/broadcast.log`, or `<config>.broadcast.log` beside a

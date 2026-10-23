@@ -190,7 +190,7 @@ void testARagchew()
     CHECK_EQ(a.session.callTry(), 2);
     CHECK(b.session.incoming() && b.session.peer() == "AG7EW");
     // The caller is on W1AW's list at once, pinned and in session.
-    CHECK_EQ(b.status("AG7EW"), std::string("In session with you"));
+    CHECK_EQ(b.status("AG7EW"), std::string("QSO w/ W1AW"));
     CHECK(run(air, all, [&] { return a.session.greeted() && b.session.greeted(); }));
 
     // Messages both ways, each delivered by the far end's modem.
@@ -202,7 +202,7 @@ void testARagchew()
     CHECK(a.session.messages().back().from == "W1AW");
 
     // KC2G hears both QRLs on the group, sent while the session is idle.
-    CHECK(run(air, all, [&] { return c.status("AG7EW") == "QRL with W1AW" && c.status("W1AW") == "QRL with AG7EW"; }));
+    CHECK(run(air, all, [&] { return c.status("AG7EW") == "QSO w/ W1AW" && c.status("W1AW") == "QSO w/ AG7EW"; }));
 
     // A deep fade: our message waits, and the strip says Link quiet.
     hostA.fadeSession(true);
@@ -220,7 +220,7 @@ void testARagchew()
     CHECK(a.session.ending() == SessionChat::Ending::Left);
     CHECK(b.session.ending() == SessionChat::Ending::LeftThere);
     CHECK(b.session.strip(now).text.find("Session ended by AG7EW") == 0);
-    CHECK(b.status("AG7EW") != "In session with you");
+    CHECK(b.status("AG7EW") != "QSO w/ W1AW");
 
     // And KC2G hears both QRVs.
     CHECK(run(air, all, [&] { return c.status("AG7EW") == "QRV" && c.status("W1AW") == "QRV"; }));

@@ -472,7 +472,8 @@ void FakeHost::serviceData()
 
 void FakeHost::stepSession(long long now)
 {
-    if (partner_ == nullptr || fading_) return;
+    // A fade is the path's: nothing crosses either way.
+    if (partner_ == nullptr || fading_ || partner_->fading_) return;
     size_t carried = 0;
     while (carried < crossing_.size() && crossing_[carried].atMs <= now)
     {
