@@ -142,7 +142,7 @@ bench"). Choices made there, for Jeff to keep or change:
 - The **Broadcast tab label** counts messages heard while it is out of
   sight, "Broadcast (3)".
 - **Auto ALC** and its meter are there, greyed, with a tooltip saying why.
-  **SNR** is in the Columns menu, greyed, "needs a host report".
+  **SNR** is a column (below, "SNR from data2g-host").
 - The **status bar**: channel clear or busy, the mode the host last sent
   in, and a line that will show the newest transfer (clicking it opens
   Files); until then it shows the host's refusals and undecoded bursts.
@@ -407,10 +407,36 @@ Done in the package I PR (see "Releases" in `CLAUDE.md`):
 - Smoke-tested headless: the AppImage under Xvfb, and `ragtime.exe` under
   Wine chatting with `ragtime_fake_air` over loopback.
 
+## SNR from data2g-host
+
+Data2G PR #98 ends `BCAST HEARD` and `BCAST * MISSED` with an SNR and
+adds VARA's `SN` for the session partner (`docs/PROTOCOL.md`).
+
+- `link::parseCommandLine` takes the SNR as the last word when it has no
+  letter in it; HostLink's `HeardFrom` and `Missed` events carry it.
+- In a session HostLink asks `SN` when the partner's burst has likely
+  come (BUFFER going down, session bytes in), at most every 5 s, and
+  reports a new figure as `SessionSnr`. A WRONG to SN is never shown as a
+  refusal.
+- `Stations` keeps each station's last SNR (the SNR column, sortable,
+  blank from an older host) and the mean of its last 5 bursts.
+- **Auto** shifts for the weakest station heard in the last 15 minutes
+  (`Stations::weakestPath`, `PATH_WINDOW_MS`): a broadcast goes to every
+  station, so it has to reach the weakest. The gearshift names the
+  station. It is how well we hear them; they may hear us a little better
+  or worse, since local noise differs, and the 3 dB margin covers some
+  of that.
+- A MISSED shows in the status bar: "Heard a E2C burst at +3.1 dB that
+  didn't decode; it may not be D2G's".
+- `ragtime_fake_air` reports SNRs: each bot at its own strength, +12 to
+  −11 dB, give or take 2 dB a burst; `--no-snr` plays an older host.
+
 ## Waiting on Andrew (via Jeff)
 
-- 200 Hz and 1.2 kHz width caps; a TX level command for Auto ALC; SNR
-  reports for broadcast bursts; thresholds in `MODES`; whether the polar
-  modes carry data and can be picked with `BCAST MODE`.
+- 200 Hz and 1.2 kHz width caps; a TX level command for Auto ALC;
+  thresholds in `MODES`; whether the polar modes carry data and can be
+  picked with `BCAST MODE`.
+- SNR reports: answered by Data2G PR #98 (merged 2026-10-23), used as
+  below.
 - The Hand primitive (`HAND SEND`, `HAND LISTEN`), which he will build;
   it belongs to the D2G net (Stage 2), not Stage 1.

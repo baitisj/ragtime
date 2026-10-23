@@ -12,6 +12,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -111,9 +112,11 @@ struct CommandEvent
         Mode,           // text: the submode a burst went out in
         ModeLine,       // modeInfo: one line of the MODES list
         BcastPort,      // number: the port BCAST OPEN gave
-        BcastHeard,     // number, text: the sender's call when sent with FROM
+        BcastHeard,     // number, text: the sender's call when sent with FROM, snr
         BcastLost,      // number, count
         BcastDropped,   // number, count
+        BcastMissed,    // text: the submode, count: its codewords, snr (any port's: "BCAST *")
+        Sn,             // snr: the session partner's last burst (the answer to SN)
         Connected,      // text: caller, peer: called station, number: bandwidth when given
         Disconnected,
         Buffer,         // count: bytes still to send in the session
@@ -126,6 +129,11 @@ struct CommandEvent
     std::string text;
     std::string peer;
     ModeInfo modeInfo;
+    // dB, average power in 2500 Hz, on the gearshift's scale. Hosts since
+    // Data2G PR #98 end HEARD with the burst's pilot SNR and MISSED with an
+    // energy reading (once they know the noise floor); older hosts send
+    // neither, and a HEARD without one still parses.
+    std::optional<double> snr;
 };
 
 CommandEvent parseCommandLine(const std::string& line);

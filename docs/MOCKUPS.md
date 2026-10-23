@@ -39,9 +39,11 @@ meter, its reading such as `−4 dB`), and the TX light (`TX Off` / `TX`).
 
 ## Station list
 
-- Columns: Call, Status, Heard, Locator, Distance, Bearing, Key (seal
-  badge), Services. A Columns menu (checkboxes) picks them; SNR is listed
-  but disabled, "needs a host report". Sortable by any column.
+- Columns: Call, Status, Heard, SNR (the last burst's, from data2g-host
+  since Data2G PR #98; blank from an older host), Locator, Distance,
+  Bearing, Key (seal badge), Services. A Columns menu (checkboxes) picks
+  them. Sortable by any column. With Globus on, the narrow list shows the
+  SNR under the last-heard time.
 - With Globus on, the list is narrow: each row is callsign and status,
   with last heard, and under it the locator and distance
   (`FN31 · 3,951 km`).

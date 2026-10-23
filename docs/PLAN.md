@@ -255,7 +255,7 @@ The Broadcast tab is the first tab and never closes. It is where CQs, roundtable
 - The station list on the left is fed by broadcast traffic: callsign, last heard, locator if sent, and whether it takes sessions. Double-clicking a station does nothing risky: it fills "@W1AW" or offers **Call**.
 - Woah! becomes a plain **Pause sending** switch on the toolbar.
 
-SNR is not reported over KISS, so the list shows last heard rather than signal strength, unless Andrew adds a report.
+Since Data2G PR #98 the host ends each `BCAST HEARD` with the burst's SNR, so the list shows signal strength beside last heard.
 
 ## File transfer
 
@@ -295,7 +295,7 @@ One ordinary window in the system theme, laid out like a messaging app: connecti
 - **Left pane:** Stations heard in broadcast mode, with the session partner pinned at the top while a session is up.
 - **Right pane: the map** (your ask, 2026-10-22). Glissando's globe at the top, showing the picked station's path, with a caption in Glissando's form, `W1AW · FN31 · 3,951 km · 81°`, and the station's details below. The theme is new: light blue oceans (#A8D4F2), near-white land (#F7F5EE), and dark blue coasts and borders (#143068). The globe is lit from the sun's real position: the light source sits over the subsolar point, so the night side falls in shadow and the greyline shows as the soft edge between them. The twilight is blended from 3° above the horizon to 12° below it.
 - **Globus on or off** (your ask, 2026-10-22). A toggle button labelled **Globus** sits where the map's heading was. It turns blue when the globe is showing, and when the globe is hidden it moves to the right end of the tab strip, so the Broadcast and Session messages can use the full width. View > Globus does the same. Beside the button, the time the globe is lit for, in UTC and local time: `22:36 UTC / 15:36 PDT`. The dividers between the station list, the tabs and the globe drag, and the client remembers where you left them. The globe also draws state and province lines, thin and light, from Natural Earth simplified to about a quarter of a degree, so the whole set stays small: for the United States, Canada, Mexico, Russia, China, India, Brazil, Argentina and Australia (your ask, 2026-10-22).
-- **Station list columns.** Call, Status, Heard, Locator, Distance, Bearing, Key (the seal badge) and Services, chosen from a Columns menu and sortable by any of them. SNR waits on a host report (Asks for Andrew). With the map shown, the narrow list keeps locator and distance under the last-heard time.
+- **Station list columns.** Call, Status, Heard, Locator, Distance, Bearing, Key (the seal badge) and Services, chosen from a Columns menu and sortable by any of them, and SNR, from the host's reports (Data2G PR #98). With the map shown, the narrow list keeps locator and distance under the last-heard time.
 - **The gearshift** (your ask, 2026-10-22, built on the Data2G Submode Map you sent). One popup, opened from the gearshift button (a speedometer icon) on the connection bar or the Gear button by Send. A 500 Hz slide switch beside it holds data2g-host to 500 Hz modes while on. Details under "The gearshift", below.
 - **Auto ALC** beside TX Off: a small checkbox with a level meter that keeps transmit drive just under the rig's ALC. The client never touches audio, so this needs a host command to set the TX level. The client can read ALC through Hamlib on many rigs (Asks for Andrew).
 - **Tabs:** Broadcast, Session and Files, always in that order (Stage 1). Session is greyed out when no session is active. A tab badge counts unread messages and waiting offers.
@@ -789,7 +789,7 @@ Each has my recommendation. Type your answer in the last column, or comment on t
 - What does an idle session cost on the air (keep-alives, how often), and how long does data2g-host retry before it reports `DISCONNECTED`? That decides how long "Link quiet" can honestly say the host is still trying.
 - Can data2g-host answer a CONNECT with "busy, in a session" while it is in one, and report that to the caller's client?
 - Can it report overheard session bursts ("heard AG7EW in a session", and the partner's call if the bursts carry it)?
-- Can it report an SNR for broadcast bursts over KISS, for the station list?
+- Can it report an SNR for broadcast bursts over KISS, for the station list? **Answered (2026-10-23):** Data2G PR #98 ends `BCAST HEARD` and `MISSED` with one, and adds `SN` for sessions.
 - Can it take 200 Hz and 1.2 kHz width caps, beside `BW500` and `BW2300`? (The gearshift's width no longer sends a cap, so this is only for a narrower switch.)
 - Can it take a TX level command, so the client's Auto ALC can hold drive just under ALC?
 - Could data2g-host offer a show-of-hands primitive for the D2G net: send a Hand burst (spec under The D2G net) in a given channel, starting a set delay after the last burst heard and shifted to match that burst's frequency offset, and decode every Hand in a list of channels in that window, reporting each with its SNR and offset?

@@ -69,8 +69,11 @@ protected:
              << utf8(status.filled ? "\xe2\x97\x8f " : "\xe2\x97\x8b ") << htmlEscape(status.word) << "</font></td>"
              << "<td nowrap align=\"right\"><font" << grey << ">" << htmlEscape(heardAgo(s->lastHeardMs, owner_->nowMs_))
              << "</font></td></tr>"
-             << "<tr><td colspan=\"2\" nowrap><font" << grey << ">" << htmlEscape(owner_->stations_.whereLine(*s))
-             << "</font></td></tr></table>";
+             << "<tr><td nowrap><font" << grey << ">" << htmlEscape(owner_->stations_.whereLine(*s))
+             << "</font></td>"
+             // The last burst's SNR, under the time, from a host that reports one.
+             << "<td nowrap align=\"right\"><font" << grey << ">"
+             << htmlEscape(owner_->stations_.cell(*s, Column::Snr, owner_->nowMs_)) << "</font></td></tr></table>";
         return html;
     }
 
@@ -239,7 +242,7 @@ void StationList::setColumns(const std::vector<Column>& columns)
     columns_.clear();
     for (Column c : columns)
     {
-        if (columnAvailable(c) && std::find(columns_.begin(), columns_.end(), c) == columns_.end())
+        if (std::find(columns_.begin(), columns_.end(), c) == columns_.end())
             columns_.push_back(c);
     }
     if (std::find(columns_.begin(), columns_.end(), Column::Call) == columns_.end())
@@ -252,12 +255,10 @@ void StationList::appendColumnItems(wxMenu& menu) const
 {
     for (Column c : ALL_COLUMNS)
     {
-        wxString label = columnLabel(c);
-        if (!columnAvailable(c)) label += " (needs a host report)";
-        wxMenuItem* item = menu.AppendCheckItem(ID_COLUMN_FIRST + (int)c, label);
+        wxMenuItem* item = menu.AppendCheckItem(ID_COLUMN_FIRST + (int)c, columnLabel(c));
         item->Check(std::find(columns_.begin(), columns_.end(), c) != columns_.end());
-        // The call names the row, so it always shows; SNR waits on data2g-host.
-        item->Enable(columnAvailable(c) && c != Column::Call);
+        // The call names the row, so it always shows.
+        item->Enable(c != Column::Call);
     }
 }
 
@@ -265,8 +266,8 @@ void StationList::toggleColumn(int menuId)
 {
     int index = menuId - ID_COLUMN_FIRST;
     if (index < 0 || index >= COLUMN_COUNT) return;
-    Column c = ALL_COLUMNS[(size_t)index];
-    if (!columnAvailable(c) || c == Column::Call) return;
+    Column c = static_cast<Column>(index);
+    if (c == Column::Call) return;
     std::vector<Column> next;
     bool shown = std::find(columns_.begin(), columns_.end(), c) != columns_.end();
     // Shown columns keep the table's order.
@@ -286,7 +287,8 @@ void StationList::rebuildColumns()
         Column c = columns_[i];
         int width = c == Column::Status ? 125 : c == Column::Heard ? 90 : c == Column::Distance ? 85 : c == Column::Call ? 80
                     : c == Column::Bearing ? 65 : c == Column::Key ? 40 : 75;
-        int align = c == Column::Distance || c == Column::Bearing ? wxLIST_FORMAT_RIGHT : wxLIST_FORMAT_LEFT;
+        int align = c == Column::Distance || c == Column::Bearing || c == Column::Snr ? wxLIST_FORMAT_RIGHT
+                                                                                      : wxLIST_FORMAT_LEFT;
         table_->AppendColumn(columnLabel(c), (wxListColumnFormat)align, FromDIP(width));
     }
     for (size_t i = 0; i < columns_.size(); i++)

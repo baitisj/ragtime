@@ -34,8 +34,10 @@ Gear button by Send. The popup *is* the Submode Map:
 - The **gears** are knobs bearing their short names (below, "Mode
   names"), joined by a heavy line; every other
   best mode sits on a thin dashed line. The current gear is filled blue.
-- **Auto**: the path's S/N, from the station's last few bursts, is a
-  dashed line; everything needing more than that, less a 3 dB margin, is
+- **Auto**: the path's S/N is a dashed line. It is the weakest station
+  heard in the last 15 minutes, by the mean of its last 5 bursts' SNRs
+  as data2g-host reported them (Data2G PR #98), since a broadcast must
+  reach every station; everything needing more than that, less a 3 dB margin, is
   shaded. Auto takes the fastest gear above the shading (ringed in green
   when Auto is off, as a suggestion).
 - The gear list beside the map: the gear (its short name), Data2G mode,

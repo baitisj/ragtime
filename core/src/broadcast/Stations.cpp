@@ -70,19 +70,9 @@ bool columnFromKey(const std::string& key, Column& out)
     return false;
 }
 
-bool columnAvailable(Column column)
-{
-    return column != Column::Snr;
-}
-
 std::vector<Column> defaultColumns()
 {
-    std::vector<Column> out;
-    for (Column c : ALL_COLUMNS)
-    {
-        if (columnAvailable(c)) out.push_back(c);
-    }
-    return out;
+    return std::vector<Column>(ALL_COLUMNS.begin(), ALL_COLUMNS.end());
 }
 
 std::string heardAgo(uint64_t thenMs, uint64_t nowMs)
@@ -167,11 +157,30 @@ Station& Stations::touch(const std::string& call, uint64_t nowMs)
     return s;
 }
 
-void Stations::heard(const std::string& call, uint64_t nowMs)
+void Stations::heard(const std::string& call, uint64_t nowMs, std::optional<double> snr)
 {
     std::string normal = protocol::normalCallsign(call);
     if (normal.empty() || normal == me_) return;
-    touch(normal, nowMs);
+    Station& s = touch(normal, nowMs);
+    if (!snr || !std::isfinite(*snr)) return;
+    // A path heard long ago has changed since.
+    if (s.snrDb && nowMs > s.snrMs + PATH_WINDOW_MS) s.path.clear();
+    s.snrDb = snr;
+    s.snrMs = nowMs;
+    s.path.record(*snr);
+}
+
+std::optional<PathReport> Stations::weakestPath(uint64_t nowMs) const
+{
+    std::optional<PathReport> weakest;
+    for (const Station& s : stations_)
+    {
+        if (!s.snrDb || nowMs > s.snrMs + PATH_WINDOW_MS) continue;
+        std::optional<double> dB = s.path.average();
+        if (!dB || (weakest && *dB >= weakest->dB)) continue;
+        weakest = PathReport{s.call, *dB, s.path.count()};
+    }
+    return weakest;
 }
 
 void Stations::onRecord(const protocol::Record& record, uint64_t nowMs)
@@ -304,7 +313,7 @@ std::string Stations::cell(const Station& s, Column column, uint64_t nowMs) cons
         case Column::Services:
             return s.automatic ? "automatic" : std::string();
         case Column::Snr:
-            return std::string();
+            return s.snrDb ? gearbox::formatDb(*s.snrDb) : std::string();
     }
     return std::string();
 }
@@ -333,8 +342,9 @@ std::vector<const Station*> Stations::sorted(Column column, bool ascending, uint
         };
         switch (column)
         {
-            case Column::Call:
             case Column::Snr:
+                return numbers(a->snrDb, b->snrDb);
+            case Column::Call:
             case Column::Key:
                 return a->call.compare(b->call);
             case Column::Status:
@@ -363,6 +373,8 @@ std::vector<const Station*> Stations::sorted(Column column, bool ascending, uint
                 return !bearingDegrees(*s).has_value();
             case Column::Services:
                 return !s->automatic;
+            case Column::Snr:
+                return !s->snrDb.has_value();
             default:
                 return false;
         }

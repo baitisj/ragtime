@@ -8,7 +8,12 @@
 // - Opening: MYCALL, CHAT ON, LISTEN, BW500 or BW2300, BCAST OPEN D2G FROM
 //   <call>, then MODES.
 // - The host's reports: PTT, BUSY, MODE, the MODES list, BCAST HEARD,
-//   LOST and DROPPED, CONNECTED, DISCONNECTED, BUFFER.
+//   LOST, DROPPED and MISSED, CONNECTED, DISCONNECTED, BUFFER. HEARD and
+//   MISSED carry an SNR from hosts since Data2G PR #98.
+// - The session partner's SNR: SN, asked when its bursts have likely
+//   arrived (BUFFER going down, session bytes in), at most every
+//   SN_GAP_MS. A host that answers WRONG (one before PR #98, or before the
+//   partner's first burst) is not refused for it.
 // - Broadcasts: one burst at a time to the D2G port, each frame with an
 //   ACKMODE tag, after BCAST MODE when the burst wants another mode. A
 //   burst is Sent once the host has acknowledged every tag, and Not sent
@@ -25,6 +30,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <deque>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -83,13 +89,15 @@ public:
             Busy,               // on
             ModeUsed,           // text: the mode a burst went out in
             Heard,              // frame: a frame heard on the group
-            HeardFrom,          // text: the call a host heard a group burst from
+            HeardFrom,          // text: the call a host heard a group burst from, snr
             GroupLost,          // count: bursts the host heard but couldn't decode
+            Missed,             // text: submode, count: codewords, snr: a burst no port could claim
             Burst,              // id, burstState
             SessionCalling,     // peer
             SessionConnected,   // peer, incoming, number: bandwidth when given
             SessionEnded,       // peer, sessionEnd
             Buffer,             // count: our session bytes not yet acknowledged
+            SessionSnr,         // peer, snr: the partner's last burst as the host heard it
             Refused,            // text: a command the host answered WRONG
         } type = Type::GroupOpen;
 
@@ -103,6 +111,7 @@ public:
         BurstState burstState = BurstState::Queued;
         SessionEnd sessionEnd = SessionEnd::Ended;
         std::vector<uint8_t> frame;
+        std::optional<double> snr;  // dB, average power in 2500 Hz
     };
 
     // A broadcast written to the host but not sent is given up after this
@@ -113,6 +122,8 @@ public:
     // An ABORT the host hasn't followed with DISCONNECTED in this long ends
     // the session here anyway, so Leave now always leaves.
     static constexpr uint64_t ABORT_WAIT_MS = 15 * 1000;
+    // SN is asked at most this often.
+    static constexpr uint64_t SN_GAP_MS = 5 * 1000;
 
     explicit HostLink(Settings settings);
 
@@ -183,6 +194,9 @@ public:
     bool sessionIncoming() const { return incoming_; }
     // The host's latest BUFFER count.
     int buffer() const { return buffer_; }
+    // Session bytes have arrived from the partner, so a burst of its has
+    // decoded: SN is asked (now, or once SN_GAP_MS has passed).
+    void sessionHeard(uint64_t nowMs);
 
     //---------------------------------------------------------------------
     // What the host has said
@@ -217,6 +231,7 @@ private:
     void setBurst(Burst& burst, BurstState state);
     void finishSession(SessionEnd end);
     void heldChanged();
+    void askSn(uint64_t nowMs);
     Burst* current();
     void emit(Event event) { events_.push_back(std::move(event)); }
 
@@ -258,6 +273,9 @@ private:
     bool incoming_ = false;
     int buffer_ = 0;
     uint64_t abortMs_ = 0;              // when ABORT went, while it waits for DISCONNECTED
+    bool snWanted_ = false;             // the partner has likely sent since SN was last asked
+    uint64_t snAskedMs_ = 0;
+    std::optional<double> sessionSnr_;  // the last SN answer this session
 };
 
 } // namespace link

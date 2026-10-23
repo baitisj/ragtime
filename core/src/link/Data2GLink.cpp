@@ -54,6 +54,17 @@ bool toDouble(const std::string& text, double& out)
     return end != nullptr && *end == '\0';
 }
 
+// An SNR at the end of a report: a finite number with no letter in it, so
+// never a callsign (a callsign always has a letter) nor "inf" or "nan".
+std::optional<double> trailingSnr(const std::string& word)
+{
+    if (std::any_of(word.begin(), word.end(), [](char c) { return std::isalpha((unsigned char)c) != 0; }))
+        return std::nullopt;
+    double dB = 0.0;
+    if (!toDouble(word, dB) || !std::isfinite(dB)) return std::nullopt;
+    return dB;
+}
+
 void appendEscaped(std::vector<uint8_t>& out, uint8_t b)
 {
     if (b == FEND)
@@ -240,13 +251,27 @@ CommandEvent parseCommandLine(const std::string& line)
         std::string what = upper(w[2]);
         if (what == "HEARD")
         {
+            // BCAST n HEARD [call] [snr]: the SNR, when there, is the last word.
             event.type = CommandEvent::Type::BcastHeard;
-            if (w.size() > 3) event.text = w[3];
+            size_t end = w.size();
+            if (end > 3 && (event.snr = trailingSnr(w[end - 1]))) end--;
+            if (end > 3) event.text = w[3];
         }
         else if ((what == "LOST" || what == "DROPPED") && w.size() == 4 && toInt(w[3], event.count))
         {
             event.type = what == "LOST" ? CommandEvent::Type::BcastLost : CommandEvent::Type::BcastDropped;
         }
+    }
+    else if (verb == "BCAST" && w.size() >= 5 && w[1] == "*" && upper(w[2]) == "MISSED" && toInt(w[4], event.count))
+    {
+        // BCAST * MISSED submode n_cw [snr]
+        event.type = CommandEvent::Type::BcastMissed;
+        event.text = w[3];
+        if (w.size() > 5) event.snr = trailingSnr(w[5]);
+    }
+    else if (verb == "SN" && w.size() == 2 && (event.snr = trailingSnr(w[1])))
+    {
+        event.type = CommandEvent::Type::Sn;
     }
     else if (verb == "CONNECTED" && w.size() >= 3)
     {

@@ -30,12 +30,17 @@
 // - With setIdleBroadcastMs, bursts go while a session has been idle that
 //   long, as data2g-host does since Data2G PR #59; otherwise a session
 //   holds the group for as long as it lasts.
+// - With setReportsSnr, HEARD ends with the burst's SNR and SN answers
+//   "SN <snr>" for the partner's last burst (WRONG before one), as
+//   data2g-host does since Data2G PR #98; otherwise neither, and SN is
+//   WRONG. The SNR is the sender's setSignalDb, give or take its jitter.
 #ifndef RAGTIME_TESTS_FAKE_HOST_H
 #define RAGTIME_TESTS_FAKE_HOST_H
 
 #include <cstddef>
 #include <cstdint>
 #include <map>
+#include <optional>
 #include <random>
 #include <string>
 #include <vector>
@@ -82,6 +87,15 @@ public:
     // Session bytes cross at most this fast, bytes a second, after the
     // airtime (0, the default: all at once).
     void setSessionRate(int bytesPerSecond) { sessionRate_ = bytesPerSecond; }
+    // Report SNRs, as data2g-host since Data2G PR #98 (off: as before it).
+    void setReportsSnr(bool on) { reportsSnr_ = on; }
+    // How strong the other hosts hear this one's bursts, dB, each burst
+    // within +/- jitterDb of it.
+    void setSignalDb(double dB, double jitterDb = 0.0)
+    {
+        signalDb_ = dB;
+        jitterDb_ = jitterDb;
+    }
     // Bursts go while a session has been idle this long (0: never).
     void setIdleBroadcastMs(int ms) { idleBroadcastMs_ = ms; }
     // The next burst is dropped: BCAST <port> DROPPED <frames>, no acks.
@@ -128,6 +142,10 @@ private:
     void stepSession(long long nowMs);
     bool sessionIdle(long long nowMs) const;
     FakeHost* reachable(const std::string& call);
+    // One of this host's bursts as another hears it.
+    double heardAtDb();
+    // " 12.5" for a HEARD line, when this host reports SNRs.
+    std::string snrSuffix(double dB) const;
     void writeTo(Port& port, const std::vector<uint8_t>& bytes);
 
     FakeAir& air_;
@@ -184,6 +202,12 @@ private:
     bool disconnectPending_ = false;
     long long lastSessionMs_ = 0;   // bytes last read or carried
     int idleBroadcastMs_ = 0;
+
+    bool reportsSnr_ = false;
+    double signalDb_ = 0.0;
+    double jitterDb_ = 0.0;
+    std::mt19937 snrRandom_{4242};
+    std::optional<double> partnerSnr_;  // the partner's last burst, for SN
 };
 
 class FakeAir
