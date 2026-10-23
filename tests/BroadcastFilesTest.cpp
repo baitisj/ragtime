@@ -365,6 +365,13 @@ void testSealAfterQuiet()
     air.run(60000);
     CHECK_EQ(air.requestsOnAir, (size_t)0);
     CHECK_EQ(a.seals.rounds(), (size_t)0);
+    // Nobody asked, so nobody said they hold it: sealed, no more.
+    for (const protocol::Record& t : texts)
+    {
+        Seals::ItemMark m = a.seals.ourMark(t.header.seq);
+        CHECK(m.mark == Seals::Mark::Sealed && m.holders.empty());
+        CHECK(b.seals.theirMark("AG7EW", t.header.seq).mark == Seals::Mark::Sealed);
+    }
 
     // The chain: the next seal names this one.
     Seals::Chain chain = a.seals.chain();
@@ -886,6 +893,83 @@ void testGiveUpAndAskAgain()
     CHECK(f.state == FileState::Incomplete && f.held == 3);
 }
 
+// The seal badge. Ours: Awaiting until the seal goes; Repairing while a
+// station's request for it is being answered; Held by the stations whose
+// requests under the seal didn't ask for it; Sealed when nobody has said.
+// Theirs: Sealed when the seal's digest matches what we hold, Mismatch
+// when it doesn't, until a good copy comes.
+void testSealMarks()
+{
+    using Mark = Seals::Mark;
+    Air air;
+    Station& a = air.add("AG7EW", 1);
+    Station& b = air.add("KC2G", 2);
+    Station& c = air.add("W1AW", 3);
+    bool lost = false, spoilt = false;
+    b.lose = [&](protocol::Record& r) {
+        const protocol::Text* t = r.as<protocol::Text>();
+        if (t != nullptr && t->text == "two" && !lost) return lost = true;
+        return false;
+    };
+    c.lose = [&](protocol::Record& r) {
+        protocol::Text* t = r.as<protocol::Text>();
+        if (t != nullptr && t->text == "three" && !spoilt)
+        {
+            t->text = "thr33";
+            spoilt = true;
+        }
+        return false;
+    };
+    air.run(2000);
+    a.chat.send("one", "", now);
+    a.chat.send("two", "", now);
+    a.chat.send("three", "", now);
+    air.run(5000);
+    auto seqOf = [&](const std::string& text) {
+        for (const broadcast::Message& m : a.chat.messages())
+        {
+            if (m.ours && m.text == text) return m.seq;
+        }
+        return (uint32_t)0;
+    };
+    uint32_t one = seqOf("one"), two = seqOf("two"), three = seqOf("three");
+    CHECK(one != 0 && two == one + 1 && three == one + 2);
+    CHECK(a.seals.ourMark(one).mark == Mark::Awaiting);
+    CHECK(a.seals.ourMark(three).mark == Mark::Awaiting);
+
+    // The seal goes; B asks for "two", so it holds the other two.
+    for (int i = 0; i < 2000 && a.seals.requestsHeard() == 0; i++) air.run(250);
+    CHECK(a.seals.requestsHeard() >= 1);
+    Seals::ItemMark m = a.seals.ourMark(two);
+    CHECK(m.mark == Mark::Repairing && m.sealedMs != 0);
+    CHECK(m.wanting.size() >= 1 && m.wanting[0] == "KC2G");
+    m = a.seals.ourMark(one);
+    CHECK(m.mark == Mark::Held && !m.holders.empty() && m.holders[0] == "KC2G");
+    // W1AW's spoilt copy of "three" doesn't match the seal.
+    CHECK(c.seals.theirMark("AG7EW", three).mark == Mark::Mismatch);
+    CHECK(c.seals.theirMark("AG7EW", one).mark == Mark::Sealed);
+
+    air.run(Seals::QUIET_MS + 120000);
+    CHECK_EQ(b.textsFrom("AG7EW"), (size_t)3);
+    // Sent again, and KC2G hasn't asked since: nothing claimed for it.
+    // W1AW's request (for "three") showed it holds "two".
+    m = a.seals.ourMark(two);
+    CHECK(m.mark == Mark::Held && m.wanting.empty());
+    CHECK(m.sentAgainFor == std::vector<std::string>{"KC2G"});
+    CHECK(m.holders == std::vector<std::string>{"W1AW"});
+    m = a.seals.ourMark(three);
+    CHECK(m.mark == Mark::Held);
+    CHECK(std::find(m.holders.begin(), m.holders.end(), "KC2G") != m.holders.end());
+    CHECK(b.seals.theirMark("AG7EW", two).mark == Mark::Sealed);
+    CHECK(c.seals.theirMark("AG7EW", three).mark == Mark::Sealed);
+
+    // Two hours on, the seals are pruned and forgotten: the marks stay.
+    air.run(broadcast::MAX_OPEN_MS + 60000, 5000);
+    CHECK(a.seals.ourMark(one).mark == Mark::Held);
+    CHECK(a.seals.ourMark(two).holders == std::vector<std::string>{"W1AW"});
+    CHECK(b.seals.theirMark("AG7EW", one).mark == Mark::Sealed);
+}
+
 // Many pieces lost: the request is cut to fit a frame, and the rest come
 // in later rounds.
 void testManyLost()
@@ -977,6 +1061,11 @@ void testChatUnsealed()
     CHECK_EQ(a.seals.sealsSent(), (size_t)0);
     CHECK_EQ(b.heardFrom("AG7EW", protocol::RecordType::Seal), (size_t)0);
     CHECK_EQ(air.requestsOnAir, (size_t)0);
+    for (const broadcast::Message& m : a.chat.messages())
+    {
+        if (m.ours) CHECK(a.seals.ourMark(m.seq).mark == Seals::Mark::None);
+    }
+    for (const broadcast::Message& m : b.chat.messages()) CHECK(b.seals.theirMark(m.from, m.seq).mark == Seals::Mark::None);
 
     // A file between two lines of chat: its seal lists the announce alone.
     a.chat.send("a file for the net", "", now);
@@ -1031,6 +1120,7 @@ int main()
     testStoppedShare();
     testStopAndAskAgain();
     testGiveUpAndAskAgain();
+    testSealMarks();
     testManyLost();
     testRefused();
     testIgnore();

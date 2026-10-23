@@ -519,6 +519,11 @@ void MainFrame::buildLayout()
     broadcast_->onSend([this](const std::string& typed) { return sendTyped(typed); });
     broadcast_->onGear([this]() { showGearshift(); });
     broadcast_->nameModes([this](const std::string& mode) { return gearshift_.shortName(mode); });
+    broadcast_->sealMarks(
+        [this](const broadcast::Message& m) {
+            return m.ours ? seals_.ourMark(m.seq) : seals_.theirMark(m.from, m.seq);
+        },
+        [this]() { return seals_.version(); });
     broadcast_->onCancel([this](uint64_t id) {
         chat_.cancel(id);
         host_->flush();
@@ -1858,6 +1863,12 @@ void MainFrame::onBroadcastFiles()
         refreshMessages();
         showStatus();
     }
+    // The seal badges.
+    else if (seals_.version() != sealsVersion_)
+    {
+        refreshMessages();
+    }
+    sealsVersion_ = seals_.version();
     saveBroadcastState();
 }
 

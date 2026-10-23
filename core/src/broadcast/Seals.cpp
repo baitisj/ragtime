@@ -23,6 +23,8 @@ constexpr uint16_t MAX_SEAL_NUMBER = 0xFFFF;
 constexpr size_t MAX_SEALS_KEPT = 200;
 // How often the listener's memory is tidied.
 constexpr uint64_t FORGET_EVERY_MS = 10 * 1000;
+// Marks kept once their seals and items are gone, at most, ours and theirs.
+constexpr size_t MAX_MARKS = 2000;
 
 uint32_t seconds(uint64_t nowMs)
 {
@@ -80,6 +82,8 @@ void Seals::setChain(const std::string& callsign, const Chain& chain)
         resendBursts_.clear();
         resendLast_ = 0;
         sealSoon_ = false;
+        settled_.clear();
+        roundItems_.clear();
         callsign_ = call;
     }
     if (seals_.empty())
@@ -374,6 +378,23 @@ void Seals::onRequest(const std::string& from, const protocol::RepairRequest& re
     OurSeal* s = findSeal(request.seal);
     if (s == nullptr) return;
     if (!zero(request.sealDigest) && request.sealDigest != s->digest) return;
+    // A station that heard the seal says, item by item, what it lacks: the
+    // rest it holds.
+    const protocol::Seal* listed = s->record.as<protocol::Seal>();
+    for (size_t i = 0; listed != nullptr && !zero(request.sealDigest) && i < listed->items.size()
+                       && i < request.missingItems.size();
+         i++)
+    {
+        if (zero(listed->items[i])) continue;
+        uint32_t seq = s->first + (uint32_t)i;
+        bool missing = request.missingItems[i];
+        auto served = s->servedTo.find(seq);
+        if (served != s->servedTo.end()) served->second.erase(from);
+        (missing ? s->wanting : s->holders)[seq].insert(from);
+        auto other = (missing ? s->holders : s->wanting).find(seq);
+        if (other != (missing ? s->holders : s->wanting).end()) other->second.erase(from);
+        version_++;
+    }
     if (!open(*s, nowMs)) return;
 
     Asked& a = asked_[request.seal];
@@ -411,12 +432,22 @@ void Seals::resend(uint64_t nowMs)
     std::set<uint32_t> items;
     std::map<uint32_t, std::set<uint16_t>> pieces;
     std::vector<const OurSeal*> seals;
+    roundItems_.clear();
     for (const auto& entry : asked_)
     {
-        const OurSeal* s = findSeal(entry.first);
+        OurSeal* s = findSeal(entry.first);
         if (s == nullptr) continue;
         seals.push_back(s);
         items.insert(entry.second.items.begin(), entry.second.items.end());
+        // Those who asked for these have them sent again now.
+        for (uint32_t seq : entry.second.items)
+        {
+            auto wanting = s->wanting.find(seq);
+            if (wanting == s->wanting.end()) continue;
+            s->servedTo[seq].insert(wanting->second.begin(), wanting->second.end());
+            s->wanting.erase(wanting);
+        }
+        roundItems_.insert(entry.second.items.begin(), entry.second.items.end());
         for (const auto& file : entry.second.pieces)
             pieces[file.first].insert(file.second.begin(), file.second.end());
     }
@@ -563,6 +594,7 @@ void Seals::onEvent(const Event& event, uint64_t nowMs)
     if (resendBursts_.erase(event.id) != 0 && event.id == resendLast_)
     {
         resendLast_ = 0;
+        roundItems_.clear();
         // The round's seals went again: listeners ask once more if they
         // still lack anything.
         if (sent)
@@ -597,10 +629,18 @@ void Seals::onRecord(const protocol::Record& record, uint64_t nowMs)
     }
     else if (protocol::isItem((protocol::RecordType)record.type()))
     {
-        HeardItem& item = stations_[from].items[record.header.seq];
+        Station& station = stations_[from];
+        HeardItem& item = station.items[record.header.seq];
         item.digest = protocol::recordDigest(record);
         item.type = record.type();
         item.heardMs = nowMs;
+        // Heard after its seal: a repair, or a late copy.
+        for (const auto& entry : station.seals)
+        {
+            const protocol::Seal& seal = entry.second.seal;
+            if (covers(seal, record.header.seq))
+                markTheirs(from, record.header.seq, item.digest, seal.items[record.header.seq - seal.firstItem], nowMs);
+        }
     }
     else if (record.as<protocol::FilePiece>() != nullptr)
     {
@@ -637,6 +677,7 @@ void Seals::prune(uint64_t nowMs)
         const OurSeal& s = seals_.front();
         bool old = s.sent && nowMs >= s.sentMs + MAX_OPEN_MS && (s.keepUntilMs == 0 || nowMs >= s.keepUntilMs);
         if (!old && seals_.size() <= MAX_SEALS_KEPT) break;
+        settle(s);
         for (uint32_t seq = s.first; seq < s.first + s.count; seq++) sealedItems_.erase(seq);
         asked_.erase(s.number);
         seals_.pop_front();
@@ -759,6 +800,12 @@ void Seals::heardSeal(const std::string& call, const protocol::Record& record, u
         station.sealAsks.erase(seal->number);
     }
     h.heardMs = nowMs;
+    for (size_t i = 0; i < seal->items.size(); i++)
+    {
+        auto held = station.items.find(seal->firstItem + (uint32_t)i);
+        if (held != station.items.end())
+            markTheirs(call, held->first, held->second.digest, seal->items[i], nowMs);
+    }
 
     // The window opens as the seal ends: ask at a random time within it,
     // leaving room for our request's own airtime and the turn round.
@@ -888,6 +935,88 @@ void Seals::askSoon(const std::string& call, uint64_t nowMs)
     auto found = stations_.find(protocol::normalCallsign(call));
     if (found == stations_.end()) return;
     armAsk(found->first, found->second, LATE_SPREAD_MS, nowMs);
+}
+
+//-------------------------------------------------------------------------
+// The seal badge
+//-------------------------------------------------------------------------
+
+Seals::ItemMark Seals::ourMark(uint32_t seq) const
+{
+    ItemMark m;
+    for (const OurItem& item : unsealed_)
+    {
+        if (item.seq != seq) continue;
+        if (item.fate != Fate::Unsent) m.mark = Mark::Awaiting;
+        return m;
+    }
+    const OurSeal* s = sealFor(seq);
+    if (s == nullptr)
+    {
+        auto settled = settled_.find(seq);
+        return settled != settled_.end() ? settled->second : m;
+    }
+    const protocol::Seal* listed = s->record.as<protocol::Seal>();
+    if (listed == nullptr || seq - s->first >= listed->items.size() || zero(listed->items[seq - s->first])) return m;
+    if (!s->sent)
+    {
+        m.mark = Mark::Awaiting;
+        return m;
+    }
+    m.sealedMs = s->sentMs;
+    auto holders = s->holders.find(seq);
+    if (holders != s->holders.end()) m.holders.assign(holders->second.begin(), holders->second.end());
+    auto wanting = s->wanting.find(seq);
+    if (wanting != s->wanting.end()) m.wanting.assign(wanting->second.begin(), wanting->second.end());
+    auto served = s->servedTo.find(seq);
+    if (served != s->servedTo.end()) m.sentAgainFor.assign(served->second.begin(), served->second.end());
+    if (!m.wanting.empty() || roundItems_.count(seq) != 0)
+        m.mark = Mark::Repairing;
+    else
+        m.mark = m.holders.empty() ? Mark::Sealed : Mark::Held;
+    return m;
+}
+
+Seals::ItemMark Seals::theirMark(const std::string& call, uint32_t seq) const
+{
+    auto found = theirMarks_.find({call, seq});
+    return found != theirMarks_.end() ? found->second : ItemMark();
+}
+
+void Seals::settle(const OurSeal& seal)
+{
+    if (!seal.sent) return;
+    for (uint32_t seq = seal.first; seq < seal.first + seal.count; seq++)
+    {
+        ItemMark m = ourMark(seq);
+        if (m.mark == Mark::None) continue;
+        // Its repairs are over: what was asked for went again.
+        m.wanting.clear();
+        m.mark = m.holders.empty() ? Mark::Sealed : Mark::Held;
+        settled_[seq] = m;
+    }
+    while (settled_.size() > MAX_MARKS) settled_.erase(settled_.begin());
+}
+
+void Seals::markTheirs(const std::string& call, uint32_t seq, const protocol::Digest& held,
+                       const protocol::Digest& sealed, uint64_t nowMs)
+{
+    if (zero(sealed)) return;
+    auto key = std::make_pair(call, seq);
+    auto found = theirMarks_.find(key);
+    if (found == theirMarks_.end())
+    {
+        found = theirMarks_.emplace(key, ItemMark()).first;
+        theirOrder_.push_back(key);
+    }
+    found->second.mark = held == sealed ? Mark::Sealed : Mark::Mismatch;
+    found->second.sealedMs = nowMs;
+    while (theirOrder_.size() > MAX_MARKS)
+    {
+        theirMarks_.erase(theirOrder_.front());
+        theirOrder_.pop_front();
+    }
+    version_++;
 }
 
 bool Seals::askAgain(const std::string& call, uint32_t seq, uint64_t nowMs)

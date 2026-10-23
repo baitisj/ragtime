@@ -120,8 +120,26 @@ means look at this. SVGs are in `images/seals/`.
 | ![](images/seals/repair.svg) | Repair Asked | amber `#8a4b00`, dashed, turning arrow | A seal lists a message you never heard; a repair request is out | Proposed |
 | ![](images/seals/mismatch.svg) | Mismatch | solid red `#b42318`, X | The seal's digest doesn't match the text received; the text is struck through | Proposed |
 
-"Proposed" icons await Jeff's keep or drop. Signing is Stage 2, so Stage 1
-leaves room for the badge but doesn't show it.
+"Proposed" icons await Jeff's keep or drop. Signing is Stage 2, so the
+identity badges (Sealed meaning a known key, New Identity, Identity
+Changed, Unsigned) wait for it. Since 2026-10-23 (Jeff: "reflect the
+states of sent, repairing messages, and sealed/confirmed in the leftmost
+column") the Broadcast tab shows the seal's own state in that column,
+with the icons above (`app/src/SealBadge.*`), 16 px, with dark shades for
+a dark list, and a greyed line atop each message's menu saying what it
+means:
+
+| Badge | Ours | Theirs |
+| --- | --- | --- |
+| Awaiting Seal | sealed chat, its seal not gone yet | |
+| Sealed (check) | its seal went; nobody has asked for it, or it went again for whoever did and they haven't asked since | their seal lists it and the digest matches (unsigned until Stage 2) |
+| Repair Asked (turning arrow) | a station asked for it, and it goes again | |
+| Receipted (double check) | Held: a station's repair request under the seal didn't ask for it, so it holds it | |
+| Mismatch (X) | | what we hold doesn't match their seal; a good copy is asked for |
+
+Silence is never shown as a receipt: with no request heard, a seal says
+only that it went. Unsealed chat (Settings, Seal my broadcast messages,
+off by default) has no badge and shows only Sent.
 
 ## Files tab
 

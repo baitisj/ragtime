@@ -23,6 +23,7 @@
 #include "GearshiftIcon.h"
 #include "Html.h"
 #include "PhraseHighlight.h"
+#include "SealBadge.h"
 #include "Theme.h"
 
 using namespace ragtime::broadcast;
@@ -34,6 +35,48 @@ namespace
 
 // Room for the seal badge (16 px) in every row.
 constexpr int BADGE_ROOM = 20;
+
+// "14:32" today, "22 Oct 14:32" on another day (from the log).
+wxString clock(uint64_t ms);
+
+std::string joinCalls(const std::vector<std::string>& calls)
+{
+    std::string out;
+    for (size_t i = 0; i < calls.size(); i++) out += (i == 0 ? "" : i + 1 == calls.size() ? " and " : ", ") + calls[i];
+    return out;
+}
+
+// What a message's seal badge means, for the greyed line atop its menu;
+// empty when there is nothing to say.
+std::string sealLine(const Message& m, const ragtime::broadcast::Seals::ItemMark& mark)
+{
+    using Mark = ragtime::broadcast::Seals::Mark;
+    std::string at = mark.sealedMs == 0 ? std::string() : " " + std::string(clock(mark.sealedMs).utf8_str());
+    switch (mark.mark)
+    {
+        case Mark::Awaiting:
+            return "Awaiting its seal (it goes after a minute's quiet)";
+        case Mark::Sealed:
+            if (!m.ours) return "Sealed: " + m.from + "'s seal lists it, and it matches";
+            if (!mark.sentAgainFor.empty())
+                return "Sealed" + at + ", and sent again for " + joinCalls(mark.sentAgainFor)
+                       + (mark.sentAgainFor.size() == 1 ? ", who hasn't" : ", who haven't")
+                       + " asked since; stations don't confirm receipt";
+            return "Sealed" + at + ". Nobody has asked for it; stations don't confirm receipt";
+        case Mark::Repairing:
+            return "Repairing: " + (mark.wanting.empty() ? std::string("asked for") : joinCalls(mark.wanting) + " asked for it")
+                   + ", and it goes again";
+        case Mark::Held:
+            return "Held by " + joinCalls(mark.holders) + ": a repair request under its seal" + at + " didn't ask for it";
+        case Mark::Mismatch:
+            return "Doesn't match " + m.from + "'s seal: a good copy is asked for";
+        case Mark::None:
+            break;
+    }
+    if (m.ours && !m.past && (m.state == Message::State::Sent || m.state == Message::State::Acknowledged))
+        return "Not sealed, so not repaired (Settings: Seal my broadcast messages)";
+    return std::string();
+}
 
 // The Gear button's speedometer, as wide as fits over the gear's name
 // with the button no taller than Send.
@@ -58,7 +101,6 @@ void snugButton(wxWindow* button)
 #endif
 }
 
-// "14:32" today, "22 Oct 14:32" on another day (from the log).
 wxString clock(uint64_t ms)
 {
     wxDateTime at((time_t)(ms / 1000));
@@ -69,6 +111,7 @@ const int ID_REPLY = wxID_HIGHEST + 401;
 const int ID_CANCEL = wxID_HIGHEST + 402;
 const int ID_RESEND = wxID_HIGHEST + 403;
 const int ID_COPY = wxID_HIGHEST + 404;
+const int ID_SEAL_LINE = wxID_HIGHEST + 405;
 const int ID_FILE_TITLE = wxID_HIGHEST + 409;
 const int ID_FILE_ACTION = wxID_HIGHEST + 410;     // and the actions after it
 
@@ -142,9 +185,12 @@ protected:
                << "</font> ";
         }
 
+        wxString badge;
+        if (owner_->sealMark_ && !m->past) badge = sealBadgeHtml(owner_->sealMark_(*m).mark, this);
+
         wxString html;
         html << "<table width=\"100%\" cellspacing=\"0\" cellpadding=\"2\"><tr>"
-             << "<td width=\"" << BADGE_ROOM << "\"></td>"
+             << "<td width=\"" << BADGE_ROOM << "\" valign=\"top\">" << badge << "</td>"
              << "<td valign=\"top\" nowrap><font" << colour(secondaryText()) << ">" << clock(m->atMs)
              << "</font></td>"
              << "<td valign=\"top\" width=\"100%\"><font" << body << "><b>" << htmlEscape(m->from) << "</b>&nbsp; "
@@ -352,8 +398,11 @@ void BroadcastPage::send()
 
 void BroadcastPage::refresh()
 {
-    if (shownVersion_ == chat_.version() && list_->GetItemCount() == chat_.messages().size()) return;
+    uint64_t seals = sealsVersion_ ? sealsVersion_() : 0;
+    if (shownVersion_ == chat_.version() && shownSeals_ == seals && list_->GetItemCount() == chat_.messages().size())
+        return;
     shownVersion_ = chat_.version();
+    shownSeals_ = seals;
     size_t count = chat_.messages().size();
     bool atEnd = list_->GetItemCount() == 0 || list_->GetVisibleRowsEnd() >= list_->GetItemCount();
     list_->SetItemCount(count);
@@ -423,6 +472,13 @@ void BroadcastPage::showMenu(int row)
     wxString text = wxString::FromUTF8(m->text);
 
     wxMenu menu;
+    std::string seal = sealMark_ && !m->past ? sealLine(*m, sealMark_(*m)) : std::string();
+    if (!seal.empty())
+    {
+        menu.Append(ID_SEAL_LINE, wxString::FromUTF8(seal));
+        menu.Enable(ID_SEAL_LINE, false);
+        menu.AppendSeparator();
+    }
     if (!m->ours) menu.Append(ID_REPLY, "Reply to " + wxString::FromUTF8(from));
     if (m->ours && m->state == State::Queued) menu.Append(ID_CANCEL, "Cancel");
     if (chat_.canResend(*m)) menu.Append(ID_RESEND, "Re-send");

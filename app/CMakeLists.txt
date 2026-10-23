@@ -33,6 +33,7 @@ add_executable(ragtime WIN32
     src/HostConnection.cpp
     src/Html.cpp
     src/PhraseHighlight.cpp
+    src/SealBadge.cpp
     src/Prefs.cpp
     src/SessionPage.cpp
     src/SettingsDialog.cpp

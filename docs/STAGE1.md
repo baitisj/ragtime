@@ -209,8 +209,11 @@ The brief:
   two minutes to give up), the Gear button by Send, "@W1AW" from the
   station list, Pause sending.
 - Seal badges: the icons are in `docs/images/seals/`. Signing comes in
-  Stage 2, so hide the badge until then rather than marking every message
-  Unsigned, but leave room for it in the message row and the Key column.
+  Stage 2, so no identity badge until then, rather than marking every
+  message Unsigned; room is left for it in the Key column. The message
+  row's badge shows the seal's own state (Awaiting, Sealed, Repairing,
+  Held, Mismatch; `docs/MOCKUPS.md`, Jeff's ask of 2026-10-23), from
+  `Seals::ourMark` and `Seals::theirMark`.
 
 ## F. Sessions
 

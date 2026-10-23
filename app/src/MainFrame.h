@@ -188,6 +188,8 @@ private:
     wxBitmapButton* themeButton_ = nullptr;     // light and dark, where the build can switch
 
     uint64_t broadcastFilesVersion_ = 0;
+
+    uint64_t sealsVersion_ = 0;
     uint16_t savedSeal_ = 0;    // the seal chain's number last saved
     std::map<std::string, std::string> askOnConnect_;   // a line to send once a session with the station is up
     std::vector<std::string> logOther_;                 // lines of the files log this version doesn't read
