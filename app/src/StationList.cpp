@@ -331,11 +331,16 @@ void StationList::refresh(uint64_t nowMs)
     updating_ = true;
     int page = narrow_ ? (order_.empty() ? PAGE_EMPTY : PAGE_NARROW) : PAGE_TABLE;
     if (book_->GetSelection() != page) book_->ChangeSelection((size_t)page);
-    narrowView_->SetItemCount(order_.size());
-    table_->SetItemCount((long)order_.size());
+    if (narrowView_->GetItemCount() != order_.size()) narrowView_->SetItemCount(order_.size());
+    // A new count leaves wx's table to lay itself out again, and a paint
+    // before that draws it empty: it blinked once a refresh (Jeff,
+    // 2026-10-23). So the count is set only when it changes, and then the
+    // table repaints itself once laid out.
+    bool recount = table_->GetItemCount() != (long)order_.size();
+    if (recount) table_->SetItemCount((long)order_.size());
     showSelection();
     narrowView_->RefreshAll();
-    table_->Refresh();
+    if (!recount) table_->Refresh();
     updating_ = false;
 }
 
