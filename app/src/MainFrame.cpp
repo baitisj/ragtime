@@ -443,6 +443,11 @@ void MainFrame::buildLayout()
     // on any tooltip set by hand.
     CreateStatusBar(STATUS_FIELDS, wxSTB_DEFAULT_STYLE & ~wxSTB_SHOW_TIPS);
     sizeStatusFields();
+    // Maximizing hides the size grip and restoring brings it back.
+    GetStatusBar()->Bind(wxEVT_SIZE, [this](wxSizeEvent& e) {
+        e.Skip();
+        CallAfter([this]() { sizeStatusFields(); });
+    });
     GetStatusBar()->Bind(wxEVT_LEFT_DOWN, [this](wxMouseEvent& e) {
         wxRect files;
         if (GetStatusBar()->GetFieldRect(FIELD_TRANSFERS, files) && files.Contains(e.GetPosition()))
@@ -733,11 +738,17 @@ void MainFrame::showConnection()
 
 void MainFrame::sizeStatusFields()
 {
-    // The transfers line takes what the host's field leaves.
+    // The transfers line takes what the host's field leaves, and the
+    // host's field is as wide as its text. On GTK the last field also
+    // holds the size grip, a square as tall as the bar, shown unless the
+    // window is maximized; wx cuts the text short rather than draw over
+    // it, so the field makes room for it.
     wxStatusBar* bar = GetStatusBar();
+    if (bar == nullptr) return;
     wxString shown = hostText_.empty() ? utf8(std::string("data2g-host 127.0.0.1:8300") + DOT + "Not connected")
                                        : hostText_;
-    int host = bar->GetTextExtent(shown).x + FromDIP(24);
+    int host = bar->GetTextExtent(shown).x + 2 * bar->GetBorderX() + FromDIP(12);
+    if (!IsMaximized()) host += bar->GetClientSize().y;
     const int widths[STATUS_FIELDS] = {FromDIP(150), FromDIP(260), -1, host};
     bar->SetStatusWidths(STATUS_FIELDS, widths);
 }
