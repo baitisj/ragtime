@@ -312,6 +312,14 @@ Choices made there, for Jeff to keep or change:
   data folder: the last 500 finished transfers, and up to 8 parts kept 7
   days each. Lines it doesn't know (package H's, say) are kept as they
   are.
+- **A kept part isn't Completed** (Jeff, 2026-10-23). The file stays in
+  In progress and parts as Part kept, its ending held with the part (a
+  `K` line's last two fields). It goes into Completed as it ended when
+  the part is deleted, runs out of time or is pushed out by newer ones,
+  or as Saved when carried on. A log from before this moves a matching
+  Completed entry back onto its part when it loads. Sending files have
+  no part to keep, so an interrupted send is Completed at once, with
+  **Send it to W1AW again** on its menu.
 - **Closing Ragtime** mid-transfer fails it and keeps the part.
 - **An offer in the background** raises a desktop notification and
   counts on the Session tab's badge.

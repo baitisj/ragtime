@@ -55,11 +55,16 @@ public:
         enum class Type
         {
             Offered,    // a file offered to us (autoAccepted: taken without asking)
-            Finished,   // a transfer ended; it is in the history as historyId
+            Finished,   // a transfer ended, as finished says
         } type = Type::Offered;
         uint64_t id = 0;
         std::string peer;
         bool autoAccepted = false;
+        // Finished: how it ended. It is in the history as historyId, or,
+        // when partKept, not yet: the file isn't done while its part is
+        // kept, and goes into the history when the part goes unused.
+        FinishedFile finished;
+        bool partKept = false;
         uint64_t historyId = 0;
     };
 

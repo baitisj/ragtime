@@ -378,9 +378,11 @@ void SessionFiles::keep(Entry& entry)
         return;
     }
     auto older = findKept(entry);
-    if (older != kept_.end()) dropKept(older);
+    if (older != kept_.end()) dropKept(older, false);
     Kept& k = kept_.emplace_back();
     k.id = nextId_++;
+    k.transferId = t.id;
+    entry.transfer.partKept = true;
     k.peer = t.peer;
     k.name = t.name;
     k.size = t.size;
@@ -393,8 +395,9 @@ void SessionFiles::keep(Entry& entry)
     changed();
 }
 
-void SessionFiles::dropKept(std::list<Kept>::iterator it)
+void SessionFiles::dropKept(std::list<Kept>::iterator it, bool ended)
 {
+    if (ended && it->hasEnding) ended_.push_back(it->ending);
     std::error_code ec;
     std::filesystem::remove(it->part, ec);
     kept_.erase(it);
@@ -410,10 +413,10 @@ void SessionFiles::limitKept(uint64_t nowMs)
         if (it->keepUntilMs == 0) it->keepUntilMs = it->keptAtMs + KEPT_MS;
         bool old = nowMs >= it->keepUntilMs;
         auto next = std::next(it);
-        if (old) dropKept(it);
+        if (old) dropKept(it, true);
         it = next;
     }
-    while (kept_.size() > KEPT_MAX) dropKept(kept_.begin());
+    while (kept_.size() > KEPT_MAX) dropKept(kept_.begin(), true);
 }
 
 // Carries on in the part file kept for the offer, with the rest asked for.
@@ -426,13 +429,13 @@ bool SessionFiles::resumePart(Entry& entry, const std::string& path)
     std::error_code ec;
     if (std::filesystem::file_size(kept->part, ec) != kept->bytes || ec)
     {
-        dropKept(kept);
+        dropKept(kept, false);
         return false;
     }
     entry.out.open(kept->part, std::ios::binary | std::ios::app);
     if (!entry.out)
     {
-        dropKept(kept);
+        dropKept(kept, false);
         return false;
     }
     entry.part = kept->part;
@@ -516,7 +519,7 @@ bool SessionFiles::accept(uint64_t id, const std::string& path, std::string& err
     if (resumePart(*entry, path)) return true;
     // Saved somewhere else: what was kept of it is of no more use.
     auto kept = findKept(*entry);
-    if (kept != kept_.end()) dropKept(kept);
+    if (kept != kept_.end()) dropKept(kept, false);
     if (openPart(*entry, path, error)) return true;
 
     // The far end hears that this side can't take it.
@@ -1139,6 +1142,8 @@ std::vector<KeptPart> SessionFiles::keptParts() const
         p.bytes = k.bytes;
         p.keptAtMs = k.keptAtMs;
         p.keepUntilMs = k.keepUntilMs != 0 ? k.keepUntilMs : k.keptAtMs + KEPT_MS;
+        p.hasEnding = k.hasEnding;
+        p.ending = k.ending;
         out.push_back(std::move(p));
     }
     return out;
@@ -1154,8 +1159,10 @@ void SessionFiles::restoreKept(const std::vector<KeptPart>& parts, uint64_t nowM
         uint64_t until = p.keepUntilMs != 0 ? p.keepUntilMs : p.keptAtMs + KEPT_MS;
         if (ec || bytes != p.bytes || p.bytes == 0 || p.bytes >= p.size || nowMs >= until)
         {
-            // Gone, changed or too old: whatever is left of it goes.
+            // Gone, changed or too old: whatever is left of it goes, and
+            // the file with it.
             if (!ec && nowMs >= until) std::filesystem::remove(part, ec);
+            if (p.hasEnding) ended_.push_back(p.ending);
             continue;
         }
         bool known = std::any_of(kept_.begin(), kept_.end(), [&](const Kept& k) { return k.part == part; });
@@ -1171,6 +1178,8 @@ void SessionFiles::restoreKept(const std::vector<KeptPart>& parts, uint64_t nowM
         k.bytes = p.bytes;
         k.keptAtMs = p.keptAtMs;
         k.keepUntilMs = until;
+        k.hasEnding = p.hasEnding;
+        k.ending = p.ending;
     }
     limitKept(nowMs);
     changed();
@@ -1193,8 +1202,27 @@ bool SessionFiles::deleteKept(uint64_t keptId)
 {
     auto it = std::find_if(kept_.begin(), kept_.end(), [keptId](const Kept& k) { return k.id == keptId; });
     if (it == kept_.end()) return false;
-    dropKept(it);
+    dropKept(it, true);
     return true;
+}
+
+void SessionFiles::setKeptEnding(uint64_t transferId, const FinishedFile& ending)
+{
+    for (Kept& k : kept_)
+    {
+        if (k.transferId != transferId) continue;
+        k.hasEnding = true;
+        k.ending = ending;
+        changed();
+        return;
+    }
+}
+
+std::vector<FinishedFile> SessionFiles::takeEnded()
+{
+    std::vector<FinishedFile> out;
+    out.swap(ended_);
+    return out;
 }
 
 bool SessionFiles::hasRecords(const std::string& peer) const

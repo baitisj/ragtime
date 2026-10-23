@@ -145,6 +145,13 @@ struct KeptPart
     uint64_t bytes = 0;         // how much of the file it holds
     uint64_t keptAtMs = 0;
     uint64_t keepUntilMs = 0;   // when it is deleted
+    // How the transfer that left it ended ("Cancelled by KC2G"). The file
+    // isn't finished while its part is kept, so this goes into Completed
+    // only when the part goes without being carried on: deleted, or past
+    // its time. hasEnding is false for a part from a log written before
+    // 2026-10-23 whose ending is already in Completed.
+    bool hasEnding = false;
+    FinishedFile ending;
 };
 
 // The history and the kept parts as text, one line each, and back.
