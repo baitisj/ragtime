@@ -171,7 +171,7 @@ The brief:
 - One main window: connection bar, station list on the left, tabs in the
   middle, Globus on the right, status bar. Both dividers drag and are
   remembered; Globus off gives the messages the full width.
-- Connection bar: my callsign, group `D2G`, the gearshift button and the 500 Hz
+- Connection bar: my callsign, group `D2G`, the 500 Hz
   switch, Accept sessions, Pause sending, TX light from `PTT`, and
   an **Auto ALC** checkbox with a level meter (disabled until the host
   takes a TX level command).

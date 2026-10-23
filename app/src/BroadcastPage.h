@@ -11,6 +11,7 @@
 
 #include "ragtime/broadcast/BroadcastChat.h"
 
+class wxBitmapButton;
 class wxBoxSizer;
 class wxButton;
 class wxStaticText;
@@ -37,8 +38,9 @@ struct FileCard
 
 // The Broadcast tab (docs/STAGE1.md, package E): the messages on D2G, each
 // of ours showing Queued, Sending, Sent or Not sent; the line to type in,
-// where "@W1AW" at the start addresses one station; the Gear button, which
-// shows the gear and opens the gearshift; and Send.
+// where "@W1AW" at the start addresses one station; the Gear button, a
+// speedometer over the gear's short name, which opens the gearshift; and
+// Send.
 //
 // Each message row leaves room on its left for the seal badge. Signing
 // comes in Stage 2, so the badge stays hidden until then rather than
@@ -80,13 +82,16 @@ private:
     void showMenu(int row);
     void showFileMenu(const ragtime::broadcast::Message& m);
     void arrange(int width);
+    // Redraws the Gear button's speedometer and gear name, in the theme's colours.
+    void drawGearButton();
 
     const ragtime::broadcast::BroadcastChat& chat_;
     MessageList* list_ = nullptr;
     wxStaticText* paused_ = nullptr;
     wxTextCtrl* compose_ = nullptr;
     wxButton* file_ = nullptr;
-    wxButton* gear_ = nullptr;
+    wxBitmapButton* gear_ = nullptr;
+    wxString gearName_ = "Gear";
     wxButton* send_ = nullptr;
     wxBoxSizer* buttons_ = nullptr;
     wxBoxSizer* row_ = nullptr;

@@ -1,18 +1,13 @@
 #include "ConnectionBar.h"
 
-#include <algorithm>
-
-#include <wx/bmpbuttn.h>
 #include <wx/button.h>
 #include <wx/checkbox.h>
 #include <wx/gauge.h>
-#include <wx/settings.h>
 #include <wx/sizer.h>
 #include <wx/statline.h>
 #include <wx/stattext.h>
 #include <wx/tglbtn.h>
 
-#include "GearshiftIcon.h"
 #include "Html.h"
 #include "ToggleSwitch.h"
 #include "TxLamp.h"
@@ -36,8 +31,6 @@ ConnectionBar::ConnectionBar(wxWindow* parent)
     auto* group = new wxStaticText(this, wxID_ANY, "Group D2G");
     group->SetToolTip("The broadcast group Ragtime opens on data2g-host");
 
-    gearshift = new wxBitmapButton(this, wxID_ANY, gearshiftIcon(wxSystemSettings::GetColour(wxSYS_COLOUR_BTNTEXT)));
-    gearshift->SetToolTip("The gearshift: pick the speed, width and path");
     narrow = new ToggleSwitch(this, wxID_ANY, "500 Hz");
     narrow->SetToolTip("On: data2g-host uses only 500 Hz modes (BW500). Off: any width (BW2300)");
     acceptSessions = new wxCheckBox(this, wxID_ANY, "Accept sessions");
@@ -60,9 +53,6 @@ ConnectionBar::ConnectionBar(wxWindow* parent)
     }
     tx = new TxLamp(this);
 
-    // The gearshift button stands as tall as Pause sending.
-    gearshift->SetMinSize(wxSize(-1, std::max(gearshift->GetBestSize().y, pause->GetBestSize().y)));
-
     left_ = new wxBoxSizer(wxHORIZONTAL);
     auto add = [this](wxSizer* to, wxWindow* w, int left) {
         to->Add(w, 0, wxALIGN_CENTER_VERTICAL | wxLEFT, FromDIP(left));
@@ -70,8 +60,7 @@ ConnectionBar::ConnectionBar(wxWindow* parent)
     add(left_, callsign_, 8);
     add(left_, group, 12);
     left_->Add(divider(this), 0, wxEXPAND | wxLEFT | wxTOP | wxBOTTOM, FromDIP(8));
-    add(left_, gearshift, 8);
-    add(left_, narrow, 6);
+    add(left_, narrow, 8);
     add(left_, acceptSessions, 14);
     add(left_, pause, 12);
 
@@ -98,11 +87,6 @@ ConnectionBar::ConnectionBar(wxWindow* parent)
         e.Skip();
     });
 
-    // The icon follows the theme's text colour, light or dark.
-    Bind(wxEVT_SYS_COLOUR_CHANGED, [this](wxSysColourChangedEvent& e) {
-        gearshift->SetBitmap(gearshiftIcon(wxSystemSettings::GetColour(wxSYS_COLOUR_BTNTEXT)));
-        e.Skip();
-    });
     pause->Bind(wxEVT_TOGGLEBUTTON, [this](wxCommandEvent& e) {
         lightToggle(pause);
         e.Skip();
@@ -137,11 +121,6 @@ void ConnectionBar::setCallsign(const wxString& callsign)
 {
     callsign_->SetLabel(callsign.empty() ? wxString("No callsign") : callsign);
     Layout();
-}
-
-void ConnectionBar::setGearshiftTip(const wxString& tip)
-{
-    gearshift->SetToolTip(tip);
 }
 
 void ConnectionBar::setNarrow(bool on)
