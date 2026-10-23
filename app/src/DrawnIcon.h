@@ -13,10 +13,10 @@ class wxGraphicsContext;
 // buttons' floppy disk, and the status bar's moon and sun.
 
 // Draws an icon in a square size wide at the context's origin.
-using DrawIcon = std::function<void(wxGraphicsContext& gc, double size)>;
+using IconDrawing = std::function<void(wxGraphicsContext& gc, double size)>;
 
 // The icon at 1x and 2x, sizeDip across.
-wxBitmapBundle drawnIcon(const DrawIcon& draw, int sizeDip);
+wxBitmapBundle drawnIcon(const IconDrawing& draw, int sizeDip);
 
 // A floppy disk, for the buttons that send a file (Jeff, 2026-10-23).
 void drawFloppyIcon(wxGraphicsContext& gc, double size, const wxColour& ink);

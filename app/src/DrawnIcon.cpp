@@ -8,7 +8,7 @@
 #include <wx/graphics.h>
 #include <wx/image.h>
 
-wxBitmapBundle drawnIcon(const DrawIcon& draw, int sizeDip)
+wxBitmapBundle drawnIcon(const IconDrawing& draw, int sizeDip)
 {
     wxVector<wxBitmap> bitmaps;
     for (int scale : {1, 2})
