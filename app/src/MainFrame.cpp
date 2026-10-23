@@ -232,6 +232,8 @@ MainFrame::MainFrame()
 
     loadFilesLog();
     applyPrefs(true);
+    // After the seals: a part read back asks for its repairs under them.
+    broadcastFiles_.setPartsFolder(broadcastPartsDir(), HostConnection::nowMs());
     showStatus();
     refreshFiles();
 

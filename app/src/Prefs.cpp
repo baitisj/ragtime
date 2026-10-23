@@ -235,6 +235,14 @@ std::string broadcastLogPath()
     return std::string(file.GetFullPath().utf8_str());
 }
 
+std::string broadcastPartsDir()
+{
+    if (!configPath.empty()) return configPath + ".broadcast-parts";
+    wxFileName dir = wxFileName::DirName(wxString::FromUTF8(appDataDir()));
+    dir.AppendDir("broadcast-parts");
+    return std::string(dir.GetPath().utf8_str());
+}
+
 broadcast::Seals::Chain loadSealChain(const std::string& callsign)
 {
     broadcast::Seals::Chain chain;

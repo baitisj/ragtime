@@ -34,6 +34,7 @@ add_library(ragtime_core STATIC
     # Package H: broadcast files, seals and repair.
     src/broadcast/Airtime.cpp
     src/broadcast/BroadcastFiles.cpp
+    src/broadcast/BroadcastParts.cpp
     src/broadcast/Seals.cpp
     # Package F (sessions): src/session/.
     src/session/SessionChat.cpp

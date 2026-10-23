@@ -496,8 +496,18 @@ the host's `MODES` lists them.
   it. A file announced again with the same size, piece size, digest and
   name takes over the pieces already heard.
 - A file still missing pieces once its seal is over 2 hours old, or 2
-  hours 10 minutes after anything new came, is shown as incomplete; it
-  and finished ones are kept on the screen for 24 hours, in memory only.
+  hours 10 minutes after anything new came, is shown as incomplete, and
+  kept 7 days. Finished files stay on the screen for 24 hours, in memory
+  only.
+- A file not yet whole (heard, being received or incomplete) is kept on
+  disk too, a file each in the app data folder's `broadcast-parts`, so a
+  restart loses neither its pieces nor the seals heard over it: the file
+  comes back on the Files tab, and a seal still under 2 hours old is
+  asked under again (a stopped file still asks for nothing). Heard and
+  never received, it goes 24 hours after its announce; incomplete, 7
+  days after it went so; saved or rejected, at once. Nothing read back
+  is trusted: a piece that doesn't fit the announce is dropped, and a
+  file that doesn't parse, or lacks its closing line, is deleted.
 
 ## Growing the protocol
 

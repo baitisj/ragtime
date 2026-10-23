@@ -71,7 +71,8 @@ screens.
   packing, the file estimate), `Seals` (sealing what we broadcast,
   listening windows, resend rounds, and asking for repairs with backoff
   and suppression) and `BroadcastFiles` (files on D2G, feeding the Files
-  tab through `FileRows.h`); file cards and the file button (a floppy disk, drawn in `DrawnIcon`) in `BroadcastPage`,
+  tab through `FileRows.h`, with `BroadcastParts` keeping files not yet
+  whole on disk across restarts, in `broadcastPartsDir()`); file cards and the file button (a floppy disk, drawn in `DrawnIcon`) in `BroadcastPage`,
   the File menu items and share menus in `MainFrame`, and the seal chain
   in `Prefs`.
 - Package I (packaging and the first release) gives the app icon

@@ -1,13 +1,16 @@
 #include "ragtime/broadcast/BroadcastFiles.h"
 
 #include <algorithm>
+#include <cctype>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <list>
 #include <string>
 #include <system_error>
 #include <utility>
 
+#include "ragtime/broadcast/BroadcastParts.h"
 #include "ragtime/files/SessionFiles.h"
 
 namespace ragtime
@@ -133,6 +136,7 @@ BroadcastFiles::BroadcastFiles(link::HostLink& link, BroadcastChat& chat, Seals&
 
 BroadcastFiles::~BroadcastFiles()
 {
+    writeParts();
     seals_.setFiles(nullptr);
 }
 
@@ -435,6 +439,7 @@ void BroadcastFiles::heardAnnounce(const protocol::Record& record, uint64_t nowM
     }
     in->announced = true;
     in->announce = *a;
+    in->announceRecord = record;
     in->file.name = files::safeFileName(a->name);
     in->file.size = a->size;
     in->file.pieces = pieces;
@@ -471,6 +476,7 @@ void BroadcastFiles::heardAnnounce(const protocol::Record& record, uint64_t nowM
         in->file.autoReceived = other->file.autoReceived;
         in->file.path = other->file.path;
         in->chosenPath = other->chosenPath;
+        dropPart(*other);
         incoming_.erase(other);
         break;
     }
@@ -601,6 +607,7 @@ bool BroadcastFiles::save(Incoming& in, std::string& error)
 
 void BroadcastFiles::finishIncoming(Incoming& in, State state, uint64_t nowMs, const std::string& error)
 {
+    dropPart(in);
     in.file.state = state;
     in.file.error = error;
     in.file.lastMs = nowMs;
@@ -688,7 +695,7 @@ bool BroadcastFiles::stop(uint64_t id, uint64_t nowMs)
     if (in == nullptr || in->file.state != State::Receiving) return false;
     in->file.state = State::Incomplete;
     in->file.stopped = true;
-    in->file.expiresAtMs = nowMs + KEEP_MS;
+    in->file.expiresAtMs = nowMs + PART_KEEP_MS;
     changed();
     return true;
 }
@@ -858,7 +865,7 @@ void BroadcastFiles::tick(uint64_t nowMs)
                 || nowMs >= in.file.lastMs + INCOMPLETE_MS))
         {
             in.file.state = State::Incomplete;
-            in.file.expiresAtMs = nowMs + KEEP_MS;
+            in.file.expiresAtMs = nowMs + PART_KEEP_MS;
             changed();
         }
         else if (in.file.state == State::Incomplete && nowMs >= in.file.expiresAtMs)
@@ -873,6 +880,178 @@ void BroadcastFiles::tick(uint64_t nowMs)
         ++it;
     }
     prune();
+    saveParts(nowMs);
+}
+
+//-------------------------------------------------------------------------
+// Parts kept on disk
+//-------------------------------------------------------------------------
+
+namespace
+{
+
+// A part's file name: the sender, the announce's number and the file's
+// digest, in characters any file system takes.
+std::string partName(const std::string& from, uint32_t seq, const protocol::Digest& digest)
+{
+    std::string name;
+    for (char c : from) name += std::isalnum((unsigned char)c) ? c : '_';
+    static const char* const digits = "0123456789abcdef";
+    name += "-" + std::to_string(seq) + "-";
+    for (size_t i = 0; i < 4 && i < digest.size(); i++)
+    {
+        name += digits[digest[i] >> 4];
+        name += digits[digest[i] & 0x0f];
+    }
+    return name + ".part";
+}
+
+bool keptState(BroadcastFile::State s)
+{
+    return s == BroadcastFile::State::Heard || s == BroadcastFile::State::Receiving
+           || s == BroadcastFile::State::Incomplete;
+}
+
+} // namespace
+
+void BroadcastFiles::dropPart(Incoming& in)
+{
+    if (in.partFile.empty()) return;
+    std::error_code ec;
+    std::filesystem::remove(files::pathFromUtf8(in.partFile), ec);
+    in.partFile.clear();
+    in.savedSig.clear();
+}
+
+void BroadcastFiles::saveParts(uint64_t nowMs)
+{
+    if (partsSavedMs_ != 0 && nowMs < partsSavedMs_ + PART_SAVE_MS) return;
+    partsSavedMs_ = nowMs;
+    writeParts();
+}
+
+void BroadcastFiles::writeParts()
+{
+    if (partsFolder_.empty()) return;
+    std::filesystem::path folder = files::pathFromUtf8(partsFolder_);
+    for (Incoming& in : incoming_)
+    {
+        // Saved, ignored and the like were dropped as they finished; a
+        // spool cleared of its pieces has nothing left to keep.
+        if (!in.announced || !keptState(in.file.state) || in.pieces.empty())
+        {
+            dropPart(in);
+            continue;
+        }
+        std::vector<KeptSeal> seals = seals_.sealsOver(in.file.from, in.file.seq);
+        std::string sig = std::to_string((int)in.file.state) + " " + std::to_string(in.pieces.size()) + " "
+                          + std::to_string(in.file.stopped) + " " + std::to_string(in.file.expiresAtMs) + " "
+                          + in.file.path + " " + std::to_string(seals.size());
+        for (const KeptSeal& s : seals) sig += " " + std::to_string(s.heardMs);
+        if (sig == in.savedSig) continue;
+
+        BroadcastPart part;
+        part.announce = in.announceRecord;
+        part.state = (int)in.file.state;
+        part.stopped = in.file.stopped;
+        part.autoReceived = in.file.autoReceived;
+        part.chosenPath = in.chosenPath;
+        part.path = in.file.path;
+        part.startedMs = in.file.startedMs;
+        part.lastMs = in.file.lastMs;
+        part.expiresAtMs = in.file.state == State::Heard ? in.file.startedMs + KEEP_MS : in.file.expiresAtMs;
+        part.seals = std::move(seals);
+        part.pieces = in.pieces;
+
+        std::error_code ec;
+        std::filesystem::create_directories(folder, ec);
+        std::filesystem::path target = folder / partName(in.file.from, in.file.seq, in.announce.digest);
+        std::filesystem::path temp = target;
+        temp += ".new";
+        {
+            std::ofstream out(temp, std::ios::binary | std::ios::trunc);
+            out << encodePart(part);
+            out.close();
+            if (!out) continue;
+        }
+        std::filesystem::rename(temp, target, ec);
+        if (ec) continue;
+        in.partFile = files::utf8FromPath(target);
+        in.savedSig = sig;
+    }
+}
+
+void BroadcastFiles::setPartsFolder(const std::string& folder, uint64_t nowMs)
+{
+    partsFolder_ = folder;
+    partsSavedMs_ = 0;
+    if (!folder.empty()) loadParts(nowMs);
+}
+
+void BroadcastFiles::loadParts(uint64_t nowMs)
+{
+    std::error_code ec;
+    std::filesystem::path folder = files::pathFromUtf8(partsFolder_);
+    for (const auto& entry : std::filesystem::directory_iterator(folder, ec))
+    {
+        if (entry.path().extension() != ".part") continue;
+        std::string file = files::utf8FromPath(entry.path());
+        std::ifstream in(entry.path(), std::ios::binary);
+        std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+        BroadcastPart part;
+        bool good = decodePart(text, part);
+        const protocol::FileAnnounce* a = good ? part.announce.as<protocol::FileAnnounce>() : nullptr;
+        State state = (State)part.state;
+        bool known = false;
+        for (const Incoming& other : incoming_)
+        {
+            if (other.file.from == part.announce.header.callsign && other.file.seq == part.announce.header.seq)
+                known = true;
+        }
+        if (a == nullptr || known || !keptState(state) || a->size > MAX_FILE_BYTES || a->pieceBytes == 0
+            || (part.expiresAtMs != 0 && nowMs >= part.expiresAtMs))
+        {
+            if (!known) std::filesystem::remove(entry.path(), ec);
+            continue;
+        }
+
+        incoming_.emplace_back();
+        Incoming& kept = incoming_.back();
+        kept.file.id = nextId_++;
+        kept.file.outgoing = false;
+        kept.file.from = part.announce.header.callsign;
+        kept.file.seq = part.announce.header.seq;
+        kept.announced = true;
+        kept.announce = *a;
+        kept.announceRecord = part.announce;
+        kept.file.name = files::safeFileName(a->name);
+        kept.file.size = a->size;
+        uint16_t pieces = (uint16_t)((a->size + a->pieceBytes - 1) / a->pieceBytes);
+        kept.file.pieces = pieces;
+        kept.file.pieceMap.assign(pieces, files::PIECE_WAITING);
+        // Nothing read back is trusted: a piece must fit the announce.
+        for (auto& p : part.pieces)
+        {
+            if (p.first >= pieces || p.second.size() != pieceLength(a->size, a->pieceBytes, p.first)) continue;
+            kept.bytes += p.second.size();
+            kept.pieces.emplace(p.first, std::move(p.second));
+        }
+        kept.file.held = (uint16_t)kept.pieces.size();
+        kept.file.state = state;
+        kept.file.stopped = part.stopped;
+        kept.file.autoReceived = part.autoReceived;
+        kept.chosenPath = part.chosenPath;
+        kept.file.path = part.path;
+        kept.file.startedMs = part.startedMs;
+        kept.file.lastMs = part.lastMs;
+        kept.file.expiresAtMs = state == State::Incomplete ? part.expiresAtMs : 0;
+        kept.sealSeen = !part.seals.empty();
+        kept.partFile = file;
+        if (state == State::Receiving && kept.file.path.empty()) kept.file.state = State::Incomplete;
+        seals_.restoreHeard(part.announce, part.seals, part.lastMs, nowMs);
+        changed();
+        tryComplete(kept, nowMs);
+    }
 }
 
 //-------------------------------------------------------------------------

@@ -48,6 +48,7 @@
 #include <vector>
 
 #include "ragtime/broadcast/BroadcastChat.h"
+#include "ragtime/broadcast/BroadcastParts.h"
 #include "ragtime/link/HostLink.h"
 #include "ragtime/protocol/Records.h"
 
@@ -183,6 +184,13 @@ public:
     bool sealHeard(const std::string& call, uint32_t seq) const;
     // A request of ours waits to go to call.
     bool asking(const std::string& call) const;
+    // Kept across a restart with a part of call's file (BroadcastParts):
+    // the seals heard over its announce seq, and back again with the
+    // announce itself (held as of now) and its last piece at lastMs. A
+    // request goes soon if a seal is fresh and something is lacked.
+    std::vector<KeptSeal> sealsOver(const std::string& call, uint32_t seq) const;
+    void restoreHeard(const protocol::Record& announce, const std::vector<KeptSeal>& seals, uint64_t lastMs,
+                      uint64_t nowMs);
 
     //---------------------------------------------------------------------
     // The seal badge: what the screen shows beside each message
