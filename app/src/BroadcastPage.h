@@ -10,6 +10,7 @@
 #include <wx/panel.h>
 
 #include "ragtime/broadcast/BroadcastChat.h"
+#include "ragtime/broadcast/Seals.h"
 
 class wxBitmapButton;
 class wxBoxSizer;
@@ -43,9 +44,10 @@ struct FileCard
 // speedometer over the gear's short name, which opens the gearshift; and
 // Send.
 //
-// Each message row leaves room on its left for the seal badge. Signing
-// comes in Stage 2, so the badge stays hidden until then rather than
-// marking every message Unsigned.
+// Each message row has the seal badge on its left (SealBadge.h): whether
+// its seal has gone, is being repaired, or shows a station holds it, and
+// on theirs whether it matches their seal. Unsealed chat has none; seals
+// aren't signed until Stage 2, so it never claims an identity.
 class BroadcastPage : public wxPanel
 {
 public:
@@ -62,6 +64,13 @@ public:
     void onFileAction(std::function<void(uint64_t file, const std::string& action)> fn)
     {
         onFileAction_ = std::move(fn);
+    }
+    // Each message's seal badge, and a number that moves when any changes.
+    using SealMark = ragtime::broadcast::Seals::ItemMark;
+    void sealMarks(std::function<SealMark(const ragtime::broadcast::Message&)> fn, std::function<uint64_t()> version)
+    {
+        sealMark_ = std::move(fn);
+        sealsVersion_ = std::move(version);
     }
     // Turns a Data2G mode name into the short name shown to people ("E2C").
     void nameModes(std::function<std::string(const std::string& mode)> fn) { nameMode_ = std::move(fn); }
@@ -99,6 +108,7 @@ private:
     wxBoxSizer* under_ = nullptr;
     bool stacked_ = false;
     uint64_t shownVersion_ = 0;
+    uint64_t shownSeals_ = 0;
 
     std::function<bool(const std::string&)> onSend_;
     std::function<void()> onGear_;
@@ -107,6 +117,8 @@ private:
     std::function<bool(uint64_t, FileCard&)> fileCard_;
     std::function<void(uint64_t, const std::string&)> onFileAction_;
     std::function<std::string(const std::string&)> nameMode_;
+    std::function<SealMark(const ragtime::broadcast::Message&)> sealMark_;
+    std::function<uint64_t()> sealsVersion_;
 };
 
 #endif

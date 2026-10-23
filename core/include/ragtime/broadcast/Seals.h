@@ -44,6 +44,7 @@
 #include <random>
 #include <set>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "ragtime/broadcast/BroadcastChat.h"
@@ -183,6 +184,33 @@ public:
     // A request of ours waits to go to call.
     bool asking(const std::string& call) const;
 
+    //---------------------------------------------------------------------
+    // The seal badge: what the screen shows beside each message
+    //---------------------------------------------------------------------
+
+    // Silence is not a receipt: with no request heard, a seal says only
+    // that it went. A station holds an item of ours when a repair request
+    // of its under the seal (it heard the seal) didn't ask for that item.
+    enum class Mark
+    {
+        None,       // not sealed: unsealed chat, or nothing known any more
+        Awaiting,   // ours: sealed chat, its seal not gone yet
+        Sealed,     // ours: its seal went, nobody has asked for it; theirs: a seal lists it, the digest matches
+        Repairing,  // ours: a station asked for it, and it goes again
+        Held,       // ours: a station's request shows it holds it (holders)
+        Mismatch,   // theirs: the seal's digest differs from the text we hold
+    };
+    struct ItemMark
+    {
+        Mark mark = Mark::None;
+        uint64_t sealedMs = 0;              // ours: when its seal went; theirs: when it was heard
+        std::vector<std::string> holders;   // ours: stations shown to hold it
+        std::vector<std::string> wanting;   // ours: stations that asked for it, not yet sent again
+        std::vector<std::string> sentAgainFor;  // ours: it went again for these, who haven't asked since
+    };
+    ItemMark ourMark(uint32_t seq) const;
+    ItemMark theirMark(const std::string& call, uint32_t seq) const;
+
     // Counts, for tests and the status line.
     size_t requestsSent() const { return requestsSent_; }
     size_t requestsHeld() const { return requestsHeld_; }   // dropped: others asked first
@@ -233,6 +261,9 @@ private:
         std::map<std::string, uint64_t> askers;
         size_t asks = 0;
         int flushes = 0;            // sent again after a quiet window
+        // Per item, from the requests heard under it: who holds it, and
+        // who asked for it and hasn't had it sent again yet.
+        std::map<uint32_t, std::set<std::string>> holders, wanting, servedTo;
     };
 
     // What the requests in a window asked for under one seal.
@@ -329,6 +360,16 @@ private:
     uint64_t resendLast_ = 0;               // the round's last burst, with the seals
 
     std::map<std::string, Station> stations_;
+
+    // Marks outliving what they came from: our seals once pruned, their
+    // items once forgotten. At most MAX_MARKS of each, oldest dropped.
+    void settle(const OurSeal& seal);
+    void markTheirs(const std::string& call, uint32_t seq, const protocol::Digest& held,
+                    const protocol::Digest& sealed, uint64_t nowMs);
+    std::map<uint32_t, ItemMark> settled_;
+    std::map<std::pair<std::string, uint32_t>, ItemMark> theirMarks_;
+    std::deque<std::pair<std::string, uint32_t>> theirOrder_;
+    std::set<uint32_t> roundItems_;         // ours, in the repair round going now
     uint64_t forgotMs_ = 0;
 
     size_t requestsSent_ = 0;
