@@ -283,10 +283,13 @@ The brief:
   whole-file SHA-256, `.part` files kept 7 days across restarts and
   resumed.
 - Files tab: two panes, newest first. "In progress and parts" (date,
-  file, size, progress, From or To, state, expiry) and "Completed" (date,
-  file, size, From or To, result, saved path). States: Waiting for answer,
-  Moving, Stalled with a timer, Repairing, Part kept. Rate over the last
-  2 minutes, one finish estimate.
+  file, size, progress, de (From or To), state, expiry) and "Completed" (date,
+  file, size, bps, de (From or To), result, saved path; bps is bits a second
+  over the whole transfer, first byte to last: a broadcast send's first
+  pass, a broadcast receive from first heard to saved). States: Waiting for answer,
+  QRL (moving), Stalled with a timer, Repairing, Part kept. Rate over the
+  last 2 minutes, one finish estimate: a moving session file reads
+  "QRL ETA 14:32", a broadcast one "Receiving, ETA 14:32".
 - Right-click menus as in PLAN.md's Stage 1 section.
 
 ## H. Broadcast files with repair

@@ -114,6 +114,12 @@ private:
     uint64_t acked_ = 0;        // our stream, acknowledged
     RateMeter session_;         // the session's acknowledged rate
     std::map<uint64_t, RateMeter> meters_;  // live transfers', by id
+    struct Start
+    {
+        uint64_t atMs;
+        uint64_t done;
+    };
+    std::map<uint64_t, Start> started_;     // when each first moved, and from where
     std::set<uint64_t> recorded_;           // finished, in the history
     std::set<uint64_t> announced_;          // offered to us, told
     std::vector<Event> events_;

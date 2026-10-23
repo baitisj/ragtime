@@ -184,6 +184,7 @@ void FileTraffic::sample(uint64_t nowMs)
         if (t.state != State::Sending && t.state != State::Receiving) continue;
         live.insert(t.id);
         meters_[t.id].sample(t.done, nowMs);
+        started_.emplace(t.id, Start{nowMs, t.done});
     }
     for (auto it = meters_.begin(); it != meters_.end();)
         it = live.count(it->first) != 0 ? std::next(it) : meters_.erase(it);
@@ -220,6 +221,14 @@ void FileTraffic::collect(uint64_t nowMs)
         if (t.state == State::FailedThere && f.reason.empty())
             f.reason = t.outgoing ? t.peer + " couldn't save it" : t.peer + " couldn't read it";
         if (t.outgoing || t.state == State::Saved) f.path = t.path;
+        auto start = started_.find(t.id);
+        if (start != started_.end() && (t.state == State::Saved || t.state == State::Delivered) &&
+            t.size > start->second.done && nowMs > start->second.atMs)
+        {
+            // A part kept from before isn't counted: only what crossed now.
+            f.movedBytes = t.size - start->second.done;
+            f.movedMs = nowMs - start->second.atMs;
+        }
         Event e;
         e.type = Event::Type::Finished;
         e.id = t.id;
@@ -234,6 +243,8 @@ void FileTraffic::collect(uint64_t nowMs)
         for (auto it = ids->begin(); it != ids->end();)
             it = present.count(*it) != 0 ? std::next(it) : ids->erase(it);
     }
+    for (auto it = started_.begin(); it != started_.end();)
+        it = present.count(it->first) != 0 && recorded_.count(it->first) == 0 ? std::next(it) : started_.erase(it);
     changes_++;
 }
 
@@ -270,8 +281,9 @@ std::string FileTraffic::stateText(const FileTransfer& t, uint64_t nowMs, FileRo
                 look = FileRow::Look::Stalled;
                 return "Stalled " + session::clockLength(nowMs - moved);
             }
-            if (t.outgoing && t.done >= t.size) return "Moving, " + t.peer + " is checking it";
-            return "Moving";
+            // QRL: the link is busy with this file (Jeff's word for it).
+            if (t.outgoing && t.done >= t.size) return "QRL, " + t.peer + " is checking it";
+            return "QRL";
         }
         default:
             return "";

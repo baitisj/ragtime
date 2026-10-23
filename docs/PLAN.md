@@ -233,11 +233,11 @@ Mock-ups of the three tabs: [Data2G client mock-ups](https://claude.ai/artifact/
 
 **The Files tab** has two panes, each ordered by date, newest first.
 
-- **In progress and parts** (top): every transfer that isn't finished, including parts kept from earlier sessions. Columns: date, file, size, progress (bytes of total), From or To, state, and expiry.
-  - From or To is the other station. For a file you broadcast, To says **Broadcast**. For a broadcast you're receiving, From is the sending station.
+- **In progress and parts** (top): every transfer that isn't finished, including parts kept from earlier sessions. Columns: date, file, size, progress (bytes of total), de (From or To; the heading is ham shorthand, Jeff 2026-10-22), state, and expiry.
+  - de reads sender → receiver, the operator as OM: "W1AW → OM" for a file coming in, "OM → W1AW" for one going out (Jeff, 2026-10-22). For a file you broadcast it says "OM → **Broadcast**". For a broadcast you're receiving, the sender is the sending station.
   - States: Waiting for answer, Moving, Stalled, Repairing (a broadcast share taking repair requests), and Part kept.
   - Expiry is when a kept part is deleted (7 days by default), or when a broadcast share's repair rounds end.
-- **Completed** (bottom): finished transfers, with date, file, size, From or To, result (Saved, Sent, Declined, or Failed with the reason), and where it was saved.
+- **Completed** (bottom): finished transfers, with date, file, size, de (From or To), result (Saved, Sent, Declined, or Failed with the reason), and where it was saved.
 
 **Right-click in Files.**
 
@@ -280,12 +280,12 @@ Session files keep the ideas that worked on the air (offer and answer, carrying 
 | Bar | Sent and acknowledged, two shades, as now; broadcast files segmented by piece |
 | Bytes | 4,096 of 7,000 |
 | Rate | over the last 2 minutes, not since the start |
-| Finish | "about 14:32 (13 min)", one item |
-| State | Waiting for answer, Moving, **Stalled 1:20** (no bytes, link quiet), Leaving, Done, Failed with the reason |
+| Finish | "ETA 14:32", one item; a moving file's state reads "QRL ETA 14:32" (Jeff, 2026-10-22) |
+| State | Waiting for answer, QRL (moving), **Stalled 1:20** (no bytes, link quiet), Leaving, Done, Failed with the reason |
 
 **Carrying on.** Partial files are kept on disk next to the received-files folder, for 7 days, not only while the app runs. The same file from the same station resumes, as #105 does, and the card says "4,096 of 7,000 kept from before". A failed file's row in Files has **Ask W1AW to send it again** (a line in the ragchew, not a protocol change).
 
-**History.** The Files tab's Completed pane is a persistent log (time, direction, station, name, size, result, saved path) with **Open folder**. It replaces the visi-scope's per-run history and the cat.
+**History.** The Files tab's Completed pane is a persistent log (time, direction, station, name, size, the actual bps over the whole transfer (Jeff, 2026-10-22), result, saved path) with **Open folder**. It replaces the visi-scope's per-run history and the cat.
 
 ## Main window
 

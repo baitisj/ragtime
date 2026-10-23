@@ -211,6 +211,13 @@ std::string resultLabel(const FinishedFile& file)
     return "Failed";
 }
 
+std::string bpsText(const FinishedFile& file)
+{
+    if (file.movedBytes == 0 || file.movedMs < 1000) return std::string();
+    double bps = (double)file.movedBytes * 8.0 * 1000.0 / (double)file.movedMs;
+    return groupedNumber((uint64_t)(bps + 0.5));
+}
+
 //-------------------------------------------------------------------------
 // The history
 //-------------------------------------------------------------------------
@@ -253,6 +260,7 @@ const FinishedFile* FileHistory::find(uint64_t id) const
 //
 //   ragtime-files 1
 //   F <tab> via <tab> at ms <tab> in|out <tab> peer <tab> name <tab> size <tab> result <tab> reason <tab> path
+//     [<tab> moved bytes <tab> moved ms]   (added 2026-10-22; older readers ignore them)
 //   K <tab> peer <tab> name <tab> size <tab> digest (hex) <tab> path <tab> part <tab> bytes <tab> kept ms <tab> until ms
 //-------------------------------------------------------------------------
 
@@ -271,7 +279,9 @@ std::string saveFilesText(const FileHistory& history, const std::vector<KeptPart
                                            std::to_string(f.size),
                                            resultKey(f.result),
                                            f.reason,
-                                           f.path};
+                                           f.path,
+                                           std::to_string(f.movedBytes),
+                                           std::to_string(f.movedMs)};
         for (size_t i = 0; i < fields.size(); i++) out += (i ? "\t" : "") + escape(fields[i]);
         out += "\n";
     }
@@ -327,6 +337,8 @@ bool loadFilesText(const std::string& text, FileHistory& history, std::vector<Ke
             if (!number(f[6], file.size) || !resultFromKey(f[7], file.result)) continue;
             file.reason = f[8];
             file.path = f[9];
+            if (f.size() >= 12 && (!number(f[10], file.movedBytes) || !number(f[11], file.movedMs)))
+                file.movedBytes = file.movedMs = 0;
             history.add(std::move(file));
         }
         else if (f[0] == "K" && f.size() >= 10)
@@ -403,9 +415,16 @@ std::string finishText(uint64_t finishAtMs, uint64_t nowMs, long utcOffsetS)
 {
     if (finishAtMs == 0) return std::string();
     uint64_t left = finishAtMs > nowMs ? finishAtMs - nowMs : 0;
-    std::string length = left < 60000 ? std::string("under a minute") : session::sessionLength(left);
-    if (left >= 24ull * 3600 * 1000) return "about " + monthDay(finishAtMs, utcOffsetS) + " (" + length + ")";
-    return "about " + session::clockTime(finishAtMs, utcOffsetS) + " (" + length + ")";
+    if (left >= 24ull * 3600 * 1000) return "ETA " + monthDay(finishAtMs, utcOffsetS);
+    return "ETA " + session::clockTime(finishAtMs, utcOffsetS);
+}
+
+std::string stateText(const FileRow& row, uint64_t nowMs, long utcOffsetS)
+{
+    std::string finish = finishText(row.finishAtMs, nowMs, utcOffsetS);
+    if (finish.empty()) return row.state;
+    if (row.state.empty()) return finish;
+    return row.state + (row.state == "QRL" ? " " : ", ") + finish;
 }
 
 std::string expiryText(uint64_t atMs, uint64_t nowMs, long utcOffsetS)
@@ -430,7 +449,9 @@ std::string dateText(uint64_t atMs, uint64_t nowMs, long utcOffsetS)
 
 std::string peerText(bool outgoing, const std::string& peer)
 {
-    return (outgoing ? "To " : "From ") + peer;
+    // Sender to receiver, the operator as OM (Jeff, 2026-10-22).
+    const std::string arrow = " \xe2\x86\x92 ";
+    return outgoing ? "OM" + arrow + peer : peer + arrow + "OM";
 }
 
 //-------------------------------------------------------------------------
