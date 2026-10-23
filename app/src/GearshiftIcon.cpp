@@ -1,12 +1,11 @@
 #include "GearshiftIcon.h"
 
 #include <cmath>
-#include <memory>
 
-#include <wx/bitmap.h>
 #include <wx/brush.h>
 #include <wx/graphics.h>
-#include <wx/image.h>
+
+#include "DrawnIcon.h"
 
 namespace
 {
@@ -48,23 +47,5 @@ void drawGearshiftIcon(wxGraphicsContext& gc, double size, const wxColour& ink)
 
 wxBitmapBundle gearshiftIcon(const wxColour& ink, int sizeDip)
 {
-    wxVector<wxBitmap> bitmaps;
-    for (int scale : {1, 2})
-    {
-        const int px = sizeDip * scale;
-        wxImage image(px, px);
-        image.InitAlpha();
-        unsigned char* alpha = image.GetAlpha();
-        for (int i = 0; i < px * px; i++) alpha[i] = 0;
-        {
-            std::unique_ptr<wxGraphicsContext> gc(wxGraphicsContext::Create(image));
-            if (gc)
-            {
-                gc->SetAntialiasMode(wxANTIALIAS_DEFAULT);
-                drawGearshiftIcon(*gc, px, ink);
-            }
-        }
-        bitmaps.push_back(wxBitmap(image));
-    }
-    return wxBitmapBundle::FromBitmaps(bitmaps);
+    return drawnIcon([ink](wxGraphicsContext& gc, double size) { drawGearshiftIcon(gc, size, ink); }, sizeDip);
 }
