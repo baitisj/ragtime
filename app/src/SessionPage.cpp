@@ -21,6 +21,7 @@
 #include "DrawnIcon.h"
 #include "Html.h"
 #include "PhraseHighlight.h"
+#include "SealBadge.h"
 #include "Theme.h"
 
 using namespace ragtime::session;
@@ -34,8 +35,8 @@ namespace
 {
 
 
-// Room for the seal badge (16 px) in every row, as in the Broadcast tab.
-constexpr int BADGE_ROOM = 20;
+// Room for a badge (SEAL_BADGE_PX) in every row, as in the Broadcast tab.
+constexpr int BADGE_ROOM = SEAL_BADGE_PX + 4;
 
 const int ID_COPY = wxID_HIGHEST + 501;
 const int ID_RESEND = wxID_HIGHEST + 502;
@@ -154,18 +155,20 @@ protected:
         wxString what = htmlEscape(m->text);
         if (m->kind == Message::Kind::File) what = "<i>File</i>&nbsp; " + what;
 
-        wxString state;
-        if (m->ours)
-        {
-            wxColour c = secondaryText();
-            if (m->state == State::Delivered) c = goodText();
-            if (m->state == State::NotDelivered) c = badText();
-            state << "<font" << colour(c) << ">" << stateLabel(m->state) << "</font>";
-        }
+        // Delivered and Not delivered are badges on the left (Jeff,
+        // 2026-10-24: in place of the words); the other states stay words
+        // on the right.
+        wxString state, badge;
+        if (m->ours && m->state == State::Delivered)
+            badge = deliveredBadgeHtml(this);
+        else if (m->ours && m->state == State::NotDelivered)
+            badge = notDeliveredBadgeHtml(this);
+        else if (m->ours)
+            state << "<font" << colour(secondaryText()) << ">" << stateLabel(m->state) << "</font>";
 
         wxString html;
         html << "<table width=\"100%\" cellspacing=\"0\" cellpadding=\"2\"><tr>"
-             << "<td width=\"" << BADGE_ROOM << "\"></td>"
+             << "<td width=\"" << BADGE_ROOM << "\" valign=\"top\">" << badge << "</td>"
              << "<td valign=\"top\" nowrap><font" << colour(secondaryText()) << ">" << clock(m->atMs)
              << "</font></td>"
              << "<td valign=\"top\" width=\"100%\"><font" << body << "><b>" << htmlEscape(m->from) << "</b>&nbsp; "
@@ -300,6 +303,8 @@ SessionPage::SessionPage(wxWindow* parent, const SessionChat& session, const rag
         const FileTransfer* t = row == wxNOT_FOUND ? nullptr : list_->fileAt((size_t)row);
         wxString tip;
         if (m != nullptr && m->kind == Message::Kind::Text) tip = wxDateTime((time_t)m->time).FormatISOCombined(' ') + wxString::Format(", item %u", m->seq);
+        if (m != nullptr && m->ours && m->state == Message::State::Delivered) tip += ", delivered";
+        if (m != nullptr && m->ours && m->state == Message::State::NotDelivered) tip += ", not delivered";
         if (t != nullptr && !t->path.empty()) tip = utf8(t->path);
         list_->SetToolTip(tip);
         e.Skip();

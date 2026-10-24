@@ -179,7 +179,7 @@ A quiet link is still a session: only Leave, a lost link, or the far end leaving
 **Being in a session.**
 
 - The tab header is a status strip: **Connected to W1AW · 14 min**, the current speed and mode from data2g-host's reports, bytes waiting for acknowledgement, and last heard "12 s ago".
-- Messages typed in the tab go into the session. Each shows Sent, then Delivered when the far end's modem acknowledges its bytes (the `BUFFER` count, as now).
+- Messages typed in the tab go into the session. Each shows Sent, then Delivered when the far end's modem acknowledges its bytes (the `BUFFER` count, as now). Delivered is the green double-check seal in the row's left column, and Not delivered a red seal with a slash, in place of the words (your ask, 2026-10-24); the other states stay words on the right.
 - When nothing has arrived for a while, the strip says **Link quiet · 1:10 · data2g-host is still retrying**, in amber. It does not close the session. That is the KC2G case: the link was fading, not finished.
 - You can still switch to the Broadcast tab and post there. data2g-host sends it while the session is idle, and the message shows **Waiting for the session to go idle** until it goes.
 
