@@ -20,4 +20,10 @@ class wxWindow;
 constexpr int SEAL_BADGE_PX = 20;
 wxString sealBadgeHtml(ragtime::broadcast::Seals::Mark mark, const wxWindow* window);
 
+// The same seals for a session message of ours, in place of the words
+// (Jeff, 2026-10-24): Delivered is Held's green double check, Not delivered
+// a red outlined seal with a slash.
+wxString deliveredBadgeHtml(const wxWindow* window);
+wxString notDeliveredBadgeHtml(const wxWindow* window);
+
 #endif

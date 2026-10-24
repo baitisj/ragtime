@@ -76,11 +76,16 @@ const char* nameOf(Mark mark)
 // The icons of docs/images/seals/, drawn on their 24-unit grid: a wax-seal
 // rosette (48 points at radius 9.4 + 0.9 cos 12θ around (12, 12), stroked
 // 1.5, dashed 2.2 on and 1.6 off while waiting), and a glyph stroked 2.
-void drawSeal(wxGraphicsContext& gc, double size, Mark mark, bool dark)
+// Not delivered (a session message): the seal in red, outlined, with a
+// slash; slashed stands for it, as Mark has no such state.
+void drawSeal(wxGraphicsContext& gc, double size, Mark mark, bool dark, bool slashed = false)
 {
     const double u = size / 24.0;
     const double pi = std::acos(-1.0);
     Shade shade = shadeOf(mark, dark);
+    if (slashed)
+        shade = dark ? Shade{wxColour(0xff, 0x86, 0x78), wxColour(0x3d, 0x1a, 0x17)}
+                     : Shade{wxColour(0xb4, 0x23, 0x18), wxColour(0xfb, 0xe4, 0xe1)};
     // A solid seal means look at this: its edge is its fill.
     bool solid = mark == Mark::Mismatch;
     bool dashed = mark == Mark::Awaiting || mark == Mark::Repairing;
@@ -156,6 +161,11 @@ void drawSeal(wxGraphicsContext& gc, double size, Mark mark, bool dark)
     };
     gc.SetBrush(*wxTRANSPARENT_BRUSH);
     pen(2);
+    if (slashed)
+    {
+        line({{8.6, 15.4}, {15.4, 8.6}});
+        return;
+    }
     switch (mark)
     {
         case Mark::Sealed:
@@ -190,12 +200,16 @@ void drawSeal(wxGraphicsContext& gc, double size, Mark mark, bool dark)
 
 } // namespace
 
-wxString sealBadgeHtml(Mark mark, const wxWindow* window)
+namespace
 {
-    if (mark == Mark::None || window == nullptr) return wxString();
+
+wxString badgeHtml(Mark mark, bool slashed, const wxWindow* window)
+{
+    if ((mark == Mark::None && !slashed) || window == nullptr) return wxString();
     bool dark = darkSurface();
     int px = window->FromDIP(SEAL_BADGE_PX);
-    wxString name = wxString::Format("ragtime-seal-%s-%s-%d.png", nameOf(mark), dark ? "dark" : "light", px);
+    wxString name = wxString::Format("ragtime-seal-%s-%s-%d.png", slashed ? "undelivered" : nameOf(mark),
+                                     dark ? "dark" : "light", px);
 
     // Each icon is drawn once a theme and size, into wxHTML's memory files.
     static std::set<wxString> made;
@@ -208,8 +222,9 @@ wxString sealBadgeHtml(Mark mark, const wxWindow* window)
             handler = true;
         }
         if (wxImage::FindHandler(wxBITMAP_TYPE_PNG) == nullptr) wxImage::AddHandler(new wxPNGHandler);
-        wxBitmapBundle icon = drawnIcon([mark, dark](wxGraphicsContext& gc, double size) { drawSeal(gc, size, mark, dark); },
-                                        SEAL_BADGE_PX);
+        wxBitmapBundle icon = drawnIcon(
+            [mark, dark, slashed](wxGraphicsContext& gc, double size) { drawSeal(gc, size, mark, dark, slashed); },
+            SEAL_BADGE_PX);
         wxBitmap bitmap = icon.GetBitmap(wxSize(px, px));
         if (!bitmap.IsOk()) return wxString();
         wxMemoryFSHandler::AddFile(name, bitmap.ConvertToImage(), wxBITMAP_TYPE_PNG);
@@ -217,4 +232,21 @@ wxString sealBadgeHtml(Mark mark, const wxWindow* window)
     }
     wxString side = wxString::Format("%d", px);
     return "<img src=\"memory:" + name + "\" width=\"" + side + "\" height=\"" + side + "\">";
+}
+
+} // namespace
+
+wxString sealBadgeHtml(Mark mark, const wxWindow* window)
+{
+    return badgeHtml(mark, false, window);
+}
+
+wxString deliveredBadgeHtml(const wxWindow* window)
+{
+    return badgeHtml(Mark::Held, false, window);
+}
+
+wxString notDeliveredBadgeHtml(const wxWindow* window)
+{
+    return badgeHtml(Mark::None, true, window);
 }
