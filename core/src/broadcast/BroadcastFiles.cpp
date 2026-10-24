@@ -1004,8 +1004,12 @@ void BroadcastFiles::loadParts(uint64_t nowMs)
     for (const std::filesystem::path& path : found)
     {
         std::string file = files::utf8FromPath(path);
-        std::ifstream in(path, std::ios::binary);
-        std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+        std::string text;
+        {
+            // Closed before anything is deleted: Windows won't delete an open file.
+            std::ifstream in(path, std::ios::binary);
+            text.assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+        }
         BroadcastPart part;
         bool good = decodePart(text, part);
         const protocol::FileAnnounce* a = good ? part.announce.as<protocol::FileAnnounce>() : nullptr;
