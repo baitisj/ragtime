@@ -9,7 +9,9 @@
 #include <filesystem>
 #include <fstream>
 #include <functional>
+#include <map>
 #include <memory>
+#include <optional>
 #include <set>
 #include <string>
 #include <vector>
@@ -20,6 +22,7 @@
 #include "ragtime/broadcast/BroadcastFiles.h"
 #include "ragtime/broadcast/Seals.h"
 #include "ragtime/files/FileRows.h"
+#include "ragtime/gearbox/Gearbox.h"
 #include "ragtime/link/Data2GLink.h"
 #include "ragtime/link/HostLink.h"
 #include "ragtime/protocol/Records.h"
@@ -118,6 +121,18 @@ struct Station
     // Decides whether this station hears a record (true: lost), and may
     // spoil it.
     std::function<bool(protocol::Record&)> lose;
+    // The S/N this station's host reports each station's bursts at; none
+    // for a station not listed, as a host from before Data2G PR #98.
+    std::map<std::string, double> hearsAt;
+    // The mode its group bursts go in, as it last asked the host.
+    std::string groupMode;
+};
+
+// A record on the air, and the mode its burst went in.
+struct Aired
+{
+    std::string mode;
+    protocol::Record record;
 };
 
 struct Air
@@ -126,6 +141,7 @@ struct Air
     size_t requestsOnAir = 0;
     size_t framesOnAir = 0;
     std::vector<uint64_t> sealsOnAir;   // when each Seal went
+    std::vector<Aired> aired;
 
     Station& add(const std::string& call, uint32_t seed)
     {
@@ -159,6 +175,11 @@ struct Air
                 at = cr + 1;
                 if (line.compare(0, 10, "BCAST OPEN") == 0)
                     replies += "BCAST PORT " + std::to_string(GROUP_PORT) + "\r";
+                else if (line.compare(0, 11, "BCAST MODE ") == 0)
+                {
+                    s.groupMode = line.substr(line.rfind(' ') + 1);
+                    replies += "OK\r";
+                }
                 else if (line == "MODES")
                     replies += MODES;
                 else
@@ -175,7 +196,10 @@ struct Air
             for (auto& op : stations)
             {
                 if (op.get() == &s) continue;
-                std::string from = "BCAST " + std::to_string(GROUP_PORT) + " HEARD " + s.call() + "\r";
+                auto snr = op->hearsAt.find(s.call());
+                std::string from = "BCAST " + std::to_string(GROUP_PORT) + " HEARD " + s.call()
+                                   + (snr != op->hearsAt.end() ? " " + std::to_string(snr->second) : std::string())
+                                   + "\r";
                 op->link.commandBytes(from.data(), from.size(), now);
             }
             for (const link::KissFrame& f : frames)
@@ -189,6 +213,7 @@ struct Air
                 protocol::decodeFrame(data, records);
                 for (const protocol::Record& r : records)
                 {
+                    aired.push_back({s.groupMode, r});
                     if (r.type() == (uint8_t)protocol::RecordType::RepairRequest) requestsOnAir++;
                     if (r.type() == (uint8_t)protocol::RecordType::Seal) sealsOnAir.push_back(now);
                 }
@@ -421,6 +446,13 @@ void testRepairText()
     CHECK_EQ(b.textsFrom("AG7EW"), (size_t)2);
     air.run(Seals::QUIET_MS + 60000);
     CHECK_EQ(b.textsFrom("AG7EW"), (size_t)3);
+    // In its place, not at the bottom (Jeff, 2026-10-24).
+    std::vector<std::string> order;
+    for (const broadcast::Message& m : b.chat.messages())
+    {
+        if (m.from == "AG7EW") order.push_back(m.text);
+    }
+    CHECK(order == std::vector<std::string>({"one", "two", "three"}));
     CHECK_EQ(b.seals.requestsSent(), (size_t)1);
     CHECK_EQ(a.seals.requestsHeard(), (size_t)1);
     CHECK_EQ(a.seals.rounds(), (size_t)1);
@@ -1260,6 +1292,266 @@ void testChatUnsealed()
     CHECK_EQ(air.requestsOnAir, (size_t)0);
 }
 
+//-------------------------------------------------------------------------
+// Repair gears and refusals
+//-------------------------------------------------------------------------
+
+// A ladder with made-up thresholds, most robust first.
+std::vector<gearbox::Gear> ladder()
+{
+    std::vector<gearbox::Gear> gears(3);
+    gears[0].number = 1;
+    gears[0].mode = "fsk16r25-r1/3";
+    gears[0].threshold = -10.0;
+    gears[1].number = 2;
+    gears[1].mode = "qpsk-r1/3";
+    gears[1].threshold = -2.0;
+    gears[2].number = 3;
+    gears[2].mode = "w48-16qam-r1/2";
+    gears[2].threshold = 10.0;
+    return gears;
+}
+
+// Where a record went on the air: its index in air.aired, from index
+// from, or -1.
+long airedAt(const Air& air, size_t from, const std::function<bool(const protocol::Record&)>& is)
+{
+    for (size_t i = from; i < air.aired.size(); i++)
+    {
+        if (is(air.aired[i].record)) return (long)i;
+    }
+    return -1;
+}
+
+std::function<bool(const protocol::Record&)> textIs(const std::string& text)
+{
+    return [text](const protocol::Record& r) {
+        const protocol::Text* t = r.as<protocol::Text>();
+        return t != nullptr && t->text == text;
+    };
+}
+
+std::function<bool(protocol::Record&)> loseOnce(const std::string& text)
+{
+    auto lost = std::make_shared<bool>(false);
+    return [text, lost](protocol::Record& r) {
+        const protocol::Text* t = r.as<protocol::Text>();
+        if (t == nullptr || t->text != text || *lost) return false;
+        *lost = true;
+        return true;
+    };
+}
+
+// Each item goes again in the gear the weakest station that asked for it
+// can copy, never faster than it first went, fastest first, and the seal
+// last in the slowest gear used.
+void testRepairGear()
+{
+    Air air;
+    Station& a = air.add("AG7EW", 1);
+    Station& b = air.add("KC2G", 2);
+    Station& c = air.add("W1AW", 3);
+    for (auto& st : air.stations) st->seals.setLadder(ladder());
+    b.hearsAt["AG7EW"] = -5.0;  // less 3 dB: -8 dB, gear 1
+    b.hearsAt["W1AW"] = 0.0;
+    c.hearsAt["AG7EW"] = 20.0;  // gear 3, but "three" went in gear 2
+    c.hearsAt["KC2G"] = 0.0;
+    b.lose = loseOnce("two");
+    c.lose = loseOnce("three");
+    air.run(2000);
+    a.chat.send("one", "", now);
+    a.chat.send("two", "", now);
+    a.chat.send("three", "", now);
+    air.run(Seals::QUIET_MS + 120000);
+    CHECK_EQ(b.textsFrom("AG7EW"), (size_t)3);
+    CHECK_EQ(c.textsFrom("AG7EW"), (size_t)3);
+    CHECK_EQ(b.seals.snrOf("AG7EW", now).value_or(99), -5.0);
+
+    // The requests say how well each asker hears AG7EW.
+    for (const Aired& on : air.aired)
+    {
+        const protocol::RepairRequest* r = on.record.as<protocol::RepairRequest>();
+        if (r == nullptr) continue;
+        if (on.record.header.callsign == "KC2G") CHECK(r->snr && *r->snr == -5.0);
+        if (on.record.header.callsign == "W1AW") CHECK(r->snr && *r->snr == 20.0);
+    }
+    CHECK_EQ(a.seals.rounds(), (size_t)1);
+    auto isSeal = [](const protocol::Record& r) { return r.as<protocol::Seal>() != nullptr; };
+    long seal = airedAt(air, 0, isSeal);
+    CHECK(seal >= 0);
+    long three = airedAt(air, (size_t)seal, textIs("three"));
+    long two = airedAt(air, (size_t)seal, textIs("two"));
+    long again = airedAt(air, (size_t)seal + 1, isSeal);
+    CHECK(three > seal && two > three && again > two);
+    if (three > 0 && two > 0 && again > 0)
+    {
+        CHECK_EQ(air.aired[(size_t)three].mode, std::string("qpsk-r1/3"));
+        CHECK_EQ(air.aired[(size_t)two].mode, std::string("fsk16r25-r1/3"));
+        CHECK_EQ(air.aired[(size_t)again].mode, std::string("fsk16r25-r1/3"));
+    }
+}
+
+// A request heard speaks for us only if its asker's gear is no faster
+// than ours: the weak station asks too when the strong one asked first,
+// and the line goes again once, in the weak one's gear.
+void testSuppressionByGear(uint32_t weakSeed, uint32_t strongSeed, const std::string& firstAsker)
+{
+    Air air;
+    Station& a = air.add("AG7EW", 1);
+    Station& b = air.add("KC2G", weakSeed);
+    Station& c = air.add("W1AW", strongSeed);
+    for (auto& st : air.stations) st->seals.setLadder(ladder());
+    b.hearsAt["AG7EW"] = -5.0;
+    c.hearsAt["AG7EW"] = 20.0;
+    b.lose = loseOnce("two");
+    c.lose = loseOnce("two");
+    air.run(2000);
+    a.chat.send("one", "", now);
+    a.chat.send("two", "", now);
+    air.run(Seals::QUIET_MS + 120000);
+    CHECK_EQ(b.textsFrom("AG7EW"), (size_t)2);
+    CHECK_EQ(c.textsFrom("AG7EW"), (size_t)2);
+    long first = airedAt(air, 0, [](const protocol::Record& r) { return r.as<protocol::RepairRequest>() != nullptr; });
+    CHECK(first >= 0);
+    if (first >= 0) CHECK_EQ(air.aired[(size_t)first].record.header.callsign, firstAsker);
+    // The strong station first: the weak one still asks. The weak one
+    // first: it speaks for the strong one too.
+    CHECK_EQ(air.requestsOnAir, firstAsker == "W1AW" ? (size_t)2 : (size_t)1);
+    long seal = airedAt(air, 0, [](const protocol::Record& r) { return r.as<protocol::Seal>() != nullptr; });
+    long two = airedAt(air, (size_t)seal, textIs("two"));
+    CHECK(two > seal);
+    if (two > 0) CHECK_EQ(air.aired[(size_t)two].mode, std::string("fsk16r25-r1/3"));
+    CHECK_EQ(airedAt(air, (size_t)two + 1, textIs("two")), -1L);
+}
+
+// The slow gears' airtime in a round is capped: a weak station's file
+// comes in several rounds, not one long one.
+void testSlowCap(double capSeconds, bool oneRound)
+{
+    Air air;
+    Station& a = air.add("AG7EW", 1);
+    Station& b = air.add("KC2G", 2);
+    a.seals.setLadder(ladder());
+    a.seals.setSlowResendSeconds(capSeconds);
+    b.hearsAt["AG7EW"] = -5.0;
+    std::filesystem::path dir = freshFolder(oneRound ? "slow-one" : "slow-many");
+    b.files.setAutoReceive(dir.string());
+    std::set<uint16_t> lost;
+    b.lose = [&lost](protocol::Record& r) {
+        const protocol::FilePiece* p = r.as<protocol::FilePiece>();
+        return p != nullptr && lost.insert(p->index).second;
+    };
+    air.run(2000);
+    std::string error;
+    std::string path = makeFile("slow.bin", 1200, 21);
+    CHECK(a.files.send(path, "qpsk-r1/3", now, error) != 0);
+    air.run(40 * 60 * 1000, 1000);
+    BroadcastFile f = fileFrom(b, "AG7EW");
+    CHECK(f.id != 0 && f.state == FileState::Saved);
+    if (f.state == FileState::Saved) CHECK(readAll(f.path) == readAll(path));
+    if (oneRound)
+        CHECK_EQ(a.seals.rounds(), (size_t)1);
+    else
+        CHECK(a.seals.rounds() >= 3);
+    // Every piece went again in the slow gear.
+    size_t slow = 0;
+    for (const Aired& on : air.aired)
+    {
+        if (on.record.as<protocol::FilePiece>() != nullptr && on.mode == "fsk16r25-r1/3") slow++;
+    }
+    CHECK_EQ(slow, lost.size());
+}
+
+// A file the sender cancelled and closed: a request for the rest is
+// refused once, the listener's file is Incomplete with the reason, and
+// it can't be asked for again.
+void testRefusedCancelled()
+{
+    Air air;
+    Station& a = air.add("AG7EW", 1);
+    Station& b = air.add("KC2G", 2);
+    std::filesystem::path dir = freshFolder("refused");
+    b.files.setAutoReceive(dir.string());
+    b.lose = [](protocol::Record& r) {
+        const protocol::FilePiece* p = r.as<protocol::FilePiece>();
+        return p != nullptr && p->index == 1;
+    };
+    bool dropRequests = true;
+    a.lose = [&dropRequests](protocol::Record& r) { return dropRequests && r.as<protocol::RepairRequest>() != nullptr; };
+    air.run(2000);
+    std::string error;
+    uint64_t id = a.files.send(makeFile("refused.bin", 2500, 31), "qpsk-r1/3", now, error);
+    BroadcastFile mine;
+    for (int i = 0; i < 2000 && a.files.find(id, now, mine) && mine.held < 4; i++) air.run(250);
+    CHECK(a.files.cancel(id));
+    for (int i = 0; i < 2000 && b.seals.requestsSent() == 0; i++) air.run(250);
+    CHECK(b.seals.requestsSent() >= 1);
+    CHECK(a.files.closeRepairs(id));
+    dropRequests = false;
+
+    BroadcastFile f = fileFrom(b, "AG7EW");
+    CHECK(f.id != 0 && !f.refusal);
+    CHECK(b.files.receive(f.id, "", now, error));
+    air.run(120000);
+    CHECK_EQ(a.seals.refusalsSent(), (size_t)1);
+    CHECK_EQ(b.seals.refusalsHeard(), (size_t)1);
+    f = fileFrom(b, "AG7EW");
+    CHECK(f.state == FileState::Incomplete);
+    CHECK(f.refusal && *f.refusal == (uint8_t)protocol::RefusalReason::Cancelled);
+    CHECK_EQ(std::string(broadcast::refusalText(*f.refusal)), std::string("cancelled it"));
+    bool row = false;
+    for (const files::FileRow& r : b.files.rows(now))
+    {
+        if (r.id == f.id) row = r.state.find("Not repaired: AG7EW cancelled it") == 0;
+    }
+    CHECK(row);
+    // Asking again asks nothing: it would only be refused again.
+    CHECK(!b.seals.askAgain("AG7EW", f.seq, now));
+    size_t asked = air.requestsOnAir;
+    CHECK(b.files.receive(f.id, "", now, error));
+    air.run(120000);
+    CHECK_EQ(air.requestsOnAir, asked);
+    CHECK_EQ(a.seals.refusalsSent(), (size_t)1);
+    CHECK(fileFrom(b, "AG7EW").state == FileState::Incomplete);
+}
+
+// After a restart the sender holds none of its old seals: a request
+// under one is refused (no longer held), and the listener stops asking.
+void testRefusedAfterRestart()
+{
+    Air air;
+    air.add("AG7EW", 1);
+    Station& b = air.add("KC2G", 2);
+    b.lose = loseOnce("two");
+    bool dropRequests = true;
+    air.stations[0]->lose = [&dropRequests](protocol::Record& r) {
+        return dropRequests && r.as<protocol::RepairRequest>() != nullptr;
+    };
+    air.run(2000);
+    air.stations[0]->chat.send("one", "", now);
+    air.stations[0]->chat.send("two", "", now);
+    air.run(Seals::QUIET_MS + 60000);
+    CHECK_EQ(b.textsFrom("AG7EW"), (size_t)1);
+    CHECK(b.seals.requestsSent() >= 1);
+    Seals::Chain chain = air.stations[0]->seals.chain();
+    CHECK(chain.number != 0);
+
+    Station& a = air.restart(0, freshFolder("restart-refused").string(), 5);
+    a.seals.setChain("AG7EW", chain);
+    dropRequests = false;
+    air.run(2000);
+    uint32_t two = 0;
+    for (const protocol::Record& r : b.heard)
+    {
+        if (const protocol::Seal* s = r.as<protocol::Seal>()) two = s->firstItem + 1;
+    }
+    CHECK(b.seals.askAgain("AG7EW", two, now));
+    air.run(60000);
+    CHECK_EQ(a.seals.refusalsSent(), (size_t)1);
+    CHECK(b.seals.refusal("AG7EW", two) == std::optional<uint8_t>((uint8_t)protocol::RefusalReason::NotHeld));
+    CHECK(!b.seals.askAgain("AG7EW", two, now));
+}
+
 int main()
 {
     testAirtime();
@@ -1283,6 +1575,13 @@ int main()
     testChatUnsealed();
     testPartsAcrossRestart();
     testPartsExpire();
+    testRepairGear();
+    testSuppressionByGear(2, 3, "KC2G");
+    testSuppressionByGear(3, 2, "W1AW");
+    testSlowCap(60 * 60, true);
+    testSlowCap(20, false);
+    testRefusedCancelled();
+    testRefusedAfterRestart();
     std::filesystem::remove_all(scratch());
     return ragtime_test::finish();
 }

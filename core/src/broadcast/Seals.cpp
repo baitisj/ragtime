@@ -6,6 +6,7 @@
 #include <utility>
 
 #include "ragtime/broadcast/Airtime.h"
+#include "ragtime/gearbox/Submodes.h"
 
 namespace ragtime
 {
@@ -46,7 +47,26 @@ bool covers(const protocol::Seal& seal, uint32_t seq)
     return seq >= seal.firstItem && seq < seal.firstItem + seal.items.size();
 }
 
+// S/N reports kept for a station, at most.
+constexpr size_t MAX_SNRS = 100;
+
 } // namespace
+
+const char* refusalText(uint8_t reason)
+{
+    switch ((protocol::RefusalReason)reason)
+    {
+        case protocol::RefusalReason::StoppedSharing:
+            return "stopped sharing it";
+        case protocol::RefusalReason::Cancelled:
+            return "cancelled it";
+        case protocol::RefusalReason::NotHeld:
+            return "no longer holds it";
+        case protocol::RefusalReason::Closed:
+            return "closed its repairs";
+    }
+    return "won't repair it";
+}
 
 bool Seals::Lack::any() const
 {
@@ -79,6 +99,8 @@ void Seals::setChain(const std::string& callsign, const Chain& chain)
         seals_.clear();
         windowEndsMs_ = 0;
         asked_.clear();
+        refusing_.clear();
+        refusedMs_.clear();
         resendBursts_.clear();
         resendLast_ = 0;
         sealSoon_ = false;
@@ -97,6 +119,40 @@ void Seals::setChain(const std::string& callsign, const Chain& chain)
 link::ModeInfo Seals::modeInfo(const std::string& mode) const
 {
     return findMode(link_.modes(), mode, link_.groupMode());
+}
+
+double Seals::speedOf(const std::string& mode) const
+{
+    link::ModeInfo info = modeInfo(mode);
+    if (!info.valid()) return 0.0;
+    return gearbox::payloadBitsPerSecond(info.bytesPerCodeword, info.maxCodewords, info.secondsAtOne,
+                                         info.secondsAtMax);
+}
+
+std::string Seals::slower(const std::string& a, const std::string& b) const
+{
+    if (a == b) return a;
+    double sa = speedOf(a), sb = speedOf(b);
+    if (sa <= 0.0) return b;
+    if (sb <= 0.0) return a;
+    return sb < sa ? b : a;
+}
+
+std::optional<std::string> Seals::gearFor(std::optional<double> snr) const
+{
+    if (!snr || ladder_.empty()) return std::nullopt;
+    int pick = gearbox::autoGearIndex(ladder_, *snr, REPAIR_MARGIN_DB);
+    return ladder_[(size_t)pick].mode;
+}
+
+std::string Seals::repairMode(std::optional<double> snr, const std::string& first) const
+{
+    std::optional<std::string> gear = gearFor(snr);
+    if (!gear) return first;
+    // Never faster than it first went: that gear failed someone already.
+    // Empty, it went in the group's mode as it stood.
+    const std::string& went = !first.empty() ? first : !link_.groupMode().empty() ? link_.groupMode() : mode_;
+    return slower(*gear, went);
 }
 
 //-------------------------------------------------------------------------
@@ -376,7 +432,13 @@ void Seals::sealIfDue(uint64_t nowMs)
 void Seals::onRequest(const std::string& from, const protocol::RepairRequest& request, uint64_t nowMs)
 {
     OurSeal* s = findSeal(request.seal);
-    if (s == nullptr) return;
+    if (s == nullptr)
+    {
+        // One of ours, gone: pruned, or from before a restart.
+        if (ours(request.seal))
+            refuse(request.seal, protocol::RefusalReason::NotHeld, 0, repairMode(request.snr, mode_), nowMs);
+        return;
+    }
     if (!zero(request.sealDigest) && request.sealDigest != s->digest) return;
     // A station that heard the seal says, item by item, what it lacks: the
     // rest it holds.
@@ -395,24 +457,61 @@ void Seals::onRequest(const std::string& from, const protocol::RepairRequest& re
         if (other != (missing ? s->holders : s->wanting).end()) other->second.erase(from);
         version_++;
     }
-    if (!open(*s, nowMs)) return;
+    if (!s->sent) return;
+    if (!open(*s, nowMs))
+    {
+        // Closed by the operator: the file under it cancelled, or sharing
+        // stopped; else out of its sensitivity window.
+        auto reason = protocol::RefusalReason::Closed;
+        if (s->closed)
+        {
+            reason = protocol::RefusalReason::StoppedSharing;
+            for (uint32_t seq = s->first; seq < s->first + s->count && files_ != nullptr; seq++)
+            {
+                if (files_->stopped(seq)) reason = protocol::RefusalReason::Cancelled;
+            }
+        }
+        refuse(s->number, reason, 0, repairMode(request.snr, s->mode), nowMs);
+        return;
+    }
 
     Asked& a = asked_[request.seal];
-    if (request.wantSeal || zero(request.sealDigest)) a.seal = true;
+    if (request.wantSeal || zero(request.sealDigest))
+    {
+        std::string mode = repairMode(request.snr, s->mode);
+        a.sealMode = a.seal ? slower(a.sealMode, mode) : mode;
+        a.seal = true;
+    }
     for (size_t i = 0; i < request.missingItems.size() && i < s->count; i++)
     {
         if (!request.missingItems[i]) continue;
         const OurItem* item = findItem(s->first + (uint32_t)i);
-        if (item != nullptr && item->fate == Fate::Sent) a.items.insert(item->seq);
+        if (item == nullptr || item->fate != Fate::Sent) continue;
+        std::string mode = repairMode(request.snr, item->mode);
+        auto have = a.items.find(item->seq);
+        a.items[item->seq] = have == a.items.end() ? mode : slower(have->second, mode);
     }
     for (const auto& file : request.files)
     {
         uint32_t seq = file.first;
         if (seq < s->first || seq >= s->first + s->count || files_ == nullptr) continue;
         uint16_t pieces = files_->pieceCount(seq);
+        const OurItem* item = findItem(seq);
+        std::string mode = repairMode(request.snr, item != nullptr ? item->mode : s->mode);
+        if (pieces == 0)
+        {
+            // Asked for pieces we no longer hold.
+            refuse(s->number, files_->stopped(seq) ? protocol::RefusalReason::Cancelled
+                                                   : protocol::RefusalReason::NotHeld,
+                   seq, mode, nowMs);
+            continue;
+        }
         for (uint16_t p : file.second)
         {
-            if (p < pieces) a.pieces[seq].insert(p);
+            if (p >= pieces) continue;
+            auto& asked = a.pieces[seq];
+            auto have = asked.find(p);
+            asked[p] = have == asked.end() ? mode : slower(have->second, mode);
         }
     }
     if (!a.seal && a.items.empty() && a.pieces.empty()) asked_.erase(request.seal);
@@ -420,85 +519,174 @@ void Seals::onRequest(const std::string& from, const protocol::RepairRequest& re
     s->asks++;
     // A request with no window open, from a late joiner: a window now, so
     // other requests can join it.
-    if (windowEndsMs_ == 0 && resendLast_ == 0) windowEndsMs_ = nowMs + listeningWindowMs(modeInfo(s->mode));
+    openWindow(s->mode, nowMs);
     version_++;
+}
+
+bool Seals::ours(uint16_t number) const
+{
+    if (callsign_.empty() || lastNumber_ == 0 || number == 0) return false;
+    // At or before our newest seal, counting round the wrap.
+    uint32_t back = lastNumber_ >= number ? (uint32_t)(lastNumber_ - number)
+                                          : (uint32_t)lastNumber_ + MAX_SEAL_NUMBER - number;
+    return back < MAX_SEAL_NUMBER / 2;
+}
+
+void Seals::refuse(uint16_t seal, protocol::RefusalReason reason, uint32_t file, const std::string& mode,
+                   uint64_t nowMs)
+{
+    auto key = std::make_pair(seal, (uint8_t)reason);
+    auto waiting = refusing_.find(key);
+    if (waiting == refusing_.end())
+    {
+        // Said already, lately: a station that keeps asking can't keep us
+        // talking.
+        auto last = refusedMs_.find(key);
+        if (last != refusedMs_.end() && nowMs < last->second + REFUSE_EVERY_MS) return;
+        waiting = refusing_.emplace(key, Refusing()).first;
+        waiting->second.mode = mode;
+    }
+    Refusing& r = waiting->second;
+    r.mode = slower(r.mode, mode);
+    if (file == 0)
+        r.all = true;
+    else
+        r.files.insert(file);
+    openWindow(mode, nowMs);
+    version_++;
+}
+
+void Seals::openWindow(const std::string& mode, uint64_t nowMs)
+{
+    if (windowEndsMs_ == 0 && resendLast_ == 0) windowEndsMs_ = nowMs + listeningWindowMs(modeInfo(mode));
 }
 
 void Seals::resend(uint64_t nowMs)
 {
     rounds_++;
     // The union of what was asked, in sequence order: items, and each
-    // file's pieces after its announce.
-    std::set<uint32_t> items;
-    std::map<uint32_t, std::set<uint16_t>> pieces;
+    // file's pieces after its announce, each in the slowest gear any of
+    // those who asked for it needs.
+    std::map<uint32_t, std::string> items;
+    std::map<uint32_t, std::map<uint16_t, std::string>> pieces;
     std::vector<const OurSeal*> seals;
+    std::vector<std::string> sealModes;
     roundItems_.clear();
     for (const auto& entry : asked_)
     {
         OurSeal* s = findSeal(entry.first);
         if (s == nullptr) continue;
+        const Asked& a = entry.second;
         seals.push_back(s);
-        items.insert(entry.second.items.begin(), entry.second.items.end());
-        // Those who asked for these have them sent again now.
-        for (uint32_t seq : entry.second.items)
+        if (a.seal) sealModes.push_back(a.sealMode);
+        for (const auto& item : a.items)
         {
-            auto wanting = s->wanting.find(seq);
+            auto have = items.find(item.first);
+            items[item.first] = have == items.end() ? item.second : slower(have->second, item.second);
+            roundItems_.insert(item.first);
+            // Those who asked for it have it sent again now.
+            auto wanting = s->wanting.find(item.first);
             if (wanting == s->wanting.end()) continue;
-            s->servedTo[seq].insert(wanting->second.begin(), wanting->second.end());
+            s->servedTo[item.first].insert(wanting->second.begin(), wanting->second.end());
             s->wanting.erase(wanting);
         }
-        roundItems_.insert(entry.second.items.begin(), entry.second.items.end());
-        for (const auto& file : entry.second.pieces)
-            pieces[file.first].insert(file.second.begin(), file.second.end());
+        for (const auto& file : a.pieces)
+        {
+            auto& merged = pieces[file.first];
+            for (const auto& piece : file.second)
+            {
+                auto have = merged.find(piece.first);
+                merged[piece.first] = have == merged.end() ? piece.second : slower(have->second, piece.second);
+            }
+        }
     }
     asked_.clear();
-    if (seals.empty()) return;
+    std::vector<protocol::Record> refusals;
+    std::vector<std::string> refusalModes;
+    uint32_t time = seconds(nowMs);
+    for (const auto& entry : refusing_)
+    {
+        protocol::RepairRefused refused;
+        refused.seal = entry.first.first;
+        refused.reason = entry.first.second;
+        if (!entry.second.all) refused.files.assign(entry.second.files.begin(), entry.second.files.end());
+        refusals.push_back(chat_.record(refused, time));
+        refusalModes.push_back(entry.second.mode);
+        refusedMs_[entry.first] = nowMs;
+        refusalsSent_++;
+    }
+    refusing_.clear();
+    if (seals.empty() && refusals.empty()) return;
     std::sort(seals.begin(), seals.end(), [](const OurSeal* a, const OurSeal* b) { return a->number < b->number; });
 
-    std::set<uint32_t> order = items;
+    // The records, gear by gear.
+    std::map<std::string, std::vector<protocol::Record>> byMode;
+    std::set<uint32_t> order;
+    for (const auto& item : items) order.insert(item.first);
     for (const auto& file : pieces) order.insert(file.first);
-    uint32_t time = seconds(nowMs);
-    std::vector<protocol::Record> records;
     for (uint32_t seq : order)
     {
-        if (items.count(seq) != 0)
+        auto item = items.find(seq);
+        if (item != items.end())
         {
-            if (const OurItem* item = findItem(seq)) records.push_back(item->record);
+            if (const OurItem* ours = findItem(seq)) byMode[item->second].push_back(ours->record);
         }
         auto file = pieces.find(seq);
         if (file == pieces.end() || files_ == nullptr) continue;
-        for (uint16_t index : file->second)
+        for (const auto& index : file->second)
         {
             protocol::Record piece;
-            if (files_->piece(seq, index, time, piece)) records.push_back(std::move(piece));
+            if (files_->piece(seq, index.first, time, piece)) byMode[index.second].push_back(std::move(piece));
         }
     }
+    // Fastest first, so the stations that hear us best are served soonest.
+    std::vector<std::string> modes;
+    for (const auto& entry : byMode) modes.push_back(entry.first);
+    std::stable_sort(modes.begin(), modes.end(),
+                     [this](const std::string& a, const std::string& b) { return speedOf(a) > speedOf(b); });
 
-    std::string mode = seals.back()->mode;
-    link::ModeInfo info = modeInfo(mode);
-    std::vector<std::vector<std::vector<uint8_t>>> bursts = packBursts(packFrames(records), info);
-    // Within this round's airtime; the rest is asked for again.
-    double air = 0.0;
-    size_t keep = 0;
-    while (keep < bursts.size())
+    // Within this round's airtime, and its slow gears' share of it; the
+    // rest is asked for again.
+    std::string own = !seals.empty() ? seals.back()->mode : mode_;
+    double ownSpeed = speedOf(own);
+    double air = 0.0, slowAir = 0.0;
+    std::string last;
+    std::vector<std::pair<std::string, std::vector<std::vector<uint8_t>>>> bursts;
+    for (const std::string& mode : modes)
     {
-        air += burstSeconds(bursts[keep], info);
-        if (keep > 0 && air > RESEND_MAX_SECONDS) break;
-        keep++;
+        link::ModeInfo info = modeInfo(mode);
+        bool slow = mode != own && ownSpeed > 0.0 && speedOf(mode) < ownSpeed;
+        for (auto& burst : packBursts(packFrames(byMode[mode]), info))
+        {
+            double seconds = burstSeconds(burst, info);
+            bool first = bursts.empty();
+            if (!first && (air + seconds > RESEND_MAX_SECONDS || (slow && slowAir + seconds > slowResendSeconds_)))
+                break;
+            air += seconds;
+            if (slow) slowAir += seconds;
+            last = last.empty() ? mode : slower(last, mode);
+            bursts.push_back({mode, std::move(burst)});
+        }
     }
-    bursts.resize(keep);
-    // The seals last: hearing one again opens the next window.
-    std::vector<std::vector<uint8_t>> sealFrames;
-    for (const OurSeal* s : seals) sealFrames.push_back(protocol::encodeFrame({s->record}));
-    for (auto& burst : packBursts(sealFrames, info)) bursts.push_back(std::move(burst));
+    // The seals last, in the slowest gear used, so every asker can copy
+    // them: hearing one again opens the next window. Refusals after them.
+    std::string end = last.empty() ? own : last;
+    for (const std::string& mode : sealModes) end = slower(end, mode);
+    for (const std::string& mode : refusalModes) end = slower(end, mode);
+    std::vector<std::vector<uint8_t>> closing;
+    for (const OurSeal* s : seals) closing.push_back(protocol::encodeFrame({s->record}));
+    for (const auto& frame : packFrames(refusals)) closing.push_back(frame);
+    for (auto& burst : packBursts(closing, modeInfo(end))) bursts.push_back({end, std::move(burst)});
 
     for (const auto& burst : bursts)
     {
-        uint64_t id = link_.broadcast(burst, mode, nowMs, "repairs");
+        uint64_t id = link_.broadcast(burst.second, burst.first, nowMs,
+                                      seals.empty() ? "repairs refused" : "repairs");
         if (id == 0) continue;
         resendBursts_.insert(id);
         resendLast_ = id;
     }
+    lastRoundMode_ = end;
     version_++;
 }
 
@@ -524,6 +712,7 @@ void Seals::flush(uint64_t nowMs)
         s->flushes++;
     }
     std::string mode = again.back()->mode;
+    lastRoundMode_ = mode;
     for (const auto& burst : packBursts(frames, modeInfo(mode)))
     {
         uint64_t id = link_.broadcast(burst, mode, nowMs, "seal again");
@@ -539,6 +728,10 @@ void Seals::flush(uint64_t nowMs)
 
 void Seals::onEvent(const Event& event, uint64_t nowMs)
 {
+    if (event.type == Event::Type::HeardFrom && event.snr)
+        heardSnr(event.text, *event.snr, nowMs);
+    else if (event.type == Event::Type::SessionSnr && event.snr)
+        heardSnr(event.peer, *event.snr, nowMs);
     if (event.type != Event::Type::Burst) return;
     bool settled = event.burstState == BurstState::Sent || event.burstState == BurstState::NotSent;
     if (!settled) return;
@@ -599,8 +792,7 @@ void Seals::onEvent(const Event& event, uint64_t nowMs)
         // still lack anything.
         if (sent)
         {
-            const OurSeal* last = seals_.empty() ? nullptr : &seals_.back();
-            windowEndsMs_ = nowMs + listeningWindowMs(modeInfo(last ? last->mode : mode_));
+            windowEndsMs_ = nowMs + listeningWindowMs(modeInfo(lastRoundMode_));
         }
         version_++;
     }
@@ -626,6 +818,10 @@ void Seals::onRecord(const protocol::Record& record, uint64_t nowMs)
         {
             heardRequest(from, *request, nowMs);
         }
+    }
+    else if (const protocol::RepairRefused* refused = record.as<protocol::RepairRefused>())
+    {
+        heardRefusal(from, *refused, nowMs);
     }
     else if (protocol::isItem((protocol::RecordType)record.type()))
     {
@@ -655,7 +851,7 @@ void Seals::tick(uint64_t nowMs)
         windowEndsMs_ = 0;
         // Requests start another round; a window with none ends the
         // repairs, but for a file's seal, which goes again a time or two.
-        if (!asked_.empty())
+        if (!asked_.empty() || !refusing_.empty())
             resend(nowMs);
         else
             flush(nowMs);
@@ -672,6 +868,8 @@ void Seals::tick(uint64_t nowMs)
 
 void Seals::prune(uint64_t nowMs)
 {
+    for (auto it = refusedMs_.begin(); it != refusedMs_.end();)
+        it = nowMs >= it->second + REFUSE_EVERY_MS ? refusedMs_.erase(it) : std::next(it);
     while (!seals_.empty())
     {
         const OurSeal& s = seals_.front();
@@ -697,6 +895,9 @@ std::vector<Seals::Lack> Seals::lacks(const std::string& call, const Station& st
     {
         const HeardSeal& h = entry.second;
         if (h.givenUp || nowMs >= h.heardMs + MAX_OPEN_MS) continue;
+        // Refused: none of it, or none of the files it names.
+        auto refused = station.refused.find(h.seal.number);
+        if (refused != station.refused.end() && refused->second.all) continue;
         // A station that heard none of this over (no item, no piece of a
         // file), and no seal of its before, has just tuned in: it doesn't
         // ask for the over it missed.
@@ -723,6 +924,7 @@ std::vector<Seals::Lack> Seals::lacks(const std::string& call, const Station& st
             const protocol::Digest& digest = h.seal.items[i];
             if (zero(digest)) continue;
             uint32_t seq = h.seal.firstItem + (uint32_t)i;
+            if (refused != station.refused.end() && refused->second.files.count(seq) != 0) continue;
             auto held = station.items.find(seq);
             if (held == station.items.end() || held->second.digest != digest)
             {
@@ -751,6 +953,8 @@ std::vector<Seals::Lack> Seals::lacks(const std::string& call, const Station& st
         auto prev = station.seals.find(number);
         if (prev != station.seals.end() && prev->second.digest == h.seal.previous) continue;
         if (listed.count(number) != 0) continue;
+        auto refused = station.refused.find(number);
+        if (refused != station.refused.end() && refused->second.all) continue;
         auto asks = station.sealAsks.find(number);
         if (asks != station.sealAsks.end() && asks->second >= MAX_ASKS) continue;
         bool following = false;
@@ -800,6 +1004,11 @@ void Seals::heardSeal(const std::string& call, const protocol::Record& record, u
         station.sealAsks.erase(seal->number);
     }
     h.heardMs = nowMs;
+    // Sent again after a refusal of all of it (the operator kept it open
+    // after all): it is answered again.
+    auto refused = station.refused.find(seal->number);
+    if (refused != station.refused.end() && refused->second.all && nowMs > refused->second.heardMs)
+        station.refused.erase(refused);
     for (size_t i = 0; i < seal->items.size(); i++)
     {
         auto held = station.items.find(seal->firstItem + (uint32_t)i);
@@ -820,9 +1029,14 @@ void Seals::heardSeal(const std::string& call, const protocol::Record& record, u
 void Seals::heardRequest(const std::string& from, const protocol::RepairRequest& request, uint64_t nowMs)
 {
     (void)from;
-    (void)nowMs;
     auto found = stations_.find(request.to);
     if (found == stations_.end() || found->second.askAtMs == 0) return;
+    // It speaks for us only if its asker's gear is no faster than ours:
+    // else what it asks for comes again in a gear we may not copy. An S/N
+    // not given (0.1, or no figure) counts as the gear in use.
+    std::string ourGear = gearFor(snrOf(request.to, nowMs)).value_or(mode_);
+    std::string theirGear = gearFor(request.snr).value_or(mode_);
+    if (slower(ourGear, theirGear) != theirGear) return;
     Lack& c = found->second.covered[request.seal];
     if (c.sealDigest != request.sealDigest)
     {
@@ -900,6 +1114,7 @@ void Seals::ask(const std::string& call, Station& station, uint64_t nowMs)
         request.seal = lack.seal;
         request.sealDigest = lack.sealDigest;
         request.wantSeal = lack.wantSeal;
+        request.snr = snrOf(call, nowMs);
         request.missingItems = lack.items;
         for (const auto& file : lack.pieces)
             request.files.push_back({file.first, std::vector<uint16_t>(file.second.begin(), file.second.end())});
@@ -1023,6 +1238,8 @@ bool Seals::askAgain(const std::string& call, uint32_t seq, uint64_t nowMs)
 {
     auto found = stations_.find(protocol::normalCallsign(call));
     if (found == stations_.end()) return false;
+    // Refused: asking again would only be refused again.
+    if (refusal(found->first, seq)) return false;
     bool listed = false;
     for (auto& entry : found->second.seals)
     {
@@ -1105,6 +1322,58 @@ bool Seals::asking(const std::string& call) const
     return found != stations_.end() && found->second.askAtMs != 0;
 }
 
+void Seals::heardSnr(const std::string& call, double dB, uint64_t nowMs)
+{
+    std::string normal = protocol::normalCallsign(call);
+    if (normal.empty() || normal == callsign_) return;
+    auto& snrs = stations_[normal].snrs;
+    snrs.push_back({nowMs, dB});
+    while (snrs.size() > MAX_SNRS || (!snrs.empty() && nowMs >= snrs.front().first + SNR_WINDOW_MS))
+        snrs.pop_front();
+}
+
+std::optional<double> Seals::snrOf(const std::string& call, uint64_t nowMs) const
+{
+    auto found = stations_.find(protocol::normalCallsign(call));
+    if (found == stations_.end()) return std::nullopt;
+    std::optional<double> lowest;
+    for (const auto& report : found->second.snrs)
+    {
+        if (nowMs >= report.first + SNR_WINDOW_MS) continue;
+        if (!lowest || report.second < *lowest) lowest = report.second;
+    }
+    return lowest;
+}
+
+void Seals::heardRefusal(const std::string& call, const protocol::RepairRefused& refused, uint64_t nowMs)
+{
+    Station& station = stations_[call];
+    Refused& r = station.refused[refused.seal];
+    r.reason = refused.reason;
+    r.heardMs = nowMs;
+    if (refused.files.empty())
+        r.all = true;
+    else
+        r.files.insert(refused.files.begin(), refused.files.end());
+    refusalsHeard_++;
+    version_++;
+}
+
+std::optional<uint8_t> Seals::refusal(const std::string& call, uint32_t seq) const
+{
+    auto found = stations_.find(call);
+    if (found == stations_.end()) return std::nullopt;
+    const Station& station = found->second;
+    for (const auto& entry : station.refused)
+    {
+        const Refused& r = entry.second;
+        if (r.files.count(seq) != 0) return r.reason;
+        auto seal = station.seals.find(entry.first);
+        if (r.all && seal != station.seals.end() && covers(seal->second.seal, seq)) return r.reason;
+    }
+    return std::nullopt;
+}
+
 void Seals::forget(uint64_t nowMs)
 {
     static_assert(FORGET_EVERY_MS > 0, "");
@@ -1121,7 +1390,13 @@ void Seals::forget(uint64_t nowMs)
         auto& pieces = station->second.piecesOf;
         for (auto it = pieces.begin(); it != pieces.end();)
             it = nowMs >= it->second + MAX_OPEN_MS ? pieces.erase(it) : std::next(it);
-        bool empty = items.empty() && seals.empty() && pieces.empty() && station->second.askAtMs == 0;
+        auto& snrs = station->second.snrs;
+        while (!snrs.empty() && nowMs >= snrs.front().first + SNR_WINDOW_MS) snrs.pop_front();
+        auto& refused = station->second.refused;
+        for (auto it = refused.begin(); it != refused.end();)
+            it = nowMs >= it->second.heardMs + MAX_OPEN_MS ? refused.erase(it) : std::next(it);
+        bool empty = items.empty() && seals.empty() && pieces.empty() && snrs.empty() && refused.empty()
+                     && station->second.askAtMs == 0;
         station = empty ? stations_.erase(station) : std::next(station);
     }
 }

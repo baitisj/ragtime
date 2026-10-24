@@ -17,7 +17,15 @@
 // After a seal goes, a listening window (3 one-codeword bursts in its
 // mode, plus 4 s). The requests heard in it are joined, and their union
 // goes again, in sequence order, with the seals it falls under at the end,
-// which opens the next window. A round with no requests ends it. A
+// which opens the next window. Each request says the S/N its asker heard
+// us at, so each item goes again in the fastest gear every station that
+// asked for it can copy (Auto's sum, with its margin), never faster than
+// it first went: gear by gear, fastest first, the seals last in the
+// slowest gear used. Slower gears than the round's own may take at most
+// setSlowResendSeconds of airtime a round; the rest waits for the next.
+// What we won't repair (a seal closed, a file cancelled or no longer
+// held) is refused once a window, in a RepairRefused, so listeners stop
+// asking. A round with no requests ends it. A
 // request heard with no window open (a late joiner, or an operator who
 // pressed Receive later) opens one. Requests are answered while the seal
 // is open: it is one of our NEWEST_OPEN newest seals, or younger than
@@ -27,10 +35,13 @@
 // Theirs. The items and seals heard from every station are kept for
 // MAX_OPEN_MS. When a station's seal comes, what we lack under it (and
 // under its other recent seals, and a missing previous seal) is asked for
-// in one RepairRequest a seal, at a random time within the window; a
-// request heard from another station first takes off what it asks for,
-// and ours goes only if something is left. A file's pieces are asked for
-// only while the operator receives it (BroadcastFiles says which).
+// in one RepairRequest a seal, at a random time within the window, with
+// the lowest S/N we heard the station at in SNR_WINDOW_MS; a request heard
+// from another station first takes off what it asks for, if its asker's
+// gear is no faster than ours, and ours goes only if something is left.
+// A refusal heard stops asking for what it names. A file's pieces are
+// asked for only while the operator receives it (BroadcastFiles says
+// which).
 //
 // No sockets and no clock: HostLink is the socket-free one the app feeds,
 // the time is passed in, and the randomness is seeded.
@@ -41,6 +52,7 @@
 #include <cstdint>
 #include <deque>
 #include <map>
+#include <optional>
 #include <random>
 #include <set>
 #include <string>
@@ -49,6 +61,7 @@
 
 #include "ragtime/broadcast/BroadcastChat.h"
 #include "ragtime/broadcast/BroadcastParts.h"
+#include "ragtime/gearbox/Gearbox.h"
 #include "ragtime/link/HostLink.h"
 #include "ragtime/protocol/Records.h"
 
@@ -71,10 +84,21 @@ public:
     virtual bool streaming(uint32_t seq) const = 0;
     // Ours: piece index of it as a FilePiece record, stamped with time.
     virtual bool piece(uint32_t seq, uint16_t index, uint32_t time, protocol::Record& out) = 0;
+    // Ours: the operator cancelled it (stopped its first pass).
+    virtual bool stopped(uint32_t seq) const
+    {
+        (void)seq;
+        return false;
+    }
     // Theirs: the pieces of call's file (announce seq) we want and lack;
     // false when we want none of it (not receiving it, or it is whole).
     virtual bool wanted(const std::string& call, uint32_t seq, std::vector<uint16_t>& missing) const = 0;
 };
+
+// A refusal's reason in words, after the sender's call: "stopped sharing
+// it", "cancelled it", "no longer holds it", "closed its repairs"; "won't
+// repair it" for a reason this version doesn't know.
+const char* refusalText(uint8_t reason);
 
 class Seals
 {
@@ -99,6 +123,18 @@ public:
     static constexpr int MAX_ASKS = 5;
     // A late request (Receive pressed after the seal) waits up to this long.
     static constexpr uint64_t LATE_SPREAD_MS = 10 * 1000;
+    // The S/N a request carries: the lowest of the sender's bursts heard
+    // in this long (the latest flatters a fading path: the bursts lost went
+    // by in fades we never measured).
+    static constexpr uint64_t SNR_WINDOW_MS = 15 * 60 * 1000;
+    // Repairs go in the fastest gear needing no more than the asker's S/N
+    // less this, as Auto picks.
+    static constexpr double REPAIR_MARGIN_DB = gearbox::AUTO_MARGIN_DB;
+    // Airtime a round may spend in gears slower than its own, by default
+    // (Settings, "Slow repairs").
+    static constexpr double SLOW_RESEND_SECONDS = 5 * 60;
+    // The same refusal goes at most once in this long.
+    static constexpr uint64_t REFUSE_EVERY_MS = 10 * 60 * 1000;
 
     Seals(link::HostLink& link, BroadcastChat& chat);
 
@@ -107,6 +143,11 @@ public:
     // The mode our requests and seals go in when nothing else says (the
     // gear's mode, or empty for the group's).
     void setMode(const std::string& mode) { mode_ = mode; }
+    // The gearshift's ladder, most robust first: the gears repairs may go
+    // in. Empty, repairs go in the gear the round would use anyway.
+    void setLadder(std::vector<gearbox::Gear> ladder) { ladder_ = std::move(ladder); }
+    void setSlowResendSeconds(double seconds) { slowResendSeconds_ = seconds; }
+    double slowResendSeconds() const { return slowResendSeconds_; }
     // Our Texts are sealed too (Settings, "Seal my broadcast messages").
     // Off, a Text is never listed, so a chat over goes with no seal and no
     // repair; a file is sealed either way. It applies to Texts sent from
@@ -184,6 +225,11 @@ public:
     bool sealHeard(const std::string& call, uint32_t seq) const;
     // A request of ours waits to go to call.
     bool asking(const std::string& call) const;
+    // The lowest S/N heard from call in the last SNR_WINDOW_MS (the host's
+    // reports), what our requests to it carry.
+    std::optional<double> snrOf(const std::string& call, uint64_t nowMs) const;
+    // call refused to repair its item seq: why (a protocol::RefusalReason).
+    std::optional<uint8_t> refusal(const std::string& call, uint32_t seq) const;
     // Kept across a restart with a part of call's file (BroadcastParts):
     // the seals heard over its announce seq, and back again with the
     // announce itself (held as of now) and its last piece at lastMs. A
@@ -225,6 +271,8 @@ public:
     size_t requestsHeard() const { return requestsHeard_; } // to us
     size_t rounds() const { return rounds_; }               // resend rounds of ours
     size_t sealsSent() const { return sealsSent_; }
+    size_t refusalsSent() const { return refusalsSent_; }
+    size_t refusalsHeard() const { return refusalsHeard_; }
     // Moves with every change the screen shows.
     uint64_t version() const { return version_; }
 
@@ -265,7 +313,7 @@ private:
         bool sent = false;
         uint64_t sentMs = 0;
         uint64_t keepUntilMs = 0;   // the operator's: open until then
-        bool closed = false;
+        bool closed = false;        // the operator closed it
         std::map<std::string, uint64_t> askers;
         size_t asks = 0;
         int flushes = 0;            // sent again after a quiet window
@@ -274,12 +322,23 @@ private:
         std::map<uint32_t, std::set<std::string>> holders, wanting, servedTo;
     };
 
-    // What the requests in a window asked for under one seal.
+    // What the requests in a window asked for under one seal, each in the
+    // gear (mode) it goes again in.
     struct Asked
     {
         bool seal = false;
-        std::set<uint32_t> items;
-        std::map<uint32_t, std::set<uint16_t>> pieces;
+        std::string sealMode;
+        std::map<uint32_t, std::string> items;
+        std::map<uint32_t, std::map<uint16_t, std::string>> pieces;
+    };
+
+    // A refusal to go at the window's end: for these files under a seal,
+    // or all of it.
+    struct Refusing
+    {
+        bool all = false;
+        std::set<uint32_t> files;
+        std::string mode;
     };
 
     bool open(const OurSeal& seal, uint64_t nowMs) const;
@@ -290,9 +349,21 @@ private:
     const OurItem* findItem(uint32_t seq) const;
     void sealIfDue(uint64_t nowMs);
     void onRequest(const std::string& from, const protocol::RepairRequest& request, uint64_t nowMs);
+    bool ours(uint16_t number) const;
+    void refuse(uint16_t seal, protocol::RefusalReason reason, uint32_t file, const std::string& mode,
+                uint64_t nowMs);
+    void openWindow(const std::string& mode, uint64_t nowMs);
     void resend(uint64_t nowMs);
     void prune(uint64_t nowMs);
     link::ModeInfo modeInfo(const std::string& mode) const;
+    // Gears by speed: a mode's payload bit/s (0 when unknown), the slower
+    // of two (the known one when only one is), and the gear for an S/N.
+    double speedOf(const std::string& mode) const;
+    std::string slower(const std::string& a, const std::string& b) const;
+    std::optional<std::string> gearFor(std::optional<double> snr) const;
+    // An item that first went in mode first goes again in this mode for a
+    // station that heard us at snr.
+    std::string repairMode(std::optional<double> snr, const std::string& first) const;
 
     //----- theirs
 
@@ -326,9 +397,19 @@ private:
         size_t size() const;
     };
 
+    struct Refused
+    {
+        uint8_t reason = 0;
+        bool all = false;
+        std::set<uint32_t> files;
+        uint64_t heardMs = 0;
+    };
+
     struct Station
     {
         std::map<uint32_t, HeardItem> items;
+        std::deque<std::pair<uint64_t, double>> snrs;   // the host's reports, when
+        std::map<uint16_t, Refused> refused;            // by seal
         std::map<uint16_t, HeardSeal> seals;
         uint64_t askAtMs = 0;                   // our request goes then; 0: none waiting
         std::map<uint16_t, Lack> covered;       // asked for by others since it was set
@@ -343,6 +424,8 @@ private:
     void ask(const std::string& call, Station& station, uint64_t nowMs);
     void heardSeal(const std::string& call, const protocol::Record& record, uint64_t nowMs);
     void heardRequest(const std::string& from, const protocol::RepairRequest& request, uint64_t nowMs);
+    void heardRefusal(const std::string& call, const protocol::RepairRefused& refused, uint64_t nowMs);
+    void heardSnr(const std::string& call, double dB, uint64_t nowMs);
     void forget(uint64_t nowMs);
     void flush(uint64_t nowMs);
 
@@ -351,6 +434,8 @@ private:
     SealedFiles* files_ = nullptr;
     std::mt19937 random_;
     std::string mode_;
+    std::vector<gearbox::Gear> ladder_;
+    double slowResendSeconds_ = SLOW_RESEND_SECONDS;
     bool sealText_ = false;
     std::string callsign_;
 
@@ -364,8 +449,11 @@ private:
 
     uint64_t windowEndsMs_ = 0;             // 0: no window open
     std::map<uint16_t, Asked> asked_;
+    std::map<std::pair<uint16_t, uint8_t>, Refusing> refusing_;   // by seal and reason
+    std::map<std::pair<uint16_t, uint8_t>, uint64_t> refusedMs_;  // the last went then
     std::set<uint64_t> resendBursts_;
     uint64_t resendLast_ = 0;               // the round's last burst, with the seals
+    std::string lastRoundMode_;             // the gear the round's seals went in
 
     std::map<std::string, Station> stations_;
 
@@ -385,6 +473,8 @@ private:
     size_t requestsHeard_ = 0;
     size_t rounds_ = 0;
     size_t sealsSent_ = 0;
+    size_t refusalsSent_ = 0;
+    size_t refusalsHeard_ = 0;
     uint64_t version_ = 0;
 };
 

@@ -76,7 +76,10 @@ with the code when the seal rules change.
   tab through `FileRows.h`, with `BroadcastParts` keeping files not yet
   whole on disk across restarts, in `broadcastPartsDir()`); file cards and the file button (a floppy disk, drawn in `DrawnIcon`) in `BroadcastPage`,
   the File menu items and share menus in `MainFrame`, and the seal chain
-  in `Prefs`.
+  in `Prefs`. Since 2026-10-24 a repair request carries the asker's S/N,
+  repairs go gear by gear (`Seals::setLadder`, the "Slow repairs" cap in
+  Settings), and a sender refuses what it won't repair (RepairRefused,
+  `0x42`).
 - Package I (packaging and the first release) gives the app icon
   (`app/res/`, drawn by `tools/icon/`), the Linux
   AppImage and the portable Windows zip (`packaging/`), the MinGW-w64

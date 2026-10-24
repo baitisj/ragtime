@@ -1,5 +1,6 @@
 #include "Prefs.h"
 
+#include <algorithm>
 #include <cstdlib>
 #include <optional>
 
@@ -43,6 +44,8 @@ StationPrefs loadStationPrefs()
     p.receivedFolder = receivedFolder();
     p.autoAccept = loadAutoAccept();
     p.sealChat = config().ReadBool("/Broadcast/SealChat", p.sealChat);
+    p.slowRepairMinutes = (int)config().ReadLong("/Broadcast/SlowRepairMinutes", p.slowRepairMinutes);
+    p.slowRepairMinutes = std::min(std::max(p.slowRepairMinutes, SLOW_REPAIR_MIN_MINUTES), SLOW_REPAIR_MAX_MINUTES);
     return p;
 }
 
@@ -57,6 +60,7 @@ void saveStationPrefs(const StationPrefs& p)
     if (!p.receivedFolder.empty() && p.receivedFolder != receivedFolder()) saveReceivedFolder(p.receivedFolder);
     saveAutoAccept(p.autoAccept);
     config().Write("/Broadcast/SealChat", p.sealChat);
+    config().Write("/Broadcast/SlowRepairMinutes", (long)p.slowRepairMinutes);
     config().Flush();
 }
 

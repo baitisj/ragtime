@@ -22,7 +22,13 @@ struct StationPrefs
     std::string receivedFolder; // where files saved from a session go
     std::vector<std::string> autoAccept;   // stations whose files are saved without asking
     bool sealChat = false;      // our broadcast chat is sealed too (files always are)
+    // A repair round may spend this long in gears slower than its own, for
+    // stations that hear us weakly (Seals::setSlowResendSeconds).
+    int slowRepairMinutes = (int)(ragtime::broadcast::Seals::SLOW_RESEND_SECONDS / 60);
 };
+
+constexpr int SLOW_REPAIR_MIN_MINUTES = 1;
+constexpr int SLOW_REPAIR_MAX_MINUTES = 60;
 
 StationPrefs loadStationPrefs();
 void saveStationPrefs(const StationPrefs& prefs);

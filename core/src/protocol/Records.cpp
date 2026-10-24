@@ -1,6 +1,8 @@
 #include "ragtime/protocol/Records.h"
 
 #include <algorithm>
+#include <cmath>
+#include <optional>
 #include <type_traits>
 
 #include "ragtime/files/Sha256.h"
@@ -22,6 +24,8 @@ constexpr uint8_t TEXT_ADDRESSED = 0x10;
 constexpr uint8_t TEXT_ACK_WANTED = 0x20;
 
 constexpr uint8_t REPAIR_WANT_SEAL = 0x01;
+constexpr int REPAIR_SNR_SHIFT = 1;
+constexpr uint8_t REPAIR_SNR_CODES = 127;
 
 constexpr uint8_t PIECES_BITMAP = 0;
 constexpr uint8_t PIECES_RANGES = 1;
@@ -153,7 +157,7 @@ bool encodeBody(const Body& body, std::vector<uint8_t>& out, bool canonical)
                 if (!putCallsign(out, b.to) || b.missingItems.size() > 255) return false;
                 putNumber(out, b.seal, 2);
                 putDigest(out, b.sealDigest);
-                out.push_back(b.wantSeal ? REPAIR_WANT_SEAL : 0);
+                out.push_back((uint8_t)((b.wantSeal ? REPAIR_WANT_SEAL : 0) | (repairSnrCode(b.snr) << REPAIR_SNR_SHIFT)));
                 out.push_back((uint8_t)b.missingItems.size());
                 std::vector<uint8_t> bitmap((b.missingItems.size() + 7) / 8, 0);
                 for (size_t i = 0; i < b.missingItems.size(); i++)
@@ -166,6 +170,19 @@ bool encodeBody(const Body& body, std::vector<uint8_t>& out, bool canonical)
                     if (file.first > MAX_SEQ) return false;
                     putNumber(out, file.first, 3);
                     putPieceList(out, file.second);
+                }
+                return true;
+            }
+            else if constexpr (std::is_same_v<T, RepairRefused>)
+            {
+                if (b.files.size() > 255) return false;
+                putNumber(out, b.seal, 2);
+                out.push_back(b.reason);
+                out.push_back((uint8_t)b.files.size());
+                for (uint32_t seq : b.files)
+                {
+                    if (seq > MAX_SEQ) return false;
+                    putNumber(out, seq, 3);
                 }
                 return true;
             }
@@ -310,6 +327,7 @@ DecodeResult decodeBody(uint8_t type, Reader& in, Record& out)
                 return DecodeResult::Malformed;
             }
             b.wantSeal = (flags & REPAIR_WANT_SEAL) != 0;
+            b.snr = repairSnr((uint8_t)(flags >> REPAIR_SNR_SHIFT));
             std::vector<uint8_t> bitmap;
             if (!in.bytes(bitmap, ((size_t)count + 7) / 8)) return DecodeResult::Malformed;
             b.missingItems.resize(count);
@@ -322,6 +340,18 @@ DecodeResult decodeBody(uint8_t type, Reader& in, Record& out)
             }
             return decoded(out, std::move(b));
         }
+        case RecordType::RepairRefused:
+        {
+            RepairRefused b;
+            uint8_t count = 0;
+            if (!in.u16(b.seal) || !in.u8(b.reason) || !in.u8(count)) return DecodeResult::Malformed;
+            b.files.resize(count);
+            for (uint32_t& seq : b.files)
+            {
+                if (!in.u24(seq)) return DecodeResult::Malformed;
+            }
+            return decoded(out, std::move(b));
+        }
     }
     Unknown b;
     b.type = type;
@@ -330,6 +360,20 @@ DecodeResult decodeBody(uint8_t type, Reader& in, Record& out)
 }
 
 } // namespace
+
+uint8_t repairSnrCode(std::optional<double> dB)
+{
+    if (!dB) return 0;
+    double steps = std::round((*dB - REPAIR_SNR_LOWEST_DB) / REPAIR_SNR_STEP_DB);
+    steps = std::min(std::max(steps, 0.0), (double)(REPAIR_SNR_CODES - 1));
+    return (uint8_t)(1 + (int)steps);
+}
+
+std::optional<double> repairSnr(uint8_t code)
+{
+    if (code == 0 || code > REPAIR_SNR_CODES) return std::nullopt;
+    return REPAIR_SNR_LOWEST_DB + (code - 1) * REPAIR_SNR_STEP_DB;
+}
 
 bool isItem(RecordType type)
 {
@@ -359,7 +403,8 @@ uint8_t Record::type() const
             else if constexpr (std::is_same_v<T, FileAnnounce>) return (uint8_t)RecordType::FileAnnounce;
             else if constexpr (std::is_same_v<T, FilePiece>) return (uint8_t)RecordType::FilePiece;
             else if constexpr (std::is_same_v<T, Seal>) return (uint8_t)RecordType::Seal;
-            else return (uint8_t)RecordType::RepairRequest;
+            else if constexpr (std::is_same_v<T, RepairRequest>) return (uint8_t)RecordType::RepairRequest;
+            else return (uint8_t)RecordType::RepairRefused;
         },
         body);
 }

@@ -27,6 +27,7 @@
 #include <cstdint>
 #include <list>
 #include <map>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -82,6 +83,10 @@ struct BroadcastFile
     // Theirs: its seal was heard, but over MAX_OPEN_MS ago, so the sender's
     // repairs have closed and Ask again has nothing to ask under.
     bool sealAged = false;
+    // Theirs: the sender refused to repair it (a protocol::RefusalReason;
+    // refusalText says it in words). It is Incomplete, and can't be asked
+    // for again.
+    std::optional<uint8_t> refusal;
     // Ours: the operator stopped the first pass (held of pieces went);
     // theirs: the operator stopped asking for it.
     bool stopped = false;
@@ -215,6 +220,7 @@ public:
     uint16_t pieceCount(uint32_t seq) const override;
     bool streaming(uint32_t seq) const override;
     bool piece(uint32_t seq, uint16_t index, uint32_t time, protocol::Record& out) override;
+    bool stopped(uint32_t seq) const override;
     bool wanted(const std::string& call, uint32_t seq, std::vector<uint16_t>& missing) const override;
 
 private:

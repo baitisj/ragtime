@@ -1,0 +1,68 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="330" viewBox="0 0 760 330" font-family="Helvetica, Arial, sans-serif" role="img" aria-label="Repairs gear by gear: each line goes again in a gear every station that asked for it can copy">
+  <rect width="760" height="330" fill="#ffffff"/>
+
+  <text x="20" y="28" font-size="16" font-weight="bold" fill="#1d2129">Each line goes again in a gear everyone who asked for it can copy</text>
+
+  <!-- Who asked -->
+  <rect x="20" y="46" width="720" height="92" rx="6" fill="#f6f7f9" stroke="#d9dce1"/>
+  <g font-size="12" fill="#4a515c">
+    <text x="36" y="68">asker</text>
+    <text x="130" y="68">hears AG7EW at</text>
+    <text x="270" y="68">less 3 dB</text>
+    <text x="370" y="68">its gear</text>
+    <text x="470" y="68">asks for</text>
+  </g>
+  <line x1="32" y1="76" x2="728" y2="76" stroke="#d9dce1"/>
+  <g font-size="14" fill="#1d2129">
+    <text x="36" y="98" font-weight="bold">K7RAG</text>
+    <text x="130" y="98">+14 dB</text>
+    <text x="270" y="98">+11 dB</text>
+    <text x="370" y="98">gear 4</text>
+    <text x="470" y="98">#43, #44</text>
+    <text x="36" y="124" font-weight="bold">KC2G</text>
+    <text x="130" y="124">+3 dB</text>
+    <text x="270" y="124">0 dB</text>
+    <text x="370" y="124">gear 2</text>
+    <text x="470" y="124">#43, #45</text>
+  </g>
+  <text x="590" y="98" font-size="12" fill="#4a515c">gears need −10, −4,</text>
+  <text x="590" y="114" font-size="12" fill="#4a515c">+2 and +8 dB; AG7EW</text>
+  <text x="590" y="130" font-size="12" fill="#4a515c">broadcasts in gear 4</text>
+
+  <!-- The resend -->
+  <text x="20" y="200" font-size="14" font-weight="bold" fill="#1d2129">AG7EW</text>
+  <text x="20" y="216" font-size="12" fill="#4a515c">resends</text>
+  <line x1="100" y1="195" x2="740" y2="195" stroke="#d9dce1"/>
+
+  <g font-size="12" fill="#1f5fbf">
+    <text x="125" y="170" text-anchor="middle">gear 4</text>
+  </g>
+  <path d="M105 176H145" stroke="#1f5fbf" stroke-width="1"/>
+  <g font-size="12" fill="#8a4b00">
+    <text x="372" y="170" text-anchor="middle">gear 2, slower</text>
+  </g>
+  <path d="M152 176H592" stroke="#8a4b00" stroke-width="1"/>
+
+  <rect x="105" y="182" width="40" height="26" rx="4" fill="#c9d8f2"/>
+  <text x="125" y="200" font-size="13" fill="#1d2129" text-anchor="middle">#44</text>
+  <rect x="152" y="182" width="140" height="26" rx="4" fill="#f2c27a"/>
+  <text x="222" y="200" font-size="13" fill="#1d2129" text-anchor="middle">#43</text>
+  <rect x="298" y="182" width="140" height="26" rx="4" fill="#f2c27a"/>
+  <text x="368" y="200" font-size="13" fill="#1d2129" text-anchor="middle">#45</text>
+  <rect x="444" y="182" width="148" height="26" rx="4" fill="#a9d4b4"/>
+  <text x="518" y="200" font-size="13" fill="#1d2129" text-anchor="middle">seal, last</text>
+  <path d="M600 195H732" stroke="#4a515c" stroke-width="1" stroke-dasharray="4 3"/>
+  <text x="666" y="186" font-size="12" fill="#4a515c" text-anchor="middle">next window</text>
+
+  <g font-size="12" fill="#4a515c" text-anchor="middle">
+    <text x="125" y="228">K7RAG</text>
+    <text x="222" y="228">both</text>
+    <text x="368" y="228">KC2G</text>
+    <text x="518" y="228">both</text>
+  </g>
+
+  <text x="20" y="266" font-size="13" fill="#4a515c">Fastest first. #44 goes quickly, since only K7RAG asked for it; #43 goes in gear 2 because KC2G asked too.</text>
+  <text x="20" y="286" font-size="13" fill="#4a515c">Nothing goes again faster than it first went (K7RAG's +11 dB would allow more): that gear failed someone already.</text>
+  <text x="20" y="306" font-size="13" fill="#4a515c">Gears slower than the round's own take at most 5 minutes a round (Settings, "Slow repairs"); the rest goes</text>
+  <text x="20" y="324" font-size="13" fill="#4a515c">in the next round, so others get a word in between.</text>
+</svg>

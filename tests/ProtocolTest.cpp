@@ -2,6 +2,7 @@
 // frames, digests, sequence numbers and a session's byte stream.
 #include <cstdint>
 #include <cstdio>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -290,7 +291,59 @@ void testEveryRecord()
         Record back = roundTrip(make(request, "W1AW", 12));
         const RepairRequest* r = back.as<RepairRequest>();
         CHECK(r != nullptr && r->to == "AG7EW" && r->seal == 5 && r->sealDigest == request.sealDigest &&
-              !r->wantSeal && r->missingItems == request.missingItems && r->files == request.files);
+              !r->wantSeal && !r->snr && r->missingItems == request.missingItems && r->files == request.files);
+
+        // The asker's S/N rides in the flags byte, beside "send the seal
+        // again", and the request is no longer for it.
+        std::vector<uint8_t> plain = encodeRecord(make(request, "W1AW", 12));
+        request.snr = -3.2;
+        request.wantSeal = true;
+        std::vector<uint8_t> withSnr = encodeRecord(make(request, "W1AW", 12));
+        CHECK_EQ(withSnr.size(), plain.size());
+        back = roundTrip(make(request, "W1AW", 12));
+        r = back.as<RepairRequest>();
+        CHECK(r != nullptr && r->wantSeal && r->snr && *r->snr == -3.0 && r->files == request.files);
+        // 0.1 reads only bit 0: the byte after the digest.
+        size_t flags = 2 + 4 + 3 + 4 + 4 + 2 + 12;   // type, length, W1AW, seq, time, to AG7EW, seal, digest
+        CHECK_EQ(withSnr[flags] & 0x01, 1);
+        CHECK_EQ(withSnr[flags] >> 1, (int)repairSnrCode(-3.0));
+    }
+    {
+        // The S/N code: none, half-dB steps, held at both ends.
+        CHECK_EQ((int)repairSnrCode(std::nullopt), 0);
+        CHECK(!repairSnr(0));
+        CHECK_EQ((int)repairSnrCode(-24.0), 1);
+        CHECK_EQ((int)repairSnrCode(-40.0), 1);
+        CHECK_EQ((int)repairSnrCode(39.0), 127);
+        CHECK_EQ((int)repairSnrCode(80.0), 127);
+        CHECK(*repairSnr(repairSnrCode(12.5)) == 12.5);
+        CHECK(*repairSnr(repairSnrCode(12.6)) == 12.5);
+        CHECK(*repairSnr(repairSnrCode(12.8)) == 13.0);
+        for (int code = 1; code <= 127; code++) CHECK_EQ((int)repairSnrCode(repairSnr((uint8_t)code)), code);
+    }
+    {
+        RepairRefused refused;
+        refused.seal = 12;
+        refused.reason = (uint8_t)RefusalReason::Cancelled;
+        refused.files = {44, 0xFFFFFF};
+        Record record = make(refused, "AG7EW", 46);
+        CHECK_EQ(encodeRecord(record).size(), (size_t)(13 + 2 + 1 + 1 + 6));
+        Record back = roundTrip(record);
+        const RepairRefused* r = back.as<RepairRefused>();
+        CHECK(r != nullptr && r->seal == 12 && r->reason == 1 && r->files == refused.files);
+        CHECK_EQ((int)back.type(), 0x42);
+        // Whole seal: no files. Bytes past the fields are ignored.
+        refused.files.clear();
+        refused.reason = (uint8_t)RefusalReason::Closed;
+        std::vector<uint8_t> bytes = encodeRecord(make(refused, "AG7EW", 46));
+        CHECK_EQ(bytes.size(), (size_t)17);
+        bytes.push_back(0x55);
+        bytes[1]++;
+        const uint8_t* at = bytes.data();
+        Record grown;
+        CHECK(decodeRecord(at, bytes.data() + bytes.size(), grown) == DecodeResult::Ok);
+        r = grown.as<RepairRefused>();
+        CHECK(r != nullptr && r->seal == 12 && r->reason == 3 && r->files.empty());
     }
 }
 

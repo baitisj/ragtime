@@ -96,6 +96,19 @@ SettingsDialog::SettingsDialog(wxWindow* parent, const StationPrefs& prefs)
                           "that missed one can ask for it again. It is a transmission of its own: 10 to 60 s "
                           "of airtime on a poor link. Files you broadcast are always sealed.");
     broadcast->Add(sealChat_, 0, wxALL, 6);
+    slowRepair_ = new wxSpinCtrl(box, wxID_ANY, wxEmptyString, wxDefaultPosition, wxDefaultSize, wxSP_ARROW_KEYS,
+                                 SLOW_REPAIR_MIN_MINUTES, SLOW_REPAIR_MAX_MINUTES, prefs.slowRepairMinutes);
+    const char* slowTip = "A station that asks for repairs says how well it hears you, and what it lacks goes again "
+                          "in a gear it can copy. Slower gears than the round's own may take this much airtime a "
+                          "round; the rest goes in the next round, so others get a word in between.";
+    slowRepair_->SetToolTip(slowTip);
+    auto* slowRow = new wxBoxSizer(wxHORIZONTAL);
+    auto* slowLabel = new wxStaticText(box, wxID_ANY, "Slow repairs: up to");
+    slowLabel->SetToolTip(slowTip);
+    slowRow->Add(slowLabel, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 6);
+    slowRow->Add(slowRepair_, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 6);
+    slowRow->Add(new wxStaticText(box, wxID_ANY, "minutes a round"), 0, wxALIGN_CENTER_VERTICAL);
+    broadcast->Add(slowRow, 0, wxLEFT | wxRIGHT | wxBOTTOM, 6);
 
     problem_ = new wxStaticText(this, wxID_ANY, "");
     problem_->SetForegroundColour(badText());
@@ -138,6 +151,7 @@ StationPrefs SettingsDialog::prefs() const
         if (!call.empty()) p.autoAccept.push_back(call);
     }
     p.sealChat = sealChat_->GetValue();
+    p.slowRepairMinutes = slowRepair_->GetValue();
     return p;
 }
 

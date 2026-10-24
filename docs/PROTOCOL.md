@@ -94,6 +94,7 @@ length.
 | `0x31` | FilePiece | index, bytes | part of its announce |
 | `0x40` | Seal | number, previous, first item, count, digests | no |
 | `0x41` | RepairRequest | to, seal, seal digest, flags, items, files | no |
+| `0x42` | RepairRefused | seal, reason, count, files | no |
 
 Square brackets mark optional trailing fields: a record may end before
 them.
@@ -105,7 +106,7 @@ frame as a check-in.
 | --- | --- | --- |
 | version | 1 | The protocol version the sender speaks: 0 |
 | flags | 1 | Bit 0: accepts sessions. Bit 1: automatic (nobody at the controls; Stage 2 gives it its rules). Other bits 0 |
-| takes | 1 | The records the sender takes. Bit 0: Text and Ack. Bit 1: Status. Bit 2: session files (FileOffer to FileCancel). Bit 3: broadcast files (FileAnnounce, FilePiece). Bit 4: Seal and RepairRequest. Version 0 sends `0x1F` |
+| takes | 1 | The records the sender takes. Bit 0: Text and Ack. Bit 1: Status. Bit 2: session files (FileOffer to FileCancel). Bit 3: broadcast files (FileAnnounce, FilePiece). Bit 4: Seal, RepairRequest and RepairRefused. Version 0 sends `0x1F` |
 | locator | 4, optional | Maidenhead, packed (Fields); 0 for none |
 | software | 1 + n, optional | A short string, at most 64 bytes, such as `Ragtime 0.1.0` |
 
@@ -194,10 +195,35 @@ seal covers.
 | to | 2 to 8 | Whose seal |
 | seal | 2 | Its number |
 | seal digest | 12 | Its record digest; zeros when asking for a seal not heard |
-| flags | 1 | Bit 0: send the seal itself again |
+| flags | 1 | Bit 0: send the seal itself again. Bits 1 to 7: the asker's S/N code (below) |
 | count | 1 | Items in the seal (0 when it wasn't heard) |
 | items | count / 8, rounded up | One bit per item, the first item in the top bit of the first byte: 1 = missing |
 | files | the rest | For each file with pieces missing: its seq (3), then a piece list |
+
+**The S/N code** in bits 1 to 7 of flags says how well the asker hears
+the seal's sender, so the repairs can go in a gear it can copy. It is the
+lowest SNR the asker's data2g-host reported for that sender's bursts
+in the last 15 minutes: the lowest rather than the latest, because the
+bursts the asker lost went by in fades it never measured. Code v = 0
+means no figure (a host from before Data2G PR #98, or nothing heard
+lately); 1 to 127 mean −24 + (v − 1) × 0.5 dB, so −24 to +39 dB in
+half-dB steps, rounded to the nearest and held at both ends. Ragtime
+0.1 sends these bits as 0 and reads only bit 0, so a 0.1 station and a
+newer one still work together: 0.1's requests carry no figure.
+
+**RepairRefused** (`0x42`): the seal's sender saying it won't repair
+what was asked for, once for every station that asked.
+
+| Field | Bytes | Meaning |
+| --- | --- | --- |
+| seal | 2 | The seal the refusal is about |
+| reason | 1 | 0 stopped sharing (the operator closed its repairs), 1 cancelled (the operator stopped the file and closed its repairs), 2 no longer held (expired, or lost in a restart), 3 closed (out of its sensitivity window) |
+| count | 1 | Files the reason covers; 0 means everything under the seal, chat lines too |
+| files | 3 each | Each file's seq |
+
+A refusal over one file is 20 bytes with a 5-character call: one
+codeword in every Data2G mode. A reason this version doesn't know is a
+refusal all the same.
 
 A **piece list** opens with its encoding byte. Encoding 0 is a bitmap:
 first piece (2), span (2), then span bits, the first piece in the top
@@ -431,6 +457,31 @@ the host's `MODES` lists them.
   pieces in sequence order (each file's pieces after its announce), cut
   at 10 minutes of airtime a round, and then the seals asked under,
   which opens the next window when that last burst is Sent.
+- **The repair gear.** Each asker's gear is the fastest on the sender's
+  own ladder needing no more than the asker's S/N less 3 dB (the
+  gearshift's Auto sum), or gear 1 when even gear 1 needs more. An item
+  or piece goes again in the slowest gear of the stations that asked for
+  it, and never in a faster gear than it first went in, which failed
+  someone already. A request with no S/N, or a sender with no ladder,
+  means the gear it first went in. This holds whether the operator chose
+  the gear or Auto did. The resend goes gear by gear, fastest first,
+  each in sequence order, and the seals go last in the slowest gear
+  used, so every asker can copy them; the next window is sized for that
+  gear.
+- **The slow cap.** Gears slower than the round's own (the newest
+  seal's) may take at most 5 minutes of airtime a round (Ragtime's
+  "Slow repairs", 1 to 60 minutes). What doesn't fit is asked for again
+  next round, so other stations get a word in between. A round's first
+  burst always goes.
+- **Refusals.** A request under a seal the sender won't serve is
+  refused at the window's end, in the gear of the weakest station that
+  asked, after the seals: a seal closed by the operator (reason 1 if a
+  file under it was stopped, else 0), a seal out of its sensitivity
+  window (3), pieces of a file it no longer holds (1 or 2, for that
+  file), or a seal of its own it no longer keeps (2): one at or up to
+  32767 numbers before its newest. Requests for the same seal and reason
+  share one refusal, and the same refusal goes at most once in 10
+  minutes. A request with no window open opens one for it.
 - A window with no requests ends the repairs, except that a seal over a
   file goes again after it, at most twice more, in case the seal or a
   request was lost (NORM's flush, repeated).
@@ -455,12 +506,21 @@ the host's `MODES` lists them.
   tuned in doesn't ask for what went before.
 - It waits a random time within the window less its own request's
   airtime and 2 s, reckoned in its own mode. Requests it hears from
-  others to the same station meanwhile are taken off what it lacks; if
-  nothing is left, it stays quiet.
+  others to the same station meanwhile are taken off what it lacks, if
+  their asker's gear is no faster than its own (both worked out on its
+  own ladder from the two S/N figures; a figure missing counts as the
+  gear in use); if nothing is left, it stays quiet. A request from a
+  station that hears the sender better would bring the repair back in a
+  gear it may not copy, so then it asks too.
+- Its request carries its S/N code for the sender.
 - A request is one frame. A list of pieces too long for it is halved
   (the lowest kept), and the rest asked for next round.
 - It stops asking under a seal after 5 requests in a row that brought
   nothing, and asks for a missed seal at most 5 times.
+- A refusal heard stops it asking for what the refusal names, for 2
+  hours, and a file it covers shows as not repaired, with the reason;
+  Ask again is greyed. Hearing a seal again that was refused whole (the
+  operator kept it open after all) lifts that refusal.
 
 ### Broadcast files
 
@@ -516,7 +576,7 @@ the host's `MODES` lists them.
   keeps it as unknown. New record types need no new version.
 - A receiver ignores bytes after the fields it knows in records with a
   fixed layout (Hello, Status, Ack, FileOffer, FileAnswer, FileSaved,
-  FileCancel, FileAnnounce, Seal), so new fields go on the end.
+  FileCancel, FileAnnounce, Seal, RepairRefused), so new fields go on the end.
   Text, FileData, FilePiece and RepairRequest run to the end of the
   record and can't grow that way.
 - A new text table takes a new coding number in Text's flags.

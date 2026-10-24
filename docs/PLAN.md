@@ -401,10 +401,12 @@ A loses nothing by missing B's receipt: B repeats its receipt state in every sea
 - **No slots, no one first in line.** After its seal the station leaves a listening window. A listener waits a random time within it, and drops its own request if it hears another that already asks for what it lacks. data2g-host's wait for a clear channel does the rest.
 - **Answering.** The station resends the union of everything asked, in sequence order. All of it is still covered by the original seal, so nothing is signed again. It opens another listening window, and stops after one with no requests, or when the seal leaves its sensitivity window.
 - **Late joiners.** Each seal names the one before, so a listener that missed a seal sees the gap and asks for it by number. Requests are answered within the sensitivity window (below).
+- **The repair gear** (your idea, 2026-10-24). A request says how well its asker hears the station (its lowest measured S/N, in the flags byte's spare bits, so it costs no airtime), and each item goes again in the fastest gear every station that asked for it can copy, never faster than it first went. A weak listener's lines go slowly; the rest don't wait for it. Slow gears take at most 5 minutes a round, set in Settings. A listener stays quiet behind another's request only if that asker's gear is no faster than its own.
+- **Refusals.** What the station won't repair (repairs closed, a file cancelled or no longer held, a seal out of its window) it refuses once a window, in a **Repair refused**, so listeners stop asking instead of trying five times for nothing.
 
 Precedent: NACK-Oriented Reliable Multicast (NORM, RFC 5740) repairs multicast the same way, with random backoff and request suppression. That is from memory, not rechecked.
 
-**Seal** and **Repair request** are record types of the client's own broadcast protocol.
+**Seal**, **Repair request** and **Repair refused** are record types of the client's own broadcast protocol.
 
 Open choices for you:
 

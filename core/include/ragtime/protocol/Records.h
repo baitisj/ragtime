@@ -10,6 +10,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <utility>
 #include <variant>
@@ -48,6 +49,7 @@ enum class RecordType : uint8_t
     FilePiece = 0x31,
     Seal = 0x40,
     RepairRequest = 0x41,
+    RepairRefused = 0x42,
 };
 
 // Which header sequence number a record carries (docs/PROTOCOL.md,
@@ -70,7 +72,7 @@ enum Takes : uint8_t
     TAKES_STATUS = 0x02,
     TAKES_SESSION_FILES = 0x04,     // FileOffer .. FileCancel
     TAKES_BROADCAST_FILES = 0x08,   // FileAnnounce, FilePiece
-    TAKES_SEALS = 0x10,             // Seal, RepairRequest
+    TAKES_SEALS = 0x10,             // Seal, RepairRequest, RepairRefused
     TAKES_ALL_V0 = 0x1F,
 };
 
@@ -190,9 +192,41 @@ struct RepairRequest
     uint16_t seal = 0;
     Digest sealDigest{};        // zeros when asking for a seal not heard
     bool wantSeal = false;      // send the seal itself again
+    // The S/N the asker measured on the seal's sender, the lowest of its
+    // recent bursts, so repairs go in a gear the asker can copy; none when
+    // it has no figure. It rides in the flags byte's bits 1 to 7, which
+    // 0.1 sends as 0 and ignores (repairSnrCode).
+    std::optional<double> snr;
     std::vector<bool> missingItems;     // one per item in the seal
     // For each file in the seal: its sequence number and the pieces missing.
     std::vector<std::pair<uint32_t, std::vector<uint16_t>>> files;
+};
+
+// A RepairRequest's S/N as its 7-bit code: 0 for none, else 1 to 127 for
+// REPAIR_SNR_LOWEST_DB to REPAIR_SNR_LOWEST_DB + 63 dB in half-dB steps,
+// rounded to the nearest and held at both ends.
+constexpr double REPAIR_SNR_LOWEST_DB = -24.0;
+constexpr double REPAIR_SNR_STEP_DB = 0.5;
+uint8_t repairSnrCode(std::optional<double> dB);
+std::optional<double> repairSnr(uint8_t code);
+
+// Why a seal's sender won't repair what was asked for.
+enum class RefusalReason : uint8_t
+{
+    StoppedSharing = 0,     // the operator closed its repairs
+    Cancelled = 1,          // the operator cancelled the file
+    NotHeld = 2,            // the sender no longer holds it (expired, or lost in a restart)
+    Closed = 3,             // the seal is out of its sensitivity window
+};
+
+// The seal's sender saying no, once for every station that asked: the
+// reason holds for these files under the seal, or for everything under it
+// (files empty).
+struct RepairRefused
+{
+    uint16_t seal = 0;
+    uint8_t reason = 0;         // a RefusalReason; another is a refusal all the same
+    std::vector<uint32_t> files;
 };
 
 // A type this version doesn't know: kept as it came, so it can be passed
@@ -204,7 +238,7 @@ struct Unknown
 };
 
 using Body = std::variant<Unknown, Hello, Status, Text, Ack, FileOffer, FileAnswer, FileData, FileSaved,
-                          FileCancel, FileAnnounce, FilePiece, Seal, RepairRequest>;
+                          FileCancel, FileAnnounce, FilePiece, Seal, RepairRequest, RepairRefused>;
 
 struct Record
 {
