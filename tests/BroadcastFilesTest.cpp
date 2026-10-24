@@ -133,6 +133,17 @@ struct Air
         return *stations.back();
     }
 
+    // Ragtime closed and opened again: the station is made anew, its
+    // broadcast parts read back from folder.
+    Station& restart(size_t i, const std::string& folder, uint32_t seed)
+    {
+        std::string call = stations[i]->call();
+        stations[i].reset();
+        stations[i] = std::make_unique<Station>(call, seed);
+        stations[i]->files.setPartsFolder(folder, now);
+        return *stations[i];
+    }
+
     void step()
     {
         for (auto& sp : stations)
@@ -1041,6 +1052,151 @@ void testIgnore()
     if (!done.empty()) CHECK(done[0].result == files::FinishedFile::Result::Declined);
 }
 
+// The .part files in a folder.
+size_t partFiles(const std::filesystem::path& dir)
+{
+    size_t n = 0;
+    std::error_code ec;
+    for (const auto& e : std::filesystem::directory_iterator(dir, ec))
+    {
+        if (e.path().extension() == ".part") n++;
+    }
+    return n;
+}
+
+BroadcastFile fileNamed(const Station& s, const std::string& name)
+{
+    for (const BroadcastFile& f : s.files.files(now))
+    {
+        if (!f.outgoing && f.name == name) return f;
+    }
+    return BroadcastFile();
+}
+
+// Broadcast parts kept on disk: Ragtime closes part way through a file,
+// and opens again with the pieces it held and the seal to ask under, so
+// the repair request still goes and the file comes whole. Saved, the
+// part file goes.
+void testPartsAcrossRestart()
+{
+    Air air;
+    Station& a = air.add("AG7EW", 1);
+    air.add("KC2G", 2);
+    std::filesystem::path parts = freshFolder("restart-parts");
+    std::filesystem::path dir = freshFolder("restart");
+    air.stations[1]->files.setPartsFolder(parts.string(), now);
+    air.stations[1]->files.setAutoReceive(dir.string());
+    air.stations[1]->lose = [](protocol::Record& r) {
+        const protocol::FilePiece* p = r.as<protocol::FilePiece>();
+        return p != nullptr && p->index >= 3;
+    };
+    air.run(2000);
+    std::string error;
+    std::string path = makeFile("restart.bin", 2500, 14);
+    CHECK(a.files.send(path, "qpsk-r1/3", now, error) != 0);
+    // The first pass and its seal, with KC2G hearing three pieces.
+    for (int i = 0; i < 4000; i++)
+    {
+        BroadcastFile f = fileNamed(*air.stations[1], "restart.bin");
+        if (f.id != 0 && f.sealed) break;
+        air.run(250);
+    }
+    air.run(BroadcastFiles::PART_SAVE_MS + 1000);
+    BroadcastFile f = fileNamed(*air.stations[1], "restart.bin");
+    CHECK(f.id != 0 && f.state == FileState::Receiving && f.sealed && f.held == 3);
+    CHECK_EQ(partFiles(parts), (size_t)1);
+    std::string saveTo = f.path;
+
+    // Closed and opened again, on a clear link now.
+    Station& b = air.restart(1, parts.string(), 3);
+    f = fileNamed(b, "restart.bin");
+    CHECK(f.id != 0 && f.state == FileState::Receiving && f.held == 3 && f.sealed);
+    CHECK(!saveTo.empty() && f.path == saveTo);
+    CHECK(b.chat.messages().empty());
+    air.run(Seals::LATE_SPREAD_MS + 2000);
+    CHECK(b.seals.requestsSent() > 0);
+    air.run(5 * 60 * 1000, 500);
+    f = fileNamed(b, "restart.bin");
+    CHECK(f.state == FileState::Saved);
+    if (f.state == FileState::Saved) CHECK(readAll(f.path) == readAll(path));
+    CHECK_EQ(partFiles(parts), (size_t)0);
+}
+
+// A part stopped (or given up) is kept seven days, across restarts, and
+// then goes. Files that aren't parts Ragtime wrote, or don't fit their
+// announce, are passed over and deleted; others in the folder are left
+// alone. Ignore (Reject) drops the part at once.
+void testPartsExpire()
+{
+    Air air;
+    Station& a = air.add("AG7EW", 1);
+    air.add("KC2G", 2);
+    std::filesystem::path parts = freshFolder("expire-parts");
+    std::filesystem::path dir = freshFolder("expire");
+    air.stations[1]->files.setPartsFolder(parts.string(), now);
+    air.stations[1]->files.setAutoReceive(dir.string());
+    air.stations[1]->lose = [](protocol::Record& r) {
+        const protocol::FilePiece* p = r.as<protocol::FilePiece>();
+        return p != nullptr && p->index >= 2;
+    };
+    air.run(2000);
+    std::string error;
+    CHECK(a.files.send(makeFile("expire.bin", 2500, 15), "qpsk-r1/3", now, error) != 0);
+    for (int i = 0; i < 4000 && fileNamed(*air.stations[1], "expire.bin").held < 2; i++) air.run(250);
+    BroadcastFile f = fileNamed(*air.stations[1], "expire.bin");
+    CHECK(f.id != 0 && air.stations[1]->files.stop(f.id, now));
+    air.run(BroadcastFiles::PART_SAVE_MS + 1000);
+    CHECK_EQ(partFiles(parts), (size_t)1);
+
+    // Junk beside it: not a part, a part that isn't one, and a cut copy.
+    {
+        std::ofstream(parts / "notes.txt") << "leave me";
+        std::ofstream(parts / "junk.part") << "ragtime broadcast part 1\nannounce zz\n";
+        std::filesystem::path real;
+        for (const auto& e : std::filesystem::directory_iterator(parts))
+        {
+            if (e.path().filename() != "junk.part" && e.path().extension() == ".part") real = e.path();
+        }
+        std::ifstream in(real, std::ios::binary);
+        std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+        std::ofstream(parts / "cut.part", std::ios::binary) << text.substr(0, text.size() / 3);
+    }
+
+    // Six days on: still there, stopped, with its pieces, and nothing to
+    // ask under (the seal is long over).
+    now += 6ull * 24 * 60 * 60 * 1000;
+    Station& b = air.restart(1, parts.string(), 3);
+    f = fileNamed(b, "expire.bin");
+    CHECK(f.id != 0 && f.state == FileState::Incomplete && f.stopped && f.held == 2);
+    CHECK_EQ(partFiles(parts), (size_t)1);
+    CHECK(std::filesystem::exists(parts / "notes.txt"));
+    air.run(60000);
+    CHECK_EQ(b.seals.requestsSent(), (size_t)0);
+
+    // Eight days on: gone, file and all.
+    now += 2ull * 24 * 60 * 60 * 1000;
+    Station& c = air.restart(1, parts.string(), 4);
+    CHECK_EQ(fileNamed(c, "expire.bin").id, (uint64_t)0);
+    CHECK_EQ(partFiles(parts), (size_t)0);
+
+    // Ignore: a file heard and not received has its part dropped.
+    c.files.setAutoReceive("");
+    c.lose = nullptr;
+    air.stations[1]->lose = [](protocol::Record& r) {
+        const protocol::FilePiece* p = r.as<protocol::FilePiece>();
+        return p != nullptr && p->index >= 2;
+    };
+    air.run(2000);
+    CHECK(a.files.send(makeFile("ignored.bin", 2500, 16), "qpsk-r1/3", now, error) != 0);
+    for (int i = 0; i < 4000 && fileNamed(c, "ignored.bin").held < 2; i++) air.run(250);
+    air.run(BroadcastFiles::PART_SAVE_MS + 1000);
+    f = fileNamed(c, "ignored.bin");
+    CHECK(f.id != 0 && f.state == FileState::Heard);
+    CHECK_EQ(partFiles(parts), (size_t)1);
+    CHECK(c.files.ignore(f.id));
+    CHECK_EQ(partFiles(parts), (size_t)0);
+}
+
 } // namespace
 
 // Chat seals are off by default (Jeff, 2026-10-22: on a poor link a seal
@@ -1125,6 +1281,8 @@ int main()
     testRefused();
     testIgnore();
     testChatUnsealed();
+    testPartsAcrossRestart();
+    testPartsExpire();
     std::filesystem::remove_all(scratch());
     return ragtime_test::finish();
 }

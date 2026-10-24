@@ -8,7 +8,7 @@
 class wxWindow;
 
 // The seal badge beside a broadcast message (docs/MOCKUPS.md, "Seal state
-// icons"): an <img> of the icon for the mark, 16 px for window, in the
+// icons"): an <img> of the icon for the mark, SEAL_BADGE_PX for window, in the
 // light or dark shades as the list is drawn; empty for Mark::None.
 //
 //   Awaiting   grey, dashed, clock         ours: its seal hasn't gone yet
@@ -16,6 +16,8 @@ class wxWindow;
 //   Repairing  amber, dashed, turning      ours: a station asked for it, and it goes again
 //   Held       green double check          ours: a station's repair request shows it holds it
 //   Mismatch   red X                       theirs: what we hold doesn't match their seal
+// 20 px: 16 was too small to read (Jeff, 2026-10-23: "another 25% larger").
+constexpr int SEAL_BADGE_PX = 20;
 wxString sealBadgeHtml(ragtime::broadcast::Seals::Mark mark, const wxWindow* window);
 
 #endif

@@ -125,7 +125,7 @@ identity badges (Sealed meaning a known key, New Identity, Identity
 Changed, Unsigned) wait for it. Since 2026-10-23 (Jeff: "reflect the
 states of sent, repairing messages, and sealed/confirmed in the leftmost
 column") the Broadcast tab shows the seal's own state in that column,
-with the icons above (`app/src/SealBadge.*`), 16 px, with dark shades for
+with the icons above (`app/src/SealBadge.*`), 20 px, with dark shades for
 a dark list, and a greyed line atop each message's menu saying what it
 means:
 

@@ -120,6 +120,10 @@ public:
     // again, and a file heard and never answered is dropped after it.
     static constexpr uint64_t INCOMPLETE_MS = MAX_OPEN_MS + 10 * 60 * 1000;
     static constexpr uint64_t KEEP_MS = 24ull * 60 * 60 * 1000;
+    // An Incomplete part is kept this long, as a session's kept part is.
+    static constexpr uint64_t PART_KEEP_MS = 7ull * 24 * 60 * 60 * 1000;
+    // Parts are written to disk at most this often while they change.
+    static constexpr uint64_t PART_SAVE_MS = 5 * 1000;
     // Finished transfers kept on the list for the screen.
     static constexpr size_t MAX_FINISHED_KEPT = 50;
 
@@ -159,6 +163,14 @@ public:
     bool ignore(uint64_t id);
     // Ours or theirs, finished: off the list.
     bool remove(uint64_t id);
+
+    // Theirs not yet whole (Heard, Receiving, Incomplete) are kept in this
+    // folder (BroadcastParts), a file each, and read back from it now: so
+    // a restart loses neither the pieces nor the seals to ask under. They
+    // come back on the Files tab, not as cards in the chat.
+    void setPartsFolder(const std::string& folder, uint64_t nowMs);
+    // Writes what has changed since (the destructor does it too).
+    void saveParts(uint64_t nowMs);
 
     // Files announced from now on are received without asking into this
     // folder (under the name announced, numbered when one is there
@@ -237,6 +249,9 @@ private:
         files::RateMeter rate;
         bool finished = false;
         bool sealSeen = false;          // a seal listing it was heard
+        protocol::Record announceRecord;
+        std::string partFile;           // its file in the parts folder, once written
+        std::string savedSig;           // what was last written, in short
     };
 
     Outgoing* findOutgoing(uint64_t id);
@@ -252,6 +267,9 @@ private:
     void tryComplete(Incoming& in, uint64_t nowMs);
     bool save(Incoming& in, std::string& error);
     void finishIncoming(Incoming& in, BroadcastFile::State state, uint64_t nowMs, const std::string& error = {});
+    void dropPart(Incoming& in);
+    void loadParts(uint64_t nowMs);
+    void writeParts();
     void limitSpool();
     BroadcastFile view(const Outgoing& out, uint64_t nowMs) const;
     BroadcastFile view(const Incoming& in, uint64_t nowMs) const;
@@ -264,6 +282,8 @@ private:
     Seals& seals_;
     std::list<Outgoing> outgoing_;
     std::list<Incoming> incoming_;
+    std::string partsFolder_;
+    uint64_t partsSavedMs_ = 0;
     std::vector<files::FinishedFile> finished_;
     std::vector<Event> events_;
     std::string autoFolder_;

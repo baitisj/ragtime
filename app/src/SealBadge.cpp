@@ -194,7 +194,7 @@ wxString sealBadgeHtml(Mark mark, const wxWindow* window)
 {
     if (mark == Mark::None || window == nullptr) return wxString();
     bool dark = darkSurface();
-    int px = window->FromDIP(16);
+    int px = window->FromDIP(SEAL_BADGE_PX);
     wxString name = wxString::Format("ragtime-seal-%s-%s-%d.png", nameOf(mark), dark ? "dark" : "light", px);
 
     // Each icon is drawn once a theme and size, into wxHTML's memory files.
@@ -209,7 +209,7 @@ wxString sealBadgeHtml(Mark mark, const wxWindow* window)
         }
         if (wxImage::FindHandler(wxBITMAP_TYPE_PNG) == nullptr) wxImage::AddHandler(new wxPNGHandler);
         wxBitmapBundle icon = drawnIcon([mark, dark](wxGraphicsContext& gc, double size) { drawSeal(gc, size, mark, dark); },
-                                        16);
+                                        SEAL_BADGE_PX);
         wxBitmap bitmap = icon.GetBitmap(wxSize(px, px));
         if (!bitmap.IsOk()) return wxString();
         wxMemoryFSHandler::AddFile(name, bitmap.ConvertToImage(), wxBITMAP_TYPE_PNG);

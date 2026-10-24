@@ -409,8 +409,18 @@ what goes on the air. Choices made there, for Jeff to keep or change:
   the item is greyed with the reason.
 - **Incomplete.** A file still missing pieces after a give-up, once its
   seal is over 2 hours old, or 2 h 10 min after anything new came, is
-  shown incomplete. Broadcast parts are kept in memory only
-  (24 hours on screen), not in the files log across restarts.
+  shown incomplete, and kept 7 days.
+- **Parts on disk** (Jeff, 2026-10-23: "Is the state of the in-progress
+  and parts list saved to disk? this should be kept there, too."). A
+  broadcast file not yet whole is kept in `broadcast-parts` beside the
+  session logs (`<config>.broadcast-parts` with `--config`), one text
+  file each (`BroadcastParts`): the announce, state, save path, the
+  pieces, and the seals heard over it. A restart reads them back onto
+  the Files tab (not as chat cards: the chat's old cards are greyed
+  history), and a seal still fresh is asked under. Heard ones go after
+  24 hours, incomplete ones after 7 days. Our own shares in Repairing
+  aren't kept across a restart yet: their repairs end when Ragtime
+  closes.
 
 The brief:
 

@@ -1060,6 +1060,45 @@ bool Seals::sealHeard(const std::string& call, uint32_t seq) const
     return false;
 }
 
+std::vector<KeptSeal> Seals::sealsOver(const std::string& call, uint32_t seq) const
+{
+    std::vector<KeptSeal> out;
+    auto found = stations_.find(call);
+    if (found == stations_.end()) return out;
+    for (const auto& entry : found->second.seals)
+    {
+        if (covers(entry.second.seal, seq)) out.push_back({entry.second.seal, entry.second.digest, entry.second.heardMs});
+    }
+    return out;
+}
+
+void Seals::restoreHeard(const protocol::Record& announce, const std::vector<KeptSeal>& seals, uint64_t lastMs,
+                         uint64_t nowMs)
+{
+    const std::string& call = announce.header.callsign;
+    if (call.empty() || call == callsign_) return;
+    Station& station = stations_[call];
+    // Held again as of now, from disk: a seal heard over it later doesn't
+    // send us asking for its announce.
+    HeardItem& item = station.items[announce.header.seq];
+    item.digest = protocol::recordDigest(announce);
+    item.type = announce.type();
+    item.heardMs = nowMs;
+    station.piecesOf[announce.header.seq] = lastMs;
+    for (const KeptSeal& s : seals)
+    {
+        if (nowMs >= s.heardMs + MAX_OPEN_MS) continue;
+        HeardSeal& h = station.seals[s.seal.number];
+        if (h.digest == s.digest) continue;
+        h = HeardSeal();
+        h.seal = s.seal;
+        h.digest = s.digest;
+        h.heardMs = s.heardMs;
+    }
+    armAsk(call, station, LATE_SPREAD_MS, nowMs);
+    version_++;
+}
+
 bool Seals::asking(const std::string& call) const
 {
     auto found = stations_.find(call);
