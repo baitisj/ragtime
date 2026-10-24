@@ -63,6 +63,6 @@
 
   <text x="20" y="266" font-size="13" fill="#4a515c">Fastest first. #44 goes quickly, since only K7RAG asked for it; #43 goes in gear 2 because KC2G asked too.</text>
   <text x="20" y="286" font-size="13" fill="#4a515c">Nothing goes again faster than it first went (K7RAG's +11 dB would allow more): that gear failed someone already.</text>
-  <text x="20" y="306" font-size="13" fill="#4a515c">Gears slower than the round's own take at most 5 minutes a round (Settings, "Slow repairs"); the rest goes</text>
-  <text x="20" y="324" font-size="13" fill="#4a515c">in the next round, so others get a word in between.</text>
+  <text x="20" y="306" font-size="13" fill="#4a515c">Gears slower than the round's own take at most 5 minutes a round (Settings, "Maximum time spent in repairs</text>
+  <text x="20" y="324" font-size="13" fill="#4a515c">per round"); the rest goes in the next round, so others get a word in between.</text>
 </svg>

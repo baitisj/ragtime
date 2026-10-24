@@ -99,15 +99,15 @@ SettingsDialog::SettingsDialog(wxWindow* parent, const StationPrefs& prefs)
     slowRepair_ = new wxSpinCtrl(box, wxID_ANY, wxEmptyString, wxDefaultPosition, wxDefaultSize, wxSP_ARROW_KEYS,
                                  SLOW_REPAIR_MIN_MINUTES, SLOW_REPAIR_MAX_MINUTES, prefs.slowRepairMinutes);
     const char* slowTip = "A station that asks for repairs says how well it hears you, and what it lacks goes again "
-                          "in a gear it can copy. Slower gears than the round's own may take this much airtime a "
-                          "round; the rest goes in the next round, so others get a word in between.";
+                          "in a gear it can copy. Repairs in gears slower than the round's own take at most this much "
+                          "airtime a round; the rest goes in the next round, so others get a word in between.";
     slowRepair_->SetToolTip(slowTip);
     auto* slowRow = new wxBoxSizer(wxHORIZONTAL);
-    auto* slowLabel = new wxStaticText(box, wxID_ANY, "Slow repairs: up to");
+    auto* slowLabel = new wxStaticText(box, wxID_ANY, "Maximum time spent in repairs per round:");
     slowLabel->SetToolTip(slowTip);
     slowRow->Add(slowLabel, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 6);
     slowRow->Add(slowRepair_, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 6);
-    slowRow->Add(new wxStaticText(box, wxID_ANY, "minutes a round"), 0, wxALIGN_CENTER_VERTICAL);
+    slowRow->Add(new wxStaticText(box, wxID_ANY, "minutes"), 0, wxALIGN_CENTER_VERTICAL);
     broadcast->Add(slowRow, 0, wxLEFT | wxRIGHT | wxBOTTOM, 6);
 
     problem_ = new wxStaticText(this, wxID_ANY, "");
