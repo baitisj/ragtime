@@ -50,6 +50,9 @@ The Gear button by Send is the one way in (Jeff, 2026-10-23), last in
 the row after Send and the file button, as on the Session tab: a
 speedometer with the gear's short name under it in small type (`E2C`),
 the dial's foot 2 px over the name and the button no taller than Send,
+its orange needle pointing at the gear's speed (Jeff, 2026-10-24) on a
+log scale from 16 bit/s at the left end to 10 kbit/s at the right, the
+five ticks at 16, 80, 400, 2000 and 10000 bit/s (`gearbox::dialPosition`),
 and the Data2G name, speed, S/N and width in its tooltip. The connection
 bar keeps only the `500 Hz` switch. FSK, PSK and the rest show only in the popup.
 

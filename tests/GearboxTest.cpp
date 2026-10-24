@@ -467,8 +467,29 @@ void testGearshift()
 
 } // namespace
 
+void testDial()
+{
+    // A log scale from 16 to 10000 bit/s, ticks five times apart.
+    auto near = [](double a, double b) { return std::fabs(a - b) < 1e-9; };
+    CHECK(near(dialPosition(16), 0.0));
+    CHECK(near(dialPosition(80), 0.25));
+    CHECK(near(dialPosition(400), 0.5));
+    CHECK(near(dialPosition(2000), 0.75));
+    CHECK(near(dialPosition(10000), 1.0));
+    // Off the scale stops at the ends; no speed rests at the left.
+    CHECK(near(dialPosition(5), 0.0));
+    CHECK(near(dialPosition(50000), 1.0));
+    CHECK(near(dialPosition(0), 0.0));
+    CHECK(near(dialPosition(-1), 0.0));
+    CHECK(near(dialPosition(std::nan("")), 0.0));
+    // Faster always points further round.
+    CHECK(dialPosition(29) < dialPosition(200));
+    CHECK(dialPosition(200) < dialPosition(8000));
+}
+
 int main()
 {
+    testDial();
     testParsing();
     testHostForm();
     testLadders();

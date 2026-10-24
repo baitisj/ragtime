@@ -1929,7 +1929,7 @@ void MainFrame::showGear()
                    + gearbox::pathLabel(gearshift_.path()) + " path." + width;
     if (!link_.modes().empty() && broadcastMode().empty())
         tip += " data2g-host doesn't offer this mode, so broadcasts go in the group's mode.";
-    broadcast_->setGearLabel(utf8(gear->name.empty() ? gear->mode : gear->name), tip);
+    broadcast_->setGearLabel(utf8(gear->name.empty() ? gear->mode : gear->name), tip, gear->bitsPerSecond);
 }
 
 void MainFrame::updatePathSnr(uint64_t nowMs)

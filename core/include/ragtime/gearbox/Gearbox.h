@@ -98,6 +98,15 @@ double secondsPerKilobyte(double bitsPerSecond);
 std::string formatDuration(double seconds);
 // "139 bit/s", "8222 bit/s".
 std::string formatSpeed(double bitsPerSecond);
+// The Gear button's speedometer (Jeff, 2026-10-23): where its needle
+// points for a speed, from 0 (the dial's left end) to 1 (its right end).
+// The scale is logarithmic, DIAL_SLOWEST_BPS to DIAL_FASTEST_BPS, so its
+// five ticks are 16, 80, 400, 2000 and 10000 bit/s, five times apart;
+// Data2G's 29 bit/s sits near the left and 8000 near the right. Slower
+// and faster speeds stop at the ends, and no speed rests at 0.
+constexpr double DIAL_SLOWEST_BPS = 16.0;
+constexpr double DIAL_FASTEST_BPS = 10000.0;
+double dialPosition(double bitsPerSecond);
 // "+1.1 dB", "−3.0 dB" (a real minus sign, UTF-8).
 std::string formatDb(double dB);
 // "Gear E2C", or Data2G's name when the gear has no short name. Gears go by their names; the numbers stay internal.

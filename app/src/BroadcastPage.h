@@ -77,7 +77,7 @@ public:
 
     // Redraws the messages when the chat has changed.
     void refresh();
-    void setGearLabel(const wxString& label, const wxString& tooltip);
+    void setGearLabel(const wxString& label, const wxString& tooltip, double bitsPerSecond = 0.0);
     void setPaused(bool paused);
     // "@W1AW " at the start of the line, and the cursor after it.
     void address(const std::string& call);
@@ -102,6 +102,7 @@ private:
     wxButton* file_ = nullptr;
     wxBitmapButton* gear_ = nullptr;
     wxString gearName_ = "Gear";
+    double gearSpeed_ = 0.0;  // bit/s, for the needle; 0 rests it at the left
     wxButton* send_ = nullptr;
     wxBoxSizer* buttons_ = nullptr;
     wxBoxSizer* row_ = nullptr;
