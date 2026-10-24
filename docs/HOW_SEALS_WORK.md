@@ -1,0 +1,218 @@
+# How seals work
+
+A plain-words primer on Ragtime's seals: what they are, when they go,
+what is inside one, how they get lost lines sent again, and what a
+station that tunes in late does with them. The exact rules, byte for
+byte, are in [PROTOCOL.md](PROTOCOL.md) ("Seal", "RepairRequest" and
+"Seals and repair"), and the reasoning behind them is in
+[PLAN.md](PLAN.md) ("Seals, receipts and repairs"). The code is
+`core/src/broadcast/Seals.*`.
+
+## The problem a seal solves
+
+On the D2G net, one station talks and many listen. HF fades come and
+go, so any listener may lose any burst, and nobody can tell what was lost
+just by listening to what arrived.
+
+In a one-to-one ragchew (a session) Data2G handles this itself: the far
+end acknowledges what it got, and the rest goes again. That doesn't work
+on a net. Twenty listeners can't all acknowledge every line, because the
+acknowledgements would take more airtime than the chat. And the sender
+can't wait for all of them, because it doesn't know who is listening.
+
+A seal turns the problem round. **The sender doesn't ask who got what.
+Every so often it says what it sent**, and each listener checks that
+against what it holds and speaks up only if something is missing.
+
+## A seal is a packing slip
+
+Think of a parcel with a packing slip inside: "3 shirts, 2 pairs of
+socks, 1 hat". You don't phone the shop to say what arrived. You check
+the box against the slip, and call only if the hat is missing.
+
+A seal is that slip for a run of broadcasts. After a few lines (or a
+file), the sender broadcasts one more record, the seal, which lists
+everything since its last seal: "lines #41 to #46, and here is a
+fingerprint of each".
+
+![Six lines, each with its fingerprint listed in the seal that follows](images/how-seals-work/packing-slip.svg)
+
+Every line on the net carries the sender's callsign, a number that
+counts up (#41, #42, ...) and the time. So "AG7EW #43" names one line,
+and nothing else on the net has that name.
+
+## When a seal goes
+
+- **Files are always sealed.** A broadcast file's announce (its name,
+  size and whole-file fingerprint) is listed in a seal, and repairs of
+  its pieces hang off that seal.
+- **Chat is sealed only if you ask for it**, with Settings, "Seal my
+  broadcast messages". It is off by default. A seal is a transmission of
+  its own. On a poor path that is not cheap: Andrew measured 350 bytes
+  at 30 to 60 s at Data2G's lowest working rungs, and a seal over six
+  lines is about 100 bytes. Plain chat must never wait on a seal, so
+  unsealed chat simply goes, and isn't repaired.
+- **The timing.** A station seals what it has sent and not yet sealed
+  when it has nothing more of its own to send and:
+  - 60 s have gone by since its last line (the end of an over), or
+  - a file's first pass has just ended, so repairs can start at once,
+  - and in any case once the oldest unsealed line is 10 minutes old.
+
+  So a seal covers one over. It covers six minutes only when the
+  station has chatted steadily for six minutes, never pausing for 60 s.
+- **Big overs.** One seal fits in one broadcast frame of 255 bytes,
+  which holds about 18 fingerprints. A longer run goes as several seals,
+  packed into the same burst.
+
+## What is inside a seal
+
+Seal #12, over six lines, is 103 bytes:
+
+![The bytes of a seal over six lines, and how one fingerprint is made](images/how-seals-work/seal-anatomy.svg)
+
+| Part | Bytes | What it says |
+| --- | --- | --- |
+| Header | 13 | That it is a seal, from AG7EW, made at 14:06, after line #46 |
+| Seal number | 2 | This is seal #12. They count up from 1 |
+| Previous | 12 | The fingerprint of seal #11 (zeros on a station's first seal) |
+| First line | 3 | The list starts at line #41 |
+| Count | 1 | Six lines are listed |
+| Fingerprints | 12 each | One per line: #41, #42, ... #46 |
+
+**A fingerprint** (a "digest" in the protocol's terms) is what you get
+by feeding the line, exactly as typed, through SHA-256 and keeping the
+first 12 bytes. It covers who sent it, its number, its time and its text.
+Change one letter, the time or the number, and the fingerprint comes out
+completely different. Two different lines sharing a fingerprint by chance
+is about as likely as guessing a number between 1 and 79 thousand
+trillion trillion (2⁹⁶) on the first try.
+
+A few things the fingerprint deliberately ignores:
+
+- **How the text was coded on the air.** Ragtime packs text with
+  Glissando's ham-word Huffman table, but the fingerprint is taken over
+  the plain UTF-8 that was typed. A new text table never changes a
+  fingerprint.
+- **File pieces.** A file is listed once, by its announce, whose
+  fingerprint covers the file's size, piece size and the SHA-256 of the
+  whole file. Data2G's own coding catches a damaged piece, and the
+  whole-file check proves the finished file.
+- **Lines that never went.** A line whose burst the host couldn't send
+  is listed with a zero fingerprint, so nobody asks for it.
+
+## Seals are chained
+
+Each seal carries the fingerprint of the seal before it, so the seals
+form one unbroken log, like numbered pages.
+
+![Seals chained: each names the fingerprint of the one before](images/how-seals-work/seal-chain.svg)
+
+The chain does two jobs:
+
+- **Gaps show.** A listener who hears seal #12 but never heard #11, and
+  was listening before, can tell it missed one, and asks for seal #11 by
+  number.
+- **Nothing can be slipped in later.** Altering seal #11 changes its
+  fingerprint, and #12 no longer points at it. Once seals are signed
+  (Stage 2), one signature on the newest seal vouches for the whole
+  chain behind it.
+
+## Repairs: asking for what you missed
+
+When a seal arrives, each listener compares the list with what it holds.
+For every listed line it either has (with the same fingerprint), lacks,
+or holds a copy of that doesn't match. For a file it is receiving, it
+works out which pieces it lacks.
+
+![A repair round: the seal goes, a listener asks for a lost line, another stays quiet, the line goes again](images/how-seals-work/repair-round.svg)
+
+1. **The sender listens.** After its seal, the sender holds a
+   *listening window*: three one-codeword bursts' worth of airtime in its
+   mode, plus 4 s. That is 13 s in `qpsk-r1/3` and 52 s in the slow
+   `fsk16r25-r1/3`.
+2. **A listener that lacks something waits a random moment** within the
+   window, then sends one short *repair request* naming the seal and,
+   one bit per line, what it lacks, plus a list of the file pieces it
+   lacks.
+3. **Others keep quiet when they can.** A listener that hears someone
+   else ask for the same lines takes those off its own list. If nothing
+   is left, it never transmits. On a busy net one request usually
+   speaks for many.
+4. **The sender sends it all again, once.** At the window's end it
+   resends everything that was asked for, by anyone, in order, then the
+   seal again. That opens another window.
+5. **A quiet window ends it.** A seal over a file goes up to twice
+   more after a quiet window, in case the seal itself or a request was
+   lost.
+
+A listener that has asked five times under a seal and got nothing stops
+asking, and the file shows as incomplete. *Ask again* on the file starts
+afresh, as long as the seal is under 2 hours old.
+
+### How long a seal stays answerable
+
+The sender answers requests under a seal while it is *open*, its
+"sensitivity window". It is open while it is one of the sender's 3
+newest seals, or younger than 4 times the airtime its lines took. It is
+never open past 2 hours, unless the operator keeps it open longer (or
+closes it now) from the file's menu. A slow mode is listened to for
+longer, in proportion to the airtime its lines took.
+
+Listeners keep what they heard of each station, its lines, seals and
+file pieces, for the same 2 hours. Broadcast files not yet whole are also
+kept on disk, so a restart doesn't lose them.
+
+## A station that tunes in late
+
+Say N0OB tunes in two and a half minutes into a six-minute over, and
+then hears the seal that covers all six minutes.
+
+![A late joiner asks for the lines it missed under that seal only](images/how-seals-work/late-joiner.svg)
+
+- **Under that seal, N0OB asks for everything it lacks**, including
+  the lines from before it tuned in (#41 to #43 here). It heard some of
+  the over (#44 to #46), so it counts as following it, and the seal
+  says plainly what it missed. If another listener asks for the same
+  lines first, N0OB stays quiet and still gets them.
+- **It doesn't follow the chain back.** N0OB never heard seal #11 or
+  anything before #41, so it doesn't ask for #11 or the lines #11
+  covers. A listener asks for a missed seal only if it was already
+  hearing that station before the later seal began. A late joiner gets
+  the over in progress, not the whole conversation.
+- **Tuning in just as the seal arrives asks for nothing.** Had N0OB
+  heard none of #41 to #46, only the seal, it would ask for nothing at
+  all. It has just arrived, and the over is history.
+
+So a late joiner costs the net at most one resend of the over it walked
+in on, and that resend is shared with anyone else who lost the same
+lines.
+
+## What the badges mean
+
+With sealed chat on, the Broadcast tab shows each message's seal state
+in its left-hand column (right-click a message for the same in words):
+
+| Badge | On your own lines | On theirs |
+| --- | --- | --- |
+| ![](images/seals/awaiting.svg) Awaiting | sealed chat, its seal not gone yet | |
+| ![](images/seals/sealed.svg) Sealed | the seal went, and nobody has asked for it | their seal lists it, and the fingerprints match |
+| ![](images/seals/repair.svg) Repairing | a station asked for it, and it goes again | |
+| ![](images/seals/receipted.svg) Held | a station's repair request under the seal didn't ask for it, so that station holds it | |
+| ![](images/seals/mismatch.svg) Mismatch | | what you hold doesn't match their seal; a good copy is asked for |
+
+"Held" is the only thing Ragtime calls confirmed. A repair request lists
+everything a station lacks under a seal, so whatever it leaves out, that
+station holds. Silence is never counted as a receipt: with no request
+heard, a seal says only that it went.
+
+## What seals don't do (yet)
+
+- **They aren't signed in version 0.** For now a seal proves only that a
+  line arrived intact and complete, not who sent it. Stage 2 adds a
+  signature to each seal, and then the Sealed badge will also mean
+  "signed by the key this callsign used before".
+- **They never hide anything.** Seals are fingerprints, not encryption,
+  as Part 97 requires (97.113(a)(4)). Anyone can read every line, and
+  anyone can check a seal.
+- **They don't repair unsealed chat.** With "Seal my broadcast messages"
+  off, a line lost in a fade is simply lost, as on a voice net.

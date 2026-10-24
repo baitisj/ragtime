@@ -1,0 +1,69 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="360" viewBox="0 0 760 360" font-family="Helvetica, Arial, sans-serif" role="img" aria-label="A repair round: the seal goes, a listener asks for a lost line, another stays quiet, the line goes again">
+  <rect width="760" height="360" fill="#ffffff"/>
+  <defs>
+    <marker id="up" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10z" fill="#8a4b00"/>
+    </marker>
+    <marker id="down" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10z" fill="#1e6b34"/>
+    </marker>
+  </defs>
+
+  <text x="20" y="28" font-size="16" font-weight="bold" fill="#1d2129">One repair round, left to right in time</text>
+
+  <!-- Lane labels -->
+  <g font-size="14" font-weight="bold" fill="#1d2129">
+    <text x="20" y="90">AG7EW</text>
+    <text x="20" y="190">K7RAG</text>
+    <text x="20" y="270">KC2G</text>
+  </g>
+  <g stroke="#d9dce1">
+    <line x1="90" y1="85" x2="740" y2="85"/>
+    <line x1="90" y1="185" x2="740" y2="185"/>
+    <line x1="90" y1="265" x2="740" y2="265"/>
+  </g>
+
+  <!-- Listening windows -->
+  <rect x="262" y="48" width="196" height="240" fill="#fdf0dc" opacity="0.7"/>
+  <text x="270" y="62" font-size="12" fill="#8a4b00">listening window</text>
+  <rect x="560" y="48" width="160" height="240" fill="#f1f2f4"/>
+  <text x="568" y="62" font-size="12" fill="#4a515c">window, no requests</text>
+
+  <!-- AG7EW's bursts -->
+  <rect x="96" y="72" width="120" height="26" rx="4" fill="#cfd3da"/>
+  <text x="156" y="90" font-size="13" fill="#1d2129" text-anchor="middle">#41 … #46</text>
+  <rect x="220" y="72" width="40" height="26" rx="4" fill="#a9d4b4"/>
+  <text x="240" y="90" font-size="12" fill="#1d2129" text-anchor="middle">seal</text>
+  <rect x="470" y="72" width="40" height="26" rx="4" fill="#cfd3da"/>
+  <text x="490" y="90" font-size="13" fill="#1d2129" text-anchor="middle">#43</text>
+  <rect x="514" y="72" width="44" height="26" rx="4" fill="#a9d4b4"/>
+  <text x="536" y="90" font-size="12" fill="#1d2129" text-anchor="middle">seal</text>
+  <text x="640" y="90" font-size="13" fill="#1e6b34" font-weight="bold" text-anchor="middle">done</text>
+
+  <!-- K7RAG lost #43 -->
+  <text x="148" y="160" font-size="13" fill="#b42318" text-anchor="middle">lost #43 in a fade</text>
+  <path d="M142 172l12 12M154 172l-12 12" stroke="#b42318" stroke-width="2.4" stroke-linecap="round"/>
+  <!-- K7RAG asks -->
+  <rect x="318" y="172" width="70" height="26" rx="4" fill="#f2c27a"/>
+  <text x="353" y="190" font-size="12" fill="#1d2129" text-anchor="middle">ask #43</text>
+  <path d="M353 170V104" stroke="#8a4b00" stroke-width="1.6" marker-end="url(#up)"/>
+  <text x="300" y="150" font-size="12" fill="#8a4b00">at a random moment</text>
+
+  <!-- KC2G also lost #43, hears K7RAG and stays quiet -->
+  <path d="M142 252l12 12M154 252l-12 12" stroke="#b42318" stroke-width="2.4" stroke-linecap="round"/>
+  <text x="148" y="240" font-size="13" fill="#b42318" text-anchor="middle">lost #43 too</text>
+  <rect x="398" y="252" width="56" height="26" rx="4" fill="none" stroke="#8a4b00" stroke-dasharray="4 3"/>
+  <text x="426" y="270" font-size="12" fill="#8a4b00" text-anchor="middle">quiet</text>
+  <text x="300" y="310" font-size="12" fill="#4a515c">KC2G heard K7RAG ask for the same line,</text>
+  <text x="300" y="326" font-size="12" fill="#4a515c">so it has nothing left to ask and keeps off the air</text>
+
+  <!-- #43 reaches both -->
+  <g stroke="#1e6b34" stroke-width="1.6" fill="none" marker-end="url(#down)">
+    <path d="M490 100V170"/>
+    <path d="M498 100V250"/>
+  </g>
+  <text x="508" y="150" font-size="12" fill="#1e6b34">#43 again,</text>
+  <text x="508" y="166" font-size="12" fill="#1e6b34">for both</text>
+
+  <text x="20" y="350" font-size="12" fill="#4a515c">The window is 3 one-codeword bursts plus 4 s: 13 s in qpsk-r1/3, 52 s in fsk16r25-r1/3.</text>
+</svg>

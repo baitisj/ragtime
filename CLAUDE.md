@@ -24,7 +24,9 @@ and open questions. `docs/STAGE1.md` is the work now under way.
 `docs/PROTOCOL.md` is what goes on the air (records, frames, sessions,
 text coding).
 `docs/GEARBOX.md` and `docs/MOCKUPS.md` cover the gearshift and the
-screens.
+screens. `docs/HOW_SEALS_WORK.md` is the plain-words primer on seals and
+repair (its figures are SVGs in `docs/images/how-seals-work/`); change it
+with the code when the seal rules change.
 
 ## Status
 

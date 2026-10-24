@@ -402,7 +402,8 @@ Broadcasts go on the `D2G` group, opened with `BCAST OPEN D2G FROM
 
 ### Seals and repair
 
-`docs/PLAN.md` ("Seals, receipts and repairs") has the reasoning; this
+`docs/PLAN.md` ("Seals, receipts and repairs") has the reasoning, and
+`docs/HOW_SEALS_WORK.md` explains it in plain words with pictures; this
 is what version 0 does. Every timing is in airtimes of Data2G modes, as
 the host's `MODES` lists them.
 

@@ -1,0 +1,50 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="250" viewBox="0 0 760 250" font-family="Helvetica, Arial, sans-serif" role="img" aria-label="Seals chained: each names the fingerprint of the one before">
+  <rect width="760" height="250" fill="#ffffff"/>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10z" fill="#1f5fbf"/>
+    </marker>
+  </defs>
+
+  <text x="20" y="28" font-size="16" font-weight="bold" fill="#1d2129">Each seal names the one before it, like numbered pages of a log</text>
+
+  <!-- Seal #10 -->
+  <rect x="40" y="50" width="200" height="130" rx="8" fill="#e3f1e6" stroke="#1e6b34" stroke-width="1.5"/>
+  <text x="54" y="74" font-size="15" font-weight="bold" fill="#1e6b34">SEAL #10 · 13:41</text>
+  <text x="54" y="98" font-size="13" fill="#1d2129">lines #29 to #34</text>
+  <text x="54" y="122" font-size="13" fill="#1d2129">previous: <tspan font-family="Menlo, Consolas, monospace">e0c4 1a77…</tspan></text>
+  <line x1="54" y1="138" x2="226" y2="138" stroke="#1e6b34" stroke-opacity="0.4"/>
+  <text x="54" y="162" font-size="13" fill="#4a515c">its own fingerprint:</text>
+  <text x="54" y="176" font-size="13" fill="#1d2129" font-family="Menlo, Consolas, monospace">d83f 6c02…</text>
+
+  <!-- Seal #11 -->
+  <rect x="290" y="50" width="200" height="130" rx="8" fill="#e3f1e6" stroke="#1e6b34" stroke-width="1.5"/>
+  <text x="304" y="74" font-size="15" font-weight="bold" fill="#1e6b34">SEAL #11 · 13:54</text>
+  <text x="304" y="98" font-size="13" fill="#1d2129">lines #35 to #40</text>
+  <rect x="302" y="108" width="176" height="20" rx="3" fill="#fdf0dc"/>
+  <text x="304" y="122" font-size="13" fill="#1d2129">previous: <tspan font-family="Menlo, Consolas, monospace">d83f 6c02…</tspan></text>
+  <line x1="304" y1="138" x2="476" y2="138" stroke="#1e6b34" stroke-opacity="0.4"/>
+  <text x="304" y="162" font-size="13" fill="#4a515c">its own fingerprint:</text>
+  <text x="304" y="176" font-size="13" fill="#1d2129" font-family="Menlo, Consolas, monospace">5be2 90d4…</text>
+
+  <!-- Seal #12 -->
+  <rect x="540" y="50" width="200" height="130" rx="8" fill="#e3f1e6" stroke="#1e6b34" stroke-width="1.5"/>
+  <text x="554" y="74" font-size="15" font-weight="bold" fill="#1e6b34">SEAL #12 · 14:06</text>
+  <text x="554" y="98" font-size="13" fill="#1d2129">lines #41 to #46</text>
+  <rect x="552" y="108" width="176" height="20" rx="3" fill="#fdf0dc"/>
+  <text x="554" y="122" font-size="13" fill="#1d2129">previous: <tspan font-family="Menlo, Consolas, monospace">5be2 90d4…</tspan></text>
+  <line x1="554" y1="138" x2="726" y2="138" stroke="#1e6b34" stroke-opacity="0.4"/>
+  <text x="554" y="162" font-size="13" fill="#4a515c">its own fingerprint:</text>
+  <text x="554" y="176" font-size="13" fill="#1d2129" font-family="Menlo, Consolas, monospace">a71c 3e95…</text>
+
+  <!-- Back links -->
+  <g stroke="#1f5fbf" stroke-width="1.6" fill="none" marker-end="url(#arrow)">
+    <path d="M302 118 C 268 118, 268 168, 244 168"/>
+    <path d="M552 118 C 518 118, 518 168, 494 168"/>
+    <path d="M52 118 C 30 118, 24 150, 24 150"/>
+  </g>
+  <text x="14" y="168" font-size="12" fill="#1f5fbf">#9</text>
+
+  <text x="20" y="214" font-size="13" fill="#4a515c">Change anything in seal #11 and its fingerprint changes, so #12 no longer points at it.</text>
+  <text x="20" y="234" font-size="13" fill="#4a515c">A listener who hears #12 but missed #11 sees the gap, and can ask for #11 by number.</text>
+</svg>

@@ -1,0 +1,84 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="424" viewBox="0 0 760 424" font-family="Helvetica, Arial, sans-serif" role="img" aria-label="The bytes of a seal over six lines, and how one fingerprint is made">
+  <rect width="760" height="424" fill="#ffffff"/>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10z" fill="#4a515c"/>
+    </marker>
+  </defs>
+
+  <text x="20" y="28" font-size="16" font-weight="bold" fill="#1d2129">Inside seal #12: 103 bytes for six lines, about 7 px a byte below</text>
+
+  <!-- The byte bar: header 13, number 2, previous 12, first 3, count 1, six fingerprints of 12 -->
+  <g stroke="#ffffff" stroke-width="1.5">
+    <rect x="20" y="96" width="91" height="44" fill="#c9d8f2"/>
+    <rect x="111" y="96" width="14" height="44" fill="#f2c27a"/>
+    <rect x="125" y="96" width="84" height="44" fill="#cfd3da"/>
+    <rect x="209" y="96" width="21" height="44" fill="#f2c27a"/>
+    <rect x="230" y="96" width="7" height="44" fill="#f2c27a"/>
+    <rect x="237" y="96" width="84" height="44" fill="#a9d4b4"/>
+    <rect x="321" y="96" width="84" height="44" fill="#a9d4b4"/>
+    <rect x="405" y="96" width="84" height="44" fill="#a9d4b4"/>
+    <rect x="489" y="96" width="84" height="44" fill="#a9d4b4"/>
+    <rect x="573" y="96" width="84" height="44" fill="#a9d4b4"/>
+    <rect x="657" y="96" width="84" height="44" fill="#a9d4b4"/>
+  </g>
+  <g font-size="13" fill="#1d2129" text-anchor="middle">
+    <text x="65" y="123">header</text>
+    <text x="167" y="123">previous</text>
+    <text x="279" y="123">#41</text>
+    <text x="363" y="123">#42</text>
+    <text x="447" y="123">#43</text>
+    <text x="531" y="123">#44</text>
+    <text x="615" y="123">#45</text>
+    <text x="699" y="123">#46</text>
+  </g>
+
+  <!-- Callouts above -->
+  <g stroke="#4a515c" stroke-width="1" fill="none">
+    <path d="M118 94V70"/>
+    <path d="M219 94V54"/>
+    <path d="M233 94V76"/>
+  </g>
+  <g font-size="13" fill="#1d2129">
+    <text x="60" y="64">seal number, 2 bytes</text>
+    <text x="196" y="48">first line, #41: 3 bytes</text>
+    <text x="240" y="80">how many: 6, 1 byte</text>
+  </g>
+
+  <!-- Callouts below -->
+  <g stroke="#4a515c" stroke-width="1" fill="none">
+    <path d="M65 142V160"/>
+    <path d="M192 142V206"/>
+    <path d="M489 142V160"/>
+  </g>
+  <g font-size="13" fill="#1d2129">
+    <text x="20" y="174">who sent it, and when</text>
+    <text x="20" y="190">(type, length, AG7EW,</text>
+    <text x="20" y="206">number, time: 13 bytes)</text>
+    <text x="186" y="220">previous seal's fingerprint, 12 bytes</text>
+    <text x="400" y="174">one fingerprint per line, 12 bytes each</text>
+  </g>
+
+  <!-- How one fingerprint is made -->
+  <line x1="20" y1="246" x2="740" y2="246" stroke="#d9dce1"/>
+  <text x="20" y="274" font-size="15" font-weight="bold" fill="#1d2129">How the fingerprint of line #43 is made</text>
+
+  <rect x="20" y="292" width="250" height="64" rx="6" fill="#f6f7f9" stroke="#d9dce1"/>
+  <text x="32" y="316" font-size="13" fill="#4a515c">the line exactly as typed, with</text>
+  <text x="32" y="336" font-size="13" fill="#1d2129">Text · AG7EW · #43 · 14:02 ·</text>
+  <text x="32" y="352" font-size="13" fill="#1d2129">"Anyone on 20 m?"</text>
+
+  <path d="M274 324H318" stroke="#4a515c" stroke-width="1.4" marker-end="url(#arrow)"/>
+  <rect x="322" y="300" width="104" height="48" rx="24" fill="#e4ecf8" stroke="#1f5fbf"/>
+  <text x="374" y="329" font-size="14" font-weight="bold" fill="#1f5fbf" text-anchor="middle">SHA-256</text>
+
+  <path d="M430 324H474" stroke="#4a515c" stroke-width="1.4" marker-end="url(#arrow)"/>
+  <text x="434" y="314" font-size="12" fill="#4a515c">32 bytes</text>
+
+  <rect x="478" y="300" width="262" height="48" rx="6" fill="#e3f1e6" stroke="#1e6b34"/>
+  <text x="490" y="320" font-size="12" fill="#4a515c">keep the first 12 bytes</text>
+  <text x="490" y="339" font-size="13" fill="#1d2129" font-family="Menlo, Consolas, monospace">71be0f2a9d63 4c085e17a2f9</text>
+
+  <text x="20" y="386" font-size="13" fill="#4a515c">Change one letter, the time or the number, and the fingerprint comes out completely different.</text>
+  <text x="20" y="406" font-size="13" fill="#4a515c">The coded bits on the air don't count: only what was typed, so a new text table never changes it.</text>
+</svg>
