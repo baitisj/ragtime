@@ -192,9 +192,9 @@ quiet only behind a station whose gear is no faster than its own.
 `qpsk-r1/3` and about 94 s in `fsk16r25-r1/3`; 4 KB of a file takes
 about a minute in the first and 21 minutes in the second. So gears
 slower than the round's own may take at most 5 minutes of airtime a
-round (Settings, "Slow repairs", 1 to 60 minutes). What doesn't fit goes
-in the next round, after the seal, so other stations get a word in
-between.
+round (Settings, "Maximum time spent in repairs per round", 1 to 60
+minutes). What doesn't fit goes in the next round, after the seal, so
+other stations get a word in between.
 
 ### When the sender says no
 

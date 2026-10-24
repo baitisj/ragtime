@@ -470,7 +470,7 @@ the host's `MODES` lists them.
   gear.
 - **The slow cap.** Gears slower than the round's own (the newest
   seal's) may take at most 5 minutes of airtime a round (Ragtime's
-  "Slow repairs", 1 to 60 minutes). What doesn't fit is asked for again
+  "Maximum time spent in repairs per round", 1 to 60 minutes). What doesn't fit is asked for again
   next round, so other stations get a word in between. A round's first
   burst always goes.
 - **Refusals.** A request under a seal the sender won't serve is
