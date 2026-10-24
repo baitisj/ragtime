@@ -9,6 +9,7 @@
 #include <string>
 #include <system_error>
 #include <utility>
+#include <vector>
 
 #include "ragtime/broadcast/BroadcastParts.h"
 #include "ragtime/files/SessionFiles.h"
@@ -992,26 +993,36 @@ void BroadcastFiles::loadParts(uint64_t nowMs)
 {
     std::error_code ec;
     std::filesystem::path folder = files::pathFromUtf8(partsFolder_);
+    // By name, so the same folder reads back the same way everywhere (a
+    // directory's own order differs from one file system to the next).
+    std::vector<std::filesystem::path> found;
     for (const auto& entry : std::filesystem::directory_iterator(folder, ec))
     {
-        if (entry.path().extension() != ".part") continue;
-        std::string file = files::utf8FromPath(entry.path());
-        std::ifstream in(entry.path(), std::ios::binary);
+        if (entry.path().extension() == ".part") found.push_back(entry.path());
+    }
+    std::sort(found.begin(), found.end());
+    for (const std::filesystem::path& path : found)
+    {
+        std::string file = files::utf8FromPath(path);
+        std::ifstream in(path, std::ios::binary);
         std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
         BroadcastPart part;
         bool good = decodePart(text, part);
         const protocol::FileAnnounce* a = good ? part.announce.as<protocol::FileAnnounce>() : nullptr;
         State state = (State)part.state;
+        // A second copy of a part already read back (copied by hand, say)
+        // is left alone; one that doesn't parse is deleted whatever it names.
         bool known = false;
         for (const Incoming& other : incoming_)
         {
-            if (other.file.from == part.announce.header.callsign && other.file.seq == part.announce.header.seq)
+            if (a != nullptr && other.file.from == part.announce.header.callsign
+                && other.file.seq == part.announce.header.seq)
                 known = true;
         }
         if (a == nullptr || known || !keptState(state) || a->size > MAX_FILE_BYTES || a->pieceBytes == 0
             || (part.expiresAtMs != 0 && nowMs >= part.expiresAtMs))
         {
-            if (!known) std::filesystem::remove(entry.path(), ec);
+            if (!known) std::filesystem::remove(path, ec);
             continue;
         }
 
