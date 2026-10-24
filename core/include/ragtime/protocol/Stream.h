@@ -70,6 +70,9 @@ public:
     // A FileData record partly in: its offer and how many file bytes have
     // come so far; false when none is.
     bool partialFileData(uint32_t& offer, size_t& bytes) const;
+    // The same, with where in the file they start and the bytes
+    // themselves, good until the next feed() or reset().
+    bool partialFileData(uint32_t& offer, uint32_t& offset, const uint8_t*& data, size_t& bytes) const;
 
 private:
     bool notOurs();

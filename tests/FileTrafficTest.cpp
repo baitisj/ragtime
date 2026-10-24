@@ -287,7 +287,7 @@ void testFileBytesArePaced()
     CHECK(row.look == Look::Moving && row.state == "QRL");
     CHECK(row.bytesPerSecond > 80 && row.bytesPerSecond < 120);
     CHECK(row.finishAtMs > p.now + 400000 && row.finishAtMs < p.now + 700000);
-    CHECK(p.a.traffic.window() >= FileTraffic::MIN_WINDOW && p.a.traffic.window() < FileTraffic::START_WINDOW * 2);
+    CHECK(p.a.traffic.window() > 4000 && p.a.traffic.window() < 8000);
     CHECK(row.done > 5000 && row.done <= row.handed && row.handed <= row.size);
 
     size_t heard = 0;
@@ -423,16 +423,30 @@ void testLeavingKeepsThePartAndTheQueue()
     CHECK_EQ(p.b.files.keptCount(), (size_t)1);
     CHECK(fs::exists(pathFromUtf8(saveAs + ".part")));
     std::vector<FileRow> rows = p.b.traffic.rows(p.now);
-    CHECK(rows.size() == 1 && rows[0].look == Look::Kept && rows[0].state == "Part kept");
+    CHECK(rows.size() == 1 && rows[0].look == Look::Kept && rows[0].state == "Part kept, cancelled by AG7EW");
     if (rows.size() == 1)
     {
         // Named as offered, not as saved.
         CHECK(rows[0].done > 0 && rows[0].done < 30000 && rows[0].name == "ONE.BIN");
         CHECK_EQ(rows[0].expiresAtMs, p.now + SessionFiles::KEPT_MS);
     }
+    // A's end of it isn't finished either: the part sent stays with what
+    // B holds, and Completed has only TWO.BIN.
+    uint64_t heldThere = rows.empty() ? 0 : rows[0].done;
     rows = p.a.traffic.rows(p.now);
-    CHECK(rows.size() == 1 && rows[0].state == "Waiting for a session with W1AW");
-    CHECK(!p.a.history.entries().empty() && p.a.history.entries().back().result == Result::Cancelled);
+    CHECK(rows.size() == 2 && rows[0].state == "Waiting for a session with W1AW");
+    if (rows.size() == 2)
+    {
+        CHECK(rows[1].look == Look::Kept && rows[1].outgoing && rows[1].name == "ONE.BIN");
+        CHECK(rows[1].state == "Part sent, cancelled");
+        CHECK_EQ(rows[1].done, heldThere);
+        CHECK_EQ(rows[1].handed, heldThere);
+    }
+    CHECK(p.a.history.entries().size() == 1 && p.a.history.entries().back().name == "TWO.BIN");
+    std::vector<KeptPart> sentParts = p.a.files.keptParts();
+    CHECK(sentParts.size() == 1 && sentParts[0].outgoing && sentParts[0].path == first);
+    CHECK(sentParts.size() == 1 && sentParts[0].hasEnding && sentParts[0].ending.result == Result::Cancelled);
+    CHECK_EQ(p.a.files.keptCount(), (size_t)0);
     // B's file isn't finished while its part is kept: Completed has only
     // TWO.BIN, and the ending waits with the part.
     CHECK(p.b.history.entries().size() == 1 && p.b.history.entries().back().name == "TWO.BIN");
@@ -700,6 +714,35 @@ void testTheLogAsText()
     CHECK(kept.size() == 1 && kept[0].bytes == 4096 && kept[0].digest[11] == (uint8_t)(11 * 17 + 1));
     CHECK(other.size() == 2 && other[0] == "B\tbroadcast's own line" && other[1] == "Z\tgarbage");
     CHECK(!loadFilesText("something else\n", back, kept));
+
+    // A part sent: an S line, its file and its ending kept, and a fresh
+    // engine takes it back with the far end's count as it was.
+    KeptPart s = k;
+    s.outgoing = true;
+    s.part.clear();
+    s.bytes = 1244;
+    s.handed = 3741;
+    s.hasEnding = true;
+    s.ending.result = Result::Cancelled;
+    std::string withSent = saveFilesText(FileHistory(), {s});
+    CHECK(withSent.find("\nS\tKC2G\tmap.png\t") != std::string::npos);
+    FileHistory noHistory;
+    std::vector<KeptPart> sentBack;
+    std::vector<std::string> notOurs;
+    CHECK(loadFilesText(withSent, noHistory, sentBack, &notOurs) && notOurs.empty());
+    CHECK(sentBack.size() == 1 && sentBack[0].outgoing && sentBack[0].path == "/tmp/map.png");
+    if (sentBack.size() == 1)
+    {
+        CHECK(sentBack[0].bytes == 1244 && sentBack[0].handed == 1244 && sentBack[0].ending.outgoing);
+        CHECK_EQ(partStateText(sentBack[0]), std::string("Part sent, cancelled"));
+        SessionFiles engine;
+        engine.restoreKept(sentBack, T0 + 1000);
+        CHECK(engine.keptParts().size() == 1 && engine.keptParts()[0].outgoing && engine.keptCount() == 0);
+        // Past its time, it goes to Completed as it ended.
+        engine.tick(T0 + SessionFiles::KEPT_MS + 1);
+        std::vector<FinishedFile> ended = engine.takeEnded();
+        CHECK(engine.keptParts().empty() && ended.size() == 1 && ended[0].result == Result::Cancelled);
+    }
 
     // The oldest go past the cap.
     FileHistory many;

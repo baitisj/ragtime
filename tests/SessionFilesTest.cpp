@@ -337,6 +337,160 @@ void testTheSenderCancels()
     CHECK(!link.a.takePiece("VK3ABC", link.numA, link.writtenByA, link.nowMs, none) && none.empty());
 }
 
+// The sender cancels with pieces still at the host: nothing more is
+// handed over, and the host sends what it has, so the file isn't finished
+// on either side. A has a part sent, counted as the far end's modem
+// acknowledges it, and B keeps all that came; sent again, only the rest
+// goes.
+void testACancelLeavesAPartSent()
+{
+    Scratch scratch("part-sent");
+    Link link;
+    std::string error;
+    std::string source = scratch.write("big.bin", 20000);
+    uint64_t id = link.a.offer("VK3ABC", source, link.nowMs, error);
+    link.turn();
+    std::string saveAs = scratch.path("got.bin");
+    CHECK(link.b.accept(last(link.b, false).id, saveAs, error));
+    link.turns(2);
+    CHECK(transferOf(link.a, id).done == 4096);
+
+    // Two more pieces at the host, not yet sent, when A cancels.
+    std::vector<uint8_t> atHost;
+    CHECK(link.a.takePiece("VK3ABC", link.numA, link.writtenByA, link.nowMs, atHost));
+    CHECK(link.a.takePiece("VK3ABC", link.numA, link.writtenByA + atHost.size(), link.nowMs, atHost));
+    CHECK(link.a.cancel(id));
+    FileTransfer cancelled = transferOf(link.a, id);
+    CHECK(cancelled.state == State::Cancelled && cancelled.partKept);
+    std::vector<uint8_t> none;
+    CHECK(!link.a.takePiece("VK3ABC", link.numA, link.writtenByA + atHost.size(), link.nowMs, none));
+    std::vector<KeptPart> sent = link.a.keptParts();
+    CHECK(sent.size() == 1 && link.a.keptCount() == 0);
+    if (sent.size() != 1) return;
+    CHECK(sent[0].outgoing && sent[0].path == source && sent[0].part.empty());
+    CHECK(sent[0].bytes == 4096 && sent[0].handed == 12288);
+    CHECK_EQ(partStateText(sent[0]), std::string("Stopping, 8,192 bytes still going out"));
+
+    // The host sends them, then the Cancel behind them.
+    std::vector<uint8_t> cancel = link.a.takeRecords("VK3ABC", link.numA, link.nowMs);
+    atHost.insert(atHost.end(), cancel.begin(), cancel.end());
+    // Half of it acknowledged, then all.
+    link.a.acknowledged("VK3ABC", link.writtenByA + atHost.size() / 2);
+    sent = link.a.keptParts();
+    CHECK(sent.size() == 1 && sent[0].bytes > 4096 && sent[0].bytes < 12288 && sent[0].handed == 12288);
+    link.writtenByA += atHost.size();
+    link.deliver(atHost, link.toB, link.b, "W1AW");
+    link.a.acknowledged("VK3ABC", link.writtenByA);
+    sent = link.a.keptParts();
+    CHECK(sent.size() == 1 && sent[0].bytes == 12288 && sent[0].handed == 12288);
+    CHECK_EQ(partStateText(sent[0]), std::string("Part sent"));
+    // B kept every byte of it, and says who stopped it.
+    CHECK(last(link.b, false).state == State::CancelledThere && last(link.b, false).partKept);
+    std::vector<KeptPart> keptThere = link.b.keptParts();
+    CHECK(keptThere.size() == 1 && keptThere[0].bytes == 12288 && !keptThere[0].outgoing);
+
+    // Send the rest: the part sent goes with the new offer, and B carries on.
+    uint64_t again = link.a.offer("VK3ABC", source, link.nowMs, error);
+    CHECK(link.a.keptParts().empty());
+    link.turn();
+    FileTransfer offered = last(link.b, false);
+    CHECK(offered.kept == 12288 && offered.keptPath == saveAs);
+    CHECK(link.b.accept(offered.id, saveAs, error));
+    link.turns(4);
+    CHECK(transferOf(link.a, again).state == State::Delivered && transferOf(link.a, again).resumedFrom == 12288);
+    CHECK(readFile(saveAs) == readFile(source));
+}
+
+// The ending a part sent waits with (as the Files tab sets it) goes to
+// Completed when the part is forgotten; one the session ended under with
+// none of it acknowledged ends at once.
+void testAPartSentIsForgotten()
+{
+    Scratch scratch("part-sent-forgotten");
+    Link link;
+    std::string error;
+    uint64_t id = link.a.offer("VK3ABC", scratch.write("big.bin", 20000), link.nowMs, error);
+    link.turn();
+    CHECK(link.b.accept(last(link.b, false).id, scratch.path("got.bin"), error));
+    link.turns(2);
+    CHECK(link.a.cancel(id));
+    std::vector<KeptPart> sent = link.a.keptParts();
+    CHECK(sent.size() == 1);
+    if (sent.size() != 1) return;
+    FinishedFile ending;
+    ending.outgoing = true;
+    ending.peer = "VK3ABC";
+    ending.result = FinishedFile::Result::Cancelled;
+    link.a.setKeptEnding(id, ending);
+    CHECK_EQ(partStateText(link.a.keptParts()[0]), std::string("Part sent, cancelled"));
+    CHECK(link.a.deleteKept(sent[0].id) && link.a.keptParts().empty());
+    std::vector<FinishedFile> ended = link.a.takeEnded();
+    CHECK(ended.size() == 1 && ended[0].result == FinishedFile::Result::Cancelled);
+
+    // Cancelled before any of it was acknowledged, and the session ends.
+    uint64_t second = link.a.offer("VK3ABC", scratch.write("two.bin", 20000), link.nowMs, error);
+    link.turn();
+    CHECK(link.b.accept(last(link.b, false).id, scratch.path("two.got"), error));
+    link.turn();
+    std::vector<uint8_t> atHost;
+    CHECK(link.a.takePiece("VK3ABC", link.numA, link.writtenByA, link.nowMs, atHost));
+    CHECK(transferOf(link.a, second).done == 0 && link.a.cancel(second));
+    CHECK(link.a.keptParts().size() == 1 && transferOf(link.a, second).partKept);
+    link.a.sessionEnded("VK3ABC", link.nowMs);
+    // Not yet in Completed: the transfer goes there itself.
+    CHECK(link.a.keptParts().empty() && !transferOf(link.a, second).partKept);
+}
+
+// Jeff's 3,000 that became 1,244: what has come of a piece still arriving
+// is kept with the part, not thrown away.
+void testAPieceStillArrivingIsKept()
+{
+    Scratch scratch("arriving-kept");
+    Link link;
+    std::string error;
+    std::string source = scratch.write("big.bin", 7000);
+    link.a.offer("VK3ABC", source, link.nowMs, error);
+    link.turn();
+    std::string saveAs = scratch.path("got.bin");
+    CHECK(link.b.accept(last(link.b, false).id, saveAs, error));
+    link.turns(2);
+    CHECK(last(link.b, false).done == 4096);
+
+    // The second piece, 1,500 of its bytes in.
+    std::vector<uint8_t> piece;
+    CHECK(link.a.takePiece("VK3ABC", link.numA, link.writtenByA, link.nowMs, piece));
+    const size_t header = 1 + 2 + 4 + 3 + 4 + 4;
+    std::vector<protocol::Record> records;
+    CHECK(link.toB.feed(piece.data(), header + 1500, records) && records.empty());
+    uint32_t number = 0, offset = 0;
+    const uint8_t* data = nullptr;
+    size_t partial = 0;
+    CHECK(link.toB.partialFileData(number, offset, data, partial) && offset == 4096 && partial == 1500);
+    link.b.arriving("W1AW", number, offset, data, partial);
+    CHECK(last(link.b, false).handed == 4096 + 1280); // to the step
+
+    CHECK(link.b.cancel(last(link.b, false).id));
+    std::vector<KeptPart> kept = link.b.keptParts();
+    CHECK(kept.size() == 1 && kept[0].bytes == 5596);
+    CHECK(readFile(saveAs + ".part") == readFile(source).substr(0, 5596));
+    // The rest of the piece comes, and is dropped.
+    CHECK(link.toB.feed(piece.data() + header + 1500, piece.size() - header - 1500, records));
+    for (const protocol::Record& r : records) link.b.onRecord("W1AW", r, link.nowMs);
+    link.writtenByA += piece.size();
+    link.turn();
+    CHECK(link.b.keptParts().size() == 1 && link.b.keptParts()[0].bytes == 5596);
+
+    // Sent again, it carries on from there, and the file is whole.
+    link.a.offer("VK3ABC", source, link.nowMs, error);
+    link.turn();
+    FileTransfer offered = last(link.b, false);
+    CHECK(offered.kept == 5596);
+    CHECK(link.b.accept(offered.id, saveAs, error));
+    link.turns(3);
+    CHECK(last(link.b, false).state == State::Saved && last(link.b, false).resumedFrom == 5596);
+    CHECK(readFile(saveAs) == readFile(source));
+}
+
 void testTheReceiverCancels()
 {
     Scratch scratch("receiver-cancels");
@@ -458,6 +612,8 @@ void testACancelCrossingSaved()
     link.turn(); // A's Cancel and B's Saved cross
     CHECK(last(link.b, false).state == State::Saved && readFile(saveAs).size() == 5000);
     CHECK(transferOf(link.a, id).state == State::Delivered && transferOf(link.a, id).done == 5000);
+    // Delivered after all: no part sent is left over.
+    CHECK(!transferOf(link.a, id).partKept && link.a.keptParts().empty());
 
     // Cancelled with only part of it written, a Saved can't come, and
     // one that did is not taken.
@@ -870,15 +1026,17 @@ void testProgressMovesWithinAPiece()
     // The receiver, the same piece in two reads.
     std::vector<protocol::Record> records;
     CHECK(link.toB.feed(piece.data(), header + 600, records) && records.empty());
-    uint32_t number = 0;
+    uint32_t number = 0, offset = 99;
+    const uint8_t* data = nullptr;
     size_t partial = 0;
-    CHECK(link.toB.partialFileData(number, partial));
-    CHECK(partial == 600);
-    link.b.arriving("W1AW", number, partial);
+    CHECK(link.toB.partialFileData(number, offset, data, partial));
+    CHECK(partial == 600 && offset == 0 && data != nullptr);
+    link.b.arriving("W1AW", number, offset, data, partial);
     FileTransfer coming = last(link.b, false);
     CHECK(coming.done == 0 && coming.handed == 512);
     // Another number's partial piece is none of this one's.
-    link.b.arriving("W1AW", number + 1, 3000);
+    std::vector<uint8_t> other(3000, 0x41);
+    link.b.arriving("W1AW", number + 1, 0, other.data(), other.size());
     CHECK(last(link.b, false).handed == 512);
 
     CHECK(link.toB.feed(piece.data() + header + 600, piece.size() - header - 600, records));
@@ -1123,6 +1281,9 @@ int main()
     testAnEmptyFile();
     testDeclined();
     testTheSenderCancels();
+    testACancelLeavesAPartSent();
+    testAPartSentIsForgotten();
+    testAPieceStillArrivingIsKept();
     testTheReceiverCancels();
     testAnOfferExpiresOnBothSides();
     testALostSession();

@@ -68,9 +68,10 @@ void FileTraffic::onRecord(const std::string& peer, const protocol::Record& reco
     collect(nowMs);
 }
 
-void FileTraffic::arriving(const std::string& peer, uint32_t offer, size_t bytes)
+void FileTraffic::arriving(const std::string& peer, uint32_t offer, uint32_t offset, const uint8_t* data,
+                           size_t bytes)
 {
-    files_.arriving(peer, offer, bytes);
+    files_.arriving(peer, offer, offset, data, bytes);
 }
 
 uint64_t FileTraffic::window() const
@@ -339,10 +340,11 @@ std::vector<FileRow> FileTraffic::rows(uint64_t nowMs) const
         r.atMs = k.keptAtMs;
         r.name = k.name;
         r.size = k.size;
-        r.done = r.handed = k.bytes;
-        r.outgoing = false;
+        r.done = k.bytes;
+        r.handed = std::max(k.bytes, k.handed);
+        r.outgoing = k.outgoing;
         r.peer = k.peer;
-        r.state = "Part kept";
+        r.state = partStateText(k);
         r.look = FileRow::Look::Kept;
         r.expiresAtMs = k.keepUntilMs;
         out.push_back(std::move(r));

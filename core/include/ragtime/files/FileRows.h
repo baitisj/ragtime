@@ -133,16 +133,24 @@ private:
 
 // A part file kept from a session transfer that ended unfinished, so the
 // same file from the same station carries on from it, across restarts.
+// Or, outgoing, the other end of one: a file of ours that ended unfinished
+// with part of it sent, which the far end keeps as its part, so "Send the
+// rest" carries on from there.
 struct KeptPart
 {
     uint64_t id = 0;            // SessionFiles' own, for the row's menu; not kept across restarts
+    bool outgoing = false;      // ours, part sent; else theirs, part kept here
     std::string peer;
     std::string name;           // the name offered, made safe
     uint64_t size = 0;          // the whole file's
     uint8_t digest[12] = {};    // the whole file's (protocol::Digest)
-    std::string path;           // where it was to be saved (UTF-8)
-    std::string part;           // the part file (UTF-8)
-    uint64_t bytes = 0;         // how much of the file it holds
+    std::string path;           // where it was to be saved, or the file sent (UTF-8)
+    std::string part;           // the part file (UTF-8); empty for one sent
+    uint64_t bytes = 0;         // how much of the file it holds, or the far end's modem acknowledged
+    // Outgoing: handed to the host, which sends what it has though the
+    // transfer was cancelled; more than bytes while that still goes out.
+    // Not in the log: it is bytes again after a restart.
+    uint64_t handed = 0;
     uint64_t keptAtMs = 0;
     uint64_t keepUntilMs = 0;   // when it is deleted
     // How the transfer that left it ended ("Cancelled by KC2G"). The file
@@ -169,6 +177,10 @@ bool loadFilesText(const std::string& text, FileHistory& history, std::vector<Ke
 
 // 7000 -> "7,000".
 std::string groupedNumber(uint64_t n);
+// A kept part's state in the tab: "Part kept, cancelled by AG7EW" (or
+// just "Part kept"); one sent: "Part sent, cancelled", or "Stopping,
+// 1,756 bytes still going out" while the host sends what it was handed.
+std::string partStateText(const KeptPart& part);
 // "7,000 bytes", "1 byte"; "6.8 KB" from 10,000 up, "1.2 MB" from 1,000,000.
 std::string sizeText(uint64_t bytes);
 // "4,096 of 7,000".

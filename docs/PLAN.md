@@ -235,14 +235,15 @@ Mock-ups of the three tabs: [Data2G client mock-ups](https://claude.ai/artifact/
 
 - **In progress and parts** (top): every transfer that isn't finished, including parts kept from earlier sessions. Columns: date, file, size, progress (bytes of total), de (From or To; the heading is ham shorthand, Jeff 2026-10-22), state, and expiry.
   - de reads sender → receiver, the operator as OM: "W1AW → OM" for a file coming in, "OM → W1AW" for one going out (Jeff, 2026-10-22). For a file you broadcast it says "OM → **Broadcast**". For a broadcast you're receiving, the sender is the sending station.
-  - States: Waiting for answer, Moving, Stalled, Repairing (a broadcast share taking repair requests), and Part kept.
+  - States: Waiting for answer, Moving, Stalled, Repairing (a broadcast share taking repair requests), Part kept ("Part kept, cancelled by AG7EW"), and, for a send that ended unfinished, Stopping (while the host still sends what it was handed) then Part sent (Jeff, 2026-10-24).
   - Expiry is when a kept part is deleted (7 days by default), or when a broadcast share's repair rounds end.
-- **Completed** (bottom): finished transfers, with date, file, size, de (From or To), result (Saved, Sent, Declined, or Failed with the reason), and where it was saved. A file whose part is kept is not finished: it stays in In progress and parts as Part kept, and goes into Completed, with how it ended ("Cancelled by KC2G"), only when the part is deleted or runs out of time. Carried on and saved, it goes in as Saved (Jeff, 2026-10-23).
+- **Completed** (bottom): finished transfers, with date, file, size, de (From or To), result (Saved, Sent, Declined, or Failed with the reason), and where it was saved. A file whose part is kept is not finished: it stays in In progress and parts as Part kept, and goes into Completed, with how it ended ("Cancelled by KC2G"), only when the part is deleted or runs out of time. Carried on and saved, it goes in as Saved (Jeff, 2026-10-23). The same holds for the sender: a send cancelled (either end) or cut off with some of it gone stays as Part sent until it is sent again, forgotten or runs out of time (Jeff, 2026-10-24).
 
 **Right-click in Files.**
 
 - **On a broadcast share you're sending,** the menu's first line, greyed, shows when its repair rounds end now: "Repairs open until 15:42 (1 h 10 min)". Below it: **Keep open 30 min longer**, **Keep open 2 hours longer**, **Keep open until...**, and **Close repairs now**. Keeping a share open costs no airtime unless someone asks for a repair. If you leave the station, answering repair requests falls under the automatic-control rules (97.221), so outside the automatic segments it answers only controlled stations, in 500 Hz modes.
 - **On a kept part:** **Ask to send the rest** (offers to Call the station first), **Keep 7 days longer**, and **Delete part**.
+- **On a part sent:** **Send the rest to W1AW** (calls the station first if needed), **Keep 7 days longer**, and **Forget it**.
 - **On a transfer in progress:** **Cancel**.
 - **On a completed transfer:** **Open**, **Open folder**, and **Remove from list**.
 

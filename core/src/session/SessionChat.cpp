@@ -322,9 +322,11 @@ std::vector<protocol::Record> SessionChat::dataBytes(const uint8_t* bytes, size_
     }
     if (length > 0) heard(nowMs);
     for (const protocol::Record& r : records) onRecord(r, nowMs);
-    uint32_t offer = 0;
+    uint32_t offer = 0, offset = 0;
+    const uint8_t* data = nullptr;
     size_t arrived = 0;
-    if (traffic_ != nullptr && reader_.partialFileData(offer, arrived)) traffic_->arriving(peer_, offer, arrived);
+    if (traffic_ != nullptr && reader_.partialFileData(offer, offset, data, arrived))
+        traffic_->arriving(peer_, offer, offset, data, arrived);
     return records;
 }
 
