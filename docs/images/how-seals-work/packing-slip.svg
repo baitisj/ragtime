@@ -1,0 +1,57 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="380" viewBox="0 0 760 380" font-family="Helvetica, Arial, sans-serif" role="img" aria-label="Six lines from AG7EW, each with its fingerprint listed in the seal that follows them">
+  <rect width="760" height="380" fill="#ffffff"/>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10z" fill="#4a515c"/>
+    </marker>
+  </defs>
+
+  <text x="20" y="28" font-size="16" font-weight="bold" fill="#1d2129">Six lines go out over six minutes...</text>
+  <text x="450" y="28" font-size="16" font-weight="bold" fill="#1d2129">...then the seal lists them all</text>
+
+  <!-- The lines as sent -->
+  <g font-size="14" fill="#1d2129">
+    <rect x="20" y="128" width="330" height="30" rx="5" fill="#f6f7f9" stroke="#d9dce1"/>
+    <text x="32" y="148"><tspan font-weight="bold">#41</tspan>  14:00  Good evening, net</text>
+    <rect x="20" y="164" width="330" height="30" rx="5" fill="#f6f7f9" stroke="#d9dce1"/>
+    <text x="32" y="184"><tspan font-weight="bold">#42</tspan>  14:01  QRV for traffic</text>
+    <rect x="20" y="200" width="330" height="30" rx="5" fill="#f6f7f9" stroke="#d9dce1"/>
+    <text x="32" y="220"><tspan font-weight="bold">#43</tspan>  14:02  Anyone on 20 m?</text>
+    <rect x="20" y="236" width="330" height="30" rx="5" fill="#f6f7f9" stroke="#d9dce1"/>
+    <text x="32" y="256"><tspan font-weight="bold">#44</tspan>  14:03  Band is open to EU</text>
+    <rect x="20" y="272" width="330" height="30" rx="5" fill="#f6f7f9" stroke="#d9dce1"/>
+    <text x="32" y="292"><tspan font-weight="bold">#45</tspan>  14:04  Bulletin at the hour</text>
+    <rect x="20" y="308" width="330" height="30" rx="5" fill="#f6f7f9" stroke="#d9dce1"/>
+    <text x="32" y="328"><tspan font-weight="bold">#46</tspan>  14:05  73 all</text>
+  </g>
+  <text x="20" y="62" font-size="13" fill="#4a515c">Each line carries the sender's call, its number</text>
+  <text x="20" y="80" font-size="13" fill="#4a515c">and the time, so it can be told apart from</text>
+  <text x="20" y="98" font-size="13" fill="#4a515c">every other line on the net.</text>
+
+  <!-- Arrows: each line to its fingerprint -->
+  <g stroke="#4a515c" stroke-width="1.4" fill="none" marker-end="url(#arrow)">
+    <path d="M354 143H466"/>
+    <path d="M354 179H466"/>
+    <path d="M354 215H466"/>
+    <path d="M354 251H466"/>
+    <path d="M354 287H466"/>
+    <path d="M354 323H466"/>
+  </g>
+  <text x="372" y="136" font-size="12" fill="#4a515c">fingerprint</text>
+
+  <!-- The seal -->
+  <rect x="450" y="42" width="290" height="310" rx="8" fill="#e3f1e6" stroke="#1e6b34" stroke-width="1.5"/>
+  <text x="466" y="68" font-size="15" font-weight="bold" fill="#1e6b34">SEAL #12 · AG7EW · 14:06</text>
+  <text x="466" y="92" font-size="13" fill="#1d2129">previous seal (#11): <tspan font-family="Menlo, Consolas, monospace">5be2 90d4 …</tspan></text>
+  <text x="466" y="114" font-size="13" fill="#1d2129">lines #41 to #46 (6 lines)</text>
+  <line x1="466" y1="124" x2="724" y2="124" stroke="#1e6b34" stroke-opacity="0.4"/>
+  <g font-size="13" fill="#1d2129" font-family="Menlo, Consolas, monospace">
+    <text x="472" y="148">#41  3f9a 1c07 e2b4 …</text>
+    <text x="472" y="184">#42  a0d3 6e19 4c58 …</text>
+    <text x="472" y="220">#43  71be 0f2a 9d63 …</text>
+    <text x="472" y="256">#44  c48e 25f1 b037 …</text>
+    <text x="472" y="292">#45  0e6c d9a4 1b82 …</text>
+    <text x="472" y="328">#46  9b27 e05d 6af0 …</text>
+  </g>
+  <text x="20" y="370" font-size="12" fill="#4a515c">Fingerprints shown are made up for the picture; real ones are 12 bytes (24 hex digits) each.</text>
+</svg>

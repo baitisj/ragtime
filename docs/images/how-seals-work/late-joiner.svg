@@ -1,0 +1,81 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="330" viewBox="0 0 760 330" font-family="Helvetica, Arial, sans-serif" role="img" aria-label="A station tunes in two and a half minutes into a six-minute over, and asks for the lines it missed under that seal only">
+  <rect width="760" height="330" fill="#ffffff"/>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10z" fill="#8a4b00"/>
+    </marker>
+  </defs>
+
+  <text x="20" y="28" font-size="16" font-weight="bold" fill="#1d2129">A late joiner: N0OB tunes in two and a half minutes into the over</text>
+
+  <!-- Lanes -->
+  <g font-size="14" font-weight="bold" fill="#1d2129">
+    <text x="12" y="100">AG7EW</text>
+    <text x="12" y="180">N0OB</text>
+  </g>
+  <line x1="100" y1="95" x2="560" y2="95" stroke="#d9dce1"/>
+  <line x1="285" y1="175" x2="560" y2="175" stroke="#d9dce1"/>
+
+  <!-- Earlier seal, greyed -->
+  <circle cx="87" cy="95" r="12" fill="#f1f2f4" stroke="#9aa1ac" stroke-dasharray="3 2"/>
+  <text x="87" y="99" font-size="10" fill="#5b6370" text-anchor="middle">#11</text>
+
+  <!-- Lines #41 to #46, a minute apart -->
+  <g fill="#1d2129">
+    <circle cx="110" cy="95" r="7"/>
+    <circle cx="180" cy="95" r="7"/>
+    <circle cx="250" cy="95" r="7"/>
+    <circle cx="320" cy="95" r="7"/>
+    <circle cx="390" cy="95" r="7"/>
+    <circle cx="460" cy="95" r="7"/>
+  </g>
+  <g font-size="12" fill="#1d2129" text-anchor="middle">
+    <text x="110" y="76">#41</text>
+    <text x="180" y="76">#42</text>
+    <text x="250" y="76">#43</text>
+    <text x="320" y="76">#44</text>
+    <text x="390" y="76">#45</text>
+    <text x="460" y="76">#46</text>
+  </g>
+  <!-- Seal #12 -->
+  <circle cx="530" cy="95" r="17" fill="#e3f1e6" stroke="#1e6b34" stroke-width="1.5"/>
+  <text x="530" y="99" font-size="11" fill="#1e6b34" font-weight="bold" text-anchor="middle">#12</text>
+  <text x="530" y="66" font-size="12" fill="#1e6b34" text-anchor="middle">seal: #41–#46</text>
+
+  <!-- N0OB tunes in -->
+  <line x1="285" y1="50" x2="285" y2="240" stroke="#1f5fbf" stroke-width="1.4" stroke-dasharray="5 4"/>
+  <text x="291" y="232" font-size="12" fill="#1f5fbf">tunes in at 2:30</text>
+  <g fill="#1d2129">
+    <circle cx="320" cy="175" r="7"/>
+    <circle cx="390" cy="175" r="7"/>
+    <circle cx="460" cy="175" r="7"/>
+  </g>
+  <circle cx="530" cy="175" r="10" fill="#e3f1e6" stroke="#1e6b34"/>
+  <g fill="none" stroke="#b42318" stroke-width="1.6">
+    <circle cx="110" cy="175" r="7" stroke-dasharray="3 2"/>
+    <circle cx="180" cy="175" r="7" stroke-dasharray="3 2"/>
+    <circle cx="250" cy="175" r="7" stroke-dasharray="3 2"/>
+  </g>
+  <text x="180" y="204" font-size="12" fill="#b42318" text-anchor="middle">missed</text>
+  <text x="390" y="204" font-size="12" fill="#1d2129" text-anchor="middle">heard</text>
+
+  <!-- The request -->
+  <rect x="580" y="155" width="160" height="42" rx="5" fill="#f2c27a"/>
+  <text x="660" y="173" font-size="13" fill="#1d2129" text-anchor="middle">asks under seal #12</text>
+  <text x="660" y="190" font-size="13" fill="#1d2129" text-anchor="middle">for #41, #42, #43</text>
+  <path d="M543 175H576" stroke="#8a4b00" stroke-width="1.4" marker-end="url(#arrow)"/>
+
+  <!-- Axis -->
+  <line x1="110" y1="262" x2="530" y2="262" stroke="#4a515c"/>
+  <g font-size="12" fill="#4a515c" text-anchor="middle">
+    <text x="110" y="280">0:00</text>
+    <text x="180" y="280">1:00</text>
+    <text x="250" y="280">2:00</text>
+    <text x="320" y="280">3:00</text>
+    <text x="390" y="280">4:00</text>
+    <text x="460" y="280">5:00</text>
+    <text x="530" y="280">6:00</text>
+  </g>
+  <text x="20" y="306" font-size="13" fill="#4a515c">Seal #11 (grey) is never asked for: N0OB heard nothing from AG7EW before #41, so it doesn't chase the chain back.</text>
+  <text x="20" y="324" font-size="13" fill="#4a515c">Had N0OB tuned in at 5:59 and heard none of #41–#46, it would ask for nothing at all.</text>
+</svg>
