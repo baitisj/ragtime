@@ -47,18 +47,52 @@ std::string joinCalls(const std::vector<std::string>& calls)
     return out;
 }
 
+// An @message of ours whose station sent its Ack.
+bool acknowledged(const Message& m)
+{
+    return m.ours && !m.past && m.state == State::Acknowledged;
+}
+
+// An @message of ours that went, its Ack not back yet.
+bool awaitingAck(const Message& m)
+{
+    return m.ours && !m.past && m.state == State::Sent && m.ackWanted;
+}
+
+// The badge on a message's left (Jeff, 2026-10-24). An @message shows a
+// bare grey check until its Ack comes back, then a bare green double
+// check, while no seal covers it. Once its seal has gone the seal's badge
+// shows (Held's for an acknowledged one), and Repairing while it goes
+// again.
+wxString badgeFor(const Message& m, ragtime::broadcast::Seals::Mark mark, const wxWindow* window)
+{
+    using Mark = ragtime::broadcast::Seals::Mark;
+    bool unsealed = mark == Mark::None || mark == Mark::Awaiting;
+    if (acknowledged(m))
+    {
+        if (mark == Mark::Sealed || mark == Mark::Held) return sealBadgeHtml(Mark::Held, window);
+        if (unsealed) return acknowledgedBadgeHtml(window);
+    }
+    if (awaitingAck(m) && unsealed) return noAckBadgeHtml(window);
+    return sealBadgeHtml(mark, window);
+}
+
 // What a message's seal badge means, for the greyed line atop its menu;
 // empty when there is nothing to say.
 std::string sealLine(const Message& m, const ragtime::broadcast::Seals::ItemMark& mark)
 {
     using Mark = ragtime::broadcast::Seals::Mark;
     std::string at = mark.sealedMs == 0 ? std::string() : " " + std::string(clock(mark.sealedMs).utf8_str());
+    std::string acked = acknowledged(m) ? "Acknowledged by " + m.to : std::string();
+    std::string ack = awaitingAck(m) ? "No ack from " + m.to + " yet" : acked;
     switch (mark.mark)
     {
         case Mark::Awaiting:
+            if (!ack.empty()) return ack + "; awaiting its seal (it goes after a minute's quiet)";
             return "Awaiting its seal (it goes after a minute's quiet)";
         case Mark::Sealed:
             if (!m.ours) return "Sealed: " + m.from + "'s seal lists it, and it matches";
+            if (!acked.empty()) return acked + ", and sealed" + at;
             if (!mark.sentAgainFor.empty())
                 return "Sealed" + at + ", and sent again for " + joinCalls(mark.sentAgainFor)
                        + (mark.sentAgainFor.size() == 1 ? ", who hasn't" : ", who haven't")
@@ -68,13 +102,16 @@ std::string sealLine(const Message& m, const ragtime::broadcast::Seals::ItemMark
             return "Repairing: " + (mark.wanting.empty() ? std::string("asked for") : joinCalls(mark.wanting) + " asked for it")
                    + ", and it goes again";
         case Mark::Held:
-            return "Held by " + joinCalls(mark.holders) + ": a repair request under its seal" + at + " didn't ask for it";
+            if (!acked.empty() && mark.holders.empty()) return acked + ", and sealed" + at;
+            return (acked.empty() ? std::string() : acked + "; ") + "Held by " + joinCalls(mark.holders)
+                   + ": a repair request under its seal" + at + " didn't ask for it";
         case Mark::Mismatch:
             return "Doesn't match " + m.from + "'s seal: a good copy is asked for";
         case Mark::None:
             break;
     }
-    if (m.ours && !m.past && (m.state == Message::State::Sent || m.state == Message::State::Acknowledged))
+    if (!ack.empty()) return ack + "; not sealed, so not repaired (Settings: Seal my broadcast messages)";
+    if (m.ours && !m.past && m.state == Message::State::Sent)
         return "Not sealed, so not repaired (Settings: Seal my broadcast messages)";
     return std::string();
 }
@@ -187,7 +224,7 @@ protected:
         }
 
         wxString badge;
-        if (owner_->sealMark_ && !m->past) badge = sealBadgeHtml(owner_->sealMark_(*m).mark, this);
+        if (owner_->sealMark_ && !m->past) badge = badgeFor(*m, owner_->sealMark_(*m).mark, this);
 
         wxString html;
         html << "<table width=\"100%\" cellspacing=\"0\" cellpadding=\"2\"><tr>"

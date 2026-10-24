@@ -26,4 +26,14 @@ wxString sealBadgeHtml(ragtime::broadcast::Seals::Mark mark, const wxWindow* win
 wxString deliveredBadgeHtml(const wxWindow* window);
 wxString notDeliveredBadgeHtml(const wxWindow* window);
 
+// An @message of ours that its station acknowledged, while no seal covers
+// it (Jeff, 2026-10-24): Held's green double check with no rosette, as
+// nothing is sealed. Once its seal has gone, Held takes over.
+wxString acknowledgedBadgeHtml(const wxWindow* window);
+
+// Before that, while its Ack isn't back ("Sent, no ack yet"; Jeff,
+// 2026-10-24): a grey check with no rosette, one tick to the Ack's two.
+// Sealed or Repairing take over as for any other message.
+wxString noAckBadgeHtml(const wxWindow* window);
+
 #endif

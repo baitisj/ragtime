@@ -119,6 +119,8 @@ edge before). SVGs are in `images/seals/`.
 | ![](images/seals/awaiting.svg) | Awaiting Seal | grey `#5b6370`, a big clock with a tinted face, no rosette | The message is here but its seal isn't yet (seals go at most 10 minutes apart) | Jeff's |
 | ![](images/seals/unsigned.svg) | Unsigned | caution yellow `#f7c600` fill, dark edge `#6b5200`, slash `#3d2f00` | No signature at all; shown, but never counts as a check-in | Jeff's (2026-10-22: "Use yellow to communicate the idea of caution") |
 | ![](images/seals/receipted.svg) | Receipted | green, double check | On your own message: a listener's receipt says they hold the sealed copy | Proposed |
+| ![](images/seals/noack.svg) | No Ack Yet | grey `#5b6370` check, no rosette | On your own @message: sent, its station's Ack not back yet | Jeff's (2026-10-24) |
+| ![](images/seals/acknowledged.svg) | Acknowledged | green double check, no rosette | On your own @message: its station's Ack came back, and no seal covers it yet | Jeff's (2026-10-24) |
 | ![](images/seals/repair.svg) | Repair Asked | amber `#8a4b00`, a big turning arrow, no rosette | A seal lists a message you never heard; a repair request is out | Proposed |
 | ![](images/seals/mismatch.svg) | Mismatch | solid red `#b42318`, X | The seal's digest doesn't match the text received; the text is struck through | Proposed |
 
@@ -137,11 +139,17 @@ means:
 | Sealed (check) | its seal went; nobody has asked for it, or it went again for whoever did and they haven't asked since | their seal lists it and the digest matches (unsigned until Stage 2) |
 | Repair Asked (turning arrow) | a station asked for it, and it goes again | |
 | Receipted (double check) | Held: a station's repair request under the seal didn't ask for it, so it holds it | |
+| No Ack Yet (bare grey check) | an @message sent, its Ack not back, with no seal gone yet; it turns to Acknowledged when the Ack comes, or to the seal's badge once its seal goes | |
+| Acknowledged (bare double check) | an @message its station acknowledged, with no seal gone yet (chat seals off, or Awaiting); once its seal goes it shows Receipted, and Repair Asked while it goes again | |
 | Mismatch (X) | | what we hold doesn't match their seal; a good copy is asked for |
 
 Silence is never shown as a receipt: with no request heard, a seal says
 only that it went. Unsealed chat (Settings, Seal my broadcast messages,
-off by default) has no badge and shows only Sent.
+off by default) has no badge and shows only Sent, unless it is an
+@message: one tick while its Ack isn't back, two once it is. An Ack is a
+real receipt, from the one station it was addressed to; "Sent, no ack
+yet" and "Acknowledged by W1AW" stay on the right, as the badge doesn't
+name the station.
 
 ## Files tab
 

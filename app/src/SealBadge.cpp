@@ -78,10 +78,22 @@ const char* nameOf(Mark mark)
 // 1.5) and a glyph stroked 2. The two still waiting, Awaiting and
 // Repairing, have no rosette: their glyph alone, nearly the badge's size
 // (Jeff, 2026-10-24: no dotted rings, bigger centres).
-// Not delivered (a session message): the seal in red, outlined, with a
-// slash; slashed stands for it, as Mark has no such state.
-void drawSeal(wxGraphicsContext& gc, double size, Mark mark, bool dark, bool slashed = false)
+// Three badges stand for states Mark has no name for (Extra): Not
+// delivered (a session message), the seal in red, outlined, with a slash;
+// Acknowledged (an @message whose station sent its Ack, not sealed), Held's
+// double check alone, nearly the badge's size, like Awaiting's clock; and
+// No ack (an @message sent, its Ack not back), Sealed's check alone, grey.
+enum class Extra
 {
+    None,
+    NotDelivered,
+    Acknowledged,
+    NoAck,
+};
+
+void drawSeal(wxGraphicsContext& gc, double size, Mark mark, bool dark, Extra extra = Extra::None)
+{
+    const bool slashed = extra == Extra::NotDelivered;
     const double u = size / 24.0;
     const double pi = std::acos(-1.0);
     Shade shade = shadeOf(mark, dark);
@@ -106,6 +118,23 @@ void drawSeal(wxGraphicsContext& gc, double size, Mark mark, bool dark, bool sla
         gc.StrokePath(path);
     };
 
+    if (extra == Extra::Acknowledged)
+    {
+        // Held's two ticks, 1.65 times as big about their middle.
+        gc.SetBrush(*wxTRANSPARENT_BRUSH);
+        pen(2);
+        line({{2.76, 12.6}, {6.72, 16.55}, {14.8, 7.65}});
+        line({{12, 15.89}, {12.66, 16.55}, {20.74, 7.65}});
+        return;
+    }
+    if (extra == Extra::NoAck)
+    {
+        // Sealed's tick, 1.9 times as big about its middle.
+        gc.SetBrush(*wxTRANSPARENT_BRUSH);
+        pen(2);
+        line({{4.4, 12.39}, {9.53, 17.52}, {19.6, 6.88}});
+        return;
+    }
     if (!slashed && mark == Mark::Awaiting)
     {
         // A clock face of radius 8.2, tinted, and its hands.
@@ -181,12 +210,28 @@ void drawSeal(wxGraphicsContext& gc, double size, Mark mark, bool dark, bool sla
 namespace
 {
 
-wxString badgeHtml(Mark mark, bool slashed, const wxWindow* window)
+const char* nameOf(Mark mark, Extra extra)
 {
-    if ((mark == Mark::None && !slashed) || window == nullptr) return wxString();
+    switch (extra)
+    {
+        case Extra::NotDelivered:
+            return "undelivered";
+        case Extra::Acknowledged:
+            return "acknowledged";
+        case Extra::NoAck:
+            return "noack";
+        case Extra::None:
+            break;
+    }
+    return nameOf(mark);
+}
+
+wxString badgeHtml(Mark mark, Extra extra, const wxWindow* window)
+{
+    if ((mark == Mark::None && extra == Extra::None) || window == nullptr) return wxString();
     bool dark = darkSurface();
     int px = window->FromDIP(SEAL_BADGE_PX);
-    wxString name = wxString::Format("ragtime-seal-%s-%s-%d.png", slashed ? "undelivered" : nameOf(mark),
+    wxString name = wxString::Format("ragtime-seal-%s-%s-%d.png", nameOf(mark, extra),
                                      dark ? "dark" : "light", px);
 
     // Each icon is drawn once a theme and size, into wxHTML's memory files.
@@ -201,7 +246,7 @@ wxString badgeHtml(Mark mark, bool slashed, const wxWindow* window)
         }
         if (wxImage::FindHandler(wxBITMAP_TYPE_PNG) == nullptr) wxImage::AddHandler(new wxPNGHandler);
         wxBitmapBundle icon = drawnIcon(
-            [mark, dark, slashed](wxGraphicsContext& gc, double size) { drawSeal(gc, size, mark, dark, slashed); },
+            [mark, dark, extra](wxGraphicsContext& gc, double size) { drawSeal(gc, size, mark, dark, extra); },
             SEAL_BADGE_PX);
         wxBitmap bitmap = icon.GetBitmap(wxSize(px, px));
         if (!bitmap.IsOk()) return wxString();
@@ -216,15 +261,25 @@ wxString badgeHtml(Mark mark, bool slashed, const wxWindow* window)
 
 wxString sealBadgeHtml(Mark mark, const wxWindow* window)
 {
-    return badgeHtml(mark, false, window);
+    return badgeHtml(mark, Extra::None, window);
 }
 
 wxString deliveredBadgeHtml(const wxWindow* window)
 {
-    return badgeHtml(Mark::Held, false, window);
+    return badgeHtml(Mark::Held, Extra::None, window);
 }
 
 wxString notDeliveredBadgeHtml(const wxWindow* window)
 {
-    return badgeHtml(Mark::None, true, window);
+    return badgeHtml(Mark::None, Extra::NotDelivered, window);
+}
+
+wxString acknowledgedBadgeHtml(const wxWindow* window)
+{
+    return badgeHtml(Mark::Held, Extra::Acknowledged, window);
+}
+
+wxString noAckBadgeHtml(const wxWindow* window)
+{
+    return badgeHtml(Mark::Awaiting, Extra::NoAck, window);
 }
