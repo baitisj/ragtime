@@ -7,7 +7,7 @@
 //
 //   ragtime broadcast log 1                the first line
 //   B <ms>                                 Ragtime opened the tab
-//   M <id> <atMs> <time> <seq> <ours> <state> <from> <to> <ack> <mode> <text>
+//   M <id> <atMs> <time> <seq> <ours> <state> <from> <to> <ack> <mode> <text> [<before>]
 //   S <id> <state> <mode>                  a message of ours settled
 //   F <id> <atMs> <ours> <from> <name>     a broadcast file's card
 //   R <id> <outcome>                       how that file ended ("Saved")
@@ -17,7 +17,9 @@
 // id in that run (BroadcastChat's, which isn't kept across restarts, so
 // it only names a row within its own B ... E). States are H, Q, G, W, S,
 // N, C and A (Heard, Queued, Sending, Held, Sent, Not sent, Cancelled,
-// Acknowledged). Lines of kinds this reader doesn't know are skipped.
+// Acknowledged). <before>, when there and not 0, is the row of the same
+// run the message goes above (a line repaired, put in its place among
+// its sender's). Lines of kinds this reader doesn't know are skipped.
 //
 // Not thread safe. Disk errors are ignored: the chat goes on without its
 // log rather than stop.
@@ -56,7 +58,8 @@ public:
     std::vector<Message> load(size_t max) const;
 
     void began(uint64_t nowMs);
-    void added(const Message& message);
+    // before: the id of the row it goes above, 0 for the end.
+    void added(const Message& message, uint64_t before = 0);
     void settled(const Message& message);
     void fileEnded(const Message& card, const std::string& outcome);
     void ended(uint64_t nowMs);

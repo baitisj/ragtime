@@ -211,6 +211,38 @@ void testCutBack()
     std::filesystem::remove_all(dir, ec);
 }
 
+// A line repaired goes above the row it was put before, in the file as
+// on the screen.
+void testRepairedInPlace()
+{
+    std::filesystem::path dir = scratch("broadcast-log-place");
+    std::string path = (dir / "broadcast.log").string();
+    BroadcastLog log(path);
+    log.began(T0);
+    log.added(text(1, false, "AG7EW", "one", T0 + 1000));
+    log.added(text(2, false, "KC2G", "hello", T0 + 2000));
+    log.added(text(4, false, "AG7EW", "three", T0 + 3000));
+    // "two" came again after its seal: above "three", below "hello".
+    log.added(text(3, false, "AG7EW", "two", T0 + 60000), 4);
+    log.added(text(5, false, "KC2G", "bye", T0 + 61000));
+    log.ended(T0 + 62000);
+    std::vector<Message> rows = log.load(100);
+    CHECK_EQ(rows.size(), (size_t)6);
+    if (rows.size() == 6)
+    {
+        CHECK_EQ(rows[0].text, std::string("one"));
+        CHECK_EQ(rows[1].text, std::string("hello"));
+        CHECK_EQ(rows[2].text, std::string("two"));
+        CHECK_EQ(rows[3].text, std::string("three"));
+        CHECK_EQ(rows[4].text, std::string("bye"));
+        CHECK(rows[5].kind == Kind::Rule);
+    }
+    // A reader from before ignores the extra field: the old order, nothing lost.
+    std::string old = readAll(path);
+    CHECK(old.find("\ttwo\t4\n") != std::string::npos);
+    std::filesystem::remove_all(dir);
+}
+
 void testNoPath()
 {
     BroadcastLog log;
@@ -227,6 +259,7 @@ int main()
     testTwoRunsAndTheirRules();
     testOddLines();
     testCutBack();
+    testRepairedInPlace();
     testNoPath();
     return ragtime_test::finish();
 }
