@@ -105,19 +105,21 @@ As built (the pane at 300 px, the same moment, `TZ=America/Los_Angeles`):
 Each icon is a wax-seal rosette with a glyph inside, so the shape carries
 the meaning without colour. The rosette is a closed path through 48
 points at radius 9.4 + 0.9 cos 12θ around (12, 12) in a 24-unit box,
-stroked 1.5. Glyphs are stroked 2, round caps and joins. A dashed edge
-(2.2 on, 1.6 off) means still waiting; a solid fill with a white glyph
-means look at this. SVGs are in `images/seals/`.
+stroked 1.5. Glyphs are stroked 2, round caps and joins. A solid fill
+with a white glyph means look at this. The two still waiting, Awaiting
+Seal and Repair Asked, have no rosette: their glyph alone fills the box
+(Jeff, 2026-10-24: no dotted rings, bigger centres; they had a dashed
+edge before). SVGs are in `images/seals/`.
 
 | Icon | State | Colour | Meaning | Status |
 | --- | --- | --- | --- | --- |
 | ![](images/seals/sealed.svg) | Sealed | green `#1e6b34`, tint `#e3f1e6`, check | A seal covering this message has arrived, signed by a key already known for this callsign | Jeff's |
 | ![](images/seals/new.svg) | New Identity | blue `#1f5fbf`, tint `#e4ecf8`, star | First time this callsign's key has been seen; kept from now on | Jeff's |
 | ![](images/seals/changed.svg) | Identity Changed | solid orange `#b54708`, "!" | Same callsign, a different key than last time | Jeff's |
-| ![](images/seals/awaiting.svg) | Awaiting Seal | grey `#5b6370`, dashed, clock | The message is here but its seal isn't yet (seals go at most 10 minutes apart) | Jeff's |
+| ![](images/seals/awaiting.svg) | Awaiting Seal | grey `#5b6370`, a big clock with a tinted face, no rosette | The message is here but its seal isn't yet (seals go at most 10 minutes apart) | Jeff's |
 | ![](images/seals/unsigned.svg) | Unsigned | caution yellow `#f7c600` fill, dark edge `#6b5200`, slash `#3d2f00` | No signature at all; shown, but never counts as a check-in | Jeff's (2026-10-22: "Use yellow to communicate the idea of caution") |
 | ![](images/seals/receipted.svg) | Receipted | green, double check | On your own message: a listener's receipt says they hold the sealed copy | Proposed |
-| ![](images/seals/repair.svg) | Repair Asked | amber `#8a4b00`, dashed, turning arrow | A seal lists a message you never heard; a repair request is out | Proposed |
+| ![](images/seals/repair.svg) | Repair Asked | amber `#8a4b00`, a big turning arrow, no rosette | A seal lists a message you never heard; a repair request is out | Proposed |
 | ![](images/seals/mismatch.svg) | Mismatch | solid red `#b42318`, X | The seal's digest doesn't match the text received; the text is struck through | Proposed |
 
 "Proposed" icons await Jeff's keep or drop. Signing is Stage 2, so the

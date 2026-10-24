@@ -75,7 +75,9 @@ const char* nameOf(Mark mark)
 
 // The icons of docs/images/seals/, drawn on their 24-unit grid: a wax-seal
 // rosette (48 points at radius 9.4 + 0.9 cos 12θ around (12, 12), stroked
-// 1.5, dashed 2.2 on and 1.6 off while waiting), and a glyph stroked 2.
+// 1.5) and a glyph stroked 2. The two still waiting, Awaiting and
+// Repairing, have no rosette: their glyph alone, nearly the badge's size
+// (Jeff, 2026-10-24: no dotted rings, bigger centres).
 // Not delivered (a session message): the seal in red, outlined, with a
 // slash; slashed stands for it, as Mark has no such state.
 void drawSeal(wxGraphicsContext& gc, double size, Mark mark, bool dark, bool slashed = false)
@@ -86,9 +88,47 @@ void drawSeal(wxGraphicsContext& gc, double size, Mark mark, bool dark, bool sla
     if (slashed)
         shade = dark ? Shade{wxColour(0xff, 0x86, 0x78), wxColour(0x3d, 0x1a, 0x17)}
                      : Shade{wxColour(0xb4, 0x23, 0x18), wxColour(0xfb, 0xe4, 0xe1)};
+
+    auto pen = [&](double width) {
+        gc.SetPen(gc.CreatePen(wxGraphicsPenInfo(shade.ink, width * u).Cap(wxCAP_ROUND).Join(wxJOIN_ROUND)));
+    };
+    auto line = [&](std::initializer_list<std::pair<double, double>> points) {
+        wxGraphicsPath path = gc.CreatePath();
+        bool first = true;
+        for (const auto& p : points)
+        {
+            if (first)
+                path.MoveToPoint(p.first * u, p.second * u);
+            else
+                path.AddLineToPoint(p.first * u, p.second * u);
+            first = false;
+        }
+        gc.StrokePath(path);
+    };
+
+    if (!slashed && mark == Mark::Awaiting)
+    {
+        // A clock face of radius 8.2, tinted, and its hands.
+        gc.SetBrush(wxBrush(shade.tint));
+        pen(2);
+        gc.DrawEllipse(3.8 * u, 3.8 * u, 16.4 * u, 16.4 * u);
+        line({{12, 7.4}, {12, 12.4}, {15.4, 14.7}});
+        return;
+    }
+    if (!slashed && mark == Mark::Repairing)
+    {
+        // An arc of radius 7.6 nearly round, and its arrowhead.
+        gc.SetBrush(*wxTRANSPARENT_BRUSH);
+        pen(2);
+        wxGraphicsPath arc = gc.CreatePath();
+        arc.AddArc(11.79 * u, 12.21 * u, 7.6 * u, 21.9 * pi / 180, 321.1 * pi / 180, true);
+        gc.StrokePath(arc);
+        line({{18.8, 2.5}, {18.8, 8}, {13.3, 8}});
+        return;
+    }
+
     // A solid seal means look at this: its edge is its fill.
     bool solid = mark == Mark::Mismatch;
-    bool dashed = mark == Mark::Awaiting || mark == Mark::Repairing;
 
     std::vector<wxPoint2DDouble> edge;
     for (int k = 0; k <= 48; k++)
@@ -107,58 +147,8 @@ void drawSeal(wxGraphicsContext& gc, double size, Mark mark, bool dark, bool sla
 
     wxColour rim = solid ? shade.tint : shade.ink;
     gc.SetPen(gc.CreatePen(wxGraphicsPenInfo(rim, 1.5 * u).Cap(wxCAP_BUTT).Join(wxJOIN_ROUND)));
-    if (!dashed)
-    {
-        gc.StrokePath(rosette);
-    }
-    else
-    {
-        // Dashes walked along the edge, the same in every backend.
-        const double on = 2.2 * u, off = 1.6 * u;
-        double left = on;
-        bool drawing = true;
-        wxGraphicsPath dashes = gc.CreatePath();
-        dashes.MoveToPoint(edge[0]);
-        for (size_t i = 1; i < edge.size(); i++)
-        {
-            wxPoint2DDouble a = edge[i - 1], b = edge[i];
-            double length = a.GetDistance(b), at = 0;
-            while (length - at > left)
-            {
-                at += left;
-                wxPoint2DDouble p = a + (b - a) * (at / length);
-                if (drawing)
-                    dashes.AddLineToPoint(p);
-                else
-                    dashes.MoveToPoint(p);
-                drawing = !drawing;
-                left = drawing ? on : off;
-            }
-            left -= length - at;
-            if (drawing)
-                dashes.AddLineToPoint(b);
-            else
-                dashes.MoveToPoint(b);
-        }
-        gc.StrokePath(dashes);
-    }
+    gc.StrokePath(rosette);
 
-    auto pen = [&](double width) {
-        gc.SetPen(gc.CreatePen(wxGraphicsPenInfo(shade.ink, width * u).Cap(wxCAP_ROUND).Join(wxJOIN_ROUND)));
-    };
-    auto line = [&](std::initializer_list<std::pair<double, double>> points) {
-        wxGraphicsPath path = gc.CreatePath();
-        bool first = true;
-        for (const auto& p : points)
-        {
-            if (first)
-                path.MoveToPoint(p.first * u, p.second * u);
-            else
-                path.AddLineToPoint(p.first * u, p.second * u);
-            first = false;
-        }
-        gc.StrokePath(path);
-    };
     gc.SetBrush(*wxTRANSPARENT_BRUSH);
     pen(2);
     if (slashed)
@@ -175,24 +165,12 @@ void drawSeal(wxGraphicsContext& gc, double size, Mark mark, bool dark, bool sla
             line({{6.3, 12.4}, {8.7, 14.8}, {13.6, 9.4}});
             line({{11.9, 14.4}, {12.3, 14.8}, {17.2, 9.4}});
             break;
-        case Mark::Awaiting:
-            gc.DrawEllipse(7.7 * u, 7.7 * u, 8.6 * u, 8.6 * u);
-            pen(1.7);
-            line({{12, 9.6}, {12, 12.2}, {13.8, 13.4}});
-            break;
-        case Mark::Repairing:
-        {
-            // An arc of radius 4 nearly round, and its arrowhead.
-            wxGraphicsPath arc = gc.CreatePath();
-            arc.AddArc(11.89 * u, 12.11 * u, 4 * u, 21.9 * pi / 180, 321.1 * pi / 180, true);
-            gc.StrokePath(arc);
-            line({{15.6, 7}, {15.6, 9.9}, {12.7, 9.9}});
-            break;
-        }
         case Mark::Mismatch:
             line({{9.3, 9.3}, {14.7, 14.7}});
             line({{14.7, 9.3}, {9.3, 14.7}});
             break;
+        case Mark::Awaiting:
+        case Mark::Repairing:
         case Mark::None:
             break;
     }
