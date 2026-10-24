@@ -8,10 +8,16 @@ chirp-mode chat app, and is named for the same musical family and for the
 ragchew.
 
 Status: 0.1.0-beta, the first release. Ragtime connects to data2g-host,
-chats on the D2G broadcast group with the station list, Globus and the
-gearshift, holds ragchews (sessions) and sends files in them, and
-broadcasts files to the group with repair. It hasn't yet been on the air
-between two real data2g-hosts.
+chats on the D2G broadcast group. Current features include:
+- "Globus," which plots your friend's maidenhead coordinates
+   on a globe,
+- "Gearshift," a graphical representation of different Data2G modes,
+  which aids in the selection of the optimal rate for chatting with
+  the group. NOTE: THIS REQUIRES DATA2G's mode_thresholds.json
+  -- see below for more details.
+- Peer-to-peer sessions, which feature automatic rate negotiation and
+  file transfer.
+- Group file transfer which includes repair rounds.
 
 ## Downloads
 
@@ -65,7 +71,7 @@ with its own `--config` file and ports 8110 and 8310 talks to the first.
   in, net control asks for traffic, and the traffic gets passed. Every
   burst teaches the net who hears whom.
 - **Sometimes we ragchew.** When operators want to talk, they enter a
-  ragchew on purpose and leave it on purpose.
+  point to point ragchew on purpose and leave it on purpose.
 
 Ragtime is a front end for a separately running `data2g-host`, reached
 over TCP. It never starts the modem and never touches the sound card.
