@@ -150,7 +150,10 @@ Since 2026-10-24 (Jeff: "eliminate the right column status messages and
 just change them into descriptions of the status when the mouse hovers
 the icon") every state of our own messages has a badge in the same
 column, and the words that were on the right are the badge's tooltip
-(and the greyed line atop its menu). None is sealed, so none has a
+(and the greyed line atop its menu). The right-hand column shows the
+gear the line went (or goes) in by its short name, "Z2k" (Jeff,
+2026-10-24); theirs have none, as data2g-host doesn't say which mode a
+heard burst came in. None of the state badges is sealed, so none has a
 rosette: each is its glyph alone, nearly the badge's size. One tick
 means it went, two that its station acknowledged it.
 

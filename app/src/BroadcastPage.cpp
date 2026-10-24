@@ -261,6 +261,12 @@ protected:
         using Mark = ragtime::broadcast::Seals::Mark;
         Mark mark = owner_->sealMark_ && !m->past ? owner_->sealMark_(*m).mark : Mark::None;
         wxString badge = badgeFor(*m, mark, this);
+        // On the right, the gear it went (or goes) in, by its short name
+        // (Jeff, 2026-10-24: in place of the state's words).
+        wxString gear;
+        if (!m->mode.empty())
+            gear << "<font" << colour(secondaryText()) << ">"
+                 << htmlEscape(owner_->nameMode_ ? owner_->nameMode_(m->mode) : m->mode) << "</font>";
 
         wxString html;
         html << "<table width=\"100%\" cellspacing=\"0\" cellpadding=\"2\"><tr>"
@@ -269,6 +275,7 @@ protected:
              << "</font></td>"
              << "<td valign=\"top\" width=\"100%\"><font" << body << "><b>" << htmlEscape(m->from) << "</b>&nbsp; "
              << to << htmlEscape(m->text) << "</font></td>"
+             << "<td valign=\"top\" nowrap align=\"right\">" << gear << "</td>"
              << "</tr></table>";
         return html;
     }
