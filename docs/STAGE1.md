@@ -121,10 +121,10 @@ bench"). Choices made there, for Jeff to keep or change:
 
 - **"@W1AW" messages** (PLAN.md question 6, kept as recommended): a
   line starting `@W1AW` is a Text addressed to W1AW asking for an Ack.
-  W1AW's Ragtime answers on the group by itself, and the message shows
-  "Acknowledged by W1AW", or "Sent, no ack yet" (with a bare green
-  double check or a bare grey check on its left, Jeff, 2026-10-24;
-  MOCKUPS.md). No automatic retries:
+  W1AW's Ragtime answers on the group by itself, and the message's badge
+  turns from a grey check (its tooltip "Sent; no ack from W1AW yet") to
+  a green double check ("Acknowledged by W1AW"; Jeff, 2026-10-24,
+  MOCKUPS.md "Message state badges"). No automatic retries:
   **Re-send** is on the right-click menu of each of your messages, as in
   Glissando, once it has settled (Sent, Not sent, Cancelled or
   Acknowledged). On the Broadcast tab it goes as the same record, so a

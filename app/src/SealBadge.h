@@ -26,14 +26,31 @@ wxString sealBadgeHtml(ragtime::broadcast::Seals::Mark mark, const wxWindow* win
 wxString deliveredBadgeHtml(const wxWindow* window);
 wxString notDeliveredBadgeHtml(const wxWindow* window);
 
-// An @message of ours that its station acknowledged, while no seal covers
-// it (Jeff, 2026-10-24): Held's green double check with no rosette, as
-// nothing is sealed. Once its seal has gone, Held takes over.
-wxString acknowledgedBadgeHtml(const wxWindow* window);
-
-// Before that, while its Ack isn't back ("Sent, no ack yet"; Jeff,
-// 2026-10-24): a grey check with no rosette, one tick to the Ack's two.
-// Sealed or Repairing take over as for any other message.
-wxString noAckBadgeHtml(const wxWindow* window);
+// Our own message's state where no seal says more (Jeff, 2026-10-24: a
+// badge for each, its words on hover in place of the right-hand column).
+// Each is its glyph alone, nearly the badge's size, with no rosette, as
+// nothing is sealed:
+//
+//   Queued        grey hourglass          still with us: its turn, or sending paused
+//   Sending       blue mast and waves     in the modem's send queue, waiting for a clear channel
+//   Held          grey pause sign         in the modem's send queue, held while our session runs
+//   Sent          grey check              it went (an @message: its Ack isn't back)
+//   Acknowledged  green double check      an @message whose station sent its Ack
+//   NotSent       red "!" in a circle     dropped, or the link closed first
+//   Cancelled     grey X                  taken back before it went
+//
+// One tick to the Ack's two. Once a seal has gone, its badge shows instead
+// (BroadcastPage), Held's for an acknowledged message.
+enum class StatusBadge
+{
+    Queued,
+    Sending,
+    Held,
+    Sent,
+    Acknowledged,
+    NotSent,
+    Cancelled,
+};
+wxString statusBadgeHtml(StatusBadge badge, const wxWindow* window);
 
 #endif

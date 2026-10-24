@@ -78,6 +78,26 @@ private:
     std::function<void(const std::vector<std::string>&)>* fn_;
 };
 
+// What a badge of ours means, for its tooltip.
+wxString stateLine(const Message& m, const std::string& peer)
+{
+    std::string far = peer.empty() ? std::string("the far end") : peer;
+    switch (m.state)
+    {
+        case State::Queued:
+            return "Queued: not yet written into the session";
+        case State::Sent:
+            return wxString::FromUTF8("Sent: written into the session; " + far + "'s modem hasn't acknowledged it yet");
+        case State::Delivered:
+            return wxString::FromUTF8("Delivered: " + far + "'s modem acknowledged it");
+        case State::NotDelivered:
+            return "Not delivered: the session ended first";
+        case State::Heard:
+            break;
+    }
+    return wxString();
+}
+
 } // namespace
 
 class SessionMessages : public wxHtmlListBox
@@ -155,16 +175,17 @@ protected:
         wxString what = htmlEscape(m->text);
         if (m->kind == Message::Kind::File) what = "<i>File</i>&nbsp; " + what;
 
-        // Delivered and Not delivered are badges on the left (Jeff,
-        // 2026-10-24: in place of the words); the other states stay words
-        // on the right.
-        wxString state, badge;
+        // Each state of ours is a badge on the left, its words on hover
+        // (Jeff, 2026-10-24: in place of the words on the right).
+        wxString badge;
         if (m->ours && m->state == State::Delivered)
             badge = deliveredBadgeHtml(this);
         else if (m->ours && m->state == State::NotDelivered)
             badge = notDeliveredBadgeHtml(this);
-        else if (m->ours)
-            state << "<font" << colour(secondaryText()) << ">" << stateLabel(m->state) << "</font>";
+        else if (m->ours && m->state == State::Queued)
+            badge = statusBadgeHtml(StatusBadge::Queued, this);
+        else if (m->ours && m->state == State::Sent)
+            badge = statusBadgeHtml(StatusBadge::Sent, this);
 
         wxString html;
         html << "<table width=\"100%\" cellspacing=\"0\" cellpadding=\"2\"><tr>"
@@ -173,7 +194,6 @@ protected:
              << "</font></td>"
              << "<td valign=\"top\" width=\"100%\"><font" << body << "><b>" << htmlEscape(m->from) << "</b>&nbsp; "
              << what << "</font></td>"
-             << "<td valign=\"top\" nowrap align=\"right\">" << state << "</td>"
              << "</tr></table>";
         return html;
     }
@@ -302,9 +322,11 @@ SessionPage::SessionPage(wxWindow* parent, const SessionChat& session, const rag
         const Message* m = row == wxNOT_FOUND ? nullptr : list_->at((size_t)row);
         const FileTransfer* t = row == wxNOT_FOUND ? nullptr : list_->fileAt((size_t)row);
         wxString tip;
-        if (m != nullptr && m->kind == Message::Kind::Text) tip = wxDateTime((time_t)m->time).FormatISOCombined(' ') + wxString::Format(", item %u", m->seq);
-        if (m != nullptr && m->ours && m->state == Message::State::Delivered) tip += ", delivered";
-        if (m != nullptr && m->ours && m->state == Message::State::NotDelivered) tip += ", not delivered";
+        bool overBadge = e.GetPosition().x < list_->GetMargins().x + list_->FromDIP(BADGE_ROOM + 4);
+        if (m != nullptr && m->kind == Message::Kind::Text && m->ours && overBadge)
+            tip = stateLine(*m, session_.peer());
+        else if (m != nullptr && m->kind == Message::Kind::Text)
+            tip = wxDateTime((time_t)m->time).FormatISOCombined(' ') + wxString::Format(", item %u", m->seq);
         if (t != nullptr && !t->path.empty()) tip = utf8(t->path);
         list_->SetToolTip(tip);
         e.Skip();
