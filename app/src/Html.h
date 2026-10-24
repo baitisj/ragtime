@@ -26,6 +26,7 @@ wxColour badText();     // red: not sent, not delivered, a problem
 wxColour quietText();   // amber: the session's link is quiet
 wxColour busyText();    // orange: a station busy in a session
 wxColour accentText();  // blue: sending, addressed, our own session, links
+wxColour needleOrange(); // orange: the gearshift speedometer's needle
 // The background of a strip that warns the link is quiet.
 wxColour quietSurface();
 

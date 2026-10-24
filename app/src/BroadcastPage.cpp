@@ -25,6 +25,7 @@
 #include "PhraseHighlight.h"
 #include "SealBadge.h"
 #include "Theme.h"
+#include "ragtime/gearbox/Gearbox.h"
 
 using namespace ragtime::broadcast;
 using State = Message::State;
@@ -410,9 +411,10 @@ void BroadcastPage::refresh()
     if (atEnd && count > 0) list_->ScrollToRow(count - 1);
 }
 
-void BroadcastPage::setGearLabel(const wxString& label, const wxString& tooltip)
+void BroadcastPage::setGearLabel(const wxString& label, const wxString& tooltip, double bitsPerSecond)
 {
     gearName_ = label;
+    gearSpeed_ = bitsPerSecond;
     drawGearButton();
     gear_->SetToolTip(tooltip);
     arrange(GetSize().x);
@@ -421,8 +423,9 @@ void BroadcastPage::setGearLabel(const wxString& label, const wxString& tooltip)
 
 void BroadcastPage::drawGearButton()
 {
-    gear_->SetBitmap(gearButtonIcon(wxSystemSettings::GetColour(wxSYS_COLOUR_BTNTEXT), GetFont().Smaller(),
-                                    gearName_, GEAR_ICON_DIP));
+    gear_->SetBitmap(gearButtonIcon(wxSystemSettings::GetColour(wxSYS_COLOUR_BTNTEXT), needleOrange(),
+                                    ragtime::gearbox::dialPosition(gearSpeed_), GetFont().Smaller(), gearName_,
+                                    GEAR_ICON_DIP));
 }
 
 void BroadcastPage::setPaused(bool paused)

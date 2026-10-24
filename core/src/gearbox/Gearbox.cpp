@@ -209,6 +209,13 @@ std::string formatDuration(double seconds)
     return text;
 }
 
+double dialPosition(double bitsPerSecond)
+{
+    if (!(bitsPerSecond > 0.0)) return 0.0;
+    const double t = std::log(bitsPerSecond / DIAL_SLOWEST_BPS) / std::log(DIAL_FASTEST_BPS / DIAL_SLOWEST_BPS);
+    return std::clamp(t, 0.0, 1.0);
+}
+
 std::string formatSpeed(double bitsPerSecond)
 {
     // %.0f rounds halves to even, as the Python ladder script does, so

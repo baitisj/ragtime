@@ -83,6 +83,11 @@ wxColour busyText()
     return shade(wxColour(0xb5, 0x47, 0x08), wxColour(0xff, 0xa8, 0x5c));
 }
 
+wxColour needleOrange()
+{
+    return shade(wxColour(0xe8, 0x6a, 0x10), wxColour(0xff, 0x9a, 0x3c));
+}
+
 wxColour accentText()
 {
     return shade(ACCENT_BLUE, wxColour(0x86, 0xb6, 0xff));

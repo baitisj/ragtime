@@ -79,38 +79,41 @@ void copyInk(const wxImage& from, const InkBox& box, wxImage& to, int x, int y)
 
 } // namespace
 
-void drawGearshiftIcon(wxGraphicsContext& gc, double size, const wxColour& ink)
+void drawGearshiftIcon(wxGraphicsContext& gc, double size, const wxColour& ink, const wxColour& needleInk,
+                       double needleAt)
 {
     // Drawn on a 24-unit grid, in fine lines.
     const double u = size / 24.0;
-    auto pen = [&](double width) {
-        gc.SetPen(gc.CreatePen(wxGraphicsPenInfo(ink, width * u).Cap(wxCAP_ROUND).Join(wxJOIN_ROUND)));
+    auto pen = [&](const wxColour& colour, double width) {
+        gc.SetPen(gc.CreatePen(wxGraphicsPenInfo(colour, width * u).Cap(wxCAP_ROUND).Join(wxJOIN_ROUND)));
     };
     gc.SetBrush(*wxTRANSPARENT_BRUSH);
 
-    // A dial from lower left round to lower right, ticks, and the needle
-    // well up the scale.
+    // A dial from lower left round to lower right, 240 degrees, with five
+    // ticks, and the needle needleAt of the way round it.
     const double cx = 12 * u, cy = 13.5 * u, r = 10.5 * u;
-    pen(1.2);
+    const double start = PI * 5 / 6, sweep = PI * 4 / 3;
+    pen(ink, 1.2);
     wxGraphicsPath arc = gc.CreatePath();
-    arc.AddArc(cx, cy, r, PI * 5 / 6, PI / 6, true);
+    arc.AddArc(cx, cy, r, start, PI / 6, true);
     gc.StrokePath(arc);
-    pen(1.0);
+    pen(ink, 1.0);
     for (int i = 0; i < 5; i++)
     {
-        const double a = PI * 5 / 6 + i * (PI * 4 / 3) / 4;
+        const double a = start + i * sweep / 4;
         gc.StrokeLine(cx + std::cos(a) * r * 0.64, cy + std::sin(a) * r * 0.64,
                       cx + std::cos(a) * r * 0.84, cy + std::sin(a) * r * 0.84);
     }
-    pen(1.4);
-    const double needle = -PI / 4;  // up and to the right
+    pen(needleInk, 1.4);
+    const double needle = start + std::clamp(needleAt, 0.0, 1.0) * sweep;
     gc.StrokeLine(cx, cy, cx + std::cos(needle) * r * 0.78, cy + std::sin(needle) * r * 0.78);
     gc.SetPen(*wxTRANSPARENT_PEN);
-    gc.SetBrush(wxBrush(ink));
+    gc.SetBrush(wxBrush(needleInk));
     gc.DrawEllipse(cx - 1.8 * u, cy - 1.8 * u, 3.6 * u, 3.6 * u);
 }
 
-wxBitmapBundle gearButtonIcon(const wxColour& ink, const wxFont& font, const wxString& name, int dialDip)
+wxBitmapBundle gearButtonIcon(const wxColour& ink, const wxColour& needleInk, double needleAt, const wxFont& font,
+                              const wxString& name, int dialDip)
 {
     // The dial and the name are drawn apart, each measured by where its
     // ink falls, then put together with the name's tops NAME_GAP + 1 px
@@ -137,7 +140,7 @@ wxBitmapBundle gearButtonIcon(const wxColour& ink, const wxFont& font, const wxS
     {
         const int dialPx = dialDip * scale;
         const wxImage dial = drawImage(dialPx, dialPx, [&](wxGraphicsContext& gc) {
-            drawGearshiftIcon(gc, dialPx, ink);
+            drawGearshiftIcon(gc, dialPx, ink, needleInk, needleAt);
         });
         const InkBox dialBox = inkBox(dial);
 
