@@ -501,8 +501,9 @@ void BroadcastChat::onRecord(const protocol::Record& record, uint64_t nowMs)
         m.time = record.header.time;
         m.atMs = nowMs;
         m.state = State::Heard;
-        if (log_ != nullptr) log_->added(m);
-        messages_.push_back(std::move(m));
+        auto at = placeFor(m);
+        if (log_ != nullptr) log_->added(m, at != messages_.end() ? at->id : 0);
+        messages_.insert(at, std::move(m));
         trim();
         version_++;
     }
@@ -581,6 +582,26 @@ void BroadcastChat::closeLog(uint64_t nowMs)
 void BroadcastChat::logState(const Message& m)
 {
     if (log_ != nullptr && !m.past) log_->settled(m);
+}
+
+std::deque<Message>::iterator BroadcastChat::placeFor(const Message& m)
+{
+    // Numbers wrap after 0xFFFFFF: later means up to half the range on.
+    auto later = [&m](const Message& o) {
+        uint32_t ahead = (o.seq - m.seq) & 0xFFFFFF;
+        return o.kind == Message::Kind::Text && !o.past && o.from == m.from && ahead != 0 && ahead < 0x800000;
+    };
+    auto at = std::find_if(messages_.begin(), messages_.end(), later);
+    if (at == messages_.end()) return at;
+    // Up past the others' lines made after it, as far as the sender's
+    // line before it, the rule, or the past.
+    while (at != messages_.begin())
+    {
+        const Message& above = *std::prev(at);
+        if (above.past || above.kind == Message::Kind::Rule || above.from == m.from || above.time <= m.time) break;
+        --at;
+    }
+    return at;
 }
 
 void BroadcastChat::trim()

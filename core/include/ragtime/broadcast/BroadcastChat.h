@@ -207,6 +207,11 @@ private:
     // bytes, between words where it can.
     std::vector<std::string> split(const std::string& text, const std::string& to, size_t firstRoom);
     void trim();
+    // Where a line heard goes: in its place among its sender's lines (one
+    // repaired, or heard late, slots in above the sender's later ones), by
+    // the record's time among the others' there; the end when it is the
+    // sender's newest.
+    std::deque<Message>::iterator placeFor(const Message& m);
     void flushAcks(const std::string& mode, uint64_t nowMs);
     void logState(const Message& m);
 

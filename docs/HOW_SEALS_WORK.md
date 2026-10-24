@@ -133,14 +133,17 @@ works out which pieces it lacks.
 2. **A listener that lacks something waits a random moment** within the
    window, then sends one short *repair request* naming the seal and,
    one bit per line, what it lacks, plus a list of the file pieces it
-   lacks.
+   lacks. The request also says how well the listener hears the sender
+   (below).
 3. **Others keep quiet when they can.** A listener that hears someone
-   else ask for the same lines takes those off its own list. If nothing
-   is left, it never transmits. On a busy net one request usually
-   speaks for many.
+   else ask for the same lines takes those off its own list, as long as
+   that station hears the sender no better than it does. If nothing is
+   left, it never transmits. On a busy net one request usually speaks
+   for many.
 4. **The sender sends it all again, once.** At the window's end it
-   resends everything that was asked for, by anyone, in order, then the
-   seal again. That opens another window.
+   resends everything that was asked for, by anyone, in order, each line
+   in a gear the stations that asked for it can copy, then the seal
+   again. That opens another window.
 5. **A quiet window ends it.** A seal over a file goes up to twice
    more after a quiet window, in case the seal itself or a request was
    lost.
@@ -148,6 +151,73 @@ works out which pieces it lacks.
 A listener that has asked five times under a seal and got nothing stops
 asking, and the file shows as incomplete. *Ask again* on the file starts
 afresh, as long as the seal is under 2 hours old.
+
+### Which gear a repair goes in
+
+A line was lost because the gear it went in was too fast for someone's
+path at that moment. Sending it again in the same gear may just lose it
+again. So every repair request carries one more figure: **how well the
+listener hears the sender**, its signal-to-noise ratio (S/N) in dB, as
+the listener's data2g-host measured it.
+
+- **The figure is the worst of the last 15 minutes,** not the latest.
+  A listener can only measure the bursts it decoded; the ones it lost
+  went by in fades it never measured. The worst decoded burst is the
+  nearest it can get to the bottom of the fade.
+- **It costs nothing on the air.** It rides in seven spare bits of a
+  byte the request already had, in half-dB steps from −24 to +39 dB.
+  Ragtime 0.1 sent those bits as zero and ignores them, so 0.1 and later
+  versions still work together; a 0.1 request simply says "no figure".
+- **The sender picks the gear,** with the same sum the gearshift's Auto
+  uses: the fastest gear on its own ladder that needs no more than the
+  listener's S/N less 3 dB. A measurement travels better than a mode
+  name, because the two stations' ladders may differ.
+- **Each line gets the gear of the weakest station that asked for it,**
+  and never a faster gear than it first went in: that gear failed
+  someone already. Lines only strong stations asked for go fast; only
+  what a weak station lacks goes slowly.
+
+![Repairs gear by gear: #44 in gear 4 for the strong station, #43 and #45 in gear 2 because the weak one asked for them, the seal last in gear 2](images/how-seals-work/repair-gears.svg)
+
+The sender works gear by gear, fastest first, so the stations that hear
+it best are served soonest, and sends the seal last in the slowest gear
+it used, so every station that asked can copy it.
+
+This is why keeping quiet now has a condition. If KC2G (+3 dB) heard
+K7RAG (+14 dB) ask for #43 and stayed quiet, #43 would come back in
+K7RAG's fast gear, and KC2G would lose it again. So a listener keeps
+quiet only behind a station whose gear is no faster than its own.
+
+**Slow repairs take time.** Six lines and their seal take about 6 s in
+`qpsk-r1/3` and about 94 s in `fsk16r25-r1/3`; 4 KB of a file takes
+about a minute in the first and 21 minutes in the second. So gears
+slower than the round's own may take at most 5 minutes of airtime a
+round (Settings, "Slow repairs", 1 to 60 minutes). What doesn't fit goes
+in the next round, after the seal, so other stations get a word in
+between.
+
+### When the sender says no
+
+Sometimes the sender won't repair what was asked for: its operator
+closed the share's repairs or cancelled the file, the seal is past its
+2 hours, or Ragtime was restarted and no longer holds it. Rather than
+leave listeners asking five times for nothing, it answers once with a
+*repair refused*: about 20 bytes naming the seal, the reason, and the
+files it covers (or everything under the seal).
+
+It goes at the end of the listening window, once however many stations
+asked, in the gear of the weakest of them, and the same refusal goes at
+most once in 10 minutes. A listener that hears it stops asking, and the
+Files tab says why: "Not repaired: AG7EW cancelled it", with *Ask again*
+greyed. A 0.1 station doesn't know the record, skips it, and keeps
+asking as before.
+
+### Repaired lines go in their place
+
+A line that comes again after its seal is put where it belongs in the
+Broadcast tab, among its sender's lines by their numbers, not at the
+bottom: AG7EW's #42 goes above #43, wherever the other stations' lines
+fall. The saved history keeps that order after a restart too.
 
 ### How long a seal stays answerable
 

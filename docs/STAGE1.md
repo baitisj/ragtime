@@ -421,6 +421,28 @@ what goes on the air. Choices made there, for Jeff to keep or change:
   24 hours, incomplete ones after 7 days. Our own shares in Repairing
   aren't kept across a restart yet: their repairs end when Ragtime
   closes.
+- **Repair gears and Repair refused** (Jeff's idea, 2026-10-24, his
+  choices on the proposal doc). A request carries the S/N its asker
+  heard the sender at (the lowest in 15 minutes) in the spare bits of
+  its flags byte, so it costs nothing on the air and 0.1 still works with
+  it. Each item goes again in the fastest gear every station that asked
+  for it can copy, with Auto's 3 dB margin, never faster than it first
+  went, even below a gear the operator chose by hand. Gears slower than
+  the round's own take at most 5 minutes a round, set in Settings ("Slow
+  repairs", 1 to 60). A heard request keeps a listener quiet only if its
+  asker's gear is no faster than the listener's. The sender refuses, in
+  a RepairRefused, what it won't serve (closed, cancelled, no longer held,
+  out of its window), and the listener's file shows "Not repaired:
+  AG7EW cancelled it", with Ask again greyed. PROTOCOL.md "Seals and
+  repair" has the rules; the airtime figures were in the proposal: six
+  lines and their seal are about 6 s in `qpsk-r1/3` and 94 s in
+  `fsk16r25-r1/3`.
+- **Repaired lines in their place** (Jeff, 2026-10-24: repaired
+  messages "did not get placed in the correct order in the chat"). A
+  line heard after a later one of its sender's goes above that one, by
+  the record time among the other stations' lines there, never above
+  the rule; the Broadcast log's M line names the row it went above, so
+  the order survives a restart.
 
 The brief:
 

@@ -367,6 +367,12 @@ uint16_t BroadcastFiles::pieceCount(uint32_t seq) const
     return out != nullptr && !out->content.empty() ? out->file.pieces : 0;
 }
 
+bool BroadcastFiles::stopped(uint32_t seq) const
+{
+    const Outgoing* out = outgoingBySeq(seq);
+    return out != nullptr && out->file.stopped;
+}
+
 bool BroadcastFiles::streaming(uint32_t seq) const
 {
     const Outgoing* out = outgoingBySeq(seq);
@@ -860,10 +866,11 @@ void BroadcastFiles::tick(uint64_t nowMs)
         bool sealed = in.announced && seals_.sealHeard(in.file.from, in.file.seq);
         if (sealed) in.sealSeen = true;
         // Repairs are over for it: we gave up asking (requests brought
-        // nothing), its seal has aged out, or nothing has come for long.
+        // nothing), the sender refused, its seal has aged out, or nothing
+        // has come for long.
         if (in.file.state == State::Receiving && !in.file.complete && in.announced
-            && ((sealed && seals_.gaveUp(in.file.from, in.file.seq)) || (in.sealSeen && !sealed)
-                || nowMs >= in.file.lastMs + INCOMPLETE_MS))
+            && ((sealed && seals_.gaveUp(in.file.from, in.file.seq)) || seals_.refusal(in.file.from, in.file.seq)
+                || (in.sealSeen && !sealed) || nowMs >= in.file.lastMs + INCOMPLETE_MS))
         {
             in.file.state = State::Incomplete;
             in.file.expiresAtMs = nowMs + PART_KEEP_MS;
@@ -1131,6 +1138,7 @@ BroadcastFile BroadcastFiles::view(const Incoming& in, uint64_t nowMs) const
     f.sealed = seals_.sealHeard(f.from, f.seq);
     f.asking = seals_.asking(f.from) && f.state == State::Receiving;
     f.sealAged = in.sealSeen && !f.sealed;
+    f.refusal = seals_.refusal(f.from, f.seq);
     if (in.announced)
     {
         // Missed: its turn has gone by (a later piece is here, or the seal).
@@ -1241,6 +1249,10 @@ std::vector<files::FileRow> BroadcastFiles::rows(uint64_t nowMs) const
         {
             row.state = std::string(f.stopped ? "Stopped, " : "Part kept, ") + std::to_string(in.pieces.size()) + " of "
                         + countText(f.pieces, "piece", "pieces");
+            if (f.refusal)
+                row.state = "Not repaired: " + f.from + " " + refusalText(*f.refusal) + ", "
+                            + std::to_string(in.pieces.size()) + " of " + countText(f.pieces, "piece", "pieces")
+                            + " kept";
             row.look = Look::Kept;
             row.expiresAtMs = f.expiresAtMs;
         }

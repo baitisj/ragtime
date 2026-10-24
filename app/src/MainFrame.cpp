@@ -609,6 +609,7 @@ void MainFrame::applyPrefs(bool reconnect)
     seals_.setChain(prefs_.callsign, loadSealChain(protocol::normalCallsign(prefs_.callsign)));
     savedSeal_ = seals_.chain().number;
     seals_.setSealText(prefs_.sealChat);
+    seals_.setSlowResendSeconds(prefs_.slowRepairMinutes * 60.0);
     session::SessionChat::Settings ss;
     ss.callsign = prefs_.callsign;
     ss.locator = prefs_.locator;
@@ -729,6 +730,7 @@ void MainFrame::onClock()
     uint64_t now = HostConnection::nowMs();
     updatePathSnr(now);
     seals_.setMode(broadcastMode());
+    seals_.setLadder(gearshift_.ladder());
     seals_.tick(now);
     broadcastFiles_.tick(now);
     onBroadcastFiles();
@@ -1661,7 +1663,15 @@ bool MainFrame::fileCard(uint64_t id, FileCard& card)
         case State::Incomplete:
             card.state = std::string(f.stopped ? "Stopped, " : "Incomplete, ") + pieces + " kept";
             card.menu = {{"askagain", "Ask again for the rest"}, {"reject", "Reject file..."}};
-            if (f.sealed)
+            if (f.refusal)
+            {
+                // The sender said no: asking again would only hear no again.
+                std::string why = f.from + " " + broadcast::refusalText(*f.refusal);
+                card.state = "Not repaired: " + why + ", " + pieces + " kept. It comes whole if " + f.from
+                             + " sends it again";
+                card.menu[0] = {"", "Can't ask again: " + why};
+            }
+            else if (f.sealed)
             {
                 card.actions = {{"askagain", "Ask again"}};
             }

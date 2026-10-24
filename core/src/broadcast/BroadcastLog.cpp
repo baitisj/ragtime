@@ -128,8 +128,24 @@ std::vector<Message> parseBroadcastLog(const std::string& text, size_t max)
             m.ackWanted = f[9] == "1";
             m.mode = unescape(f[10]);
             m.text = unescape(f[11]);
-            ids[id] = rows.size();
-            rows.push_back(std::move(m));
+            uint64_t before = 0;
+            auto above = f.size() >= 13 && number(f[12], before) ? ids.find(before) : ids.end();
+            if (above != ids.end())
+            {
+                // In its place, above that row: the rows below it move down one.
+                size_t at = above->second;
+                for (auto& row : ids)
+                {
+                    if (row.second >= at) row.second++;
+                }
+                ids[id] = at;
+                rows.insert(rows.begin() + (std::ptrdiff_t)at, std::move(m));
+            }
+            else
+            {
+                ids[id] = rows.size();
+                rows.push_back(std::move(m));
+            }
             any = true;
             lastMs = std::max(lastMs, atMs);
         }
@@ -253,7 +269,7 @@ void BroadcastLog::began(uint64_t nowMs)
     append(join({"B", std::to_string(nowMs)}));
 }
 
-void BroadcastLog::added(const Message& m)
+void BroadcastLog::added(const Message& m, uint64_t before)
 {
     if (m.kind == Kind::File)
     {
@@ -264,7 +280,7 @@ void BroadcastLog::added(const Message& m)
     if (m.kind != Kind::Text) return;
     append(join({"M", std::to_string(m.id), std::to_string(m.atMs), std::to_string(m.time), std::to_string(m.seq),
                  m.ours ? "1" : "0", std::string(1, stateLetter(m.state)), escape(m.from), escape(m.to),
-                 m.ackWanted ? "1" : "0", escape(m.mode), escape(m.text)}));
+                 m.ackWanted ? "1" : "0", escape(m.mode), escape(m.text), std::to_string(before)}));
 }
 
 void BroadcastLog::settled(const Message& m)

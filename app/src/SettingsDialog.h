@@ -36,6 +36,7 @@ private:
     wxDirPickerCtrl* received_ = nullptr;
     wxTextCtrl* autoAccept_ = nullptr;
     wxCheckBox* sealChat_ = nullptr;
+    wxSpinCtrl* slowRepair_ = nullptr;
     wxStaticText* problem_ = nullptr;
 };
 
