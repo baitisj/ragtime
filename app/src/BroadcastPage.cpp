@@ -33,8 +33,8 @@ namespace
 {
 
 
-// Room for the seal badge (16 px) in every row.
-constexpr int BADGE_ROOM = 20;
+// Room for the seal badge (SEAL_BADGE_PX) in every row.
+constexpr int BADGE_ROOM = SEAL_BADGE_PX + 4;
 
 // "14:32" today, "22 Oct 14:32" on another day (from the log).
 wxString clock(uint64_t ms);
