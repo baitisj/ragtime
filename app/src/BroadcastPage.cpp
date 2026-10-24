@@ -47,36 +47,122 @@ std::string joinCalls(const std::vector<std::string>& calls)
     return out;
 }
 
+// An @message of ours whose station sent its Ack.
+bool acknowledged(const Message& m)
+{
+    return m.ours && !m.past && m.state == State::Acknowledged;
+}
+
+// An @message of ours that went, its Ack not back yet.
+bool awaitingAck(const Message& m)
+{
+    return m.ours && !m.past && m.state == State::Sent && m.ackWanted;
+}
+
+// The badge on a message's left (Jeff, 2026-10-24): ours shows its state
+// (StatusBadge) until a seal says more. Once its seal has gone the seal's
+// badge shows (Held's for an acknowledged @message), Repairing while it
+// goes again, and Awaiting while a sealed line's seal hasn't gone (an
+// @message keeps its tick, as the Ack matters more). Theirs shows only the
+// seal's. What came before Ragtime last closed shows its state alone.
+wxString badgeFor(const Message& m, ragtime::broadcast::Seals::Mark mark, const wxWindow* window)
+{
+    using Mark = ragtime::broadcast::Seals::Mark;
+    if (!m.ours) return m.past ? wxString() : sealBadgeHtml(mark, window);
+    switch (m.state)
+    {
+        case State::Queued:
+            return statusBadgeHtml(StatusBadge::Queued, window);
+        case State::Sending:
+            return statusBadgeHtml(StatusBadge::Sending, window);
+        case State::Held:
+            return statusBadgeHtml(StatusBadge::Held, window);
+        case State::NotSent:
+            return statusBadgeHtml(StatusBadge::NotSent, window);
+        case State::Cancelled:
+            return statusBadgeHtml(StatusBadge::Cancelled, window);
+        case State::Sent:
+        case State::Acknowledged:
+        case State::Heard:
+            break;
+    }
+    bool acked = m.state == State::Acknowledged;
+    if (m.past || mark == Mark::None || (mark == Mark::Awaiting && (m.ackWanted || acked)))
+        return statusBadgeHtml(acked ? StatusBadge::Acknowledged : StatusBadge::Sent, window);
+    if (acked && mark == Mark::Sealed) return sealBadgeHtml(Mark::Held, window);
+    return sealBadgeHtml(mark, window);
+}
+
 // What a message's seal badge means, for the greyed line atop its menu;
 // empty when there is nothing to say.
 std::string sealLine(const Message& m, const ragtime::broadcast::Seals::ItemMark& mark)
 {
     using Mark = ragtime::broadcast::Seals::Mark;
     std::string at = mark.sealedMs == 0 ? std::string() : " " + std::string(clock(mark.sealedMs).utf8_str());
+    std::string acked = acknowledged(m) ? "Acknowledged by " + m.to : std::string();
+    std::string ack = awaitingAck(m) ? "Sent; no ack from " + m.to + " yet" : acked;
     switch (mark.mark)
     {
         case Mark::Awaiting:
-            return "Awaiting its seal (it goes after a minute's quiet)";
+            // Jeff, 2026-10-24: "Not yet verified by seal" while seals are
+            // on; with them off (Mark::None) the words just leave it out.
+            return (ack.empty() ? std::string("Sent") : ack)
+                   + ". Not yet verified by seal (it goes after a minute's quiet)";
         case Mark::Sealed:
             if (!m.ours) return "Sealed: " + m.from + "'s seal lists it, and it matches";
+            if (!acked.empty()) return acked + ", and sealed" + at;
             if (!mark.sentAgainFor.empty())
                 return "Sealed" + at + ", and sent again for " + joinCalls(mark.sentAgainFor)
                        + (mark.sentAgainFor.size() == 1 ? ", who hasn't" : ", who haven't")
-                       + " asked since; stations don't confirm receipt";
-            return "Sealed" + at + ". Nobody has asked for it; stations don't confirm receipt";
+                       + " asked for a repair since, though silence doesn't prove they have it";
+            return "Sealed" + at + ". No one has asked for a repair yet, though silence doesn't prove they all have it";
         case Mark::Repairing:
             return "Repairing: " + (mark.wanting.empty() ? std::string("asked for") : joinCalls(mark.wanting) + " asked for it")
                    + ", and it goes again";
         case Mark::Held:
-            return "Held by " + joinCalls(mark.holders) + ": a repair request under its seal" + at + " didn't ask for it";
+            if (!acked.empty() && mark.holders.empty()) return acked + ", and sealed" + at;
+            return (acked.empty() ? std::string() : acked + "; ") + "Held by " + joinCalls(mark.holders)
+                   + ": a repair request under its seal" + at + " didn't ask for it";
         case Mark::Mismatch:
             return "Doesn't match " + m.from + "'s seal: a good copy is asked for";
         case Mark::None:
             break;
     }
-    if (m.ours && !m.past && (m.state == Message::State::Sent || m.state == Message::State::Acknowledged))
-        return "Not sealed, so not repaired (Settings: Seal my broadcast messages)";
+    if (!ack.empty()) return ack;
+    if (m.ours && !m.past && m.state == Message::State::Sent) return "Sent";
     return std::string();
+}
+
+// What a message's badge means: the words that were on the right of ours,
+// and what its seal says. For the badge's tooltip and the greyed line atop
+// its menu; empty when there is nothing to say.
+std::string statusLine(const Message& m, const ragtime::broadcast::Seals::ItemMark* mark)
+{
+    if (m.ours)
+    {
+        std::string closed = m.past ? " (before Ragtime last closed)" : "";
+        switch (m.state)
+        {
+            case State::Queued:
+                return "Queued: waiting its turn, not yet given to the modem";
+            case State::Sending:
+                return "Sending: added to the modem's send queue; waiting for a clear channel";
+            case State::Held:
+                return "Held: in the modem's send queue; held until our session goes idle";
+            case State::NotSent:
+                return "Not sent: the modem dropped it, the link to it closed, or two minutes passed" + closed
+                       + ". Right click to re-send";
+            case State::Cancelled:
+                return "Cancelled: taken back before it went" + closed;
+            case State::Sent:
+            case State::Acknowledged:
+            case State::Heard:
+                break;
+        }
+        if (m.past)
+            return (m.state == State::Acknowledged ? "Acknowledged by " + m.to : std::string("Sent")) + closed;
+    }
+    return mark == nullptr ? std::string() : sealLine(m, *mark);
 }
 
 // The Gear button's speedometer, as wide as fits over the gear's name
@@ -162,22 +248,6 @@ protected:
         // What came before Ragtime last closed reads in grey.
         wxString body = m->past ? colour(secondaryText()) : wxString();
 
-        wxString state;
-        if (m->ours)
-        {
-            wxColour c = secondaryText();
-            if (!m->past)
-            {
-                if (m->state == State::Sent || m->state == State::Acknowledged) c = goodText();
-                if (m->state == State::Sending) c = accentText();
-                if (m->state == State::NotSent) c = badText();
-            }
-            wxString label = stateLabel(m->state);
-            if (m->state == State::Acknowledged) label = "Acknowledged by " + wxString::FromUTF8(m->to);
-            else if (m->state == State::Sent && m->ackWanted) label = "Sent, no ack yet";
-            state << "<font" << colour(c) << ">" << label << "</font>";
-        }
-
         wxString to;
         if (!m->to.empty())
         {
@@ -186,8 +256,17 @@ protected:
                << "</font> ";
         }
 
-        wxString badge;
-        if (owner_->sealMark_ && !m->past) badge = sealBadgeHtml(owner_->sealMark_(*m).mark, this);
+        // The badge says the state; its tooltip says it in words (Jeff,
+        // 2026-10-24: in place of the words on the right).
+        using Mark = ragtime::broadcast::Seals::Mark;
+        Mark mark = owner_->sealMark_ && !m->past ? owner_->sealMark_(*m).mark : Mark::None;
+        wxString badge = badgeFor(*m, mark, this);
+        // On the right, the gear it went (or goes) in, by its short name
+        // (Jeff, 2026-10-24: in place of the state's words).
+        wxString gear;
+        if (!m->mode.empty())
+            gear << "<font" << colour(secondaryText()) << ">"
+                 << htmlEscape(owner_->nameMode_ ? owner_->nameMode_(m->mode) : m->mode) << "</font>";
 
         wxString html;
         html << "<table width=\"100%\" cellspacing=\"0\" cellpadding=\"2\"><tr>"
@@ -196,7 +275,7 @@ protected:
              << "</font></td>"
              << "<td valign=\"top\" width=\"100%\"><font" << body << "><b>" << htmlEscape(m->from) << "</b>&nbsp; "
              << to << htmlEscape(m->text) << "</font></td>"
-             << "<td valign=\"top\" nowrap align=\"right\">" << state << "</td>"
+             << "<td valign=\"top\" nowrap align=\"right\">" << gear << "</td>"
              << "</tr></table>";
         return html;
     }
@@ -354,8 +433,19 @@ BroadcastPage::BroadcastPage(wxWindow* parent, const BroadcastChat& chat)
         wxString tip;
         if (m != nullptr && m->kind == Message::Kind::Text && list_->VirtualHitTest(e.GetPosition().y) != wxNOT_FOUND)
         {
-            tip = wxDateTime((time_t)m->time).FormatISOCombined(' ') + wxString::Format(", item %u", m->seq);
-            if (!m->mode.empty()) tip += ", " + wxString::FromUTF8(nameMode_ ? nameMode_(m->mode) : m->mode);
+            // Over the badge, what it means; elsewhere, when and how it went.
+            if (e.GetPosition().x < list_->GetMargins().x + list_->FromDIP(BADGE_ROOM + 4))
+            {
+                SealMark mark;
+                bool marked = sealMark_ && !m->past;
+                if (marked) mark = sealMark_(*m);
+                tip = wxString::FromUTF8(statusLine(*m, marked ? &mark : nullptr));
+            }
+            else
+            {
+                tip = wxDateTime((time_t)m->time).FormatISOCombined(' ') + wxString::Format(", item %u", m->seq);
+                if (!m->mode.empty()) tip += ", " + wxString::FromUTF8(nameMode_ ? nameMode_(m->mode) : m->mode);
+            }
         }
         list_->SetToolTip(tip);
         e.Skip();
@@ -475,7 +565,10 @@ void BroadcastPage::showMenu(int row)
     wxString text = wxString::FromUTF8(m->text);
 
     wxMenu menu;
-    std::string seal = sealMark_ && !m->past ? sealLine(*m, sealMark_(*m)) : std::string();
+    SealMark mark;
+    bool marked = sealMark_ && !m->past;
+    if (marked) mark = sealMark_(*m);
+    std::string seal = statusLine(*m, marked ? &mark : nullptr);
     if (!seal.empty())
     {
         menu.Append(ID_SEAL_LINE, wxString::FromUTF8(seal));

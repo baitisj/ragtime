@@ -38,16 +38,17 @@ struct FileCard
     std::vector<std::pair<std::string, std::string>> menu;
 };
 
-// The Broadcast tab (docs/STAGE1.md, package E): the messages on D2G, each
-// of ours showing Queued, Sending, Sent or Not sent; the line to type in,
-// where "@W1AW" at the start addresses one station; the Gear button, a
-// speedometer over the gear's short name, which opens the gearshift; and
-// Send.
+// The Broadcast tab (docs/STAGE1.md, package E): the messages on D2G; the
+// line to type in, where "@W1AW" at the start addresses one station; the
+// Gear button, a speedometer over the gear's short name, which opens the
+// gearshift; and Send.
 //
-// Each message row has the seal badge on its left (SealBadge.h): whether
-// its seal has gone, is being repaired, or shows a station holds it, and
-// on theirs whether it matches their seal. Unsealed chat has none; seals
-// aren't signed until Stage 2, so it never claims an identity.
+// Each message row has a badge on its left (SealBadge.h), and hovering it
+// says what it means. Ours show their state (Queued, Sending, Sent,
+// Acknowledged, Not sent...) until a seal says more: whether its seal has
+// gone, is being repaired, or shows a station holds it. Theirs show only
+// whether they match their seal. Seals aren't signed until Stage 2, so a
+// badge never claims an identity.
 class BroadcastPage : public wxPanel
 {
 public:
