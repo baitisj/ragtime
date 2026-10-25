@@ -194,12 +194,20 @@ SettingsDialog::SettingsDialog(wxWindow* parent, const StationPrefs& prefs,
     problem_ = new wxStaticText(this, wxID_ANY, "");
     problem_->SetForegroundColour(badText());
 
+    // Two columns, so it stays short enough for a 1366x768 screen: the
+    // station and its connections on the left, what it sends on the right.
+    auto* left = new wxBoxSizer(wxVERTICAL);
+    left->Add(station, 0, wxEXPAND | wxTOP, 12);
+    left->Add(host, 0, wxEXPAND | wxTOP, 12);
+    left->Add(radio, 0, wxEXPAND | wxTOP, 12);
+    auto* right = new wxBoxSizer(wxVERTICAL);
+    right->Add(files, 0, wxEXPAND | wxTOP, 12);
+    right->Add(broadcast, 0, wxEXPAND | wxTOP, 12);
+    auto* columns = new wxBoxSizer(wxHORIZONTAL);
+    columns->Add(left, 1, wxEXPAND | wxLEFT, 12);
+    columns->Add(right, 1, wxEXPAND | wxLEFT | wxRIGHT, 12);
     auto* sizer = new wxBoxSizer(wxVERTICAL);
-    sizer->Add(station, 0, wxEXPAND | wxLEFT | wxRIGHT | wxTOP, 12);
-    sizer->Add(host, 0, wxEXPAND | wxLEFT | wxRIGHT | wxTOP, 12);
-    sizer->Add(files, 0, wxEXPAND | wxLEFT | wxRIGHT | wxTOP, 12);
-    sizer->Add(broadcast, 0, wxEXPAND | wxLEFT | wxRIGHT | wxTOP, 12);
-    sizer->Add(radio, 0, wxEXPAND | wxLEFT | wxRIGHT | wxTOP, 12);
+    sizer->Add(columns, 0, wxEXPAND);
     sizer->Add(problem_, 0, wxEXPAND | wxLEFT | wxRIGHT | wxTOP, 12);
     sizer->Add(CreateStdDialogButtonSizer(wxOK | wxCANCEL), 0, wxEXPAND | wxALL, 12);
     SetSizer(sizer);

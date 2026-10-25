@@ -170,6 +170,15 @@ std::string durationText(double seconds)
     return std::to_string(minutes / 60) + " h " + std::to_string(minutes % 60) + " min";
 }
 
+// When a file's repairs close: "21:50 (29 min)". Under an hour the Files
+// tab's expiryText counts down ("29:56"), which reads oddly after "until".
+std::string repairsUntilText(uint64_t untilMs, uint64_t nowMs, long utcOffsetS)
+{
+    if (untilMs > nowMs && untilMs - nowMs < 3600 * 1000)
+        return session::clockTime(untilMs, utcOffsetS) + " (" + session::sessionLength(untilMs - nowMs) + ")";
+    return files::expiryText(untilMs, nowMs, utcOffsetS);
+}
+
 // The local time so many seconds from now: "16:40".
 wxString clockIn(double seconds)
 {
@@ -1954,7 +1963,7 @@ bool MainFrame::fileCard(uint64_t id, FileCard& card)
             if (!f.sealed)
                 card.state = "Sealing";
             else
-                card.state = "Repairs open until " + files::expiryText(f.repairsUntilMs, now, localOffsetSeconds())
+                card.state = "Repairs open until " + repairsUntilText(f.repairsUntilMs, now, localOffsetSeconds())
                              + (f.askers == 0 ? std::string()
                                               : ", " + std::to_string(f.askers) + (f.askers == 1 ? " station" : " stations")
                                                     + " asked");
@@ -1964,7 +1973,7 @@ bool MainFrame::fileCard(uint64_t id, FileCard& card)
             if (f.sealed)
             {
                 card.actions = {{"keep", "Keep open 30 min longer"}, {"close", "Close repairs now"}};
-                card.title = "Repairs open until " + files::expiryText(f.repairsUntilMs, now, localOffsetSeconds());
+                card.title = "Repairs open until " + repairsUntilText(f.repairsUntilMs, now, localOffsetSeconds());
                 if (f.repairSeconds > 0.0) card.title += ", " + durationText(f.repairSeconds) + " of repairs sent";
                 card.menu = {{"keep", "Keep open 30 min longer"},
                              {"keep2h", "Keep open 2 hours longer"},
