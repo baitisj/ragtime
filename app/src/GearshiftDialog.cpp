@@ -10,6 +10,7 @@
 #include <wx/arrstr.h>
 #include <wx/button.h>
 #include <wx/checkbox.h>
+#include <wx/choice.h>
 #include <wx/dcbuffer.h>
 #include <wx/filedlg.h>
 #include <wx/filename.h>
@@ -92,14 +93,17 @@ void setPen(wxGraphicsContext& gc, const wxColour& colour, double width,
 // The Submode Map: speed across on a log scale, the S/N each mode needs down
 // the side (harder further down), one dot per mode coloured by modulation,
 // the best modes on a thin dashed line and the gears as knobs bearing their
-// short names on a heavy one. Clicking a knob picks that gear.
+// short names on a heavy one. Clicking a knob picks that gear, and clicking
+// any other dot within the width picks its mode.
 class SubmodeMap : public wxPanel
 {
 public:
-    SubmodeMap(wxWindow* parent, const Gearshift& shift, std::function<void(int)> onPickGear)
+    SubmodeMap(wxWindow* parent, const Gearshift& shift, std::function<void(int)> onPickGear,
+               std::function<void(const std::string&)> onPickMode)
         : wxPanel(parent, wxID_ANY, wxDefaultPosition, wxSize(640, 430))
         , shift_(shift)
         , onPickGear_(std::move(onPickGear))
+        , onPickMode_(std::move(onPickMode))
     {
         SetBackgroundStyle(wxBG_STYLE_PAINT);
         SetMinSize(wxSize(560, 380));
@@ -119,8 +123,14 @@ public:
         });
         Bind(wxEVT_LEFT_DOWN, [this](wxMouseEvent& e) {
             const int gear = gearAt(e.GetPosition());
-            if (gear > 0 && onPickGear_)
+            if (gear > 0)
+            {
                 onPickGear_(gear);
+                return;
+            }
+            const Submode* mode = dotAt(dots(plot()), e.GetPosition());
+            if (mode && mode->widthHz <= widthCapHz(shift_.effectiveWidth()))
+                onPickMode_(mode->name);
         });
     }
 
@@ -179,6 +189,24 @@ private:
                 out.emplace_back(&mode, wxPoint2DDouble(xFor(p, mode.bitsPerSecond), yFor(p, *dB)));
         }
         return out;
+    }
+
+    // The dot within 9 px of a point, the nearest if several.
+    static const Submode* dotAt(const std::vector<std::pair<const Submode*, wxPoint2DDouble>>& all,
+                                const wxPoint& at)
+    {
+        const Submode* found = nullptr;
+        double nearest = 81.0;  // 9 px, squared
+        for (const auto& [mode, dot] : all)
+        {
+            const double d = (dot.m_x - at.x) * (dot.m_x - at.x) + (dot.m_y - at.y) * (dot.m_y - at.y);
+            if (d < nearest)
+            {
+                nearest = d;
+                found = mode;
+            }
+        }
+        return found;
     }
 
     int gearAt(const wxPoint& at) const
@@ -322,6 +350,15 @@ private:
         const std::vector<Gear>& ladder = shift_.ladder();
         const std::optional<Gear> current = shift_.current();
         const std::optional<Gear> suggestion = shift_.suggestion();
+        // A mode chosen off the ladder is ringed in blue.
+        if (current && current->number == 0)
+        {
+            const double r = DOT_RADIUS + 4;
+            setPen(*gc, ACCENT, 2.5);
+            gc->SetBrush(*wxTRANSPARENT_BRUSH);
+            gc->DrawEllipse(xFor(p, current->bitsPerSecond) - r, yFor(p, current->threshold) - r, 2 * r, 2 * r);
+        }
+
         if (ladder.size() > 1)
         {
             std::vector<wxPoint2DDouble> points;
@@ -390,18 +427,7 @@ private:
         // Hovering a dot shows its name, width, speed and threshold.
         if (hovering_)
         {
-            const Submode* hovered = nullptr;
-            double nearest = 81.0;  // 9 px, squared
-            for (const auto& [mode, at] : all)
-            {
-                const double d = (at.m_x - mouse_.x) * (at.m_x - mouse_.x)
-                                 + (at.m_y - mouse_.y) * (at.m_y - mouse_.y);
-                if (d < nearest)
-                {
-                    nearest = d;
-                    hovered = mode;
-                }
-            }
+            const Submode* hovered = dotAt(all, mouse_);
             if (hovered)
             {
                 const wxString text
@@ -428,6 +454,7 @@ private:
 
     const Gearshift& shift_;
     std::function<void(int)> onPickGear_;
+    std::function<void(const std::string&)> onPickMode_;
     wxPoint mouse_;
     bool hovering_ = false;
 };
@@ -494,6 +521,9 @@ GearshiftDialog::GearshiftDialog(wxWindow* parent, Gearshift& shift, std::functi
     map_ = new SubmodeMap(this, shift_, [this](int gear) {
         if (shift_.selectGear(gear))
             changed();
+    }, [this](const std::string& mode) {
+        if (shift_.selectMode(mode))
+            changed();
     });
     body->Add(map_, 1, wxEXPAND | wxRIGHT, 10);
 
@@ -513,6 +543,18 @@ GearshiftDialog::GearshiftDialog(wxWindow* parent, Gearshift& shift, std::functi
     gears_->SetToolTip("Gears in red need more S/N than the path has, less Auto's 3 dB margin");
     gears_->Bind(wxEVT_LIST_ITEM_SELECTED, &GearshiftDialog::onGearSelected, this);
     side->Add(gears_, 1, wxEXPAND);
+    // Any mode the map draws within the width, gear or not.
+    auto* any = new wxBoxSizer(wxHORIZONTAL);
+    any->Add(new wxStaticText(this, wxID_ANY, "Any mode"), 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 6);
+    anyMode_ = new wxChoice(this, wxID_ANY);
+    anyMode_->SetToolTip("Choose a mode that is not a gear. Clicking its dot on the map does the same.");
+    anyMode_->Bind(wxEVT_CHOICE, [this](wxCommandEvent& e) {
+        const int row = e.GetSelection();
+        if (row >= 0 && row < static_cast<int>(anyModes_.size()) && shift_.selectMode(anyModes_[row]))
+            changed();
+    });
+    any->Add(anyMode_, 1, wxALIGN_CENTER_VERTICAL);
+    side->Add(any, 0, wxEXPAND | wxTOP, 6);
     body->Add(side, 0, wxEXPAND);
     top->Add(body, 1, wxEXPAND | wxALL, 10);
 
@@ -614,6 +656,30 @@ void GearshiftDialog::refresh()
             gears_->SetItemState(row, wxLIST_STATE_SELECTED, wxLIST_STATE_SELECTED);
             gears_->EnsureVisible(row);
         }
+    }
+
+    // Every mode within the width with an S/N on this path, slowest first.
+    std::vector<const Submode*> modes;
+    for (const Submode& mode : shift_.usable().modes())
+    {
+        if (mode.hasFacts() && mode.widthHz <= widthCapHz(shift_.effectiveWidth())
+            && mode.thresholdOn(shift_.path()))
+            modes.push_back(&mode);
+    }
+    std::sort(modes.begin(), modes.end(), [](const Submode* a, const Submode* b) {
+        return std::make_pair(a->bitsPerSecond, a->name) < std::make_pair(b->bitsPerSecond, b->name);
+    });
+    anyMode_->Clear();
+    anyModes_.clear();
+    for (const Submode* mode : modes)
+    {
+        const std::string name = shift_.shortName(mode->name);
+        anyMode_->Append(utf8(name == mode->name ? name : name + "  " + mode->name) + ", "
+                         + utf8(formatSpeed(mode->bitsPerSecond)) + ", "
+                         + utf8(formatDb(*mode->thresholdOn(shift_.path()))));
+        anyModes_.push_back(mode->name);
+        if (current && current->mode == mode->name)
+            anyMode_->SetSelection(static_cast<int>(anyModes_.size()) - 1);
     }
 
     const wxArrayString sources = loadedThresholdSources();
