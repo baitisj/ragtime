@@ -714,10 +714,12 @@ two.
   After a message addressed to a station, which asks for its Ack, a
   file's bursts also wait until the Ack is heard or a listening window
   in the message's mode has passed (3 one-codeword bursts and 4 s). An
-  Ack goes as soon as the station decodes the message; a reply typed
-  while our burst was on air waits in data2g-host's own
-  p-persistent slots after it (KISS P and SLOTTIME), so it can still
-  meet our next burst. The operator sees the estimate (pieces, airtime, when repairs end
+  Ack goes as soon as the station decodes the message. A reply typed
+  while another station's burst was on air waits for it to end, then
+  takes each of data2g-host's 1 s slots with probability (P + 1) / 256.
+  Ragtime sets KISS P to 191 as it connects (the host's own default is
+  63): 75% a slot, so 94% of such replies go within two slots, inside
+  the gap. The operator sees the estimate (pieces, airtime, when repairs end
   at the latest) before it goes; Ragtime refuses a file that would take
   over 2 hours of airtime and warns over 15 minutes.
 - **Stopping a share** ends its first pass, not its repairs. What went is

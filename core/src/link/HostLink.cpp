@@ -52,6 +52,8 @@ void HostLink::commandUp(uint64_t nowMs)
     sendLine(settings_.narrow ? "BW500" : "BW2300", OK, nowMs);
     sendLine(std::string("BCAST OPEN ") + GROUP + " FROM " + call, BCAST_PORT, nowMs);
     sendLine("MODES", MODES, nowMs);
+    std::vector<uint8_t> persist = kissEncodeCommand(0, KISS_PERSIST, KISS_P);
+    kissOut_.insert(kissOut_.end(), persist.begin(), persist.end());
 }
 
 void HostLink::commandDown(uint64_t nowMs)

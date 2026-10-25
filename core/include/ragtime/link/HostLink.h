@@ -138,6 +138,14 @@ public:
     // the far end's reply is seen here only once its header decodes, about
     // a second after it keys.
     static constexpr uint64_t YIELD_GAP_MS = 4000;
+    // KISS P, sent as the ports connect: a burst of ours that waited on
+    // BUSY (a reply typed while another station's burst was on air) takes
+    // each 1 s slot after it with probability (P + 1) / 256. data2g-host's
+    // own 63 gives 25%, so a reply often missed the gap between another
+    // station's file bursts; 191 gives 75%, 94% within two slots (Jeff,
+    // 2026-10-25). Not 255: two stations waiting under one burst would
+    // always key together.
+    static constexpr uint8_t KISS_P = 191;
 
     explicit HostLink(Settings settings);
 

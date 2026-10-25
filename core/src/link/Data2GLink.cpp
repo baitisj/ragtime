@@ -122,6 +122,11 @@ std::vector<uint8_t> kissEncodeAckMode(int port, uint16_t tag, const std::vector
     return kissFrame((uint8_t)(((port & 0x0F) << 4) | KISS_ACKMODE), body);
 }
 
+std::vector<uint8_t> kissEncodeCommand(int port, uint8_t command, uint8_t value)
+{
+    return kissFrame((uint8_t)(((port & 0x0F) << 4) | (command & 0x0F)), {value});
+}
+
 void KissDecoder::feed(const uint8_t* bytes, size_t length, std::vector<KissFrame>& framesOut)
 {
     for (size_t i = 0; i < length; i++)

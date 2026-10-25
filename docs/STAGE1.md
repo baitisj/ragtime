@@ -331,8 +331,10 @@ Choices made there, for Jeff to keep or change:
   after any burst of ours, chat included (it was 3 s between file bursts
   only, so a piece followed our own chat line 0.4 s later), and while an
   addressed message waits for its Ack (`BroadcastChat`, a listening
-  window in its mode at most). Raising data2g-host's KISS P, so a reply
-  queued under our burst takes the first slot after it, waits for Jeff.
+  window in its mode at most). Ragtime also sets data2g-host's KISS P
+  to 191 (75% a slot; the host's default is 63) as it connects, so a
+  reply queued under another station's burst goes in the first slot or
+  two after it (Jeff, 2026-10-25).
 - **Offers wait for the far end's Hello,** and go only if it takes
   session files; a file queued for a station that doesn't ends Not taken.
 - **Leave** cancels what is under way, so the far end hears why and keeps

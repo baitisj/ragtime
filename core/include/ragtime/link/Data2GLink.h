@@ -35,6 +35,7 @@ constexpr const char* GROUP = "D2G";
 
 constexpr uint8_t KISS_DATA = 0x00;
 constexpr uint8_t KISS_ACKMODE = 0x0C;
+constexpr uint8_t KISS_PERSIST = 0x02;      // KISS P: one byte, a slot taken with probability (P + 1) / 256
 
 // A data frame for a KISS port (0 to 15).
 std::vector<uint8_t> kissEncode(int port, const std::vector<uint8_t>& data);
@@ -42,6 +43,8 @@ std::vector<uint8_t> kissEncode(int port, const std::vector<uint8_t>& data);
 // An ACKMODE frame: data2g-host answers with the same tag once the burst
 // carrying it has been transmitted.
 std::vector<uint8_t> kissEncodeAckMode(int port, uint16_t tag, const std::vector<uint8_t>& data);
+// A KISS command with a one-byte value, such as KISS_PERSIST.
+std::vector<uint8_t> kissEncodeCommand(int port, uint8_t command, uint8_t value);
 
 struct KissFrame
 {
