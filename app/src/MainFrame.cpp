@@ -1861,7 +1861,7 @@ void MainFrame::broadcastFile()
     wxString faster;
     for (const gearbox::Gear& g : gearshift_.ladder())
     {
-        if (gear && g.number <= gear->number) continue;
+        if (gear && g.bitsPerSecond <= gear->bitsPerSecond) continue;
         bool offered = std::any_of(link_.modes().begin(), link_.modes().end(),
                                    [&](const link::ModeInfo& m) { return m.name == g.mode; });
         if (!offered) continue;

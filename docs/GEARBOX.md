@@ -48,6 +48,11 @@ the Submode Map:
   names, not numbers (Jeff, 2026-10-22). Once the path's S/N is known,
   gears needing more than it less the 3 dB margin are red, in the list
   and on the map (Jeff, 2026-10-22).
+- **Any mode** under the gear list picks a mode that is not a gear, from
+  every mode drawn within the width, slowest first; clicking its dot on
+  the map does the same. It is ringed in blue, turns Auto off, and holds
+  while the mode is drawn within the width (meanwhile the gear falls back
+  as for a width change). Picking a gear clears it.
 - Leave out the `ack-` modes: they carry the host's own ARQ control.
 
 The Gear button by Send is the one way in (Jeff, 2026-10-23), last in
@@ -200,7 +205,8 @@ run. The tables below are the Submode Map's.
   `effectiveWidth()` is the width the ladder uses). Changing the width or path keeps the
   chosen mode if it is still a gear, or else takes the fastest gear no
   faster than it, so the gearbox never shifts up on its own. Auto with no
-  S/N reports yet holds the chosen gear.
+  S/N reports yet holds the chosen gear. `selectMode` chooses any mode
+  (`chosenMode()`, a `Gear` numbered 0 when off the ladder).
 - `app/src/GearshiftDialog.*`: the popup, opened by the Gear button
   (`GearshiftIcon.*` draws its speedometer and name as one picture) and Settings > Gearshift
   (Ctrl+G). `ToggleSwitch.*` is the 500 Hz switch. `app/src/Thresholds.*`:

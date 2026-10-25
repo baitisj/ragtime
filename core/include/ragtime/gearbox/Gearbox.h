@@ -41,7 +41,7 @@ constexpr double AUTO_MARGIN_DB = 3.0;   // Auto's margin below the path's S/N
 
 struct Gear
 {
-    int number = 0;  // from 1, the most robust
+    int number = 0;  // from 1, the most robust; 0 for a mode off the ladder
     std::string mode;  // Data2G's name, which host commands use
     std::string name;  // the short name, "E2C" (empty when unknown)
     int widthHz = 0;
@@ -179,6 +179,13 @@ public:
     // Chooses a gear by number (from 1) and turns Auto off. False if there
     // is no such gear.
     bool selectGear(int number);
+    // Chooses any mode, on the ladder or off it, and turns Auto off. The
+    // choice holds while the mode is drawn on the map within the width;
+    // meanwhile the gear is picked as for a ladder change. True if it is
+    // in effect now.
+    bool selectMode(const std::string& mode);
+    // The mode chosen with selectMode, empty after selectGear.
+    const std::string& chosenMode() const { return chosenMode_; }
 
     // The path's S/N (dB, average power in 2500 Hz), the mean of `bursts`
     // bursts from the station `from`; none until data2g-host reports one.
@@ -194,7 +201,8 @@ public:
 
     // The ladder for the current width, path and offered modes.
     const std::vector<Gear>& ladder() const { return ladder_; }
-    // The chosen gear (Auto off), even while Auto overrides it.
+    // The chosen gear (Auto off), even while Auto overrides it: a mode off
+    // the ladder has number 0.
     std::optional<Gear> chosen() const;
     // Auto's pick, whether or not Auto is on. Empty with no path S/N.
     std::optional<Gear> suggestion() const;
@@ -217,6 +225,8 @@ private:
     std::map<std::string, std::string> names_;
     std::vector<Gear> ladder_;
     int chosen_ = 0;  // index into ladder_
+    std::string chosenMode_;
+    std::optional<Gear> offLadder_;  // chosenMode_, when it is off the ladder
 };
 
 } // namespace ragtime::gearbox

@@ -3,12 +3,15 @@
 
 #include <array>
 #include <functional>
+#include <string>
+#include <vector>
 
 #include <wx/dialog.h>
 
 #include "ragtime/gearbox/Gearbox.h"
 
 class wxCheckBox;
+class wxChoice;
 class wxListCtrl;
 class wxListEvent;
 class wxStaticText;
@@ -43,6 +46,8 @@ private:
     wxStaticText* inGear_ = nullptr;
     wxStaticText* snr_ = nullptr;
     wxListCtrl* gears_ = nullptr;
+    wxChoice* anyMode_ = nullptr;
+    std::vector<std::string> anyModes_;  // anyMode_'s modes, by row
     wxStaticText* source_ = nullptr;
 };
 

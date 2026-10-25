@@ -126,6 +126,25 @@ std::map<std::string, std::string> shortNames(const SubmodeTable& table)
     return names;
 }
 
+namespace
+{
+
+Gear makeGear(const Submode& mode, Path path, int number, const std::map<std::string, std::string>& names)
+{
+    Gear gear;
+    gear.number = number;
+    gear.mode = mode.name;
+    if (auto name = names.find(mode.name); name != names.end())
+        gear.name = name->second;
+    gear.widthHz = mode.widthHz;
+    gear.modulation = mode.modulation;
+    gear.bitsPerSecond = mode.bitsPerSecond;
+    gear.threshold = *mode.thresholdOn(path);
+    return gear;
+}
+
+} // namespace
+
 std::vector<Gear> gearLadder(const SubmodeTable& table, Path path, int capHz)
 {
     const std::vector<const Submode*> best = bestModes(table, path, capHz);
@@ -150,18 +169,7 @@ std::vector<Gear> gearLadder(const SubmodeTable& table, Path path, int capHz)
     const std::map<std::string, std::string> names = shortNames(table);
     std::vector<Gear> ladder;
     for (const Submode* mode : picked)
-    {
-        Gear gear;
-        gear.number = static_cast<int>(ladder.size()) + 1;
-        gear.mode = mode->name;
-        if (auto name = names.find(mode->name); name != names.end())
-            gear.name = name->second;
-        gear.widthHz = mode->widthHz;
-        gear.modulation = mode->modulation;
-        gear.bitsPerSecond = mode->bitsPerSecond;
-        gear.threshold = *mode->thresholdOn(path);
-        ladder.push_back(std::move(gear));
-    }
+        ladder.push_back(makeGear(*mode, path, static_cast<int>(ladder.size()) + 1, names));
     return ladder;
 }
 
@@ -305,8 +313,18 @@ bool Gearshift::selectGear(int number)
     if (number < 1 || number > static_cast<int>(ladder_.size()))
         return false;
     chosen_ = number - 1;
+    chosenMode_.clear();
+    offLadder_.reset();
     auto_ = false;
     return true;
+}
+
+bool Gearshift::selectMode(const std::string& mode)
+{
+    chosenMode_ = mode;
+    auto_ = false;
+    rebuild();
+    return chosen() && chosen()->mode == mode;
 }
 
 std::string Gearshift::shortName(const std::string& mode) const
@@ -317,6 +335,8 @@ std::string Gearshift::shortName(const std::string& mode) const
 
 std::optional<Gear> Gearshift::chosen() const
 {
+    if (offLadder_)
+        return offLadder_;
     if (ladder_.empty())
         return std::nullopt;
     return ladder_[static_cast<std::size_t>(chosen_)];
@@ -370,6 +390,26 @@ void Gearshift::rebuild()
         gear.name = name != names_.end() ? name->second : std::string();
     }
     chosen_ = 0;
+    offLadder_.reset();
+    // A mode chosen by name holds while it is drawn within the width.
+    if (!chosenMode_.empty())
+    {
+        for (std::size_t i = 0; i < ladder_.size(); i++)
+        {
+            if (ladder_[i].mode == chosenMode_)
+            {
+                chosen_ = static_cast<int>(i);
+                return;
+            }
+        }
+        const Submode* mode = usable_.find(chosenMode_);
+        if (mode && mode->hasFacts() && mode->widthHz <= widthCapHz(effectiveWidth())
+            && mode->thresholdOn(path_))
+        {
+            offLadder_ = makeGear(*mode, path_, 0, names_);
+            return;
+        }
+    }
     if (!before)
         return;
     for (std::size_t i = 0; i < ladder_.size(); i++)

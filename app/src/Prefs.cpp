@@ -144,7 +144,9 @@ void loadGearshift(gearbox::Gearshift& shift)
     // Before the 500 Hz switch had its own key it followed the width.
     shift.setNarrowOnly(config().ReadBool(keys::NARROW_ONLY, shift.width() == gearbox::Width::Hz500));
     int gear = (int)config().ReadLong("/Gearshift/Gear", 0);
-    if (gear > 0) shift.selectGear(gear);
+    wxString mode = config().Read("/Gearshift/Mode", "");
+    if (!mode.empty()) shift.selectMode(std::string(mode.utf8_str()));
+    else if (gear > 0) shift.selectGear(gear);
     shift.setAuto(config().ReadBool("/Gearshift/Auto", false));
 }
 
@@ -155,6 +157,7 @@ void saveGearshift(const gearbox::Gearshift& shift)
     config().Write("/Gearshift/Auto", shift.isAuto());
     std::optional<gearbox::Gear> chosen = shift.chosen();
     config().Write("/Gearshift/Gear", (long)(chosen ? chosen->number : 0));
+    config().Write("/Gearshift/Mode", wxString::FromUTF8(shift.chosenMode()));
     config().Flush();
 }
 

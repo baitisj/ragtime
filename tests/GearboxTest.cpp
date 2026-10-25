@@ -463,6 +463,26 @@ void testGearshift()
     // And choosing 500 Hz by hand leaves the switch alone.
     shift.setWidth(Width::Hz500);
     CHECK(!shift.narrowOnly());
+
+    // Any mode, off the ladder: it holds while drawn within the width.
+    shift.setWidth(Width::Hz2400);
+    shift.setAuto(true);
+    CHECK(shift.selectMode("polar-p1"));
+    CHECK(!shift.isAuto());
+    CHECK_EQ(shift.chosenMode(), std::string("polar-p1"));
+    CHECK_EQ(shift.current()->mode, std::string("polar-p1"));
+    CHECK_EQ(shift.current()->number, 0);
+    shift.setWidth(Width::Hz200);  // too wide now: the ladder's pick stands in
+    CHECK_EQ(shift.current()->mode, std::string("p-200"));
+    shift.setWidth(Width::Hz2400);  // and the chosen mode comes back
+    CHECK_EQ(shift.current()->mode, std::string("polar-p1"));
+    // A mode that is a gear selects that gear.
+    CHECK(shift.selectMode("p-16qam"));
+    CHECK_EQ(shift.current()->number, 3);
+    CHECK(!shift.selectMode("no-such-mode"));
+    CHECK(shift.selectGear(1));
+    CHECK(shift.chosenMode().empty());
+    CHECK_EQ(shift.current()->mode, std::string("p-fsk-2"));
 }
 
 } // namespace
