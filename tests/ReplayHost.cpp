@@ -6,6 +6,7 @@
 #include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <random>
 #include <sstream>
 #include <stdexcept>
 #include <utility>
@@ -160,11 +161,32 @@ ReplayHost::ReplayHost(const std::vector<FlightLine>& recording, Options options
     }
 
     kissListener_ = listenOn(kissPort);
-    commandListener_ = kissListener_ >= 0 ? listenOn(commandPort) : -1;
-    int commandBound = commandListener_ >= 0 ? boundPort(commandListener_) : 0;
-    dataListener_ = commandListener_ >= 0 ? listenOn(commandBound + 1) : -1;
-    if (dataListener_ < 0)
+    int commandBound = 0;
+    if (kissListener_ >= 0 && commandPort != 0)
     {
+        commandListener_ = listenOn(commandPort);
+        dataListener_ = commandListener_ >= 0 ? listenOn(commandPort + 1) : -1;
+        if (dataListener_ >= 0) commandBound = commandPort;
+    }
+    // Any free pair: a free command port's + 1 may be taken, so try a few,
+    // as FakeHost does.
+    std::random_device random;
+    for (int attempt = 0; kissListener_ >= 0 && commandPort == 0 && attempt < 100 && commandBound == 0; attempt++)
+    {
+        int port = 20000 + (int)(random() % 40000);
+        commandListener_ = listenOn(port);
+        if (commandListener_ < 0) continue;
+        dataListener_ = listenOn(port + 1);
+        if (dataListener_ < 0)
+        {
+            closeFd(commandListener_);
+            continue;
+        }
+        commandBound = port;
+    }
+    if (commandBound == 0)
+    {
+        closeFd(dataListener_);
         closeFd(commandListener_);
         closeFd(kissListener_);
         throw std::runtime_error("replay host: KISS, command or data port taken");
