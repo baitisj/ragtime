@@ -42,6 +42,8 @@
 #include "FilesPage.h"
 #include "GearshiftDialog.h"
 #include "HostConnection.h"
+#include "PathsDialog.h"
+#include "RigConnection.h"
 #include "SessionPage.h"
 #include "SettingsDialog.h"
 #include "StationList.h"
@@ -49,12 +51,14 @@
 #include "Thresholds.h"
 #include "ToggleSwitch.h"
 #include "TxLamp.h"
+#include "WatchDialog.h"
 #include "globus/GlobusPanel.h"
 #include "globus/GlobusToggle.h"
 #include "ragtime/Version.h"
 #include "ragtime/broadcast/Airtime.h"
 #include "ragtime/files/FileRows.h"
 #include "ragtime/globus/Sun.h"
+#include "ragtime/radio/Bands.h"
 
 using namespace ragtime;
 using Event = link::HostLink::Event;
@@ -102,6 +106,10 @@ enum
     ID_FILE_DELETE_PART,
     ID_FILE_ASK_AGAIN,
     ID_FILE_SEND_AGAIN,
+    ID_WATCH_LIST,
+    ID_STATION_WATCH,
+    ID_STATION_WHEN_FREE,
+    ID_STATION_PATHS,
 };
 
 constexpr size_t BROADCAST_FILE_ACTIONS = ID_BROADCAST_FILE_ACTION_LAST - ID_BROADCAST_FILE_ACTION + 1;
@@ -166,6 +174,13 @@ wxString clockIn(double seconds)
     return (wxDateTime::Now() + wxTimeSpan::Seconds((wxLongLong)seconds)).Format("%H:%M");
 }
 
+// A Status column word for a station busy in a session: "QRL", "QRL with
+// KC2G", "QSO w/ KC2G" (not "QRL? 25 min ago", probably free again).
+bool busyWord(const std::string& word)
+{
+    return word == "QRL" || word.compare(0, 4, "QRL ") == 0 || word.compare(0, 6, "QSO w/") == 0;
+}
+
 // "From W1AW's QRL, 3 min ago" as the middle of a sentence.
 std::string lowerFirst(std::string text)
 {
@@ -192,6 +207,9 @@ MainFrame::MainFrame()
     session_.setLog(&sessionLog_);
     broadcastLog_.setPath(broadcastLogPath());
     chat_.setLog(&broadcastLog_, HostConnection::nowMs());
+    pathLog_.setPath(pathLogPath(), HostConnection::nowMs());
+    watch_.setCalls(loadWatchList());
+    acceptWanted_ = link_.settings().acceptSessions;
     SetIcons(appIcons());
     // Every dialog and the main window must fit Jeff's 1366x768 screen.
     SetMinSize(wxSize(960, 600));
@@ -209,13 +227,17 @@ MainFrame::MainFrame()
     });
     HostConnection::DataSide data;
     data.bytes = [this](const uint8_t* bytes, size_t length) { onSessionData(bytes, length); };
-    data.take = [this]() { return session_.takeDataOutput(HostConnection::nowMs()); };
+    // Receive only holds the session's bytes too.
+    data.take = [this]() {
+        return held_ ? std::vector<uint8_t>() : session_.takeDataOutput(HostConnection::nowMs());
+    };
     data.up = [this](bool up) {
         session_.dataPort(up, HostConnection::nowMs());
         onSessionEvents();
         refreshSession();
     };
     host_->setDataSide(std::move(data));
+    rig_ = std::make_unique<RigConnection>([this]() { onDial(); });
 
     // Every broadcast item of ours is sealed once it has gone.
     chat_.onItems([this](const std::vector<protocol::Record>& items, uint64_t burst, const std::string& mode,
@@ -224,7 +246,7 @@ MainFrame::MainFrame()
 
     loadGearshift();
     setNarrow(gearshift_.narrowOnly());
-    bar_->acceptSessions->SetValue(link_.settings().acceptSessions);
+    bar_->acceptSessions->SetValue(acceptWanted_);
     setPaused(loadBool(keys::PAUSED, false));
     stationList_->setColumns(loadColumns());
     broadcast::Column sort = broadcast::Column::Heard;
@@ -234,6 +256,7 @@ MainFrame::MainFrame()
 
     loadFilesLog();
     applyPrefs(true);
+    applyRadioPrefs();
     // After the seals: a part read back asks for its repairs under them.
     broadcastFiles_.setPartsFolder(broadcastPartsDir(), HostConnection::nowMs());
     showStatus();
@@ -273,6 +296,7 @@ MainFrame::MainFrame()
 MainFrame::~MainFrame()
 {
     clock_.Stop();
+    rig_.reset();
     host_.reset();
 }
 
@@ -307,6 +331,9 @@ void MainFrame::buildMenus()
     station->Append(ID_LEAVE_NOW, "Leave &now\tCtrl+Shift+L", "Leaves at once (ABORT)");
     station->Append(ID_STATION_SEND_FILE, "Send a &file...", "Offers files in the session, calling the station first if "
                                                              "you aren't in one with it");
+    station->AppendSeparator();
+    station->Append(ID_WATCH_LIST, "&Watch list...", "Bells on callsigns: a notification when one is heard on D2G "
+                                                     "or sends QRV");
     station->AppendSeparator();
     station->AppendCheckItem(ID_PAUSE, "&Pause sending\tCtrl+P");
 
@@ -350,6 +377,7 @@ void MainFrame::buildMenus()
     Bind(wxEVT_MENU, [this](wxCommandEvent& e) { setGlobus(e.IsChecked()); }, ID_GLOBUS);
     Bind(wxEVT_MENU, [this](wxCommandEvent& e) { setPaused(e.IsChecked()); }, ID_PAUSE);
     Bind(wxEVT_MENU, [this](wxCommandEvent&) { checkIn(); }, ID_CHECK_IN);
+    Bind(wxEVT_MENU, [this](wxCommandEvent&) { showWatchList(); }, ID_WATCH_LIST);
     Bind(wxEVT_MENU, [this](wxCommandEvent&) { callPrompt(); }, ID_CALL);
     Bind(wxEVT_MENU, [this](wxCommandEvent&) { leaveSession(); }, ID_LEAVE);
     Bind(wxEVT_MENU, [this](wxCommandEvent&) { leaveSessionNow(); }, ID_LEAVE_NOW);
@@ -499,10 +527,10 @@ void MainFrame::buildLayout()
     bar_->narrow->Bind(wxEVT_TOGGLEBUTTON, [this](wxCommandEvent& e) { setNarrow(e.IsChecked()); });
     bar_->pause->Bind(wxEVT_TOGGLEBUTTON, [this](wxCommandEvent& e) { setPaused(e.IsChecked()); });
     bar_->acceptSessions->Bind(wxEVT_CHECKBOX, [this](wxCommandEvent& e) {
-        link_.setAcceptSessions(e.IsChecked(), HostConnection::nowMs());
+        acceptWanted_ = e.IsChecked();
         saveBool(keys::ACCEPT_SESSIONS, e.IsChecked());
         applyPrefs(false);
-        host_->flush();
+        applySending();
     });
 
     // The station list.
@@ -512,6 +540,8 @@ void MainFrame::buildLayout()
         broadcast_->address(call);
     });
     stationList_->onMenu([this](const std::string& call) { stationMenu(call); });
+    stationList_->bells([this](const std::string& call) { return watch_.belled(call); },
+                        [this](const std::string& call) { return watch_.bellTip(call); });
 
     // The Broadcast tab.
     broadcast_->onSend([this](const std::string& typed) { return sendTyped(typed); });
@@ -599,7 +629,7 @@ void MainFrame::applyPrefs(bool reconnect)
     broadcast::BroadcastChat::Settings s;
     s.callsign = prefs_.callsign;
     s.locator = prefs_.locator;
-    s.acceptsSessions = link_.settings().acceptSessions;
+    s.acceptsSessions = acceptWanted_;
     s.software = software();
     chat_.setSettings(s, loadNewestItem(protocol::normalCallsign(prefs_.callsign)));
     seals_.setChain(prefs_.callsign, loadSealChain(protocol::normalCallsign(prefs_.callsign)));
@@ -609,11 +639,12 @@ void MainFrame::applyPrefs(bool reconnect)
     session::SessionChat::Settings ss;
     ss.callsign = prefs_.callsign;
     ss.locator = prefs_.locator;
-    ss.acceptsSessions = link_.settings().acceptSessions;
+    ss.acceptsSessions = acceptWanted_;
     ss.software = software();
     session_.setSettings(ss);
     stations_.setMyCallsign(prefs_.callsign);
     stations_.setHome(prefs_.locator);
+    watch_.setMyCallsign(prefs_.callsign);
     applyFilePrefs();
     globus_->setHome(prefs_.locator);
     bar_->setCallsign(utf8(prefs_.callsign));
@@ -637,9 +668,12 @@ void MainFrame::showSettings()
     StationPrefs next = dialog.prefs();
     bool reconnect = next.callsign != prefs_.callsign || next.host != prefs_.host || next.kissPort != prefs_.kissPort
                      || next.commandPort != prefs_.commandPort || host_->state() == HostConnection::State::Off;
+    bool radio = next.readDial != prefs_.readDial || next.rigHost != prefs_.rigHost || next.rigPort != prefs_.rigPort
+                 || next.usSegmentsOnly != prefs_.usSegmentsOnly;
     prefs_ = next;
     saveStationPrefs(prefs_);
     applyPrefs(reconnect);
+    if (radio) applyRadioPrefs();
 }
 
 //-------------------------------------------------------------------------
@@ -649,6 +683,8 @@ void MainFrame::showSettings()
 void MainFrame::onHostEvents(const std::vector<Event>& events)
 {
     uint64_t now = HostConnection::nowMs();
+    // Our partner's bursts never ring a bell.
+    watch_.setPartner(session_.active() ? session_.peer() : std::string());
     for (const Event& e : events)
     {
         session_.onEvent(e, now);
@@ -656,16 +692,20 @@ void MainFrame::onHostEvents(const std::vector<Event>& events)
         {
             case Event::Type::Ptt:
                 bar_->tx->setOn(e.on);
+                rig_->setKeyed(e.on);
                 break;
             case Event::Type::ModeUsed:
                 modeUsed_ = e.text;
                 break;
             case Event::Type::HeardFrom:
                 stations_.heard(e.text, now, e.snr);
+                watch_.heard(e.text, now, e.snr);
+                logPath(e.text, e.snr, false, now);
                 updatePathSnr(now);
                 break;
             case Event::Type::SessionSnr:
                 stations_.heard(e.peer, now, e.snr);
+                logPath(e.peer, e.snr, true, now);
                 updatePathSnr(now);
                 break;
             case Event::Type::Missed:
@@ -707,6 +747,7 @@ void MainFrame::onHostEvents(const std::vector<Event>& events)
         for (const protocol::Record& r : chat_.onEvent(e, now))
         {
             stations_.onRecord(r, now);
+            watch_.onRecord(r, now);
             seals_.onRecord(r, now);
             broadcastFiles_.onRecord(r, now);
         }
@@ -717,6 +758,7 @@ void MainFrame::onHostEvents(const std::vector<Event>& events)
     onBroadcastFiles();
     onSessionEvents();
     onFileEvents();
+    ringBells();
     showConnection();
     showStatus();
     refreshMessages();
@@ -727,6 +769,12 @@ void MainFrame::onHostEvents(const std::vector<Event>& events)
 void MainFrame::onClock()
 {
     uint64_t now = HostConnection::nowMs();
+    applySendGuard();
+    if (now > trimmedMs_ + 60 * 60 * 1000)
+    {
+        pathLog_.trim(now);
+        trimmedMs_ = now;
+    }
     updatePathSnr(now);
     seals_.setMode(broadcastMode());
     seals_.setLadder(gearshift_.ladder());
@@ -859,12 +907,42 @@ void MainFrame::stationPicked(const std::string& call)
     if (s == nullptr)
     {
         globus_->setStation("", "");
+        globus_->setPathStrip(nullptr, 0);
         return;
     }
     uint64_t now = HostConnection::nowMs();
     std::string details = stations_.status(*s, now).word + " \xc2\xb7 heard " + broadcast::heardAgo(s->lastHeardMs, now);
     if (!s->software.empty()) details += "\n" + s->software;
+    // The band it is heard on most, in words, over its strip.
+    const radio::PathStrip& strip = stripFor(s->call, now);
+    const radio::BandRow* most = nullptr;
+    for (const radio::BandRow& row : strip.bands)
+    {
+        if (most == nullptr || row.bursts > most->bursts) most = &row;
+    }
+    if (most != nullptr && !most->band.empty())
+    {
+        details += "\nHeard most on " + most->band + ": " + std::to_string(most->days)
+                   + (most->days == 1 ? " day" : " days");
+        if (most->medianDb) details += ", median " + gearbox::formatDb(*most->medianDb);
+    }
     globus_->setStation(s->call, s->locator, true, details);
+    globus_->setPathStrip(&strip, now);
+}
+
+const radio::PathStrip& MainFrame::stripFor(const std::string& call, uint64_t nowMs)
+{
+    // Drawn again on a new line, another station, or once a minute for the
+    // hour mark.
+    if (call != strip_.call || pathLog_.version() != stripVersion_ || nowMs > stripMs_ + 60 * 1000)
+    {
+        uint64_t days = radio::PathLog::KEEP_DAYS;
+        uint64_t since = nowMs > days * radio::PathLog::DAY_MS ? nowMs - days * radio::PathLog::DAY_MS : 0;
+        strip_ = radio::pathStrip(pathLog_.of(call, since), call, nowMs, days);
+        stripVersion_ = pathLog_.version();
+        stripMs_ = nowMs;
+    }
+    return strip_;
 }
 
 void MainFrame::stationMenu(const std::string& call)
@@ -886,7 +964,44 @@ void MainFrame::stationMenu(const std::string& call)
     menu.Append(ID_STATION_SEND_FILE, "Send a file to " + utf8(call) + "...");
     menu.Enable(ID_STATION_SEND_FILE, canCall() || (session_.phase() == session::SessionChat::Phase::Connected));
     menu.Append(ID_STATION_COPY, "Copy callsign");
+    menu.AppendSeparator();
+    // The bells: a lasting one, and Tell me when free on a busy station.
+    menu.AppendCheckItem(ID_STATION_WATCH, "Watch " + utf8(call),
+                         "A notification when it is heard on D2G or sends QRV");
+    menu.Check(ID_STATION_WATCH, watch_.watching(call));
+    if (watch_.waitingFree(call))
+    {
+        menu.AppendCheckItem(ID_STATION_WHEN_FREE, "Tell me when " + utf8(call) + " is free");
+        menu.Check(ID_STATION_WHEN_FREE, true);
+    }
+    else if (const broadcast::Station* s = stations_.find(call))
+    {
+        if (busyWord(stations_.status(*s, HostConnection::nowMs()).word))
+        {
+            if (!(session_.active() && session_.peer() == call))
+                menu.AppendCheckItem(ID_STATION_WHEN_FREE, "Tell me when " + utf8(call) + " is free");
+        }
+    }
+    menu.Append(ID_STATION_PATHS, "Paths heard from " + utf8(call) + "...");
     menu.Bind(wxEVT_MENU, [this, call](wxCommandEvent& e) {
+        if (e.GetId() == ID_STATION_WATCH)
+        {
+            if (e.IsChecked())
+                watch_.watch(call);
+            else
+                watch_.unwatch(call);
+            saveWatchList(watch_.calls());
+            stationList_->refresh(HostConnection::nowMs());
+        }
+        if (e.GetId() == ID_STATION_WHEN_FREE)
+        {
+            if (e.IsChecked())
+                watch_.tellWhenFree(call);
+            else
+                watch_.cancelWhenFree(call);
+            stationList_->refresh(HostConnection::nowMs());
+        }
+        if (e.GetId() == ID_STATION_PATHS) CallAfter([this, call]() { showPaths(call); });
         if (e.GetId() == ID_STATION_CALL) callStation(call);
         if (e.GetId() == ID_STATION_SEND_FILE) CallAfter([this, call]() { sendFilePrompt(call); });
         if (e.GetId() == ID_STATION_LEAVE) leaveSession();
@@ -951,7 +1066,7 @@ void MainFrame::updateTabLabels()
 
 bool MainFrame::canCall() const
 {
-    return !prefs_.callsign.empty() && link_.commandConnected() && host_ && host_->dataUp();
+    return !prefs_.callsign.empty() && link_.commandConnected() && host_ && host_->dataUp() && !held_;
 }
 
 void MainFrame::callPrompt()
@@ -990,6 +1105,12 @@ void MainFrame::callStation(const std::string& call)
         leaveSession();
         return;
     }
+    if (held_)
+    {
+        note_ = "Can't call: receive only. " + heldWhy_;
+        showStatus();
+        return;
+    }
     if (!canCall())
     {
         note_ = host_ && !host_->dataUp() && link_.commandConnected()
@@ -1004,16 +1125,33 @@ void MainFrame::callStation(const std::string& call)
     {
         broadcast::StatusView view = stations_.status(*s, now);
         std::string why;
-        if (view.word == "QRL" || view.word.compare(0, 4, "QRL ") == 0)
-            why = them + " is " + view.word + ": " + lowerFirst(view.how) + ".";
+        if (busyWord(view.word))
+            why = them + (view.word.compare(0, 3, "QSO") == 0 ? " is in a " : " is ") + view.word + ": "
+                  + lowerFirst(view.how) + ".";
         else if (view.word == "No sessions")
             why = view.how + ".";
         if (!why.empty())
         {
-            wxMessageDialog ask(this, utf8(why) + "\n\nCall anyway, or send it a message on D2G instead?",
-                                "Call " + utf8(them), wxYES_NO | wxCANCEL | wxCANCEL_DEFAULT | wxICON_QUESTION);
+            // A busy station can be waited for: Tell me when free rings at
+            // its QRV and offers the call then (docs/PLAN.md, "Busy stations").
+            bool busy = view.word != "No sessions";
+            wxMessageDialog ask(this,
+                                utf8(why)
+                                    + (busy ? "\n\nCall anyway, send it a message on D2G instead, or wait for its QRV?"
+                                            : "\n\nCall anyway, or send it a message on D2G instead?"),
+                                "Call " + utf8(them),
+                                wxYES_NO | wxCANCEL | wxCANCEL_DEFAULT | wxICON_QUESTION | (busy ? wxHELP : 0));
             ask.SetYesNoCancelLabels("Call anyway", "Message instead", "Cancel");
+            if (busy) ask.SetHelpLabel("Tell me when free");
             int answer = ask.ShowModal();
+            if (answer == wxID_HELP)
+            {
+                watch_.tellWhenFree(them);
+                note_ = "Waiting for " + them + " to be free: Ragtime offers the call at its QRV";
+                showStatus();
+                stationList_->refresh(now);
+                return;
+            }
             if (answer == wxID_NO)
             {
                 tabs_->SetSelection(TAB_BROADCAST);
@@ -1540,13 +1678,25 @@ void MainFrame::checkIn()
 
 void MainFrame::setPaused(bool paused)
 {
-    link_.setPaused(paused, HostConnection::nowMs());
-    session_.setPaused(paused, HostConnection::nowMs());
-    sessionPage_->setPaused(paused);
+    paused_ = paused;
     bar_->setPaused(paused);
     GetMenuBar()->Check(ID_PAUSE, paused);
-    broadcast_->setPaused(paused);
     saveBool(keys::PAUSED, paused);
+    applySending();
+}
+
+void MainFrame::applySending()
+{
+    uint64_t now = HostConnection::nowMs();
+    bool hold = paused_ || held_;
+    link_.setPaused(hold, now);
+    session_.setPaused(hold, now);
+    link_.setAcceptSessions(acceptWanted_ && !held_, now);
+    // The pages say why: Pause sending's own line, or receive only's.
+    wxString why;
+    if (held_ && !paused_) why = "Receive only until the dial is inside a US data segment: messages wait as Queued.";
+    sessionPage_->setPaused(hold, why);
+    broadcast_->setPaused(hold, why);
     if (host_) host_->flush();
 }
 
@@ -2058,4 +2208,158 @@ void MainFrame::placeTabToggle()
     int y = std::max(0, (strip - size.y) / 2);
     tabToggle_->SetSize(x, y, size.x, size.y);
     tabToggle_->Raise();
+}
+
+//-------------------------------------------------------------------------
+// The radio: the dial, receive only, the path log and the watch list
+//-------------------------------------------------------------------------
+
+void MainFrame::applyRadioPrefs()
+{
+    if (prefs_.readDial)
+        rig_->start(prefs_.rigHost, prefs_.rigPort);
+    else
+        rig_->stop();
+    applySendGuard();
+    showDial();
+}
+
+void MainFrame::onDial()
+{
+    applySendGuard();
+    showDial();
+}
+
+void MainFrame::showDial()
+{
+    if (!prefs_.readDial)
+    {
+        bar_->setDial(wxString(), wxString(), false);
+        return;
+    }
+    std::optional<uint64_t> hz = rig_->dialHz();
+    std::string text;
+    if (hz)
+    {
+        std::string band = radio::bandOf(*hz);
+        text = radio::formatMHz(*hz) + DOT + (band.empty() ? std::string("outside the bands") : band);
+    }
+    else
+    {
+        text = "Dial not read";
+    }
+    if (held_) text = "Receive only" + std::string(DOT) + text;
+    std::string tip = rig_->describe();
+    if (held_)
+        tip += "\n\nReceive only: " + heldWhy_;
+    else if (prefs_.usSegmentsOnly)
+        tip += "\n\nInside a US data segment: sending allowed";
+    tip += "\n\nRagtime only reads the dial; it never tunes the radio.";
+    bar_->setDial(utf8(text), utf8(tip), held_);
+}
+
+std::string MainFrame::sendRefusal() const
+{
+    if (!prefs_.readDial || !prefs_.usSegmentsOnly) return std::string();
+    std::optional<uint64_t> hz = rig_->dialHz();
+    if (!hz) return "Ragtime doesn't know the dial frequency, so it can't tell whether a burst would be inside a "
+                    "US data segment. " + rig_->describe() + ".";
+    return radio::usDataRefusal(*hz);
+}
+
+void MainFrame::applySendGuard()
+{
+    std::string why = sendRefusal();
+    bool held = !why.empty();
+    if (held == held_ && why == heldWhy_) return;
+    bool changed = held != held_;
+    held_ = held;
+    heldWhy_ = why;
+    if (changed)
+    {
+        note_ = held_ ? "Receive only: " + heldWhy_ : std::string("Sending allowed: the dial is inside a US data "
+                                                                  "segment");
+        applySending();
+        showStatus();
+    }
+    showDial();
+}
+
+void MainFrame::logPath(const std::string& call, std::optional<double> snr, bool session, uint64_t nowMs)
+{
+    if (call.empty()) return;
+    radio::PathEntry e;
+    e.atMs = nowMs;
+    e.call = call;
+    e.snrDb = snr;
+    // The host names the mode of a session's bursts (MODE), not of a
+    // broadcast heard.
+    if (session) e.mode = session_.mode();
+    if (std::optional<uint64_t> hz = rig_->dialHz())
+    {
+        e.dialHz = *hz;
+        e.band = radio::bandOf(*hz);
+    }
+    e.gear = broadcastMode();
+    e.session = session;
+    pathLog_.add(e);
+    if (!pathLog_.problem().empty()) note_ = pathLog_.problem();
+}
+
+void MainFrame::ringBells()
+{
+    uint64_t now = HostConnection::nowMs();
+    for (const broadcast::Ring& ring : watch_.takeRings())
+    {
+        // "−6.5 dB · 17 m · 16:30 UTC"
+        std::string where;
+        std::optional<double> snr = ring.snrDb;
+        // The S/N may have come in the host's report after the record.
+        const broadcast::Station* heard = stations_.find(ring.call);
+        if (!snr && heard != nullptr && heard->snrDb && now < heard->snrMs + 60 * 1000) snr = heard->snrDb;
+        if (snr) where = gearbox::formatDb(*snr);
+        if (std::optional<uint64_t> hz = rig_->dialHz())
+        {
+            std::string band = radio::bandOf(*hz);
+            if (!band.empty()) where += (where.empty() ? "" : DOT) + band;
+        }
+        where += (where.empty() ? std::string() : std::string(DOT))
+                 + std::string(wxDateTime::Now().ToUTC().Format("%H:%M UTC").utf8_str());
+
+        bool qrv = ring.why == broadcast::Ring::Why::Qrv;
+        std::string title = ring.call + (qrv ? " is QRV" : " heard on D2G");
+        std::string body = qrv ? (ring.free ? "Free for a session now. " : "Free for a session. ") + where : where;
+        wxNotificationMessage notice(utf8(title), utf8(body), this);
+        notice.Show();
+        note_ = "Bell: " + title + " (" + where + ")";
+        if (qrv) stationList_->flash(ring.call, now);
+
+        // Tell me when free: offer the call.
+        if (ring.free)
+        {
+            std::string call = ring.call;
+            CallAfter([this, call]() {
+                wxMessageDialog ask(this, utf8(call) + " just sent QRV: it's free for a session. Call it now?",
+                                    "Tell me when free", wxYES_NO | wxYES_DEFAULT | wxICON_INFORMATION);
+                ask.SetYesNoLabels("Call " + utf8(call), "Not now");
+                if (ask.ShowModal() == wxID_YES) callStation(call);
+            });
+        }
+    }
+}
+
+void MainFrame::showWatchList()
+{
+    WatchDialog dialog(this, watch_.calls());
+    if (dialog.ShowModal() != wxID_OK) return;
+    watch_.setCalls(dialog.calls());
+    saveWatchList(watch_.calls());
+    stationList_->refresh(HostConnection::nowMs());
+}
+
+void MainFrame::showPaths(const std::string& call)
+{
+    uint64_t now = HostConnection::nowMs();
+    PathsDialog dialog(this, stripFor(call, now), now, pathLog_.path());
+    dialog.ShowModal();
 }

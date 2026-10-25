@@ -10,8 +10,8 @@ class wxGraphicsContext;
 
 // The small button icons Ragtime draws itself, in the theme's text colour
 // so they follow light and dark: the gearshift's speedometer and the file
-// buttons' floppy disk, the status bar's moon and sun, and the green
-// check on Done.
+// buttons' floppy disk, the status bar's moon and sun, the green
+// check on Done, and a watched station's bell.
 
 // Draws an icon in a square size wide at the context's origin.
 using IconDrawing = std::function<void(wxGraphicsContext& gc, double size)>;
@@ -34,5 +34,10 @@ wxBitmapBundle themeIcon(bool dark, const wxColour& ink, int sizeDip = 16);
 // colour given, goodText() green on the gearshift.
 void drawCheckIcon(wxGraphicsContext& gc, double size, const wxColour& ink);
 wxBitmapBundle checkIcon(const wxColour& ink, int sizeDip = 16);
+
+// A bell, on a watched station's row (the watch list, and Tell me when
+// free).
+void drawBellIcon(wxGraphicsContext& gc, double size, const wxColour& ink);
+wxBitmapBundle bellIcon(const wxColour& ink, int sizeDip = 14);
 
 #endif

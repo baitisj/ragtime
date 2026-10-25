@@ -7,6 +7,7 @@
 //
 //   ragtime_fake_air [--bots N] [--airtime MS] [--call CALL] [--fade] [--rate BPS]
 //                    [--loss PCT] [--files] [--no-snr] [--no-cut]
+//                    [--rig PORT [--dial HZ] [--dial-hop]]
 //
 // --call CALL has the first bot that takes sessions call CALL half a
 // minute in, for an incoming session, and offer you its bulletin, a small
@@ -31,6 +32,12 @@
 // (CLEANTXBUFFER), as data2g-host does since Data2G PR #118; --no-cut plays
 // a host from before it.
 //
+// --rig PORT plays a rigctld on that port (pick another than 4532 where a
+// real one runs): it answers "f" with the dial, 14.105 MHz or --dial HZ,
+// and prints anything else it is sent (Ragtime should only ever ask "f").
+// --dial-hop moves the dial to 14.250 MHz, outside the US data segments,
+// for one minute in every three, so receive only shows.
+//
 // Host A listens on 127.0.0.1:8100 (KISS) and 8300 (commands), host B on
 // 8110 and 8310, so two Ragtimes (each with its own --config file) can talk
 // to each other through it. Nothing here is Data2G's, and nothing goes on
@@ -47,9 +54,11 @@
 #include <fstream>
 #include <memory>
 #include <random>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
+#include <fcntl.h>
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
@@ -117,6 +126,75 @@ void readSome(int fd, std::vector<uint8_t>& out)
         out.insert(out.end(), buffer, buffer + n);
     }
 }
+
+// A rigctld that knows one command: "f", the dial frequency.
+class FakeRig
+{
+public:
+    FakeRig(int port, uint64_t dialHz, bool hop)
+        : dialHz_(dialHz)
+        , hop_(hop)
+    {
+        listener_ = ::socket(AF_INET, SOCK_STREAM, 0);
+        int yes = 1;
+        ::setsockopt(listener_, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes));
+        sockaddr_in addr{};
+        addr.sin_family = AF_INET;
+        addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+        addr.sin_port = htons((uint16_t)port);
+        if (listener_ < 0 || ::bind(listener_, (sockaddr*)&addr, sizeof(addr)) != 0 || ::listen(listener_, 4) != 0)
+            throw std::runtime_error("can't listen on " + std::to_string(port) + " for --rig");
+        ::fcntl(listener_, F_SETFL, O_NONBLOCK);
+    }
+
+    ~FakeRig()
+    {
+        for (const Client& c : clients_) ::close(c.fd);
+        if (listener_ >= 0) ::close(listener_);
+    }
+
+    void pump(uint64_t nowMs)
+    {
+        for (int fd; (fd = ::accept(listener_, nullptr, nullptr)) >= 0;) clients_.push_back(Client{fd, {}});
+        for (Client& c : clients_)
+        {
+            std::vector<uint8_t> in;
+            readSome(c.fd, in);
+            c.partial.append(in.begin(), in.end());
+            for (size_t eol; (eol = c.partial.find('\n')) != std::string::npos;)
+            {
+                std::string line = c.partial.substr(0, eol);
+                c.partial.erase(0, eol + 1);
+                if (!line.empty() && line.back() == '\r') line.pop_back();
+                std::string answer;
+                if (line == "f")
+                {
+                    // One minute in three outside the data segments.
+                    bool out = hop_ && nowMs / 60000 % 3 == 2;
+                    answer = std::to_string(out ? 14250000ull : (unsigned long long)dialHz_) + "\n";
+                }
+                else
+                {
+                    std::printf("fake rigctld was sent \"%s\": Ragtime should only ask \"f\"\n", line.c_str());
+                    std::fflush(stdout);
+                    answer = "RPRT -11\n";
+                }
+                sendAll(c.fd, answer.data(), answer.size());
+            }
+        }
+    }
+
+private:
+    struct Client
+    {
+        int fd;
+        std::string partial;
+    };
+    int listener_ = -1;
+    uint64_t dialHz_;
+    bool hop_;
+    std::vector<Client> clients_;
+};
 
 struct Profile
 {
@@ -455,6 +533,9 @@ int main(int argc, char** argv)
     int rate = 400;
     bool snr = true;
     bool cuts = true;
+    int rigPort = 0;
+    uint64_t dialHz = 14105000;
+    bool dialHop = false;
     for (int i = 1; i < argc; i++)
     {
         if (std::strcmp(argv[i], "--bots") == 0 && i + 1 < argc)
@@ -475,10 +556,17 @@ int main(int argc, char** argv)
             snr = false;
         else if (std::strcmp(argv[i], "--no-cut") == 0)
             cuts = false;
+        else if (std::strcmp(argv[i], "--rig") == 0 && i + 1 < argc)
+            rigPort = std::atoi(argv[++i]);
+        else if (std::strcmp(argv[i], "--dial") == 0 && i + 1 < argc)
+            dialHz = std::strtoull(argv[++i], nullptr, 10);
+        else if (std::strcmp(argv[i], "--dial-hop") == 0)
+            dialHop = true;
         else
         {
             std::fprintf(stderr, "usage: ragtime_fake_air [--bots N] [--airtime MS] [--call CALL] [--fade] "
-                                 "[--rate BPS] [--loss PCT] [--files] [--no-snr] [--no-cut]\n");
+                                 "[--rate BPS] [--loss PCT] [--files] [--no-snr] [--no-cut] "
+                                 "[--rig PORT [--dial HZ] [--dial-hop]]\n");
             return 2;
         }
     }
@@ -491,10 +579,12 @@ int main(int argc, char** argv)
 
     FakeAir air;
     std::unique_ptr<FakeHost> a, b;
+    std::unique_ptr<FakeRig> rig;
     try
     {
         a = std::make_unique<FakeHost>(air, 2, 8100, 8300);
         b = std::make_unique<FakeHost>(air, 2, 8110, 8310);
+        if (rigPort > 0) rig = std::make_unique<FakeRig>(rigPort, dialHz, dialHop);
     }
     catch (const std::exception& e)
     {
@@ -546,12 +636,15 @@ int main(int argc, char** argv)
                 "B KISS 8110, commands 8310, session data 8311.\n"
                 "%d bot station%s on the air. Ctrl-C to stop.\n",
                 bots, bots == 1 ? "" : "s");
+    if (rig) std::printf("A rigctld on 127.0.0.1:%d, the dial at %llu Hz%s.\n", rigPort, (unsigned long long)dialHz,
+                         dialHop ? " (14.250 MHz one minute in three)" : "");
     std::fflush(stdout);
     while (!stopping)
     {
         air.step(20);
         uint64_t now = nowMs();
         for (auto& s : stations) s->pump(now);
+        if (rig) rig->pump(now);
     }
     return 0;
 }

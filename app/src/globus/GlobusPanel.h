@@ -1,6 +1,7 @@
 #ifndef RAGTIME_GLOBUS_PANEL_H
 #define RAGTIME_GLOBUS_PANEL_H
 
+#include <cstdint>
 #include <string>
 #include <utility>
 #include <vector>
@@ -8,14 +9,17 @@
 #include <wx/panel.h>
 #include <wx/timer.h>
 
+#include "ragtime/radio/PathLog.h"
+
 class GlobusToggle;
+class PathStripView;
 class GlobusView;
 class wxStaticText;
 
 // The Globus pane (docs/MOCKUPS.md): a header with the Globus toggle and
 // the time the globe is lit for, "22:36 UTC / 15:36 PDT"; the globe; and
 // under it the caption, "W1AW · FN31 · 3,951 km · 81°", then the station's
-// details. The toggle sends wxEVT_TOGGLEBUTTON up to the window that holds
+// details, with its 24-hour strip by band from the path log. The toggle sends wxEVT_TOGGLEBUTTON up to the window that holds
 // the pane, which shows or hides it (package E).
 class GlobusPanel : public wxPanel
 {
@@ -30,6 +34,9 @@ public:
     // details for under the caption.
     void setStation(const std::string& callsign, const std::string& locator, bool current = true,
                     const std::string& details = "");
+
+    // The picked station's strip from the path log; none hides it.
+    void setPathStrip(const ragtime::radio::PathStrip* strip, uint64_t nowMs);
 
     // The squares of the stations in the station list, as red dots.
     void setStations(const std::vector<std::pair<std::string, bool>>& stations);
@@ -50,6 +57,8 @@ private:
     GlobusView* view_ = nullptr;
     wxStaticText* caption_ = nullptr;
     wxStaticText* details_ = nullptr;
+    PathStripView* strip_ = nullptr;
+    bool stripWanted_ = false;
     wxTimer clock_;
 
     std::string home_;

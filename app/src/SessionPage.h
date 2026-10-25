@@ -60,7 +60,9 @@ public:
 
     // Redraws the strip every second, and the messages when they change.
     void refresh(uint64_t nowMs, long utcOffsetS);
-    void setPaused(bool paused);
+    // Pause sending shows a line saying so; with a reason (receive only,
+    // outside the US data segments) the line gives it instead.
+    void setPaused(bool paused, const wxString& why = wxString());
     void focusCompose();
 
 private:

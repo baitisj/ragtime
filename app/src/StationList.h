@@ -46,6 +46,15 @@ public:
 
     std::string selected() const { return selected_; }
 
+    // A bell on a row (the watch list, Tell me when free), with how it
+    // came to be for the row's tooltip.
+    using BellFn = std::function<bool(const std::string& call)>;
+    using BellTipFn = std::function<std::string(const std::string& call)>;
+    void bells(BellFn belled, BellTipFn tip);
+    // Lights a row for a moment: its QRV has come (docs/PLAN.md, "The
+    // station list shows it").
+    void flash(const std::string& call, uint64_t nowMs);
+
     // The table's columns, and the Columns menu that picks them.
     const std::vector<ragtime::broadcast::Column>& columns() const { return columns_; }
     void setColumns(const std::vector<ragtime::broadcast::Column>& columns);
@@ -66,6 +75,8 @@ private:
     void rebuildColumns();
     void showSelection();
     wxString tooltip(long row) const;
+    bool belled(const std::string& call) const { return belled_ && belled_(call); }
+    bool flashing(const std::string& call) const;
 
     const ragtime::broadcast::Stations& stations_;
     wxSimplebook* book_ = nullptr;
@@ -83,6 +94,10 @@ private:
     bool updating_ = false;
 
     CallFn onSelect_, onActivate_, onMenu_;
+    BellFn belled_;
+    BellTipFn bellTip_;
+    std::string flashCall_;
+    uint64_t flashUntilMs_ = 0;
 };
 
 #endif

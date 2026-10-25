@@ -25,6 +25,14 @@ struct StationPrefs
     // A repair round may spend this long in gears slower than its own, for
     // stations that hear us weakly (Seals::setSlowResendSeconds).
     int slowRepairMinutes = (int)(ragtime::broadcast::Seals::SLOW_RESEND_SECONDS / 60);
+    // The radio's dial, read (never set) from rigctld once a second: for
+    // the path log's bands, and the data segment check below.
+    bool readDial = false;
+    std::string rigHost = "127.0.0.1";
+    int rigPort = 4532;
+    // Receive only outside the US data segments, and while the dial isn't
+    // known (needs readDial).
+    bool usSegmentsOnly = false;
 };
 
 constexpr int SLOW_REPAIR_MIN_MINUTES = 1;
@@ -65,6 +73,10 @@ void saveReceivedFolder(const std::string& folder);
 std::vector<std::string> loadAutoAccept();
 void saveAutoAccept(const std::vector<std::string>& calls);
 
+// The watch list's lasting bells (WatchList::calls()).
+std::vector<std::string> loadWatchList();
+void saveWatchList(const std::vector<std::string>& calls);
+
 // --config's file, when one was given ("" for the usual place).
 void setConfigPath(const std::string& path);
 // Where Ragtime keeps its own files (the files log, a thresholds file):
@@ -85,6 +97,9 @@ std::string broadcastLogPath();
 // still ask for repairs: beside the --config file (<config>.broadcast-parts),
 // or appDataDir()/broadcast-parts.
 std::string broadcastPartsDir();
+// The path log, a line for every burst heard, appended and never cut:
+// beside the --config file (<config>.paths.log), or appDataDir()/paths.log.
+std::string pathLogPath();
 
 namespace keys
 {
@@ -100,6 +115,7 @@ constexpr const char* SORT_COLUMN = "/Stations/SortColumn";
 constexpr const char* SORT_ASCENDING = "/Stations/SortAscending";
 constexpr const char* RECEIVED_FOLDER = "/Files/ReceivedFolder";
 constexpr const char* AUTO_ACCEPT = "/Files/AutoAccept";             // callsigns, comma separated
+constexpr const char* WATCH_LIST = "/Stations/Watch";                // callsigns, comma separated
 constexpr const char* AUTO_RECEIVE_BROADCAST = "/Files/AutoReceiveBroadcast";   // files on D2G, into the received folder
 } // namespace keys
 

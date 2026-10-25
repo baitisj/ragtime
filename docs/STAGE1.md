@@ -559,6 +559,84 @@ adds VARA's `SN` for the session partner (`docs/PROTOCOL.md`).
 - `ragtime_fake_air` reports SNRs: each bot at its own strength, +12 to
   −11 dB, give or take 2 dB a burst; `--no-snr` plays an older host.
 
+## The dial, the path log and the watch list
+
+Ideas 3 and 7 from the 2026-10-25 list (Jeff picked them with parity
+repair and the flight recorder). Nothing here goes on the air.
+
+**The dial.** With **Read the dial from rigctld** ticked (Settings >
+Station, Radio; off by default, `127.0.0.1:4532`), Ragtime asks rigctld
+the radio's frequency once a second, and only that: `radio::DialReader`
+writes `f` and nothing else, ever (a test drives it through errors,
+keying and silence and checks every byte it wrote). It never tunes or
+sets anything, since the radio is the source of truth and the
+operator's rigctld is often shared (fldigi). It doesn't ask while the
+host reports PTT, and the last reading stands through a burst.
+`RigConnection` is the socket, beside `HostConnection`, trying again 2,
+4, 8, 15 and then every 30 s. A rigctld started with `--vfo` wants a
+VFO named after each command; Ragtime doesn't name one (a VFO name sent
+to a rigctld without `--vfo` would be read as more commands), so such a
+rigctld reads as an error. The connection bar shows the dial and band,
+"18.104 MHz · 17 m", and its tooltip how rigctld is answering.
+
+**Receive only outside the US data segments** (the last box in PLAN.md's
+parity list). Ticked (off by default, and only with the dial read),
+Ragtime holds everything it would hand data2g-host unless the dial is
+at least 3 kHz inside a US data segment (`radio::usDataRefusal`, 47 CFR
+97.305(c); the 3 kHz is the burst's room to one side of the dial in
+either sideband), and while it doesn't know the dial. Held means: queued
+broadcasts wait (as Pause sending does, and the channel field says
+"Paused"), the session's bytes wait, Call is refused with the reason,
+and the host gets `LISTEN OFF` so it takes no calls; the Broadcast and
+Session tabs say "Receive only until the dial is inside a US data
+segment", and the connection bar's dial turns red with "Receive only".
+What data2g-host already holds still goes, and a session already up
+keeps its link, since the host acknowledges what it hears. 60 m is left
+out (data there is on four 2.8 kHz channels, 97.303(h), and the dial
+alone can't show a burst sits in one), as are 2200 m, 630 m and
+219-220 MHz. Licence classes aren't known.
+
+**The path log** (`radio::PathLog`). Every burst heard from another
+station adds a line to `paths.log` in `appDataDir()` (or
+`<config>.paths.log`), appended and never rewritten: UTC time, call,
+S/N, the burst's mode, band, dial in Hz, our gear, and `D2G` or
+`session`. Broadcast bursts come from `BCAST HEARD`, the session
+partner's from `SN`. The host names the mode only of a session's bursts
+(`MODE`), so a broadcast's mode field is empty; naming it in `BCAST
+HEARD` would be an ask for Andrew. Band and dial are empty while the
+dial isn't read. The last 14 days are read back (from the end of the
+file, so a long log opens quickly) for the strips.
+
+**The strip.** The picked station's details under Globus gain a 24-hour
+strip by band, a cell for each UTC hour, darker for hours it was heard
+on more of the 14 days, the hour now marked, and hovering a cell gives
+its bursts, days and median S/N; and a line, "Heard most on 17 m: 11
+days, median −6.0 dB". **Paths heard from KC2G...** on the station's
+right-click menu shows the strip bigger with a line a band, "17 m:
+2000–0000Z on 5 days, median −6.0 dB", and opens the log itself.
+
+**The watch list** (`broadcast::WatchList`). A bell on any callsign,
+heard before or not: **Station > Watch list...**, or **Watch KC2G** on
+a station's menu. A watched station rings when it is heard on D2G after
+30 minutes or more of quiet (or for the first time in a run), and at
+every QRV; the session partner never rings. A ring is a desktop
+notification ("KC2G is QRV", "−6.5 dB · 17 m · 16:30 UTC") and a line in
+the status bar; a QRV also lights the station's row for a moment. The
+bell shows beside the call in both station lists, with its reason on
+hover. Lasting bells are kept in `/Stations/Watch`.
+
+**Tell me when free** (PLAN.md, "Busy stations") is its one-shot case.
+Call on a busy station ("QRL", "QSO w/ ...") asks Call anyway, Message
+instead, **Tell me when free** or Cancel, and the station's menu has
+**Tell me when KC2G is free**. Its bell rings once at the station's
+QRV, offers "Call KC2G", and comes off. It isn't kept across restarts.
+Before this, Call didn't ask about a station shown "QSO w/ ...", only
+"QRL": it does now.
+
+Choices made here, for Jeff to keep or change: both settings off by
+default; the strip covers 14 days; 30 minutes of quiet before a watched
+station rings again; a Tell me when free bell lasts only the run.
+
 ## Waiting on Andrew (via Jeff)
 
 - 200 Hz and 1.2 kHz width caps; a TX level command for Auto ALC;

@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <map>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -16,11 +17,13 @@
 #include "ragtime/broadcast/BroadcastFiles.h"
 #include "ragtime/broadcast/Seals.h"
 #include "ragtime/broadcast/Stations.h"
+#include "ragtime/broadcast/WatchList.h"
 #include "ragtime/files/FileRows.h"
 #include "ragtime/files/FileTraffic.h"
 #include "ragtime/files/SessionFiles.h"
 #include "ragtime/gearbox/Gearbox.h"
 #include "ragtime/link/HostLink.h"
+#include "ragtime/radio/PathLog.h"
 #include "ragtime/session/SessionChat.h"
 #include "ragtime/session/SessionLog.h"
 
@@ -31,6 +34,7 @@ class FilesPage;
 class GlobusPanel;
 class GlobusToggle;
 class HostConnection;
+class RigConnection;
 class SessionPage;
 class StationList;
 class wxBitmapButton;
@@ -136,6 +140,25 @@ private:
     void updatePathSnr(uint64_t nowMs);
     void setNarrow(bool narrow);
 
+    // The radio (docs/STAGE1.md, "The dial, the path log and the watch
+    // list"): its dial read from rigctld (never set), sending held
+    // outside the US data segments when the operator asks, a line in the
+    // path log for every burst heard, and the watch list's bells.
+    void applyRadioPrefs();
+    void onDial();
+    void showDial();
+    // Why sending is held (receive only), or "" when it isn't.
+    std::string sendRefusal() const;
+    void applySendGuard();
+    // Pause sending (the operator's) and the guard's hold, to the link,
+    // the session and the pages.
+    void applySending();
+    void logPath(const std::string& call, std::optional<double> snr, bool session, uint64_t nowMs);
+    void ringBells();
+    void showWatchList();
+    void showPaths(const std::string& call);
+    const ragtime::radio::PathStrip& stripFor(const std::string& call, uint64_t nowMs);
+
     // Globus on or off, and the toggle on the tab strip.
     void setGlobus(bool on);
     void placeTabToggle();
@@ -152,6 +175,9 @@ private:
     ragtime::broadcast::Stations stations_;
     ragtime::gearbox::Gearshift gearshift_;
     std::unique_ptr<HostConnection> host_;
+    std::unique_ptr<RigConnection> rig_;
+    ragtime::radio::PathLog pathLog_;
+    ragtime::broadcast::WatchList watch_;
     // Session files: the engine, the log of finished transfers (the Files
     // tab's Completed pane, shared with broadcast files), and the two
     // plugged into the session.
@@ -191,6 +217,15 @@ private:
     wxBitmapButton* themeButton_ = nullptr;     // light and dark, where the build can switch
 
     uint64_t broadcastFilesVersion_ = 0;
+
+    bool paused_ = false;       // Pause sending, the operator's
+    bool held_ = false;         // receive only: outside the US data segments, or the dial not known
+    std::string heldWhy_;
+    bool acceptWanted_ = true;  // Accept sessions, the operator's (LISTEN OFF while held)
+    ragtime::radio::PathStrip strip_;   // the picked station's, from the path log
+    uint64_t stripVersion_ = ~0ull;
+    uint64_t stripMs_ = 0;
+    uint64_t trimmedMs_ = 0;    // the path log's memory last cut back
 
     uint64_t sealsVersion_ = 0;
     uint16_t savedSeal_ = 0;    // the seal chain's number last saved

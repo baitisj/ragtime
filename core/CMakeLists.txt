@@ -31,6 +31,7 @@ add_library(ragtime_core STATIC
     src/broadcast/BroadcastChat.cpp
     src/broadcast/BroadcastLog.cpp
     src/broadcast/Stations.cpp
+    src/broadcast/WatchList.cpp
     # Package H: broadcast files, seals and repair.
     src/broadcast/Airtime.cpp
     src/broadcast/BroadcastFiles.cpp
@@ -40,6 +41,11 @@ add_library(ragtime_core STATIC
     src/session/SessionChat.cpp
     src/session/StreamLog.cpp
     src/session/SessionLog.cpp
+    # The radio's dial from rigctld (read only), the US data segments, and
+    # the path log: src/radio/.
+    src/radio/Bands.cpp
+    src/radio/DialReader.cpp
+    src/radio/PathLog.cpp
 )
 
 target_include_directories(ragtime_core PUBLIC
