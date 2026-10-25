@@ -26,10 +26,12 @@ ragtime_test(ragtime_session_files_test SessionFilesTest.cpp)
 if(UNIX)
     ragtime_test(ragtime_fake_host_test FakeHostTest.cpp FakeHost.cpp)
     ragtime_test(ragtime_session_host_test SessionHostTest.cpp FakeHost.cpp)
+    # A flight recording played back to a HostLink on loopback.
+    ragtime_test(ragtime_replay_test ReplayTest.cpp ReplayHost.cpp FakeHost.cpp)
 
     # The bench: fake hosts on 8100/8300 and 8110/8310 and a few bot
     # stations, for trying the app without Data2G. Not a test.
-    add_executable(ragtime_fake_air FakeAirMain.cpp FakeHost.cpp)
+    add_executable(ragtime_fake_air FakeAirMain.cpp FakeHost.cpp ReplayHost.cpp)
     target_link_libraries(ragtime_fake_air PRIVATE ragtime_core)
     ragtime_warnings(ragtime_fake_air)
 endif()
@@ -49,3 +51,5 @@ target_include_directories(ragtime_globus_test PRIVATE ${PROJECT_SOURCE_DIR}/cor
 
 ragtime_test(ragtime_broadcast_files_test BroadcastFilesTest.cpp)
 ragtime_test(ragtime_file_traffic_test FileTrafficTest.cpp)
+
+ragtime_test(ragtime_flight_recorder_test FlightRecorderTest.cpp)

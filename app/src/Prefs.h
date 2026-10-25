@@ -81,6 +81,9 @@ std::string sessionLogDir();
 // The Broadcast tab's lasting log: beside the --config file
 // (<config>.broadcast.log), or appDataDir()/broadcast.log.
 std::string broadcastLogPath();
+// The flight recorder's files (docs/FLIGHT_RECORDER.md): beside the
+// --config file (<config>.flight), or appDataDir()/flight.
+std::string flightRecorderDir();
 // Broadcast files not yet whole, a file each, kept a week so a restart can
 // still ask for repairs: beside the --config file (<config>.broadcast-parts),
 // or appDataDir()/broadcast-parts.

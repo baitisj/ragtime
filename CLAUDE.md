@@ -24,7 +24,8 @@ and open questions. `docs/STAGE1.md` is the work now under way.
 `docs/PROTOCOL.md` is what goes on the air (records, frames, sessions,
 text coding).
 `docs/GEARBOX.md` and `docs/MOCKUPS.md` cover the gearshift and the
-screens. `docs/HOW_SEALS_WORK.md` is the plain-words primer on seals and
+screens. `docs/FLIGHT_RECORDER.md` is the host-link recorder, the report
+and `--replay`. `docs/HOW_SEALS_WORK.md` is the plain-words primer on seals and
 repair (its figures are SVGs in `docs/images/how-seals-work/`); change it
 with the code when the seal rules change.
 
@@ -99,6 +100,15 @@ with the code when the seal rules change.
   and `FileTraffic` keeps a flat 8 KB window where the host can cut
   (docs/PROTOCOL.md, "Cuts"). The fake hosts cut too (`--no-cut` for an
   older one).
+- The flight recorder (2026-10-25, idea 2 of "Ideas before
+  signatures"): `link::FlightRecorder` keeps every command line, KISS
+  frame and session byte count to and from the host, with millisecond
+  UTC times, in `flightRecorderDir()` (7 days, 50 MB). Help > Save a
+  report zips it with the settings (`app/src/Report`), never a setting
+  named like a secret (`link::reportableSetting`): keep any future
+  private key out of wxConfig names that rule misses, and out of the
+  flight folder. `ragtime_fake_air --replay` plays it back
+  (`tests/ReplayHost`).
 - Data2G PR #98 (merged 2026-10-23) gives SNRs: on `BCAST HEARD` and
   `MISSED`, and `SN` for the session partner. Ragtime shows them in the
   station list's SNR column and feeds the gearshift's Auto the weakest
@@ -174,7 +184,7 @@ with the code when the seal rules change.
 | --- | --- |
 | `core/` | `ragtime_core`, the socket-free library: no wx, no sockets in the engines, all unit-tested. Headers in `core/include/ragtime/`, sources in `core/src/`, one subfolder per area: `protocol/`, `link/`, `text/`, `files/` (package B; G adds `FileRows`, `FileTraffic`), `globus/` (C), `gearbox/` (D), `broadcast/` (E, with `BroadcastLog`; H adds `Airtime`, `Seals`, `BroadcastFiles`), `session/` (F, and `SessionLog`; `StreamLog` for cuts). Add sources to `core/CMakeLists.txt` |
 | `app/` | The wxWidgets app (`app/src/`). It draws and wires; logic goes in core. `MainFrame` is the one main window and owns the engines; `HostConnection` is the only code with sockets; `Prefs` holds every wxConfig key, and `appDataDir()` is where Ragtime keeps its own files (never wx's `GetUserDataDir()`: on Linux that is `~/.Ragtime`, the settings file); `app/src/globus/` is the Globus pane (`GlobusPanel`, `GlobusView`, `GlobusToggle`) |
-| `tests/` | ctest unit tests for core, plain executables on `tests/Check.h` (`CHECK`, `CHECK_EQ`). Add one with `ragtime_test(<name> <source>)` in `tests/CMakeLists.txt`. `FakeHost.*` is a fake data2g-host on loopback sockets (POSIX, so its test and the bench build only `if(UNIX)`); `FakeAirMain.cpp` is the bench `ragtime_fake_air` |
+| `tests/` | ctest unit tests for core, plain executables on `tests/Check.h` (`CHECK`, `CHECK_EQ`). Add one with `ragtime_test(<name> <source>)` in `tests/CMakeLists.txt`. `FakeHost.*` is a fake data2g-host on loopback sockets (POSIX, so its test and the bench build only `if(UNIX)`); `FakeAirMain.cpp` is the bench `ragtime_fake_air`, and `ReplayHost.*` its `--replay` |
 | `tools/` | Reference scripts: `icon/` (`make_leaf_svg.py` draws the icon, the Maple Leaf Rag's leaf going digital, as `app/res/ragtime.svg`; `make_icons.sh` renders its PNG and ICO), `globe/` (sunlit globe renderer, and the generators of the map tables in `core/src/globus/`: coasts and borders from Natural Earth, the big lakes from `ne_110m_lakes.geojson`, state and province lines from Natural Earth's 1:10m admin-1 lines, fetched for the run, for the countries in `gen_admin1_lines.py`), `gearbox/` (ladders), `ham_table/` (text table 0 generator and corpus: `gen_table.py --check`), `gcc16/check.py` (GCC 16 check) |
 | `cmake/` | CMake helpers. `ragtime_warnings(<target>)` gives every target `-Wall -Wextra` and, with `RAGTIME_WERROR` (on by default), `-Werror`; `Toolchain-mingw64.cmake` (the Windows cross build), `BuildWxWidgets.cmake` (wxWidgets 3.2.9 cloned and built statically with `-DRAGTIME_BUILD_WX=ON`), `EmbedFile.cmake` (the window icon built in) |
 | `packaging/` | Release recipes: `linux/make-appimage.sh` (with `ragtime.desktop`), `windows/make-zip.sh` (with the zip's `README.txt`). Both write to `dist/`, named by `release-name.sh` |
@@ -220,7 +230,9 @@ bulletin 20 s later, and `--fade` gives their sessions a 45 s fade every
 two minutes, for Link quiet. Bots save the files you send them (in the
 temp folder) and offer their bulletin again when you mention a file;
 `--rate BPS` caps session bytes (400 a second by default) so transfers
-take a while. The bots seal what they broadcast, answer repair requests
+take a while. `--replay FOLDER` plays a flight recording (a report's
+`flight/`) on host A's ports instead of the air, with `--from TIME` and
+`--speed X` (docs/FLIGHT_RECORDER.md). The bots seal what they broadcast, answer repair requests
 and take broadcast files without asking; `--loss PCT` has hosts A and B
 lose that share of the group frames they hear, so repairs happen, and
 `--files` has the first bot broadcast a bulletin file a minute in and

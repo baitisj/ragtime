@@ -247,6 +247,14 @@ std::string broadcastPartsDir()
     return std::string(dir.GetPath().utf8_str());
 }
 
+std::string flightRecorderDir()
+{
+    if (!configPath.empty()) return configPath + ".flight";
+    wxFileName dir = wxFileName::DirName(wxString::FromUTF8(appDataDir()));
+    dir.AppendDir("flight");
+    return std::string(dir.GetPath().utf8_str());
+}
+
 broadcast::Seals::Chain loadSealChain(const std::string& callsign)
 {
     broadcast::Seals::Chain chain;

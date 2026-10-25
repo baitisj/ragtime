@@ -301,7 +301,7 @@ One ordinary window in the system theme, laid out like a messaging app: connecti
 - **Auto ALC** beside TX Off: a small checkbox with a level meter that keeps transmit drive just under the rig's ALC. The client never touches audio, so this needs a host command to set the TX level. The client can read ALC through Hamlib on many rigs (Asks for Andrew).
 - **Tabs:** Broadcast, Session and Files, always in that order (Stage 1). Session is greyed out when no session is active. A tab badge counts unread messages and waiting offers.
 - **Status bar:** channel busy (`BUSY`), current mode, and the newest transfer in one line, with a countdown to our next seal while one waits (your ask, 2026-10-25; the line no longer opens Files on a click); at its right end, data2g-host's address and state (Connected, Reconnecting in 8 s), moved there from the connection bar (your ask, 2026-10-23); and last, beside the size grip, the light and dark button (a moon in the light, a sun in the dark; your ask, 2026-10-23).
-- **Menus:** File (Send file, Files, Open received folder, Quit), Station (Call, Leave, Send file), View, Settings, Help. Every action has a keyboard shortcut.
+- **Menus:** File (Send file, Files, Open received folder, Quit), Station (Call, Leave, Send file), View, Settings, Help (Save a report, Open the flight recorder folder, About; docs/FLIGHT_RECORDER.md). Every action has a keyboard shortcut.
 
 **The gearshift.** The popup *is* the Submode Map: speed across (bits per second, log scale), the S/N each mode needs down the side, one dot per mode, coloured by modulation. The `ack-` modes are left out, because they carry the host's own ARQ control. Three choices sit above the map:
 

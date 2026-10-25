@@ -10,6 +10,7 @@
 #include <wx/socket.h>
 #include <wx/timer.h>
 
+#include "ragtime/link/FlightRecorder.h"
 #include "ragtime/link/HostLink.h"
 #include "ragtime/link/Reconnect.h"
 
@@ -18,7 +19,8 @@
 // then every 30 s while the host isn't there; and the session data port
 // (command + 1), carrying a session's byte stream for the Session tab,
 // tried again every 5 s on its own while the other two are up. Ragtime
-// never starts data2g-host; the operator runs it.
+// never starts data2g-host; the operator runs it. Everything that crosses
+// goes to the flight recorder too (docs/FLIGHT_RECORDER.md).
 class HostConnection : public wxEvtHandler
 {
 public:
@@ -63,6 +65,9 @@ public:
     // window calls it after anything it asks of HostLink.
     void flush();
 
+    // The host link on disk, for Help > Save a report.
+    ragtime::link::FlightRecorder& recorder() { return recorder_; }
+
     static uint64_t nowMs();
 
 private:
@@ -81,9 +86,11 @@ private:
     void onTimer(wxTimerEvent& event);
     void read(Port& port, bool command);
     void write(Port& port);
+    void recordWritten(const Port& port, const char* bytes, size_t length);
 
     ragtime::link::HostLink& link_;
     EventsFn onEvents_;
+    ragtime::link::FlightRecorder recorder_;
     wxTimer timer_;
     ragtime::link::Reconnect reconnect_;
     Port kiss_, command_, data_;
