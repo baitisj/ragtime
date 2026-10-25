@@ -71,6 +71,10 @@ jobs:
       env:
         WINEDEBUG: -all
       run: ctest --test-dir build-win --output-on-failure
+    - name: Checksum
+      # Printed in the log and the run summary, to check a downloaded
+      # artifact against before it goes into a release.
+      run: (cd dist && sha256sum *.zip) | tee -a "$GITHUB_STEP_SUMMARY"
     - uses: actions/upload-artifact@v4
       with:
         name: ragtime-windows-x86_64
@@ -89,6 +93,8 @@ jobs:
         sudo apt-get install -y build-essential cmake curl file libwxgtk3.2-dev libgtk-3-dev
     - name: Build the AppImage
       run: packaging/linux/make-appimage.sh
+    - name: Checksum
+      run: (cd dist && sha256sum *.AppImage) | tee -a "$GITHUB_STEP_SUMMARY"
     - uses: actions/upload-artifact@v4
       with:
         name: ragtime-appimage-x86_64
