@@ -4,11 +4,13 @@
 // - Offers wait for the far end's Hello, and go only if it takes session
 //   files (docs/PROTOCOL.md, Hello); files queued for a station that
 //   doesn't end Not taken.
-// - File bytes are paced: no more of them go to data2g-host than about a
-//   10 s of the session's acknowledged rate (WINDOW_MS), between
-//   MIN_WINDOW and MAX_WINDOW bytes waiting, so a message typed during a
-//   transfer isn't stuck behind the whole file, and a cancel isn't
-//   either: data2g-host can't take back what it has been handed.
+// - File bytes are paced: no more of them wait at data2g-host than two of
+//   the session mode's longest bursts (WINDOW_BURSTS), between MIN_WINDOW
+//   and MAX_WINDOW bytes, so the host always has the next burst queued,
+//   yet a message typed during a transfer isn't stuck behind the whole
+//   file, and a cancel isn't either: data2g-host can't take back what it
+//   has been handed. Until the mode is known, 10 s of the session's
+//   acknowledged rate (WINDOW_MS).
 // - Leave cancels what is under way in the session, so the far end hears
 //   it, and keeps the files still queued for the next session with the
 //   station. A part received is kept, to carry on next time.
@@ -29,6 +31,7 @@
 
 #include "ragtime/files/FileRows.h"
 #include "ragtime/files/SessionFiles.h"
+#include "ragtime/link/Data2GLink.h"
 #include "ragtime/session/SessionChat.h"
 
 namespace ragtime
@@ -39,17 +42,23 @@ namespace files
 class FileTraffic : public session::SessionTraffic
 {
 public:
-    // File bytes waiting at the host, unacknowledged: this much of the
-    // session's rate, within these bounds, and START_WINDOW until the rate
-    // is known. The host sends whatever it has been handed, so a cancel
-    // waits behind it: the window starts at its smallest. 10 s is
-    // shorter than Data2G's longest bursts (24 s on FSK, 12 s on OFDM),
-    // which costs a little speed, and on a fading path shorter bursts can
-    // seize an uptick (Andrew, 2026-10-24; Jeff's pick).
-    static constexpr uint64_t WINDOW_MS = 10 * 1000;
+    // File bytes waiting at the host, unacknowledged: two of the session
+    // mode's longest bursts, within these bounds. A burst on a session
+    // runs at most 24 s on FSK and 12 s on OFDM (Andrew, 2026-10-24), and
+    // a host with less than its next burst queued idles into CSMA between
+    // bursts, which starves the fast modes (Andrew, 2026-10-25). The cap
+    // is what Andrew asked to keep queued, 6 to 8 KB; a cancel waits
+    // behind it, until data2g-host can drop what it holds (Data2G #118).
+    static constexpr uint64_t WINDOW_BURSTS = 2;
+    static constexpr double FSK_BURST_SECONDS = 24.0;
+    static constexpr double OFDM_BURST_SECONDS = 12.0;
     static constexpr uint64_t MIN_WINDOW = 1024;
+    static constexpr uint64_t MAX_WINDOW = 8192;
+    // With the mode not yet known (no MODE report yet, or a mode the host
+    // didn't list): this much of the session's acknowledged rate, and
+    // START_WINDOW until the rate is known.
+    static constexpr uint64_t WINDOW_MS = 10 * 1000;
     static constexpr uint64_t START_WINDOW = MIN_WINDOW;
-    static constexpr uint64_t MAX_WINDOW = 16384;
     // A FileData carries at most half the window, and at least this much.
     static constexpr size_t MIN_PIECE = 256;
     // Moving, but nothing for this long: Stalled.
@@ -101,8 +110,14 @@ public:
 
     // A session is up with the peer and its Hello says it takes files.
     bool takesFiles(const std::string& peer) const;
+    // The session's mode, as data2g-host last reported it (invalid when
+    // not known).
+    void setMode(const link::ModeInfo& mode) { mode_ = mode; }
     // How many bytes may wait at the host now.
     uint64_t window() const;
+    // The most one burst in this mode carries in a session (0 for an
+    // invalid mode).
+    static uint64_t burstBytes(const link::ModeInfo& mode);
 
     // The Files tab's rows: every transfer still going, and the kept parts.
     std::vector<FileRow> rows(uint64_t nowMs) const;
@@ -124,6 +139,7 @@ private:
     bool takes_ = false;
     uint64_t acked_ = 0;        // our stream, acknowledged
     RateMeter session_;         // the session's acknowledged rate
+    link::ModeInfo mode_;       // the session's mode, if known
     std::map<uint64_t, RateMeter> meters_;  // live transfers', by id
     struct Start
     {

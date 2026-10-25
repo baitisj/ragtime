@@ -4,6 +4,8 @@
 #include <cmath>
 #include <utility>
 
+#include "ragtime/broadcast/Airtime.h"
+
 namespace ragtime
 {
 namespace files
@@ -74,8 +76,25 @@ void FileTraffic::arriving(const std::string& peer, uint32_t offer, uint32_t off
     files_.arriving(peer, offer, offset, data, bytes);
 }
 
+uint64_t FileTraffic::burstBytes(const link::ModeInfo& mode)
+{
+    if (!mode.valid()) return 0;
+    // Codewords past the first cost the same time each; as many as fit.
+    double longest = broadcast::isCpmMode(mode) ? FSK_BURST_SECONDS : OFDM_BURST_SECONDS;
+    int codewords = mode.maxCodewords;
+    if (mode.maxCodewords > 1 && mode.secondsAtMax > mode.secondsAtOne)
+    {
+        double each = (mode.secondsAtMax - mode.secondsAtOne) / (mode.maxCodewords - 1);
+        double more = std::floor((longest - mode.secondsAtOne) / each);
+        codewords = 1 + (int)std::max(0.0, std::min(more, (double)(mode.maxCodewords - 1)));
+    }
+    return (uint64_t)mode.bytesPerCodeword * (uint64_t)codewords;
+}
+
 uint64_t FileTraffic::window() const
 {
+    uint64_t burst = burstBytes(mode_);
+    if (burst > 0) return std::max(MIN_WINDOW, std::min(MAX_WINDOW, WINDOW_BURSTS * burst));
     double rate = session_.rate();
     if (!(rate > 0)) return START_WINDOW;
     uint64_t w = (uint64_t)std::llround(rate * (double)WINDOW_MS / 1000.0);

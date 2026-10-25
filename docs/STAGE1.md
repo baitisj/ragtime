@@ -292,16 +292,25 @@ and offer their bulletin (`ragtime_fake_air --call AG7EW`, then type
 "send the file again"; `--rate` sets how fast session bytes cross).
 Choices made there, for Jeff to keep or change:
 
-- **Pacing.** No more file bytes wait at data2g-host than 10 s of the
-  session's acknowledged rate (1 to 16 KB, 1 KB until the rate is
-  known), and a FileData carries at most half of that. Until 2026-10-24
-  it was a minute, and 4 KB at the start. Data2G's longest bursts are
-  24 s on FSK and 12 s on OFDM, so 10 s gives up a little speed, and on
-  a fading path shorter bursts may even gain by catching an uptick
-  (Andrew); Jeff picked 10 s so a cancel or a message waits less.
-  Andrew means to add a dequeue to data2g-host, which would let a cancel
-  drop what the host hasn't sent yet. A message typed
-  mid-file goes out behind at most that much, not behind the whole file.
+- **Pacing.** No more file bytes wait at data2g-host than two of the
+  session mode's longest bursts, between 1 and 8 KB, and a FileData
+  carries at most half of that. A burst in a session runs at most 24 s
+  on FSK and 12 s on OFDM (Andrew), so the longest is as many of the
+  mode's codewords as fit in that time, from the airtimes in `MODES`:
+  about 4.5 KB for `w48-16qam-r1/2` (so the 8 KB cap), 684 B for
+  `qpsk-r1/3`, 847 B for `n10-16qam-r1/2`, and 266 B for
+  `fsk32r62-r1/3` (so the 1 KB floor). The mode is the one data2g-host
+  last reported (`MODE`) in the session; until it has, the window is
+  10 s of the session's acknowledged rate (1 KB until the rate is
+  known). Since 2026-10-25 (Jeff's pick, after Andrew found the fast
+  modes starved: a window of about 1 KB is less than one of their
+  bursts, so the host idled into CSMA between them, and a miss shrank
+  it further). Before that it was the acknowledged rate alone: a minute
+  of it until 2026-10-24, then 10 s, between 1 and 16 KB. Once
+  data2g-host can drop what it holds (`CLEANTXBUFFER`, Data2G #118),
+  the plan is a flat 8 KB, cut back on a cancel or to slip a message
+  in (Andrew). Until then a message typed mid-file goes out behind at
+  most the window, not behind the whole file.
 - **Offers wait for the far end's Hello,** and go only if it takes
   session files; a file queued for a station that doesn't ends Not taken.
 - **Leave** cancels what is under way, so the far end hears why and keeps

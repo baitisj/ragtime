@@ -52,6 +52,7 @@
 #include "globus/GlobusPanel.h"
 #include "globus/GlobusToggle.h"
 #include "ragtime/Version.h"
+#include "ragtime/broadcast/Airtime.h"
 #include "ragtime/files/FileRows.h"
 #include "ragtime/globus/Sun.h"
 
@@ -710,6 +711,8 @@ void MainFrame::onHostEvents(const std::vector<Event>& events)
             broadcastFiles_.onRecord(r, now);
         }
     }
+    // File pacing follows the mode the session is in.
+    fileTraffic_.setMode(broadcast::findMode(link_.modes(), session_.mode()));
     onBroadcastFiles();
     onSessionEvents();
     onFileEvents();
@@ -730,6 +733,7 @@ void MainFrame::onClock()
     broadcastFiles_.tick(now);
     onBroadcastFiles();
     session_.tick(now);
+    fileTraffic_.setMode(broadcast::findMode(link_.modes(), session_.mode()));
     fileTraffic_.tick(now);
     onSessionEvents();
     onFileEvents();
