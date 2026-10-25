@@ -11,15 +11,21 @@ namespace broadcast
 namespace
 {
 
-// Data2G puts a 2-byte length ahead of each frame in a burst.
-constexpr int LENGTH_BYTES = 2;
 constexpr int MIN_PIECE_BYTES = 16;
 
 int codewordsFor(const std::vector<int>& frameBytes, const link::ModeInfo& mode)
 {
     int bytes = 0;
-    for (int length : frameBytes) bytes += LENGTH_BYTES + length;
+    for (int length : frameBytes) bytes += link::framedBytes(length);
     return 1 + (bytes + mode.bytesPerCodeword - 1) / mode.bytesPerCodeword;
+}
+
+// The longest frame that, framed, fits `bytes`.
+int longestFrameIn(int bytes)
+{
+    int n = bytes - 2;
+    while (n > 1 && link::framedBytes(n) > bytes) n--;
+    return std::max(1, n);
 }
 
 } // namespace
@@ -44,7 +50,7 @@ bool isCpmMode(const link::ModeInfo& mode)
 double oneCodewordSeconds(const link::ModeInfo& mode)
 {
     if (!mode.valid()) return UNKNOWN_BURST_SECONDS;
-    return mode.burstSeconds({std::max(1, mode.bytesPerCodeword - LENGTH_BYTES)});
+    return mode.burstSeconds({longestFrameIn(mode.bytesPerCodeword)});
 }
 
 uint64_t listeningWindowMs(const link::ModeInfo& mode)
@@ -56,13 +62,13 @@ int pieceFrameBytes(const link::ModeInfo& mode)
 {
     const int limit = (int)protocol::MAX_BROADCAST_FRAME;
     int pb = mode.bytesPerCodeword;
-    if (!mode.valid() || pb - LENGTH_BYTES >= limit) return limit;
+    if (!mode.valid() || link::framedBytes(limit) <= pb) return limit;
     // Every codeword but the burst's control one may carry data.
     int most = std::max(1, mode.maxCodewords - 1);
-    int k = isCpmMode(mode) ? 3 : (limit + LENGTH_BYTES) / pb;
+    int k = isCpmMode(mode) ? 3 : link::framedBytes(limit) / pb;
     k = std::min(std::max(k, 1), most);
-    while (k > 1 && k * pb - LENGTH_BYTES > limit) k--;
-    return std::max(1, std::min(k * pb - LENGTH_BYTES, limit));
+    while (k > 1 && longestFrameIn(k * pb) > limit) k--;
+    return std::min(longestFrameIn(k * pb), limit);
 }
 
 int pieceBytesFor(const link::ModeInfo& mode, const std::string& callsign)

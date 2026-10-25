@@ -178,7 +178,7 @@ double ModeInfo::burstSeconds(const std::vector<int>& frameBytes) const
     if (!valid()) return 0.0;
 
     int bytes = 0;
-    for (int length : frameBytes) bytes += 2 + length;
+    for (int length : frameBytes) bytes += framedBytes(length);
     int codewords = 1 + (bytes + bytesPerCodeword - 1) / bytesPerCodeword;
     codewords = std::min(codewords, maxCodewords);
     if (maxCodewords <= 1) return secondsAtOne;

@@ -110,6 +110,12 @@ with the code when the seal rules change.
   and `FileTraffic` keeps a flat 8 KB window where the host can cut
   (docs/PROTOCOL.md, "Cuts"). The fake hosts cut too (`--no-cut` for an
   older one).
+- Data2G PR #121 (broadcast v3, open 2026-10-25) frames each broadcast
+  frame with COBS and a zero, so a lost codeword loses only the frames
+  it touches. Ragtime counts frames framed (`link::framedBytes`, for v2
+  and v3 alike) and keeps its bursts long; shorter bursts on fading
+  paths (ragtime #68's first version) were dropped for it
+  (docs/DATA2G.md, "Loss").
 - The dial, the path log and the watch list (2026-10-25,
   `docs/STAGE1.md`): `core/src/radio/` (`DialReader`, which only ever
   asks rigctld `f`; `Bands`, the US data segments; `PathLog`, a line a
