@@ -7,6 +7,11 @@ Rodland, KC2G. Ragtime is a sibling of
 chirp-mode chat app, and is named for the same musical family and for the
 ragchew.
 
+Ragtime helps you keep in touch. Every burst it hears teaches it when,
+and on which band, each of your friends gets through, so it can tell you
+who is likely around now, and the best time of day to check in to the
+D2G net to find them.
+
 Status: 0.1.1-beta. Ragtime connects to data2g-host,
 chats on the D2G broadcast group. Current features include:
 - "Globus," which plots your friend's maidenhead coordinates
@@ -18,6 +23,9 @@ chats on the D2G broadcast group. Current features include:
 - Peer-to-peer sessions, which feature automatic rate negotiation and
   file transfer.
 - Group file transfer which includes repair rounds.
+- "Recent work," under the station list: the stations you hear and
+  work, the ones likely around at this hour first, from two weeks of
+  the path log (who was heard when, and on which band).
 
 ## Downloads
 

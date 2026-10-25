@@ -657,6 +657,54 @@ Choices made here, for Jeff to keep or change: both settings off by
 default; the strip covers 14 days; 30 minutes of quiet before a watched
 station rings again; a Tell me when free bell lasts only the run.
 
+## Recent work
+
+Jeff's ask (2026-10-25): under the station list, past a divider that
+drags, a second pane, **Recent work**, of the stations heard and worked
+in the path log's last 14 days, the ones likely around now first. It is
+the core of keeping in touch: the path log already knows at which hours
+and on which bands each friend gets through, so Ragtime can say who to
+look for now, and when to check in to the D2G net to find them.
+
+**What counts** (`radio::RecentWork`, from the path log in memory):
+
+- *At this hour*: the days a station was heard within an hour either
+  side of the hour now (UTC), so at 1830Z the days with a burst between
+  1700 and 2000Z. When Ragtime reads the dial, only bursts on the band
+  it is on count, and lines from before the dial was read count on any
+  band.
+- *Worked*: the days with a contact. A contact is a session that came
+  up (Started), a message we sent to the station (`@KC2G ...`), or one
+  it sent to us; each adds a `work` line to the path log (a new last
+  field beside `D2G` and `session`; the strip leaves them out, as they
+  aren't bursts heard). A session's bursts count as worked too.
+
+**Likely now**, the default order, is (1 + days worked) × (1 + days at
+this hour). The two multiply so a station needs both to rise: a friend
+worked on 3 days and heard at this hour on 5 scores 4 × 6 = 24, ahead of
+a stranger heard at this hour every day of 14 (1 × 15 = 15), and the
+same friend at an hour it is never heard scores only 4. Ties go to more
+days at this hour, then more days worked, then the newest. The pane's
+menu also sorts by **Most worked** and **Latest** (heard or worked), and
+keeps the choice (`/Stations/RecentWorkOrder`).
+
+**A row** is the call, its bell if watched, "● on now" (heard in the
+last 15 minutes) or when last heard, and under it what puts it there:
+"At this hour 10 days, 17 m · worked 4", "Worked 2 days", "Heard 4
+days". Hovering gives the counts in full and the score. Picking a row
+shows the station in Globus with its strip (a station not heard this run
+says when it last was, with no square on the globe, since the path log
+keeps no locators); double-click addresses a message to it; the
+right-click menu is the station list's, so Call, Watch and Paths heard
+work from here. A pick in either list unpicks the other, and Call and
+Message take whichever is picked. The pane is drawn again on a new line
+in the log (at most every 5 s), when the band changes, and every 30 s.
+
+Choices made here, for Jeff to keep or change: the hour either side;
+the multiplied score; contacts counted by day, not by message; every
+station heard in 14 days listed, including those in the station list
+now.
+
 ## The flight recorder
 
 Idea 2 of "Ideas before signatures" (Jeff, 2026-10-25), for the bugs only

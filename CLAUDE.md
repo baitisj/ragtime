@@ -11,13 +11,18 @@ Ragtime is a plain, friendly desktop chat and file-transfer client for
 [Data2G](https://github.com/arodland/Data2G), Andrew Rodland's (KC2G) HF
 data modem. It is a sibling of Glissando (`baitisj/glissando`), Jeff's
 chirp-mode chat app, and takes its name from the same musical family and
-from "ragchew". Two ideas frame everything:
+from "ragchew". Three ideas frame everything:
 
 - **Welcome to the D2G net.** D2G is a net that never closes: check in,
   net control asks for traffic, traffic gets passed, and every burst
   teaches the net who hears whom.
 - **Sometimes we ragchew.** Operators enter a ragchew (a session) on
   purpose and leave it on purpose, and are off traffic duty meanwhile.
+- **Keep in touch.** Every burst heard teaches Ragtime when and on which
+  band each friend gets through, so it can say who is likely around now
+  and when to check in to find them (Jeff, 2026-10-25: a core value, to
+  stress in the docs). Recent work and the path strips are where it
+  shows.
 
 Read `docs/PLAN.md` first: it is the full design, with Jeff's decisions
 and open questions. `docs/STAGE1.md` is the work now under way.
@@ -108,6 +113,12 @@ with the code when the seal rules change.
   `RigConnection`, `PathStripView`, `PathsDialog` and `WatchDialog`.
   Receive only outside the US data segments ticks PLAN.md's last parity
   box.
+- Recent work (2026-10-25, `docs/STAGE1.md`): `radio::RecentWork` ranks
+  the path log's stations, by default by (1 + days worked) × (1 + days
+  heard at this hour on this band); contacts (a session, an `@` message
+  either way) are `work` lines in the path log. The pane is
+  `app/src/RecentWorkPane`, under the station list in the `left_`
+  splitter.
 - The flight recorder (2026-10-25, idea 2 of "Ideas before
   signatures"): `link::FlightRecorder` keeps every command line, KISS
   frame and session byte count to and from the host, with millisecond
@@ -191,7 +202,7 @@ with the code when the seal rules change.
 
 | Path | What |
 | --- | --- |
-| `core/` | `ragtime_core`, the socket-free library: no wx, no sockets in the engines, all unit-tested. Headers in `core/include/ragtime/`, sources in `core/src/`, one subfolder per area: `protocol/`, `link/`, `text/`, `files/` (package B; G adds `FileRows`, `FileTraffic`), `globus/` (C), `gearbox/` (D), `broadcast/` (E, with `BroadcastLog`; H adds `Airtime`, `Seals`, `BroadcastFiles`), `session/` (F, and `SessionLog`; `StreamLog` for cuts), `radio/` (the dial from rigctld, the US data segments, the path log). Add sources to `core/CMakeLists.txt` |
+| `core/` | `ragtime_core`, the socket-free library: no wx, no sockets in the engines, all unit-tested. Headers in `core/include/ragtime/`, sources in `core/src/`, one subfolder per area: `protocol/`, `link/`, `text/`, `files/` (package B; G adds `FileRows`, `FileTraffic`), `globus/` (C), `gearbox/` (D), `broadcast/` (E, with `BroadcastLog`; H adds `Airtime`, `Seals`, `BroadcastFiles`), `session/` (F, and `SessionLog`; `StreamLog` for cuts), `radio/` (the dial from rigctld, the US data segments, the path log, Recent work). Add sources to `core/CMakeLists.txt` |
 | `app/` | The wxWidgets app (`app/src/`). It draws and wires; logic goes in core. `MainFrame` is the one main window and owns the engines; `HostConnection` (data2g-host) and `RigConnection` (rigctld, read only) are the only code with sockets; `Prefs` holds every wxConfig key, and `appDataDir()` is where Ragtime keeps its own files (never wx's `GetUserDataDir()`: on Linux that is `~/.Ragtime`, the settings file); `app/src/globus/` is the Globus pane (`GlobusPanel`, `GlobusView`, `GlobusToggle`) |
 | `tests/` | ctest unit tests for core, plain executables on `tests/Check.h` (`CHECK`, `CHECK_EQ`). Add one with `ragtime_test(<name> <source>)` in `tests/CMakeLists.txt`. `FakeHost.*` is a fake data2g-host on loopback sockets (POSIX, so its test and the bench build only `if(UNIX)`); `FakeAirMain.cpp` is the bench `ragtime_fake_air`, and `ReplayHost.*` its `--replay` |
 | `tools/` | Reference scripts: `icon/` (`make_leaf_svg.py` draws the icon, the Maple Leaf Rag's leaf going digital, as `app/res/ragtime.svg`; `make_icons.sh` renders its PNG and ICO), `globe/` (sunlit globe renderer, and the generators of the map tables in `core/src/globus/`: coasts and borders from Natural Earth, the big lakes from `ne_110m_lakes.geojson`, state and province lines from Natural Earth's 1:10m admin-1 lines, fetched for the run, for the countries in `gen_admin1_lines.py`), `gearbox/` (ladders), `ham_table/` (text table 0 generator and corpus: `gen_table.py --check`), `gcc16/check.py` (GCC 16 check) |

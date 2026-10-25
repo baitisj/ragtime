@@ -24,6 +24,7 @@
 #include "ragtime/gearbox/Gearbox.h"
 #include "ragtime/link/HostLink.h"
 #include "ragtime/radio/PathLog.h"
+#include "ragtime/radio/RecentWork.h"
 #include "ragtime/session/SessionChat.h"
 #include "ragtime/session/SessionLog.h"
 
@@ -34,6 +35,7 @@ class FilesPage;
 class GlobusPanel;
 class GlobusToggle;
 class HostConnection;
+class RecentWorkPane;
 class RigConnection;
 class SessionPage;
 class StationList;
@@ -154,6 +156,18 @@ private:
     // the session and the pages.
     void applySending();
     void logPath(const std::string& call, std::optional<double> snr, bool session, uint64_t nowMs);
+    // A contact for the path log: a session came up, or a message went
+    // between the station and us.
+    void logWorked(const std::string& call, uint64_t nowMs);
+    // A Text heard on D2G addressed to our call.
+    bool addressedToUs(const ragtime::protocol::Record& record) const;
+    // Recent work again: on a new path log line (at most every few
+    // seconds) and twice a minute for the hour and on now; at once with
+    // force.
+    void refreshRecent(bool force = false);
+    // The station picked in the station list or in Recent work (only one
+    // has a pick at a time), or "".
+    std::string pickedCall() const;
     void ringBells();
     void showWatchList();
     void showPaths(const std::string& call);
@@ -187,8 +201,10 @@ private:
 
     ConnectionBar* bar_ = nullptr;
     wxSplitterWindow* outer_ = nullptr;     // station list | the rest
+    wxSplitterWindow* left_ = nullptr;      // station list over Recent work
     wxSplitterWindow* inner_ = nullptr;     // the tabs | Globus
     StationList* stationList_ = nullptr;
+    RecentWorkPane* recent_ = nullptr;
     wxPanel* middle_ = nullptr;
     wxNotebook* tabs_ = nullptr;
     BroadcastPage* broadcast_ = nullptr;
@@ -203,6 +219,7 @@ private:
     int listWidth_ = 300;       // the station list beside Globus
     int tableWidth_ = 640;      // the station table, Globus off
     int globusWidth_ = 320;
+    int recentHeight_ = 220;    // Recent work, under the station list
 
     uint64_t seenMessage_ = 0;  // the newest message id the operator has seen
     size_t unread_ = 0;
@@ -226,6 +243,10 @@ private:
     uint64_t stripVersion_ = ~0ull;
     uint64_t stripMs_ = 0;
     uint64_t trimmedMs_ = 0;    // the path log's memory last cut back
+    ragtime::radio::WorkOrder recentOrder_ = ragtime::radio::WorkOrder::LikelyNow;
+    uint64_t recentVersion_ = ~0ull;    // the path log's version Recent work was drawn from
+    uint64_t recentMs_ = 0;
+    std::string recentBand_;
 
     uint64_t sealsVersion_ = 0;
     uint16_t savedSeal_ = 0;    // the seal chain's number last saved

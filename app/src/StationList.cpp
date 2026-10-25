@@ -3,10 +3,6 @@
 #include <algorithm>
 #include <utility>
 
-#include <set>
-
-#include <wx/filesys.h>
-#include <wx/fs_mem.h>
 #include <wx/htmllbox.h>
 #include <wx/imaglist.h>
 #include <wx/listctrl.h>
@@ -43,33 +39,6 @@ enum Page
 // A row lights this long when its QRV comes.
 constexpr uint64_t FLASH_MS = 3000;
 constexpr int BELL_DIP = 12;
-
-// The bell for the narrow list's rows, drawn once a theme into wxHTML's
-// memory files.
-wxString bellHtml(const wxWindow* window, const wxColour& ink)
-{
-    int px = window->FromDIP(BELL_DIP);
-    wxString name = wxString::Format("ragtime-bell-%s-%d.png", ink.GetAsString(wxC2S_HTML_SYNTAX).Mid(1), px);
-    static std::set<wxString> made;
-    if (made.count(name) == 0)
-    {
-        static bool handler = false;
-        if (!handler)
-        {
-            // SealBadge may have added it already: wx keeps one of each.
-            if (!wxFileSystem::HasHandlerForPath("memory:x")) wxFileSystem::AddHandler(new wxMemoryFSHandler);
-            handler = true;
-        }
-        if (wxImage::FindHandler(wxBITMAP_TYPE_PNG) == nullptr) wxImage::AddHandler(new wxPNGHandler);
-        wxBitmap bitmap = bellIcon(ink, BELL_DIP).GetBitmap(wxSize(px, px));
-        if (!bitmap.IsOk()) return wxString();
-        wxMemoryFSHandler::AddFile(name, bitmap.ConvertToImage(), wxBITMAP_TYPE_PNG);
-        made.insert(name);
-    }
-    wxString side = wxString::Format("%d", px);
-    return "<img src=\"memory:" + name + "\" width=\"" + side + "\" height=\"" + side + "\">";
-}
-
 } // namespace
 
 //-------------------------------------------------------------------------
@@ -103,7 +72,7 @@ protected:
         bool ours = s->call == owner_->stations_.partner();
         wxColour dot = !status.filled ? secondaryText() : ours ? accentText() : status.word == "QRV" ? goodText() : busyText();
         wxString tint = picked ? wxString() : " color=\"" + htmlColour(dot) + "\"";
-        wxString bell = owner_->belled(s->call) ? "&nbsp;" + bellHtml(this, picked ? wxSystemSettings::GetColour(
+        wxString bell = owner_->belled(s->call) ? "&nbsp;" + bellHtml(this, BELL_DIP, picked ? wxSystemSettings::GetColour(
                                                                        wxSYS_COLOUR_HIGHLIGHTTEXT) : accentText())
                                                 : wxString();
         wxString lit = owner_->flashing(s->call) && !picked
@@ -430,6 +399,14 @@ void StationList::refresh(uint64_t nowMs)
     showSelection();
     narrowView_->RefreshAll();
     if (!recount) table_->Refresh();
+    updating_ = false;
+}
+
+void StationList::clearSelection()
+{
+    selected_.clear();
+    updating_ = true;
+    showSelection();
     updating_ = false;
 }
 

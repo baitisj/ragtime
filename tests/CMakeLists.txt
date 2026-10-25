@@ -54,4 +54,5 @@ ragtime_test(ragtime_broadcast_files_test BroadcastFilesTest.cpp)
 ragtime_test(ragtime_file_traffic_test FileTrafficTest.cpp)
 
 ragtime_test(ragtime_radio_test RadioTest.cpp)
+ragtime_test(ragtime_recent_work_test RecentWorkTest.cpp)
 ragtime_test(ragtime_flight_recorder_test FlightRecorderTest.cpp)

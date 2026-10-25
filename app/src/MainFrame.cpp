@@ -43,6 +43,7 @@
 #include "GearshiftDialog.h"
 #include "HostConnection.h"
 #include "PathsDialog.h"
+#include "RecentWorkPane.h"
 #include "Report.h"
 #include "RigConnection.h"
 #include "SessionPage.h"
@@ -221,6 +222,12 @@ MainFrame::MainFrame()
     listWidth_ = std::max(MIN_PANE, loadInt(keys::LIST_WIDTH, listWidth_));
     tableWidth_ = std::max(MIN_PANE, loadInt(keys::TABLE_WIDTH, tableWidth_));
     globusWidth_ = std::max(MIN_PANE, loadInt(keys::GLOBUS_WIDTH, globusWidth_));
+    recentHeight_ = std::max(MIN_PANE, loadInt(keys::RECENT_HEIGHT, recentHeight_));
+    {
+        int order = loadInt(keys::RECENT_ORDER, (int)recentOrder_);
+        if (order >= (int)radio::WorkOrder::LikelyNow && order <= (int)radio::WorkOrder::Latest)
+            recentOrder_ = static_cast<radio::WorkOrder>(order);
+    }
 
     buildMenus();
     buildLayout();
@@ -269,6 +276,7 @@ MainFrame::MainFrame()
     wxPersistentRegisterAndRestore(this, "MainWindow");
     if (!IsMaximized() && GetPosition() == wxDefaultPosition) Centre();
 
+    refreshRecent(true);
     Bind(wxEVT_TIMER, [this](wxTimerEvent&) { onClock(); });
     clock_.Start(CLOCK_MS);
     Bind(wxEVT_CLOSE_WINDOW, [this](wxCloseEvent& e) {
@@ -284,6 +292,8 @@ MainFrame::MainFrame()
         saveInt(keys::LIST_WIDTH, listWidth_);
         saveInt(keys::TABLE_WIDTH, tableWidth_);
         saveInt(keys::GLOBUS_WIDTH, globusWidth_);
+        saveInt(keys::RECENT_HEIGHT, recentHeight_);
+        saveInt(keys::RECENT_ORDER, (int)recentOrder_);
         saveColumns(stationList_->columns());
         saveInt(keys::SORT_COLUMN, (int)stationList_->sortColumn());
         saveBool(keys::SORT_ASCENDING, stationList_->sortAscending());
@@ -408,7 +418,7 @@ void MainFrame::buildMenus()
     Bind(wxEVT_UPDATE_UI, [this](wxUpdateUIEvent& e) { e.Enable(session_.active()); }, ID_LEAVE_NOW);
     Bind(wxEVT_MENU, [this](wxCommandEvent&) {
         tabs_->SetSelection(TAB_BROADCAST);
-        if (!stationList_->selected().empty()) broadcast_->address(stationList_->selected());
+        if (!pickedCall().empty()) broadcast_->address(pickedCall());
     }, ID_MESSAGE_STATION);
     Bind(wxEVT_MENU, [this](wxCommandEvent&) { tabs_->SetSelection(TAB_BROADCAST); }, ID_TAB_BROADCAST);
     Bind(wxEVT_MENU, [this](wxCommandEvent&) { tabs_->SetSelection(TAB_SESSION); }, ID_TAB_SESSION);
@@ -422,7 +432,7 @@ void MainFrame::buildMenus()
         e.Check(std::find(shown.begin(), shown.end(), c) != shown.end());
         e.Enable(c != broadcast::Column::Call);
     }, StationList::ID_COLUMN_FIRST, StationList::ID_COLUMN_FIRST + broadcast::COLUMN_COUNT - 1);
-    Bind(wxEVT_UPDATE_UI, [this](wxUpdateUIEvent& e) { e.Enable(!stationList_->selected().empty()); },
+    Bind(wxEVT_UPDATE_UI, [this](wxUpdateUIEvent& e) { e.Enable(!pickedCall().empty()); },
          ID_MESSAGE_STATION);
     Bind(wxEVT_UPDATE_UI, [this](wxUpdateUIEvent& e) { e.Enable(!prefs_.callsign.empty()); }, ID_CHECK_IN);
     Bind(wxEVT_MENU, [this](wxCommandEvent&) {
@@ -459,7 +469,16 @@ void MainFrame::buildLayout()
                                   wxSP_LIVE_UPDATE | wxSP_3DSASH | wxSP_NO_XP_THEME);
     outer_->SetMinimumPaneSize(MIN_PANE);
     outer_->SetSashGravity(0.0);
-    stationList_ = new StationList(outer_, stations_);
+    // The station list over Recent work, which keeps its height as the
+    // window grows.
+    left_ = new wxSplitterWindow(outer_, wxID_ANY, wxDefaultPosition, wxDefaultSize,
+                                 wxSP_LIVE_UPDATE | wxSP_3DSASH | wxSP_NO_XP_THEME);
+    left_->SetMinimumPaneSize(MIN_PANE);
+    left_->SetSashGravity(1.0);
+    stationList_ = new StationList(left_, stations_);
+    recent_ = new RecentWorkPane(left_);
+    recent_->setOrder(recentOrder_);
+    left_->SplitHorizontally(stationList_, recent_, -recentHeight_);
 
     inner_ = new wxSplitterWindow(outer_, wxID_ANY, wxDefaultPosition, wxDefaultSize,
                                   wxSP_LIVE_UPDATE | wxSP_3DSASH | wxSP_NO_XP_THEME);
@@ -486,7 +505,7 @@ void MainFrame::buildLayout()
     tabToggle_->Hide();
 
     globus_ = new GlobusPanel(inner_);
-    outer_->SplitVertically(stationList_, inner_, globusOn_ ? listWidth_ : tableWidth_);
+    outer_->SplitVertically(left_, inner_, globusOn_ ? listWidth_ : tableWidth_);
     if (globusOn_)
         inner_->SplitVertically(middle_, globus_, -globusWidth_);
     else
@@ -556,7 +575,10 @@ void MainFrame::buildLayout()
     });
 
     // The station list.
-    stationList_->onSelect([this](const std::string& call) { stationPicked(call); });
+    stationList_->onSelect([this](const std::string& call) {
+        if (!call.empty()) recent_->clearSelection();
+        stationPicked(call);
+    });
     stationList_->onActivate([this](const std::string& call) {
         tabs_->SetSelection(TAB_BROADCAST);
         broadcast_->address(call);
@@ -564,6 +586,23 @@ void MainFrame::buildLayout()
     stationList_->onMenu([this](const std::string& call) { stationMenu(call); });
     stationList_->bells([this](const std::string& call) { return watch_.belled(call); },
                         [this](const std::string& call) { return watch_.bellTip(call); });
+
+    // Recent work: as the station list, and its order kept.
+    recent_->onSelect([this](const std::string& call) {
+        if (!call.empty()) stationList_->clearSelection();
+        stationPicked(call);
+    });
+    recent_->onActivate([this](const std::string& call) {
+        tabs_->SetSelection(TAB_BROADCAST);
+        broadcast_->address(call);
+    });
+    recent_->onMenu([this](const std::string& call) { stationMenu(call); });
+    recent_->onOrder([this](radio::WorkOrder order) {
+        recentOrder_ = order;
+        saveInt(keys::RECENT_ORDER, (int)order);
+        refreshRecent(true);
+    });
+    recent_->bells([this](const std::string& call) { return watch_.belled(call); });
 
     // The Broadcast tab.
     broadcast_->onSend([this](const std::string& typed) { return sendTyped(typed); });
@@ -772,6 +811,7 @@ void MainFrame::onHostEvents(const std::vector<Event>& events)
             watch_.onRecord(r, now);
             seals_.onRecord(r, now);
             broadcastFiles_.onRecord(r, now);
+            if (addressedToUs(r)) logWorked(r.header.callsign, now);
         }
         // Lines rebuilt from parity go where a line heard goes.
         for (std::vector<protocol::Record> rebuilt = seals_.takeRebuilt(); !rebuilt.empty();
@@ -783,6 +823,7 @@ void MainFrame::onHostEvents(const std::vector<Event>& events)
                 stations_.onRecord(r, now);
                 seals_.onRecord(r, now);
                 broadcastFiles_.onRecord(r, now);
+                if (addressedToUs(r)) logWorked(r.header.callsign, now);
             }
         }
     }
@@ -828,7 +869,8 @@ void MainFrame::onClock()
     showConnection();
     showStatus();
     stationList_->refresh(HostConnection::nowMs());
-    if (!stationList_->selected().empty()) stationPicked(stationList_->selected());
+    refreshRecent();
+    if (!pickedCall().empty()) stationPicked(pickedCall());
 }
 
 void MainFrame::showConnection()
@@ -932,23 +974,34 @@ void MainFrame::refreshStations()
         if (!s.locator.empty()) dots.push_back({s.locator, true});
     }
     globus_->setStations(dots);
-    stationPicked(stationList_->selected());
+    stationPicked(pickedCall());
 }
 
 void MainFrame::stationPicked(const std::string& call)
 {
-    const broadcast::Station* s = call.empty() ? nullptr : stations_.find(call);
-    if (s == nullptr)
+    if (call.empty())
     {
         globus_->setStation("", "");
         globus_->setPathStrip(nullptr, 0);
         return;
     }
     uint64_t now = HostConnection::nowMs();
-    std::string details = stations_.status(*s, now).word + " \xc2\xb7 heard " + broadcast::heardAgo(s->lastHeardMs, now);
-    if (!s->software.empty()) details += "\n" + s->software;
+    const radio::PathStrip& strip = stripFor(call, now);
+    // A station from Recent work may not have been heard this run: its
+    // strip and when it was last heard, with no square on the globe.
+    const broadcast::Station* s = stations_.find(call);
+    std::string details;
+    if (s != nullptr)
+    {
+        details = stations_.status(*s, now).word + " \xc2\xb7 heard " + broadcast::heardAgo(s->lastHeardMs, now);
+        if (!s->software.empty()) details += "\n" + s->software;
+    }
+    else
+    {
+        details = strip.lastMs != 0 ? "Not heard this run \xc2\xb7 last heard " + broadcast::heardAgo(strip.lastMs, now)
+                                    : "Not heard in the last " + std::to_string(strip.days) + " days";
+    }
     // The band it is heard on most, in words, over its strip.
-    const radio::PathStrip& strip = stripFor(s->call, now);
     const radio::BandRow* most = nullptr;
     for (const radio::BandRow& row : strip.bands)
     {
@@ -960,8 +1013,35 @@ void MainFrame::stationPicked(const std::string& call)
                    + (most->days == 1 ? " day" : " days");
         if (most->medianDb) details += ", median " + gearbox::formatDb(*most->medianDb);
     }
-    globus_->setStation(s->call, s->locator, true, details);
+    globus_->setStation(call, s != nullptr ? s->locator : std::string(), s != nullptr, details);
     globus_->setPathStrip(&strip, now);
+}
+
+std::string MainFrame::pickedCall() const
+{
+    std::string call = stationList_->selected();
+    return call.empty() ? recent_->selected() : call;
+}
+
+void MainFrame::refreshRecent(bool force)
+{
+    uint64_t now = HostConnection::nowMs();
+    std::string band;
+    if (std::optional<uint64_t> hz = rig_ ? rig_->dialHz() : std::nullopt) band = radio::bandOf(*hz);
+    bool fresh = pathLog_.version() != recentVersion_ && now >= recentMs_ + 5000;
+    if (force || fresh || band != recentBand_ || now >= recentMs_ + 30 * 1000)
+    {
+        recent_->setWork(radio::recentWork(pathLog_.entries(), now, radio::PathLog::KEEP_DAYS, band, recentOrder_),
+                         now);
+        recentVersion_ = pathLog_.version();
+        recentMs_ = now;
+        recentBand_ = band;
+    }
+    else
+    {
+        // The bells may have changed.
+        recent_->redraw();
+    }
 }
 
 const radio::PathStrip& MainFrame::stripFor(const std::string& call, uint64_t nowMs)
@@ -1105,7 +1185,7 @@ bool MainFrame::canCall() const
 
 void MainFrame::callPrompt()
 {
-    std::string call = stationList_->selected();
+    std::string call = pickedCall();
     if (call.empty() || (session_.active() && call == session_.peer()))
     {
         wxTextEntryDialog ask(this, "The callsign of the station to call:", "Call a station");
@@ -1275,6 +1355,7 @@ void MainFrame::onSessionEvents()
                 // hears we're QRL (once the session goes idle).
                 stations_.setPartner(e.peer, true, now);
                 chat_.announce(protocol::Status::State::Qrl, e.peer, broadcastMode(), now);
+                logWorked(e.peer, now);
                 sessionUnread_ = 0;
                 tabs_->SetSelection(TAB_SESSION);
                 if (e.incoming && !IsActive()) RequestUserAttention(wxUSER_ATTENTION_INFO);
@@ -1432,7 +1513,7 @@ void MainFrame::sendFilePrompt(const std::string& call)
 {
     using Phase = session::SessionChat::Phase;
     std::string them = protocol::normalCallsign(call);
-    if (them.empty()) them = session_.active() ? session_.peer() : stationList_->selected();
+    if (them.empty()) them = session_.active() ? session_.peer() : pickedCall();
     if (them.empty())
     {
         wxTextEntryDialog ask(this, "The callsign of the station to send files to:", "Send a file");
@@ -1699,6 +1780,10 @@ bool MainFrame::sendTyped(const std::string& typed)
     }
     std::vector<uint64_t> ids = chat_.send(typed, broadcastMode(), HostConnection::nowMs());
     if (ids.empty()) return false;
+    // A message to one station is a contact, for Recent work.
+    std::string to, rest;
+    if (broadcast::BroadcastChat::addressee(typed, to, rest))
+        logWorked(protocol::normalCallsign(to), HostConnection::nowMs());
     saveNewestItem(chat_.settings().callsign, chat_.newestItem());
     host_->flush();
     refreshMessages();
@@ -2205,6 +2290,7 @@ void MainFrame::rememberDividers()
             tableWidth_ = left;
     }
     if (inner_->IsSplit()) globusWidth_ = std::max(MIN_PANE, inner_->GetClientSize().x - inner_->GetSashPosition());
+    if (left_->IsSplit()) recentHeight_ = std::max(MIN_PANE, left_->GetClientSize().y - left_->GetSashPosition());
 }
 
 void MainFrame::setGlobus(bool on)
@@ -2336,6 +2422,30 @@ void MainFrame::logPath(const std::string& call, std::optional<double> snr, bool
     }
     e.gear = broadcastMode();
     e.session = session;
+    pathLog_.add(e);
+    if (!pathLog_.problem().empty()) note_ = pathLog_.problem();
+}
+
+bool MainFrame::addressedToUs(const protocol::Record& record) const
+{
+    const protocol::Text* text = record.as<protocol::Text>();
+    return text != nullptr && !text->to.empty() && !prefs_.callsign.empty()
+           && protocol::normalCallsign(text->to) == protocol::normalCallsign(prefs_.callsign);
+}
+
+void MainFrame::logWorked(const std::string& call, uint64_t nowMs)
+{
+    if (call.empty() || call == protocol::normalCallsign(prefs_.callsign)) return;
+    radio::PathEntry e;
+    e.atMs = nowMs;
+    e.call = call;
+    if (std::optional<uint64_t> hz = rig_->dialHz())
+    {
+        e.dialHz = *hz;
+        e.band = radio::bandOf(*hz);
+    }
+    e.gear = broadcastMode();
+    e.worked = true;
     pathLog_.add(e);
     if (!pathLog_.problem().empty()) note_ = pathLog_.problem();
 }

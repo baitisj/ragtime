@@ -48,6 +48,7 @@ add_library(ragtime_core STATIC
     src/radio/Bands.cpp
     src/radio/DialReader.cpp
     src/radio/PathLog.cpp
+    src/radio/RecentWork.cpp
     # The flight recorder: the host link on disk, for reports and --replay.
     src/link/FlightRecorder.cpp
 )
