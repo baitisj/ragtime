@@ -250,6 +250,14 @@ public:
     // one, the far end's stream is still read, and a farewell found there
     // turns "Link lost" into "Session ended by W1AW".
     static constexpr uint64_t AFTERGLOW_MS = 1000;
+    // data2g-host hangs up a session with no data either way for 5 minutes
+    // (Data2G's IDLE_CLOSE_S, docs/DATA2G.md "Sessions"). A session that
+    // ends after about that long without data is taken as that, not as a
+    // lost link: from 5 s short of it (the far end's host may count from a
+    // little earlier) to 30 s past it (the hosts' goodbyes).
+    static constexpr uint64_t HOST_IDLE_CLOSE_MS = 300 * 1000;
+    static constexpr uint64_t HOST_IDLE_EARLY_MS = 5 * 1000;
+    static constexpr uint64_t HOST_IDLE_LATE_MS = 30 * 1000;
     // Messages kept in the tab; the oldest go first.
     static constexpr size_t MAX_MESSAGES = 2000;
     // The longest message taken at once, in bytes.

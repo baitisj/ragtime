@@ -460,6 +460,24 @@ void testTheFarEndLeavesOrIsLost()
     CHECK(lost.chat.ending() == Ending::LinkLost);
     CHECK_EQ(lost.chat.strip(lost.now).text, std::string("Link lost at 00:03 after 3 min without contact"));
 
+    // Five minutes with nothing either way: data2g-host hangs up.
+    Rig idle;
+    Far far5("W1AW");
+    connect(idle, far5);
+    idle.advance(SessionChat::HOST_IDLE_CLOSE_MS + 4000);
+    idle.say("DISCONNECTED\r");
+    CHECK(idle.chat.ending() == Ending::LinkLost);
+    CHECK_EQ(idle.chat.strip(idle.now).text,
+             std::string("data2g-host closed the quiet session with W1AW at 00:05: it hangs up after 5 minutes "
+                         "with nothing sent either way"));
+    // Later than that, it was the link.
+    Rig gone;
+    Far far6("W1AW");
+    connect(gone, far6);
+    gone.advance(SessionChat::HOST_IDLE_CLOSE_MS + SessionChat::HOST_IDLE_LATE_MS + 60000);
+    gone.say("DISCONNECTED\r");
+    CHECK_EQ(gone.chat.strip(gone.now).text, std::string("Link lost at 00:06 after 6 min without contact"));
+
     // The next session starts clean, though the last one's stream ended
     // mid-record.
     std::vector<uint8_t> half = far2.text("this record breaks off", lost.now);
