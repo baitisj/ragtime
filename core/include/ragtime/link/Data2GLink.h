@@ -121,6 +121,7 @@ struct CommandEvent
         Disconnected,
         Buffer,         // count: bytes still to send in the session
         Cqframe,
+        Clean,          // clean: a CLEANTXBUFFER answer, or its SETTLED report
     } type = Type::Other;
 
     bool on = false;
@@ -134,6 +135,28 @@ struct CommandEvent
     // energy reading (once they know the noise floor); older hosts send
     // neither, and a HEARD without one still parses.
     std::optional<double> snr;
+
+    // CLEANTXBUFFER (Data2G PR #118; with DATA2G ON, host byte offsets
+    // since CONNECTED, ranges [from, to)):
+    // - Ok: drop from, drop to, limbo from, limbo to: the bytes dropped,
+    //   and those on air not yet acknowledged.
+    // - Late: nothing dropped, the offset asked for is on air already.
+    // - Empty (BUFFEREMPTY): nothing queued. Failed: no session.
+    // - Settled: from, split, to: the limbo settled, delivered before split,
+    //   dropped from it; unknown when the session ended first.
+    struct Clean
+    {
+        enum class Result
+        {
+            Ok,
+            Late,
+            Empty,
+            Failed,
+            Settled,
+        } result = Result::Ok;
+        std::vector<uint64_t> offsets;
+        bool unknown = false;
+    } clean;
 };
 
 CommandEvent parseCommandLine(const std::string& line);

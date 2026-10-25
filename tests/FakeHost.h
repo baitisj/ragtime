@@ -34,6 +34,12 @@
 //   "SN <snr>" for the partner's last burst (WRONG before one), as
 //   data2g-host does since Data2G PR #98; otherwise neither, and SN is
 //   WRONG. The SNR is the sender's setSignalDb, give or take its jitter.
+// - DATA2G ON: OK, and then CLEANTXBUFFER n drops every session byte not
+//   yet carried (none is ever on air, so the limbo is empty): CLEANTXBUFFER
+//   OK with host byte offsets since CONNECTED, as data2g-host does since
+//   Data2G PR #118. BUFFEREMPTY with nothing waiting, FAILED outside a
+//   session. With setCuts(false), a host from before it: DATA2G and
+//   CLEANTXBUFFER n are WRONG.
 #ifndef RAGTIME_TESTS_FAKE_HOST_H
 #define RAGTIME_TESTS_FAKE_HOST_H
 
@@ -89,6 +95,9 @@ public:
     void setSessionRate(int bytesPerSecond) { sessionRate_ = bytesPerSecond; }
     // Report SNRs, as data2g-host since Data2G PR #98 (off: as before it).
     void setReportsSnr(bool on) { reportsSnr_ = on; }
+    void setCuts(bool on) { cuts_ = on; }
+    // Session bytes cuts have dropped.
+    size_t cutBytes() const { return cutBytes_; }
     // How strong the other hosts hear this one's bursts, dB, each burst
     // within +/- jitterDb of it.
     void setSignalDb(double dB, double jitterDb = 0.0)
@@ -202,6 +211,11 @@ private:
     bool disconnectPending_ = false;
     long long lastSessionMs_ = 0;   // bytes last read or carried
     int idleBroadcastMs_ = 0;
+
+    bool cuts_ = true;
+    bool data2g_ = false;       // DATA2G ON
+    uint64_t sessionRead_ = 0;  // host offsets: session bytes read since CONNECTED
+    size_t cutBytes_ = 0;
 
     bool reportsSnr_ = false;
     double signalDb_ = 0.0;

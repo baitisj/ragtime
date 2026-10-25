@@ -66,7 +66,7 @@ struct Rig
     explicit Rig(uint64_t nowMs = T0) : link({"AG7EW", true, false}), chat(link), now(nowMs)
     {
         link.commandUp(now);
-        say("OK\rOK\rOK\rOK\rBCAST PORT 2\rOK\r");
+        say("OK\rOK\rWRONG\rOK\rOK\rBCAST PORT 2\rOK\r");
         link.takeCommandOutput();
         SessionChat::Settings s;
         s.callsign = "ag7ew";
@@ -644,7 +644,7 @@ void testTheHostLinkSide()
     // A CONNECT the host answers WRONG ends the call.
     HostLink link({"AG7EW", true, false});
     link.commandUp(0);
-    std::string open = "OK\rOK\rOK\rOK\rBCAST PORT 2\rOK\r";
+    std::string open = "OK\rOK\rWRONG\rOK\rOK\rBCAST PORT 2\rOK\r";
     link.commandBytes(open.data(), open.size(), 0);
     link.takeEvents();
     CHECK(link.call("W1AW", 10));
@@ -666,7 +666,7 @@ void testQrlAndQrv()
 {
     HostLink link({"AG7EW", true, false});
     link.commandUp(0);
-    std::string open = "OK\rOK\rOK\rOK\rBCAST PORT 2\rOK\r";
+    std::string open = "OK\rOK\rWRONG\rOK\rOK\rBCAST PORT 2\rOK\r";
     link.commandBytes(open.data(), open.size(), 0);
     link.takeKissOutput();
     broadcast::BroadcastChat chat(link);
@@ -867,6 +867,19 @@ void testTheLengths()
     CHECK_EQ(session::clockTime(T0, -7 * 3600), std::string("17:00"));
 }
 
+void testTheSessionModeCarriesOver()
+{
+    // The host reports a mode only when it changes: a session that goes on
+    // in the mode of the burst before it shows that mode.
+    Rig rig;
+    rig.say("PTT ON\rMODE qpsk-r1/3\rPTT OFF\r");
+    CHECK(rig.chat.call("W1AW", rig.now));
+    rig.say("OK\rCONNECTED AG7EW W1AW 2300\r");
+    CHECK_EQ(rig.chat.mode(), std::string("qpsk-r1/3"));
+    rig.say("PTT ON\rMODE w48-16qam-r1/2\r");
+    CHECK_EQ(rig.chat.mode(), std::string("w48-16qam-r1/2"));
+}
+
 } // namespace
 
 int main()
@@ -886,5 +899,6 @@ int main()
     testTheSessionPartnerOnTheStationList();
     testTheLengths();
     testTheLogCarriesOn();
+    testTheSessionModeCarriesOver();
     return ragtime_test::finish();
 }

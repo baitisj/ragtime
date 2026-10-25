@@ -46,6 +46,17 @@ bool toInt(const std::string& text, int& out)
     return true;
 }
 
+bool toOffset(const std::string& text, uint64_t& out)
+{
+    if (text.empty() || text.size() > 18) return false;
+    for (char c : text)
+    {
+        if (c < '0' || c > '9') return false;
+    }
+    out = std::strtoull(text.c_str(), nullptr, 10);
+    return true;
+}
+
 bool toDouble(const std::string& text, double& out)
 {
     if (text.empty()) return false;
@@ -291,6 +302,40 @@ CommandEvent parseCommandLine(const std::string& line)
     else if (verb == "CQFRAME")
     {
         event.type = CommandEvent::Type::Cqframe;
+    }
+    else if (verb == "CLEANTXBUFFER" && w.size() >= 2)
+    {
+        using Result = CommandEvent::Clean::Result;
+        CommandEvent::Clean& c = event.clean;
+        size_t want = 0;
+        if (arg1 == "OK")
+        {
+            c.result = Result::Ok;
+            want = 4;
+        }
+        else if (arg1 == "SETTLED")
+        {
+            c.result = Result::Settled;
+            want = 3;
+        }
+        else if (arg1 == "LATE" || arg1 == "BUFFEREMPTY" || arg1 == "FAILED")
+        {
+            c.result = arg1 == "LATE" ? Result::Late : arg1 == "FAILED" ? Result::Failed : Result::Empty;
+        }
+        else
+        {
+            return event;
+        }
+        // A bare OK is a host without DATA2G ON: no offsets.
+        for (size_t i = 2; i < w.size() && c.offsets.size() < want; i++)
+        {
+            uint64_t value = 0;
+            if (!toOffset(w[i], value)) break;
+            c.offsets.push_back(value);
+        }
+        if (c.offsets.size() != want && !(c.result == Result::Ok && w.size() == 2)) return event;
+        c.unknown = c.result == Result::Settled && w.size() > 5 && upper(w[5]) == "UNKNOWN";
+        event.type = CommandEvent::Type::Clean;
     }
     return event;
 }

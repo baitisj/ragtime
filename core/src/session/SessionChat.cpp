@@ -1,7 +1,9 @@
 #include "ragtime/session/SessionChat.h"
 
 #include <algorithm>
+#include <cstdint>
 #include <utility>
+#include <vector>
 
 #include "ragtime/broadcast/Stations.h"
 #include "ragtime/session/SessionLog.h"
@@ -69,6 +71,25 @@ void StreamAccount::buffer(int count, uint64_t nowMs)
         acked_ = std::max(acked_, read_ - (uint64_t)count);
     }
     while (!writes_.empty() && writes_.front().end <= acked_) writes_.pop_front();
+}
+
+void StreamAccount::dropped(uint64_t at, uint64_t bytes, uint64_t unread, uint64_t nowMs)
+{
+    // Never on air, so never acknowledged: at is past acked_.
+    at = std::max(at, acked_);
+    bytes = std::min(bytes, written_ - std::min(written_, at));
+    auto shift = [&](uint64_t x) { return x <= at ? x : at + (x > at + bytes ? x - at - bytes : 0); };
+    written_ -= bytes;
+    read_ = std::min(shift(read_), written_ - std::min(unread, written_));
+    count_ = (int)std::max<int64_t>(0, (int64_t)count_ - (int64_t)bytes);
+    // Bytes the host has yet to read are settled by counts, not by a
+    // BUFFER 0 that comes before it reads them: their writes start again.
+    uint64_t readTo = written_ - std::min(unread, written_);
+    for (Write& w : writes_)
+    {
+        w.end = shift(w.end);
+        if (w.end > readTo) w.atMs = std::max(w.atMs, nowMs);
+    }
 }
 
 void StreamAccount::reset()
@@ -163,28 +184,46 @@ bool SessionChat::leave(uint64_t nowMs)
 {
     if (phase_ == Phase::Calling) return leaveNow(nowMs);
     if (phase_ != Phase::Connected) return false;
-    phase_ = Phase::Leaving;
     sinceMs_ = nowMs;
     if (dataUp_)
     {
-        // The last word of whatever rides in the session, then the
-        // farewell: our QRV, so the far end knows we left on purpose.
-        std::vector<uint8_t> out;
-        if (traffic_ != nullptr) traffic_->leaving(peer_, numbering_, nowMs, out);
-        protocol::Status qrv;
-        qrv.state = protocol::Status::State::Qrv;
-        protocol::encodeRecord(numbering_.record(qrv, seconds(nowMs)), out);
-        write(out, nowMs);
-        farewellPending_ = true;
-        farewellEnd_ = account_.written() + out_.size();
-        farewellMs_ = nowMs;
+        // File bytes the host still holds needn't hold up the farewell: a
+        // cut drops them first.
+        bool cut = cutting_ != Cutting::None
+                   || (canCut() && traffic_ != nullptr && traffic_->busy(peer_) && account_.waiting() > 0);
+        phase_ = Phase::Leaving;
+        if (cut)
+        {
+            leaveAfterCut_ = true;
+            startCut(nowMs);
+        }
+        else
+        {
+            writeFarewell(nowMs);
+        }
     }
     else
     {
+        phase_ = Phase::Leaving;
         link_.leave(nowMs);
     }
     changed();
     return true;
+}
+
+// The last word of whatever rides in the session, then the farewell: our
+// QRV, so the far end knows we left on purpose.
+void SessionChat::writeFarewell(uint64_t nowMs)
+{
+    std::vector<uint8_t> out;
+    if (traffic_ != nullptr) traffic_->leaving(peer_, numbering_, nowMs, out);
+    protocol::Status qrv;
+    qrv.state = protocol::Status::State::Qrv;
+    protocol::encodeRecord(numbering_.record(qrv, seconds(nowMs)), out);
+    write(out, nowMs);
+    farewellPending_ = true;
+    farewellEnd_ = account_.written() + out_.size();
+    farewellMs_ = nowMs;
 }
 
 bool SessionChat::leaveNow(uint64_t nowMs)
@@ -223,7 +262,12 @@ uint64_t SessionChat::send(const std::string& typed, uint64_t nowMs)
     messages_.push_back(std::move(m));
     uint64_t id = messages_.back().id;
     trim();
-    if (!paused_) writeQueued(nowMs);
+    // More than a little of a file waiting at the host: a cut lets the
+    // message in ahead of it, and the file carries on behind.
+    if (!paused_ && cutting_ == Cutting::None && canCut() && traffic_ != nullptr && traffic_->busy(peer_)
+        && account_.waiting() > CUT_FOR_CHAT_BYTES)
+        startCut(nowMs);
+    if (!paused_ && cutting_ == Cutting::None) writeQueued(nowMs);
     changed();
     return id;
 }
@@ -243,7 +287,7 @@ uint64_t SessionChat::resend(uint64_t id, uint64_t nowMs)
 void SessionChat::setPaused(bool paused, uint64_t nowMs)
 {
     paused_ = paused;
-    if (!paused_ && phase_ == Phase::Connected) writeQueued(nowMs);
+    if (!paused_ && phase_ == Phase::Connected && cutting_ == Cutting::None) writeQueued(nowMs);
     changed();
 }
 
@@ -251,9 +295,11 @@ void SessionChat::setPaused(bool paused, uint64_t nowMs)
 // The ports
 //-------------------------------------------------------------------------
 
-void SessionChat::write(const std::vector<uint8_t>& bytes, uint64_t nowMs)
+void SessionChat::write(const std::vector<uint8_t>& bytes, uint64_t nowMs, uint64_t message)
 {
     (void)nowMs;
+    if (bytes.empty()) return;
+    if (message != 0) outMessages_.push_back({out_.size(), message});
     out_.insert(out_.end(), bytes.begin(), bytes.end());
 }
 
@@ -262,7 +308,7 @@ void SessionChat::writeQueued(uint64_t nowMs)
     if (!dataUp_) return;
     for (auto& q : queued_)
     {
-        write(q.second, nowMs);
+        write(q.second, nowMs, q.first);
         for (Message& m : messages_)
         {
             if (m.id != q.first) continue;
@@ -277,17 +323,222 @@ void SessionChat::writeQueued(uint64_t nowMs)
 
 std::vector<uint8_t> SessionChat::takeDataOutput(uint64_t nowMs)
 {
+    // Nothing goes while a cut is made: what follows it depends on where
+    // it falls.
+    stepCut(nowMs);
+    if (cutting_ != Cutting::None) return {};
     if (phase_ == Phase::Connected && dataUp_ && traffic_ != nullptr)
     {
+        if (canCut() && traffic_->wantsCut(peer_))
+        {
+            startCut(nowMs);
+            if (cutting_ != Cutting::None) return {};
+        }
         std::vector<uint8_t> more;
         traffic_->write(peer_, numbering_, account_.written() + out_.size(), nowMs, more);
         write(more, nowMs);
     }
     std::vector<uint8_t> out;
     out.swap(out_);
-    if (!dataUp_) return {};
+    std::vector<std::pair<size_t, uint64_t>> messages;
+    messages.swap(outMessages_);
+    if (!dataUp_ || out.empty()) return {};
+
+    // Into the log, record by record, each message's where it now ends.
+    size_t at = 0;
+    for (size_t i = 0; i <= messages.size(); i++)
+    {
+        size_t next = i < messages.size() ? messages[i].first : out.size();
+        if (next > at) sent_.wrote(out.data() + at, next - at);
+        if (i == messages.size()) break;
+        size_t to = i + 1 < messages.size() ? messages[i + 1].first : out.size();
+        uint64_t start = sent_.end();
+        sent_.wrote(out.data() + next, to - next, messages[i].second);
+        for (const StreamLog::Span& span : sent_.spans())
+        {
+            if (span.start != start) continue;
+            for (Message& m : messages_)
+            {
+                if (m.id == messages[i].second) m.streamEnd = span.end;
+            }
+        }
+        at = to;
+    }
     account_.wrote(out.size(), nowMs);
+    hostWritten_ += out.size();
+    lastWriteMs_ = nowMs;
     return out;
+}
+
+//-------------------------------------------------------------------------
+// Cuts (docs/PROTOCOL.md, "Cuts")
+//-------------------------------------------------------------------------
+
+bool SessionChat::canCut() const
+{
+    bool up = phase_ == Phase::Connected || (phase_ == Phase::Leaving && leaveAfterCut_);
+    return up && dataUp_ && connectedMs_ != 0 && link_.canCut();
+}
+
+void SessionChat::startCut(uint64_t nowMs)
+{
+    if (cutting_ != Cutting::None) return;
+    cutting_ = Cutting::Quiet;
+    cutRanges_.clear();
+    cutBase_ = hostDropped_;
+    limbo_ = false;
+    cutTries_ = 0;
+    changed();
+    stepCut(nowMs);
+}
+
+void SessionChat::stepCut(uint64_t nowMs)
+{
+    switch (cutting_)
+    {
+        case Cutting::None:
+        case Cutting::Settling:
+            // The limbo settles with the far end's next acknowledgement, or
+            // the session ends.
+            return;
+        case Cutting::Quiet:
+            // The host reads its data port as bytes come: a moment after
+            // our last write it has read all of it, so all of it is cut.
+            if (!canCut())
+            {
+                mend(nowMs);
+                return;
+            }
+            if (hostWritten_ != 0 && nowMs < lastWriteMs_ + CUT_QUIET_MS) return;
+            if (!link_.cleanTxBuffer(hostWritten_, nowMs))
+            {
+                mend(nowMs);
+                return;
+            }
+            cutting_ = Cutting::Asked;
+            cutAskedMs_ = nowMs;
+            cutTries_++;
+            return;
+        case Cutting::Asked:
+            if (nowMs >= cutAskedMs_ + CUT_ANSWER_MS) mend(nowMs);
+            return;
+    }
+}
+
+void SessionChat::dropCut(uint64_t from, uint64_t to, uint64_t unread, uint64_t nowMs)
+{
+    if (to <= from) return;
+    // Where it sits in our stream: less what was cut before it.
+    uint64_t at = from - cutBase_;
+    for (const auto& r : cutRanges_)
+    {
+        if (r.second <= from) at -= r.second - r.first;
+    }
+    cutRanges_.push_back({from, to});
+    account_.dropped(at, to - from, unread, nowMs);
+    hostDropped_ += to - from;
+    cutBytes_ += to - from;
+}
+
+void SessionChat::onClean(const link::CommandEvent::Clean& clean, uint64_t nowMs)
+{
+    using Result = link::CommandEvent::Clean::Result;
+    if (clean.result == Result::Settled)
+    {
+        // Ended first (UNKNOWN): the session is going, and the cut with it.
+        if (clean.unknown || clean.offsets.size() != 3 || cutting_ == Cutting::None) return;
+        // Delivered before split, dropped from it.
+        dropCut(clean.offsets[1], clean.offsets[2], 0, nowMs);
+        limbo_ = false;
+        if (cutting_ == Cutting::Settling) mend(nowMs);
+        return;
+    }
+    if (cutting_ != Cutting::Asked) return;
+    if (clean.result == Result::Ok && clean.offsets.size() == 4)
+    {
+        // Past drop to, the host had yet to read what we wrote.
+        uint64_t unread = hostWritten_ > clean.offsets[1] ? hostWritten_ - clean.offsets[1] : 0;
+        dropCut(clean.offsets[0], clean.offsets[1], unread, nowMs);
+        if (clean.offsets[3] > clean.offsets[2]) limbo_ = true;
+        // Bytes still on their way to the host were kept, and follow the
+        // cut: cut again.
+        if (clean.offsets[1] < hostWritten_ && cutTries_ < 3 && link_.cleanTxBuffer(hostWritten_, nowMs))
+        {
+            cutAskedMs_ = nowMs;
+            cutTries_++;
+            return;
+        }
+    }
+    if (limbo_)
+    {
+        cutting_ = Cutting::Settling;
+        return;
+    }
+    mend(nowMs);
+}
+
+// The cut is made: what the far end has is our stream up to it. The record
+// it fell in is finished, then come the messages waiting, the records cut
+// that still matter (not file bytes: those go again from the file), and
+// what was written meanwhile.
+void SessionChat::mend(uint64_t nowMs)
+{
+    cutting_ = Cutting::None;
+    std::vector<uint8_t> held;
+    held.swap(out_);
+    std::vector<std::pair<size_t, uint64_t>> heldMessages;
+    heldMessages.swap(outMessages_);
+    StreamLog::Cut cut;
+    if (!cutRanges_.empty())
+    {
+        std::sort(cutRanges_.begin(), cutRanges_.end());
+        uint64_t from = cutRanges_.front().first, to = from;
+        bool joined = true;
+        for (const auto& r : cutRanges_)
+        {
+            if (r.first > to) joined = false;
+            to = std::max(to, r.second);
+        }
+        // Only a cut that takes the end of the stream can be mended.
+        uint64_t at = from - cutBase_;
+        if (!joined || to != hostWritten_ || account_.written() != at || !sent_.cut(at, cut))
+        {
+            cutRanges_.clear();
+            leaveAfterCut_ = false;
+            leaveNow(nowMs);
+            return;
+        }
+        cuts_++;
+        write(cut.tail, nowMs);
+        if (traffic_ != nullptr) traffic_->cut(peer_, at);
+    }
+    cutRanges_.clear();
+    if (!paused_) writeQueued(nowMs);
+    for (size_t i = 0; i < cut.lost.size(); i++)
+    {
+        if (cut.lost[i].type == (uint8_t)protocol::RecordType::FileData) continue;
+        write(cut.lostBytes[i], nowMs, cut.lost[i].message);
+    }
+    for (auto& m : heldMessages) outMessages_.push_back({m.first + out_.size(), m.second});
+    out_.insert(out_.end(), held.begin(), held.end());
+    if (leaveAfterCut_)
+    {
+        leaveAfterCut_ = false;
+        writeFarewell(nowMs);
+    }
+    changed();
+}
+
+void SessionChat::endCut()
+{
+    cutting_ = Cutting::None;
+    cutRanges_.clear();
+    limbo_ = false;
+    leaveAfterCut_ = false;
+    sent_.reset();
+    outMessages_.clear();
+    hostWritten_ = hostDropped_ = cutBase_ = 0;
+    lastWriteMs_ = 0;
 }
 
 std::vector<protocol::Record> SessionChat::dataBytes(const uint8_t* bytes, size_t length, uint64_t nowMs)
@@ -390,6 +641,7 @@ void SessionChat::settle()
             changed();
         }
     }
+    sent_.acknowledged(acked);
     if (traffic_ != nullptr && connectedMs_ != 0) traffic_->acknowledged(peer_, acked);
 }
 
@@ -479,6 +731,11 @@ void SessionChat::onEvent(const link::HostLink::Event& event, uint64_t nowMs)
             }
             pttOn_ = event.on;
             break;
+        case Type::Clean:
+            if ((phase_ == Phase::Connected || phase_ == Phase::Leaving) && connectedMs_ != 0)
+                onClean(event.clean, nowMs);
+            changed();
+            break;
         case Type::ModeUsed:
             // While a broadcast of ours is with the host, the mode may be its.
             if ((phase_ == Phase::Connected || phase_ == Phase::Leaving) && !link_.burstWithHost()
@@ -505,7 +762,9 @@ void SessionChat::begin(const std::string& peer, bool incoming, int bandwidth, u
     bandwidthHz_ = bandwidth;
     connectedMs_ = sinceMs_ = nowMs;
     lastHeardMs_ = waitingSinceMs_ = nowMs;
-    mode_.clear();
+    // The host reports a mode only when it changes: a session in the mode
+    // of the burst before it hears none.
+    mode_ = link_.lastMode();
     farewellHeard_ = farewellPending_ = false;
     greetedTold_ = false;
     if (!stopping) cancelling_ = gaveUp_ = false;
@@ -514,6 +773,9 @@ void SessionChat::begin(const std::string& peer, bool incoming, int bandwidth, u
     account_.reset();
     out_.clear();
     queued_.clear();
+    endCut();
+    cuts_ = 0;
+    cutBytes_ = 0;
 
     SessionChat::Event started;
     started.type = SessionChat::Event::Type::Started;
@@ -564,6 +826,7 @@ void SessionChat::finish(Ending ending, uint64_t nowMs)
     // after a moment for a farewell still on its way.
     early_.clear();
     out_.clear();
+    endCut();
     if (ending == Ending::LinkLost)
     {
         afterglowUntilMs_ = std::max<uint64_t>(nowMs + AFTERGLOW_MS, 1);
@@ -624,6 +887,7 @@ void SessionChat::dataPort(bool up, uint64_t nowMs)
     if (!up)
     {
         out_.clear();
+        outMessages_.clear();
         if (active())
         {
             dataLost_ = true;
@@ -652,6 +916,7 @@ void SessionChat::tick(uint64_t nowMs)
         link_.leaveNow(nowMs);
         changed();
     }
+    stepCut(nowMs);
     checkFarewell(nowMs);
 }
 

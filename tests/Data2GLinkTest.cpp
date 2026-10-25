@@ -118,6 +118,34 @@ void testCommandLines()
     CHECK_EQ(lines.size(), (size_t)2);
 }
 
+void testCleanTxBufferLines()
+{
+    // Data2G PR #118, with DATA2G ON.
+    using Type = CommandEvent::Type;
+    using Result = CommandEvent::Clean::Result;
+    CommandEvent e = parseCommandLine("CLEANTXBUFFER OK 1200 4096 980 1200");
+    CHECK(e.type == Type::Clean && e.clean.result == Result::Ok);
+    CHECK(e.clean.offsets == std::vector<uint64_t>({1200, 4096, 980, 1200}));
+    e = parseCommandLine("CLEANTXBUFFER SETTLED 980 1100 1200");
+    CHECK(e.type == Type::Clean && e.clean.result == Result::Settled && !e.clean.unknown);
+    CHECK(e.clean.offsets == std::vector<uint64_t>({980, 1100, 1200}));
+    e = parseCommandLine("CLEANTXBUFFER SETTLED 980 1100 1200 UNKNOWN");
+    CHECK(e.type == Type::Clean && e.clean.result == Result::Settled && e.clean.unknown);
+    CHECK(parseCommandLine("CLEANTXBUFFER LATE").clean.result == Result::Late);
+    CHECK(parseCommandLine("CLEANTXBUFFER BUFFEREMPTY").clean.result == Result::Empty);
+    // VARA's FAILED ends in a space.
+    e = parseCommandLine("CLEANTXBUFFER FAILED ");
+    CHECK(e.type == Type::Clean && e.clean.result == Result::Failed);
+    // VARA's bare OK, from a host without DATA2G ON: no offsets.
+    e = parseCommandLine("CLEANTXBUFFER OK");
+    CHECK(e.type == Type::Clean && e.clean.result == Result::Ok && e.clean.offsets.empty());
+    // Short or odd ones aren't taken.
+    CHECK(parseCommandLine("CLEANTXBUFFER OK 1 2 3").type == Type::Other);
+    CHECK(parseCommandLine("CLEANTXBUFFER SETTLED 1 x 3").type == Type::Other);
+    CHECK(parseCommandLine("CLEANTXBUFFER OK -1 2 3 4").type == Type::Other);
+    CHECK(parseCommandLine("CLEANTXBUFFER MAYBE").type == Type::Other);
+}
+
 void testCommandCallsign()
 {
     CHECK_EQ(commandCallsign("vk2abc/p"), std::string("VK2ABC/P"));
@@ -161,6 +189,7 @@ int main()
 {
     testKissPortsAndAckMode();
     testCommandLines();
+    testCleanTxBufferLines();
     testCommandCallsign();
     testModes();
     return ragtime_test::finish();

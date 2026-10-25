@@ -225,7 +225,11 @@ void FakeHost::serviceCommand()
 {
     bool had = command_.client >= 0;
     service(command_.listener, command_.client, command_.in);
-    if (had && command_.client < 0) lineIn_.clear();
+    if (had && command_.client < 0)
+    {
+        lineIn_.clear();
+        data2g_ = false; // the client that asked for it has gone
+    }
     for (uint8_t b : command_.in)
     {
         if (b == '\r' || b == '\n')
@@ -270,6 +274,39 @@ void FakeHost::onCommand(const std::string& line)
     else if (verb == "CHAT" || verb == "BW500" || verb == "BW2300")
     {
         reply("OK");
+    }
+    else if (verb == "DATA2G" && w.size() == 2 && cuts_)
+    {
+        data2g_ = w[1] == "ON";
+        reply("OK");
+    }
+    else if (verb == "CLEANTXBUFFER" && w.size() == 2 && data2g_)
+    {
+        uint64_t upto = std::strtoull(w[1].c_str(), nullptr, 10);
+        if (partner_ == nullptr)
+        {
+            reply("CLEANTXBUFFER FAILED ");
+        }
+        else if (waiting_ == 0)
+        {
+            reply("CLEANTXBUFFER BUFFEREMPTY");
+        }
+        else if (upto < sessionRead_)
+        {
+            // Only all of it, here.
+            reply("CLEANTXBUFFER LATE");
+        }
+        else
+        {
+            std::string from = std::to_string(sessionRead_ - waiting_);
+            cutBytes_ += waiting_;
+            crossing_.clear();
+            waiting_ = 0;
+            lastCrossingMs_ = 0;
+            reply("CLEANTXBUFFER OK " + from + " " + std::to_string(sessionRead_) + " " + from + " " + from);
+            reply("BUFFER 0");
+            if (disconnectPending_) disconnected();
+        }
     }
     else if (verb == "BCAST" && w.size() >= 5 && w[1] == "OPEN" && w[3] == "FROM")
     {
@@ -390,6 +427,7 @@ void FakeHost::connected(FakeHost& caller, FakeHost& called)
     {
         h->crossing_.clear();
         h->waiting_ = 0;
+        h->sessionRead_ = 0;
         h->disconnectPending_ = false;
         h->lastSessionMs_ = nowMs();
         h->partnerSnr_.reset();
@@ -447,6 +485,7 @@ void FakeHost::serviceData()
     bytes.swap(data_.in);
     if (partner_ == nullptr) return; // no session: nowhere for them to go
     waiting_ += bytes.size();
+    sessionRead_ += bytes.size();
     reply("BUFFER " + std::to_string(waiting_));
     lastSessionMs_ = nowMs();
     long long at = nowMs() + airtimeMs_;
