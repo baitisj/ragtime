@@ -85,7 +85,8 @@ with the code when the seal rules change.
   AppImage and the portable Windows zip (`packaging/`), the MinGW-w64
   cross build against a static wxWidgets (`cmake/Toolchain-mingw64.cmake`,
   `-DRAGTIME_BUILD_WX=ON`), and their CI jobs. 0.1.0-beta is the first
-  release. Stage 1 is done once Jeff has run the two-host bench on
+  release; 0.1.1-beta adds the session file cancel fix (#49) with the
+  same protocol. Stage 1 is done once Jeff has run the two-host bench on
   Hamlet.
 - Data2G PR #98 (merged 2026-10-23) gives SNRs: on `BCAST HEARD` and
   `MISSED`, and `SN` for the session partner. Ragtime shows them in the

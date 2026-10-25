@@ -7,7 +7,7 @@ Rodland, KC2G. Ragtime is a sibling of
 chirp-mode chat app, and is named for the same musical family and for the
 ragchew.
 
-Status: 0.1.0-beta, the first release. Ragtime connects to data2g-host,
+Status: 0.1.1-beta. Ragtime connects to data2g-host,
 chats on the D2G broadcast group. Current features include:
 - "Globus," which plots your friend's maidenhead coordinates
    on a globe,
