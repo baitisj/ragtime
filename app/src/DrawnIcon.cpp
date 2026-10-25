@@ -110,3 +110,22 @@ wxBitmapBundle themeIcon(bool dark, const wxColour& ink, int sizeDip)
         },
         sizeDip);
 }
+
+void drawCheckIcon(wxGraphicsContext& gc, double size, const wxColour& ink)
+{
+    // Drawn on a 24-unit grid: a short stroke down to the left, a long one
+    // up to the right.
+    const double u = size / 24.0;
+    gc.SetPen(gc.CreatePen(wxGraphicsPenInfo(ink, 3.0 * u).Cap(wxCAP_ROUND).Join(wxJOIN_ROUND)));
+    gc.SetBrush(*wxTRANSPARENT_BRUSH);
+    wxGraphicsPath check = gc.CreatePath();
+    check.MoveToPoint(4.5 * u, 12.5 * u);
+    check.AddLineToPoint(9.5 * u, 17.5 * u);
+    check.AddLineToPoint(19.5 * u, 6.5 * u);
+    gc.StrokePath(check);
+}
+
+wxBitmapBundle checkIcon(const wxColour& ink, int sizeDip)
+{
+    return drawnIcon([ink](wxGraphicsContext& gc, double size) { drawCheckIcon(gc, size, ink); }, sizeDip);
+}

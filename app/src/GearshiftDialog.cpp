@@ -22,6 +22,7 @@
 #include <wx/stattext.h>
 #include <wx/tglbtn.h>
 
+#include "DrawnIcon.h"
 #include "Html.h"
 #include "Thresholds.h"
 
@@ -524,12 +525,17 @@ GearshiftDialog::GearshiftDialog(wxWindow* parent, Gearshift& shift, std::functi
     load->SetToolTip("Data2G's data2g/codes_data/mode_thresholds.json, or the Submode Map's file");
     load->Bind(wxEVT_BUTTON, [this](wxCommandEvent&) { loadFile(); });
     foot->Add(load, 0, wxRIGHT, 6);
-    auto* close = new wxButton(this, wxID_CLOSE);
-    // Close, Escape and the title bar's X all end the dialog through the
+    // Done with a green check, not "X Close": every change has already
+    // gone to the gearshift, so there is nothing to save or cancel (Jeff,
+    // 2026-10-25: "X Close implies that you cancel something").
+    auto* done = new wxButton(this, wxID_OK, "Done");
+    done->SetBitmap(checkIcon(goodText()));
+    done->SetToolTip("Your choices are already in use; this just closes the gearshift");
+    // Done, Escape and the title bar's X all end the dialog through the
     // escape id. Binding the button to Close() as well would send the same
     // press round again, and the dialog would never end.
-    SetEscapeId(wxID_CLOSE);
-    foot->Add(close, 0);
+    SetEscapeId(wxID_OK);
+    foot->Add(done, 0);
     top->Add(foot, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 10);
 
     SetSizerAndFit(top);
