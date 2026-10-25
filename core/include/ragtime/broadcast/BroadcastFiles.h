@@ -7,14 +7,18 @@
 // gap between, so other stations and our own messages get a word in. The
 // announce goes again ahead of every ANNOUNCE_EVERY_PIECES pieces. Once
 // the last piece has gone it is sealed at once, and Seals answers repair
-// requests for it while the seal is open. Nothing acknowledges receipt:
+// requests for it while the seal is open, with parity pieces made from
+// the whole file as they are asked for. Nothing acknowledges receipt:
 // stations will not confirm.
 //
 // Theirs. Pieces are kept as they come, before their announce too. A file
 // announced is a card with Receive and Ignore, or is received at once
 // into the received folder when that is on. Its missing pieces are asked
-// for (through Seals) only once it is being received. With every piece
-// in, the whole file's digest is checked against the announce's; a match
+// for (through Seals) only once it is being received, as parity pieces
+// (docs/PROTOCOL.md, "Parity"): as many as it lacks, and more for the
+// share it expects to lose; any of them fill any gap, so once the pieces
+// and parity pieces held are as many as the file's pieces, the missing
+// ones are rebuilt. With every piece in, the whole file's digest is checked against the announce's; a match
 // is saved, a mismatch throws the pieces away and asks for them all again
 // once, then fails.
 //
@@ -221,7 +225,8 @@ public:
     bool streaming(uint32_t seq) const override;
     bool piece(uint32_t seq, uint16_t index, uint32_t time, protocol::Record& out) override;
     bool stopped(uint32_t seq) const override;
-    bool wanted(const std::string& call, uint32_t seq, std::vector<uint16_t>& missing) const override;
+    bool wanted(const std::string& call, uint32_t seq, uint32_t& need, uint32_t& want) const override;
+    void asked(const std::string& call, uint32_t seq, uint32_t want) override;
 
 private:
     struct Outgoing
@@ -229,6 +234,7 @@ private:
         BroadcastFile file;
         protocol::Record announce;
         std::vector<uint8_t> content;   // freed once it has ended
+        std::vector<std::vector<uint8_t>> slices;   // its pieces, made for parity when first asked for
         uint16_t pieceBytes = 0;
         uint16_t next = 0;              // the next piece of the first pass
         int lastBlock = -1;             // the last block of pieces an announce went ahead of
@@ -250,6 +256,15 @@ private:
         protocol::FileAnnounce announce;
         std::map<uint16_t, std::vector<uint8_t>> pieces;
         size_t bytes = 0;               // in pieces
+        // Parity pieces (index at or past the piece count) until there are
+        // enough to rebuild the pieces missing.
+        std::map<uint16_t, std::vector<uint8_t>> parity;
+        size_t parityBytes = 0;
+        // The share of what is sent that we lose: of the last round (pieces
+        // that came of those asked for), else unknown (below 0).
+        double loss = -1.0;
+        uint32_t askedWant = 0;         // parity pieces last asked for, by us or a request speaking for ours
+        uint32_t came = 0;              // pieces and parity pieces heard since
         int digestFailures = 0;
         bool chosenPath = false;        // the operator gave the path
         files::RateMeter rate;
@@ -271,6 +286,9 @@ private:
     void heardAnnounce(const protocol::Record& record, uint64_t nowMs);
     void heardPiece(const protocol::Record& record, uint64_t nowMs);
     void tryComplete(Incoming& in, uint64_t nowMs);
+    void tryRebuild(Incoming& in);
+    double lossOf(const Incoming& in) const;
+    void clearPieces(Incoming& in);
     bool save(Incoming& in, std::string& error);
     void finishIncoming(Incoming& in, BroadcastFile::State state, uint64_t nowMs, const std::string& error = {});
     void dropPart(Incoming& in);

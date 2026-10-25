@@ -286,12 +286,17 @@ void testEveryRecord()
         request.seal = 5;
         request.sealDigest = digestOf(std::vector<uint8_t>(1, 9));
         request.missingItems = {false, true, false, false, true, false, false, false, false, true};
-        request.files.push_back({42, {3, 4, 5, 9}});
-        request.files.push_back({44, {0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26}});
+        request.itemsWant = 5;
+        request.files.push_back({42, 4});
+        request.files.push_back({44, 1300});
         Record back = roundTrip(make(request, "W1AW", 12));
         const RepairRequest* r = back.as<RepairRequest>();
         CHECK(r != nullptr && r->to == "AG7EW" && r->seal == 5 && r->sealDigest == request.sealDigest &&
-              !r->wantSeal && !r->snr && r->missingItems == request.missingItems && r->files == request.files);
+              !r->wantSeal && !r->snr && r->missingItems == request.missingItems && r->itemsWant == 5 &&
+              r->files == request.files);
+        CHECK_EQ((int)back.type(), 0x43);
+        // to, seal, digest, flags, count, 2 bytes of bits, want, 5 bytes a file.
+        CHECK_EQ(encodeRecord(make(request, "W1AW", 12)).size(), (size_t)(13 + 4 + 2 + 12 + 1 + 1 + 2 + 1 + 10));
 
         // The asker's S/N rides in the flags byte, beside "send the seal
         // again", and the request is no longer for it.
@@ -303,7 +308,7 @@ void testEveryRecord()
         back = roundTrip(make(request, "W1AW", 12));
         r = back.as<RepairRequest>();
         CHECK(r != nullptr && r->wantSeal && r->snr && *r->snr == -3.0 && r->files == request.files);
-        // 0.1 reads only bit 0: the byte after the digest.
+        // Bit 0 is "send the seal again": the byte after the digest.
         size_t flags = 2 + 4 + 3 + 4 + 4 + 2 + 12;   // type, length, W1AW, seq, time, to AG7EW, seal, digest
         CHECK_EQ(withSnr[flags] & 0x01, 1);
         CHECK_EQ(withSnr[flags] >> 1, (int)repairSnrCode(-3.0));
@@ -345,42 +350,29 @@ void testEveryRecord()
         r = grown.as<RepairRefused>();
         CHECK(r != nullptr && r->seal == 12 && r->reason == 3 && r->files.empty());
     }
-}
-
-void testPieceLists()
-{
-    const std::vector<std::vector<uint16_t>> lists = {
-        {},
-        {7},
-        {0, 1, 2, 3, 4, 5, 6, 7, 8, 9},                         // one range
-        {0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26},    // a bitmap is shorter
-        {1000, 1001, 2000, 2001, 2002},
-        {65535},
-    };
-    for (const auto& list : lists)
     {
-        std::vector<uint8_t> out;
-        putPieceList(out, list);
-        Reader in(out.data(), out.data() + out.size());
-        std::vector<uint16_t> back;
-        CHECK(readPieceList(in, back));
-        CHECK(in.done());
-        CHECK(back == list);
+        ItemParity parity;
+        parity.seal = 7;
+        parity.items = {true, false, true, true, false, false, false, false, false, true};
+        parity.index = 3;
+        parity.bytes = {1, 2, 3, 4, 5, 6};
+        Record record = make(parity, "AG7EW", 46);
+        // seal, count, 2 bytes of bits, index, the symbol.
+        CHECK_EQ(encodeRecord(record).size(), (size_t)(13 + 2 + 1 + 2 + 2 + 6));
+        Record back = roundTrip(record);
+        const ItemParity* p = back.as<ItemParity>();
+        CHECK(p != nullptr && p->seal == 7 && p->items == parity.items && p->index == 3 && p->bytes == parity.bytes);
+        CHECK_EQ((int)back.type(), 0x44);
     }
-    // A long run splits into ranges of 256.
-    std::vector<uint16_t> run;
-    for (uint16_t p = 0; p < 600; p++) run.push_back(p);
-    std::vector<uint8_t> out;
-    putPieceList(out, run);
-    Reader in(out.data(), out.data() + out.size());
-    std::vector<uint16_t> back;
-    CHECK(readPieceList(in, back) && back == run);
-    // Out of order and repeated: sorted, once each.
-    out.clear();
-    putPieceList(out, {9, 3, 3, 5});
-    Reader again(out.data(), out.data() + out.size());
-    back.clear();
-    CHECK(readPieceList(again, back) && back == std::vector<uint16_t>({3, 5, 9}));
+    {
+        // 0.1's request (0x41, with piece lists) is a type unknown now.
+        std::vector<uint8_t> old = {0x41, 0, 0x07, 0x7a, 0x22, 0xd8, 0, 0, 1, 0, 0, 0, 0, 0x55};
+        old[1] = (uint8_t)(old.size() - 2);
+        const uint8_t* at = old.data();
+        Record back;
+        CHECK(decodeRecord(at, old.data() + old.size(), back) == DecodeResult::Ok);
+        CHECK(back.as<Unknown>() != nullptr && back.type() == 0x41);
+    }
 }
 
 void testGoldenText()
@@ -655,7 +647,6 @@ int main()
     testLocators();
     testLengths();
     testEveryRecord();
-    testPieceLists();
     testGoldenText();
     testDigests();
     testFrames();

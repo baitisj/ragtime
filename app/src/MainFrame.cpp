@@ -751,6 +751,18 @@ void MainFrame::onHostEvents(const std::vector<Event>& events)
             seals_.onRecord(r, now);
             broadcastFiles_.onRecord(r, now);
         }
+        // Lines rebuilt from parity go where a line heard goes.
+        for (std::vector<protocol::Record> rebuilt = seals_.takeRebuilt(); !rebuilt.empty();
+             rebuilt = seals_.takeRebuilt())
+        {
+            for (const protocol::Record& r : rebuilt)
+            {
+                chat_.onRebuilt(r, now);
+                stations_.onRecord(r, now);
+                seals_.onRecord(r, now);
+                broadcastFiles_.onRecord(r, now);
+            }
+        }
     }
     // File pacing follows the mode the session is in.
     fileTraffic_.setMode(broadcast::findMode(link_.modes(), session_.mode()));

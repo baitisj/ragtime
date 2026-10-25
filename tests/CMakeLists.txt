@@ -14,6 +14,7 @@ endfunction()
 
 ragtime_test(ragtime_version_test VersionTest.cpp)
 ragtime_test(ragtime_sha256_test Sha256Test.cpp)
+ragtime_test(ragtime_parity_test ParityTest.cpp)
 ragtime_test(ragtime_ham_text_test HamTextTest.cpp)
 target_compile_definitions(ragtime_ham_text_test PRIVATE RAGTIME_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
 ragtime_test(ragtime_data2g_link_test Data2GLinkTest.cpp)

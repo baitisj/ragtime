@@ -1,12 +1,17 @@
 #include "ragtime/broadcast/Seals.h"
 
 #include <algorithm>
+#include <cmath>
 #include <limits>
 #include <optional>
+#include <set>
 #include <string>
+#include <tuple>
 #include <utility>
+#include <vector>
 
 #include "ragtime/broadcast/Airtime.h"
+#include "ragtime/files/Parity.h"
 #include "ragtime/gearbox/Submodes.h"
 
 namespace ragtime
@@ -51,6 +56,25 @@ bool covers(const protocol::Seal& seal, uint32_t seq)
 // S/N reports kept for a station, at most.
 constexpr size_t MAX_SNRS = 100;
 
+// ItemParity indexes go round before ITEM_PARITY_BASE + index passes the
+// top of 16 bits.
+constexpr uint32_t ITEM_PARITY_SPAN = 65536 - protocol::ITEM_PARITY_BASE;
+
+// The airtime records take as frames packed into bursts in a mode.
+double airOf(const std::vector<protocol::Record>& records, const link::ModeInfo& info)
+{
+    double air = 0.0;
+    for (const auto& burst : packBursts(packFrames(records), info)) air += burstSeconds(burst, info);
+    return air;
+}
+
+// A share lost, from symbols that came of those sent, held at 0 to 1.
+double lostShare(size_t came, size_t sent)
+{
+    if (sent == 0) return 0.0;
+    return std::min(1.0, std::max(0.0, 1.0 - (double)came / (double)sent));
+}
+
 } // namespace
 
 const char* refusalText(uint8_t reason)
@@ -69,16 +93,21 @@ const char* refusalText(uint8_t reason)
     return "won't repair it";
 }
 
+size_t Seals::Lack::missingItems() const
+{
+    return (size_t)std::count(items.begin(), items.end(), true);
+}
+
 bool Seals::Lack::any() const
 {
-    return wantSeal || std::find(items.begin(), items.end(), true) != items.end() || !pieces.empty();
+    return wantSeal || missingItems() != 0 || !files.empty();
 }
 
 size_t Seals::Lack::size() const
 {
     size_t n = wantSeal ? 1 : 0;
-    n += (size_t)std::count(items.begin(), items.end(), true);
-    for (const auto& file : pieces) n += file.second.size();
+    n += missingItems();
+    for (const auto& file : files) n += file.second.need;
     return n;
 }
 
@@ -502,6 +531,9 @@ void Seals::onRequest(const std::string& from, const protocol::RepairRequest& re
         a.sealMode = a.seal ? slower(a.sealMode, mode) : mode;
         a.seal = true;
     }
+    // Items, each in the slowest gear of those who asked for it; and what
+    // this asker lacks and wants, to size the parity in each gear.
+    std::set<uint32_t> lacked;
     for (size_t i = 0; i < request.missingItems.size() && i < s->count; i++)
     {
         if (!request.missingItems[i]) continue;
@@ -510,11 +542,17 @@ void Seals::onRequest(const std::string& from, const protocol::RepairRequest& re
         std::string mode = repairMode(request.snr, item->mode);
         auto have = a.items.find(item->seq);
         a.items[item->seq] = have == a.items.end() ? mode : slower(have->second, mode);
+        lacked.insert(item->seq);
+    }
+    if (!lacked.empty())
+    {
+        uint32_t want = std::max<uint32_t>(request.itemsWant, (uint32_t)lacked.size());
+        a.itemAskers.push_back({std::move(lacked), want});
     }
     for (const auto& file : request.files)
     {
         uint32_t seq = file.first;
-        if (seq < s->first || seq >= s->first + s->count || files_ == nullptr) continue;
+        if (seq < s->first || seq >= s->first + s->count || files_ == nullptr || file.second == 0) continue;
         uint16_t pieces = files_->pieceCount(seq);
         const OurItem* item = findItem(seq);
         std::string mode = repairMode(request.snr, item != nullptr ? item->mode : s->mode);
@@ -526,15 +564,13 @@ void Seals::onRequest(const std::string& from, const protocol::RepairRequest& re
                    seq, mode, nowMs);
             continue;
         }
-        for (uint16_t p : file.second)
-        {
-            if (p >= pieces) continue;
-            auto& asked = a.pieces[seq];
-            auto have = asked.find(p);
-            asked[p] = have == asked.end() ? mode : slower(have->second, mode);
-        }
+        // Even a station that lost all of it needs no more than its losses
+        // allow for: four times the file (wantFor holds the loss at 75%).
+        uint32_t want = std::min<uint32_t>(file.second, 4u * pieces);
+        uint32_t& most = a.files[seq][mode];
+        most = std::max(most, want);
     }
-    if (!a.seal && a.items.empty() && a.pieces.empty()) asked_.erase(request.seal);
+    if (!a.seal && a.items.empty() && a.files.empty()) asked_.erase(request.seal);
     s->askers[from] = nowMs;
     s->asks++;
     // A request with no window open, from a late joiner: a window now, so
@@ -584,14 +620,15 @@ void Seals::openWindow(const std::string& mode, uint64_t nowMs)
 void Seals::resend(uint64_t nowMs)
 {
     rounds_++;
-    // The union of what was asked, in sequence order: items, and each
-    // file's pieces after its announce, each in the slowest gear any of
-    // those who asked for it needs.
-    std::map<uint32_t, std::string> items;
-    std::map<uint32_t, std::map<uint16_t, std::string>> pieces;
+    // Gear by gear: under each seal, the items asked for (the lines, or
+    // parity over them, as many as the neediest asker in that gear wants),
+    // then its files' parity pieces, each as many as the neediest asker
+    // in that gear wants.
+    std::map<std::string, std::vector<protocol::Record>> byMode;
     std::vector<const OurSeal*> seals;
     std::vector<std::string> sealModes;
     roundItems_.clear();
+    uint32_t time = seconds(nowMs);
     for (const auto& entry : asked_)
     {
         OurSeal* s = findSeal(entry.first);
@@ -599,10 +636,10 @@ void Seals::resend(uint64_t nowMs)
         const Asked& a = entry.second;
         seals.push_back(s);
         if (a.seal) sealModes.push_back(a.sealMode);
+        std::map<std::string, std::vector<uint32_t>> gears;
         for (const auto& item : a.items)
         {
-            auto have = items.find(item.first);
-            items[item.first] = have == items.end() ? item.second : slower(have->second, item.second);
+            gears[item.second].push_back(item.first);
             roundItems_.insert(item.first);
             // Those who asked for it have it sent again now.
             auto wanting = s->wanting.find(item.first);
@@ -610,20 +647,57 @@ void Seals::resend(uint64_t nowMs)
             s->servedTo[item.first].insert(wanting->second.begin(), wanting->second.end());
             s->wanting.erase(wanting);
         }
-        for (const auto& file : a.pieces)
+        for (const auto& gear : gears)
         {
-            auto& merged = pieces[file.first];
-            for (const auto& piece : file.second)
+            // An asker lacking some of these needs as many symbols as it
+            // lacks of them, scaled up as it asked for its whole lack.
+            std::set<uint32_t> here(gear.second.begin(), gear.second.end());
+            uint32_t want = 0;
+            for (const auto& asker : a.itemAskers)
             {
-                auto have = merged.find(piece.first);
-                merged[piece.first] = have == merged.end() ? piece.second : slower(have->second, piece.second);
+                size_t in = 0;
+                for (uint32_t seq : asker.first) in += here.count(seq);
+                if (in == 0) continue;
+                uint64_t scaled = ((uint64_t)asker.second * in + asker.first.size() - 1) / asker.first.size();
+                want = std::max(want, (uint32_t)scaled);
+            }
+            if (want == 0) want = (uint32_t)gear.second.size();
+            for (auto& r : itemRepairs(*s, gear.second, want, gear.first, time))
+                byMode[gear.first].push_back(std::move(r));
+        }
+        for (const auto& file : a.files)
+        {
+            uint32_t seq = file.first;
+            auto item = sealedItems_.find(seq);
+            uint16_t k = files_ != nullptr ? files_->pieceCount(seq) : 0;
+            if (item == sealedItems_.end() || k == 0) continue;
+            uint32_t span = 65536u - k;
+            for (const auto& gear : file.second)
+            {
+                link::ModeInfo info = modeInfo(gear.first);
+                uint32_t limit = gear.second;
+                for (uint32_t i = 0; i < limit; i++)
+                {
+                    uint16_t index = (uint16_t)(k + item->second.nextParity++ % span);
+                    protocol::Record piece;
+                    if (!files_->piece(seq, index, time, piece)) break;
+                    if (i == 0)
+                    {
+                        // No more than the round can carry: each parity
+                        // piece is the work of the whole file to make.
+                        std::vector<protocol::Record> some(MAX_FRAMES_PER_BURST, piece);
+                        double each = airOf(some, info) / MAX_FRAMES_PER_BURST;
+                        if (each > 0.0) limit = std::min<uint32_t>(limit, (uint32_t)(RESEND_MAX_SECONDS / each) + 1);
+                    }
+                    byMode[gear.first].push_back(std::move(piece));
+                    paritySent_++;
+                }
             }
         }
     }
     asked_.clear();
     std::vector<protocol::Record> refusals;
     std::vector<std::string> refusalModes;
-    uint32_t time = seconds(nowMs);
     for (const auto& entry : refusing_)
     {
         protocol::RepairRefused refused;
@@ -639,26 +713,6 @@ void Seals::resend(uint64_t nowMs)
     if (seals.empty() && refusals.empty()) return;
     std::sort(seals.begin(), seals.end(), [](const OurSeal* a, const OurSeal* b) { return a->number < b->number; });
 
-    // The records, gear by gear.
-    std::map<std::string, std::vector<protocol::Record>> byMode;
-    std::set<uint32_t> order;
-    for (const auto& item : items) order.insert(item.first);
-    for (const auto& file : pieces) order.insert(file.first);
-    for (uint32_t seq : order)
-    {
-        auto item = items.find(seq);
-        if (item != items.end())
-        {
-            if (const OurItem* ours = findItem(seq)) byMode[item->second].push_back(ours->record);
-        }
-        auto file = pieces.find(seq);
-        if (file == pieces.end() || files_ == nullptr) continue;
-        for (const auto& index : file->second)
-        {
-            protocol::Record piece;
-            if (files_->piece(seq, index.first, time, piece)) byMode[index.second].push_back(std::move(piece));
-        }
-    }
     // Fastest first, so the stations that hear us best are served soonest.
     std::vector<std::string> modes;
     for (const auto& entry : byMode) modes.push_back(entry.first);
@@ -708,6 +762,76 @@ void Seals::resend(uint64_t nowMs)
     }
     lastRoundMode_ = end;
     version_++;
+}
+
+std::vector<protocol::Record> Seals::itemRepairs(OurSeal& s, const std::vector<uint32_t>& items, uint32_t want,
+                                                const std::string& mode, uint32_t time)
+{
+    std::vector<protocol::Record> plain;
+    std::vector<std::vector<uint8_t>> bytes;
+    size_t longest = 0;
+    for (uint32_t seq : items)
+    {
+        const OurItem* item = findItem(seq);
+        if (item == nullptr) continue;
+        plain.push_back(item->record);
+        bytes.push_back(protocol::encodeRecord(item->record));
+        longest = std::max(longest, bytes.back().size());
+    }
+    if (plain.empty() || longest == 0) return plain;
+
+    // Parity over these items: each is the data symbol named by its place
+    // in the seal, its encoded record padded to the longest.
+    size_t length = files::parity::symbolLength(longest);
+    protocol::ItemParity p;
+    p.seal = s.number;
+    p.items.assign(s.count, false);
+    std::vector<files::parity::Symbol> data;
+    for (size_t i = 0; i < items.size() && i < bytes.size(); i++)
+    {
+        uint32_t place = items[i] - s.first;
+        p.items[place] = true;
+        data.push_back({(uint16_t)place, &bytes[i]});
+    }
+    // A long line may leave no room for its parity in a frame: the lines
+    // go as they are.
+    p.bytes.assign(length, 0);
+    std::vector<uint8_t> probe = protocol::encodeFrame({chat_.record(p, time)});
+    if (probe.empty() || probe.size() > protocol::MAX_BROADCAST_FRAME) return plain;
+
+    auto parity = [&](uint32_t n) {
+        std::vector<protocol::Record> out;
+        for (uint32_t i = 0; i < n; i++)
+        {
+            p.index = (uint16_t)(s.nextParity++ % ITEM_PARITY_SPAN);
+            p.bytes = files::parity::parityOf((uint16_t)(protocol::ITEM_PARITY_BASE + p.index), data, length);
+            if (p.bytes.empty()) break;
+            out.push_back(chat_.record(p, time));
+        }
+        return out;
+    };
+    if (want >= plain.size())
+    {
+        // Each asker lacks some of them and expects to lose more: the
+        // lines themselves, and parity after them for what is lost.
+        std::vector<protocol::Record> out = plain;
+        std::vector<protocol::Record> more = parity(want - (uint32_t)plain.size());
+        paritySent_ += more.size();
+        out.insert(out.end(), more.begin(), more.end());
+        return out;
+    }
+    // Fewer symbols than lines fill every asker's gaps (each holds what it
+    // didn't ask for): parity, unless the lines cost no more airtime.
+    uint32_t keep = s.nextParity;
+    std::vector<protocol::Record> some = parity(want);
+    link::ModeInfo info = modeInfo(mode);
+    if (some.size() < want || airOf(some, info) >= airOf(plain, info))
+    {
+        s.nextParity = keep;
+        return plain;
+    }
+    paritySent_ += some.size();
+    return some;
 }
 
 void Seals::flush(uint64_t nowMs)
@@ -843,20 +967,32 @@ void Seals::onRecord(const protocol::Record& record, uint64_t nowMs)
     {
         heardRefusal(from, *refused, nowMs);
     }
+    else if (record.as<protocol::ItemParity>() != nullptr)
+    {
+        heardItemParity(from, record, nowMs);
+    }
     else if (protocol::isItem((protocol::RecordType)record.type()))
     {
         Station& station = stations_[from];
+        protocol::Digest digest = protocol::recordDigest(record);
         HeardItem& item = station.items[record.header.seq];
-        item.digest = protocol::recordDigest(record);
+        bool fresh = item.digest != digest || item.bytes.empty();
+        item.digest = digest;
         item.type = record.type();
         item.heardMs = nowMs;
+        item.bytes = protocol::encodeRecord(record);
         // Heard after its seal: a repair, or a late copy.
-        for (const auto& entry : station.seals)
+        for (auto& entry : station.seals)
         {
             const protocol::Seal& seal = entry.second.seal;
-            if (covers(seal, record.header.seq))
-                markTheirs(from, record.header.seq, item.digest, seal.items[record.header.seq - seal.firstItem], nowMs);
+            if (!covers(seal, record.header.seq)) continue;
+            markTheirs(from, record.header.seq, item.digest, seal.items[record.header.seq - seal.firstItem], nowMs);
+            if (fresh) entry.second.came++;
         }
+        // One parity symbol fewer needed for the lines it covers.
+        std::vector<ParityKey> keys;
+        for (const auto& batch : station.parity) keys.push_back(batch.first);
+        for (const ParityKey& key : keys) rebuildItems(from, station, key);
     }
     else if (record.as<protocol::FilePiece>() != nullptr)
     {
@@ -939,10 +1075,12 @@ std::vector<Seals::Lack> Seals::lacks(const std::string& call, const Station& st
         lack.seal = h.seal.number;
         lack.sealDigest = h.digest;
         lack.items.assign(h.seal.items.size(), false);
+        size_t listedItems = 0;
         for (size_t i = 0; i < h.seal.items.size(); i++)
         {
             const protocol::Digest& digest = h.seal.items[i];
             if (zero(digest)) continue;
+            listedItems++;
             uint32_t seq = h.seal.firstItem + (uint32_t)i;
             if (refused != station.refused.end() && refused->second.files.count(seq) != 0) continue;
             auto held = station.items.find(seq);
@@ -951,10 +1089,19 @@ std::vector<Seals::Lack> Seals::lacks(const std::string& call, const Station& st
                 lack.items[i] = true;
                 continue;
             }
-            std::vector<uint16_t> missing;
+            FileLack file;
             if (held->second.type == (uint8_t)protocol::RecordType::FileAnnounce && files_ != nullptr
-                && files_->wanted(call, seq, missing) && !missing.empty())
-                lack.pieces[seq].insert(missing.begin(), missing.end());
+                && files_->wanted(call, seq, file.need, file.want) && file.need != 0)
+                lack.files[seq] = file;
+        }
+        // Repair symbols for the items: as many as we lack, and more for
+        // the share we expect to lose, the last round's, or else the first
+        // pass's.
+        size_t missing = lack.missingItems();
+        if (missing != 0)
+        {
+            double loss = h.itemLoss >= 0.0 ? h.itemLoss : lostShare(listedItems - missing, listedItems);
+            lack.itemsWant = std::min<uint32_t>(255, files::parity::wantFor((uint32_t)missing, loss));
         }
         if (lack.any())
         {
@@ -1036,6 +1183,14 @@ void Seals::heardSeal(const std::string& call, const protocol::Record& record, u
             markTheirs(call, held->first, held->second.digest, seal->items[i], nowMs);
     }
 
+    // Parity heard before its seal can be used now.
+    std::vector<ParityKey> keys;
+    for (const auto& batch : station.parity)
+    {
+        if (std::get<0>(batch.first) == seal->number) keys.push_back(batch.first);
+    }
+    for (const ParityKey& key : keys) rebuildItems(call, station, key);
+
     // The window opens as the seal ends: ask at a random time within it,
     // leaving room for our request's own airtime and the turn round.
     link::ModeInfo info = modeInfo(mode_);
@@ -1057,51 +1212,69 @@ void Seals::heardRequest(const std::string& from, const protocol::RepairRequest&
     std::string ourGear = gearFor(snrOf(request.to, nowMs)).value_or(mode_);
     std::string theirGear = gearFor(request.snr).value_or(mode_);
     if (slower(ourGear, theirGear) != theirGear) return;
-    Lack& c = found->second.covered[request.seal];
-    if (c.sealDigest != request.sealDigest)
-    {
-        c = Lack();
-        c.seal = request.seal;
-        c.sealDigest = request.sealDigest;
-    }
-    c.wantSeal = c.wantSeal || request.wantSeal || zero(request.sealDigest);
-    if (c.items.size() < request.missingItems.size()) c.items.resize(request.missingItems.size(), false);
-    for (size_t i = 0; i < request.missingItems.size(); i++)
-    {
-        if (request.missingItems[i]) c.items[i] = true;
-    }
-    for (const auto& file : request.files) c.pieces[file.first].insert(file.second.begin(), file.second.end());
+    Lack c;
+    c.seal = request.seal;
+    c.sealDigest = request.sealDigest;
+    c.wantSeal = request.wantSeal || zero(request.sealDigest);
+    c.items = request.missingItems;
+    c.itemsWant = request.itemsWant;
+    for (const auto& file : request.files) c.files[file.first].want = file.second;
+    found->second.covered[request.seal].push_back(std::move(c));
 }
 
 void Seals::ask(const std::string& call, Station& station, uint64_t nowMs)
 {
     station.askAtMs = 0;
+    // What came of the symbols last asked for under each seal says what
+    // share of a round we lose.
+    for (auto& entry : station.seals)
+    {
+        HeardSeal& h = entry.second;
+        if (h.itemsAsked != 0 && h.came != 0) h.itemLoss = lostShare(h.came, h.itemsAsked);
+        h.itemsAsked = 0;
+        h.came = 0;
+    }
     std::vector<protocol::Record> records;
     for (Lack lack : lacks(call, station, nowMs))
     {
-        // What another station has asked for already is coming anyway.
+        // What another station has asked for already is coming anyway: the
+        // seal; our items, if one request lacks all of them and wants as
+        // many symbols; a file, if one wants as many of its pieces.
+        uint32_t itemsComing = 0;
+        std::map<uint32_t, uint32_t> filesComing;
         auto c = station.covered.find(lack.seal);
         if (c != station.covered.end())
         {
-            const Lack& other = c->second;
-            bool same = other.sealDigest == lack.sealDigest || zero(other.sealDigest);
-            if (same)
+            for (const Lack& other : c->second)
             {
+                if (other.sealDigest != lack.sealDigest && !zero(other.sealDigest)) continue;
                 if (other.wantSeal) lack.wantSeal = false;
-                for (size_t i = 0; i < lack.items.size() && i < other.items.size(); i++)
+                bool all = lack.missingItems() != 0 && other.itemsWant >= lack.itemsWant;
+                for (size_t i = 0; i < lack.items.size() && all; i++)
                 {
-                    if (other.items[i]) lack.items[i] = false;
+                    if (lack.items[i] && (i >= other.items.size() || !other.items[i])) all = false;
                 }
-                for (auto file = lack.pieces.begin(); file != lack.pieces.end();)
+                if (all)
                 {
-                    auto theirs = other.pieces.find(file->first);
-                    if (theirs != other.pieces.end())
-                    {
-                        for (uint16_t p : theirs->second) file->second.erase(p);
-                    }
-                    file = file->second.empty() ? lack.pieces.erase(file) : std::next(file);
+                    itemsComing = lack.itemsWant;
+                    std::fill(lack.items.begin(), lack.items.end(), false);
+                    lack.itemsWant = 0;
+                }
+                for (auto file = lack.files.begin(); file != lack.files.end();)
+                {
+                    auto theirs = other.files.find(file->first);
+                    bool coming = theirs != other.files.end() && theirs->second.want >= file->second.want;
+                    if (coming) filesComing[file->first] = file->second.want;
+                    file = coming ? lack.files.erase(file) : std::next(file);
                 }
             }
+        }
+        auto heard = station.seals.find(lack.seal);
+        bool heardIt = heard != station.seals.end() && heard->second.digest == lack.sealDigest && !zero(lack.sealDigest);
+        if (heardIt) heard->second.itemsAsked = itemsComing;
+        for (const auto& file : filesComing)
+        {
+            if (files_ != nullptr) files_->asked(call, file.first, file.second);
         }
         if (!lack.any())
         {
@@ -1110,8 +1283,6 @@ void Seals::ask(const std::string& call, Station& station, uint64_t nowMs)
         }
 
         // Asking again and again for nothing: give up on this seal.
-        auto heard = station.seals.find(lack.seal);
-        bool heardIt = heard != station.seals.end() && heard->second.digest == lack.sealDigest && !zero(lack.sealDigest);
         if (heardIt)
         {
             HeardSeal& h = heard->second;
@@ -1123,6 +1294,7 @@ void Seals::ask(const std::string& call, Station& station, uint64_t nowMs)
             }
             h.asks++;
             h.lackWhenAsked = lack.size();
+            if (lack.itemsWant != 0) h.itemsAsked = lack.itemsWant;
         }
         else
         {
@@ -1136,24 +1308,23 @@ void Seals::ask(const std::string& call, Station& station, uint64_t nowMs)
         request.wantSeal = lack.wantSeal;
         request.snr = snrOf(call, nowMs);
         request.missingItems = lack.items;
-        for (const auto& file : lack.pieces)
-            request.files.push_back({file.first, std::vector<uint16_t>(file.second.begin(), file.second.end())});
+        request.itemsWant = (uint8_t)std::min<uint32_t>(255, lack.itemsWant);
+        for (const auto& file : lack.files)
+            request.files.push_back({file.first, (uint16_t)std::min<uint32_t>(65535, file.second.want)});
         protocol::Record record = chat_.record(request, seconds(nowMs));
-        // One frame: a long list of pieces is cut, the lowest kept; the
-        // rest is asked for next round.
+        // One frame: files past what fits are asked for next round.
         for (;;)
         {
             std::vector<uint8_t> frame = protocol::encodeFrame({record});
             if (!frame.empty() && frame.size() <= protocol::MAX_BROADCAST_FRAME) break;
             auto* r = record.as<protocol::RepairRequest>();
-            auto longest = std::max_element(r->files.begin(), r->files.end(), [](const auto& a, const auto& b) {
-                return a.second.size() < b.second.size();
-            });
-            if (longest == r->files.end()) break;
-            if (longest->second.size() <= 1)
-                r->files.erase(longest);
-            else
-                longest->second.resize(longest->second.size() / 2);
+            if (r->files.empty()) break;
+            r->files.pop_back();
+        }
+        if (files_ != nullptr)
+        {
+            for (const auto& file : record.as<protocol::RepairRequest>()->files)
+                files_->asked(call, file.first, file.second);
         }
         records.push_back(std::move(record));
         requestsSent_++;
@@ -1163,6 +1334,104 @@ void Seals::ask(const std::string& call, Station& station, uint64_t nowMs)
     link::ModeInfo info = modeInfo(mode_);
     for (const auto& burst : packBursts(packFrames(records), info)) link_.broadcast(burst, mode_, nowMs, "repair request");
     version_++;
+}
+
+void Seals::heardItemParity(const std::string& call, const protocol::Record& record, uint64_t nowMs)
+{
+    const protocol::ItemParity* p = record.as<protocol::ItemParity>();
+    size_t length = p->bytes.size();
+    if (length == 0 || length % 2 != 0 || (uint32_t)p->index >= ITEM_PARITY_SPAN) return;
+    Station& station = stations_[call];
+    ParityKey key{p->seal, p->items, length};
+    ParityBatch& batch = station.parity[key];
+    bool fresh = batch.symbols.emplace(p->index, p->bytes).second;
+    batch.heardMs = nowMs;
+    auto heard = station.seals.find(p->seal);
+    if (fresh && heard != station.seals.end()) heard->second.came++;
+    rebuildItems(call, station, key);
+}
+
+void Seals::rebuildItems(const std::string& call, Station& station, const ParityKey& key)
+{
+    auto found = station.parity.find(key);
+    if (found == station.parity.end()) return;
+    // Its seal says which numbers the places are and what each must be.
+    auto heard = station.seals.find(std::get<0>(key));
+    if (heard == station.seals.end()) return;
+    const protocol::Seal& seal = heard->second.seal;
+    const std::vector<bool>& covered = std::get<1>(key);
+    size_t length = std::get<2>(key);
+    if (covered.size() != seal.items.size())
+    {
+        station.parity.erase(found);
+        return;
+    }
+    std::vector<files::parity::Symbol> known;
+    std::vector<uint16_t> missing;
+    for (size_t i = 0; i < covered.size(); i++)
+    {
+        if (!covered[i]) continue;
+        auto held = station.items.find(seal.firstItem + (uint32_t)i);
+        if (held != station.items.end() && held->second.digest == seal.items[i] && !held->second.bytes.empty())
+        {
+            // Coded otherwise than the sender coded it: no use.
+            if (held->second.bytes.size() > length)
+            {
+                station.parity.erase(found);
+                return;
+            }
+            known.push_back({(uint16_t)i, &held->second.bytes});
+        }
+        else
+        {
+            missing.push_back((uint16_t)i);
+        }
+    }
+    const ParityBatch& batch = found->second;
+    if (missing.empty())
+    {
+        station.parity.erase(found);
+        return;
+    }
+    if (batch.symbols.size() < missing.size()) return;
+    std::vector<files::parity::Symbol> parity;
+    for (const auto& symbol : batch.symbols)
+    {
+        if (parity.size() == missing.size()) break;
+        parity.push_back({(uint16_t)(protocol::ITEM_PARITY_BASE + symbol.first), &symbol.second});
+    }
+    std::vector<std::vector<uint8_t>> out;
+    bool ok = files::parity::rebuild(known, parity, missing, length, out);
+    uint64_t heardMs = batch.heardMs;
+    station.parity.erase(found);
+    if (!ok) return;
+    for (size_t i = 0; i < missing.size(); i++)
+    {
+        // Each must decode as the item the seal lists at its place.
+        uint32_t seq = seal.firstItem + missing[i];
+        protocol::Record item;
+        const uint8_t* at = out[i].data();
+        if (protocol::decodeRecord(at, out[i].data() + out[i].size(), item) != protocol::DecodeResult::Ok) continue;
+        if (item.header.callsign != call || item.header.seq != seq || !protocol::isItem((protocol::RecordType)item.type()))
+            continue;
+        protocol::Digest digest = protocol::recordDigest(item);
+        if (digest != seal.items[missing[i]]) continue;
+        HeardItem& held = station.items[seq];
+        held.digest = digest;
+        held.type = item.type();
+        held.heardMs = heardMs;
+        held.bytes = protocol::encodeRecord(item);
+        rebuilt_.push_back(std::move(item));
+        itemsRebuilt_++;
+        version_++;
+    }
+}
+
+std::vector<protocol::Record> Seals::takeRebuilt()
+{
+    std::vector<protocol::Record> out;
+    out.swap(rebuilt_);
+    return out;
 }
 
 void Seals::askSoon(const std::string& call, uint64_t nowMs)
@@ -1321,6 +1590,7 @@ void Seals::restoreHeard(const protocol::Record& announce, const std::vector<Kep
     item.digest = protocol::recordDigest(announce);
     item.type = announce.type();
     item.heardMs = nowMs;
+    item.bytes = protocol::encodeRecord(announce);
     station.piecesOf[announce.header.seq] = lastMs;
     for (const KeptSeal& s : seals)
     {
@@ -1415,8 +1685,11 @@ void Seals::forget(uint64_t nowMs)
         auto& refused = station->second.refused;
         for (auto it = refused.begin(); it != refused.end();)
             it = nowMs >= it->second.heardMs + MAX_OPEN_MS ? refused.erase(it) : std::next(it);
+        auto& parity = station->second.parity;
+        for (auto it = parity.begin(); it != parity.end();)
+            it = nowMs >= it->second.heardMs + MAX_OPEN_MS ? parity.erase(it) : std::next(it);
         bool empty = items.empty() && seals.empty() && pieces.empty() && snrs.empty() && refused.empty()
-                     && station->second.askAtMs == 0;
+                     && parity.empty() && station->second.askAtMs == 0;
         station = empty ? stations_.erase(station) : std::next(station);
     }
 }

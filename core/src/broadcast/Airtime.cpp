@@ -84,7 +84,8 @@ int pieceBytesFor(const link::ModeInfo& mode, const std::string& callsign)
         if (1 + (int)protocol::encodeRecord(r).size() <= frame) break;
         bytes--;
     }
-    return bytes;
+    // Even, so a parity piece (16-bit symbols) is no longer than a piece.
+    return std::max(MIN_PIECE_BYTES, bytes - bytes % 2);
 }
 
 std::vector<std::vector<uint8_t>> packFrames(const std::vector<protocol::Record>& records)

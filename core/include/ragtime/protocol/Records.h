@@ -48,8 +48,11 @@ enum class RecordType : uint8_t
     FileAnnounce = 0x30,
     FilePiece = 0x31,
     Seal = 0x40,
-    RepairRequest = 0x41,
+    // 0x41 was 0.1's RepairRequest, with lists of pieces; it is skipped
+    // now as a type unknown, so a 0.1 station still chats with us.
     RepairRefused = 0x42,
+    RepairRequest = 0x43,
+    ItemParity = 0x44,
 };
 
 // Which header sequence number a record carries (docs/PROTOCOL.md,
@@ -72,7 +75,7 @@ enum Takes : uint8_t
     TAKES_STATUS = 0x02,
     TAKES_SESSION_FILES = 0x04,     // FileOffer .. FileCancel
     TAKES_BROADCAST_FILES = 0x08,   // FileAnnounce, FilePiece
-    TAKES_SEALS = 0x10,             // Seal, RepairRequest, RepairRefused
+    TAKES_SEALS = 0x10,             // Seal, RepairRequest, RepairRefused, ItemParity
     TAKES_ALL_V0 = 0x1F,
 };
 
@@ -171,7 +174,11 @@ struct FileAnnounce
     std::string name;
 };
 
-// The header's seq is the announce's.
+// The header's seq is the announce's. An index at or past the file's
+// piece count names a parity piece (docs/PROTOCOL.md, "Parity"): the
+// pieces are the data symbols, named by their indexes, and this is the
+// parity symbol named by its own, files::parity::symbolLength(piece size)
+// bytes long.
 struct FilePiece
 {
     uint16_t index = 0;
@@ -194,12 +201,16 @@ struct RepairRequest
     bool wantSeal = false;      // send the seal itself again
     // The S/N the asker measured on the seal's sender, the lowest of its
     // recent bursts, so repairs go in a gear the asker can copy; none when
-    // it has no figure. It rides in the flags byte's bits 1 to 7, which
-    // 0.1 sends as 0 and ignores (repairSnrCode).
+    // it has no figure. It rides in the flags byte's bits 1 to 7
+    // (repairSnrCode).
     std::optional<double> snr;
     std::vector<bool> missingItems;     // one per item in the seal
-    // For each file in the seal: its sequence number and the pieces missing.
-    std::vector<std::pair<uint32_t, std::vector<uint16_t>>> files;
+    // How many repair symbols for those items the asker wants: as many as
+    // it lacks, and more for what it expects to lose (files::parity::wantFor).
+    uint8_t itemsWant = 0;
+    // For each file in the seal it lacks pieces of: the file's sequence
+    // number, and how many parity pieces it wants.
+    std::vector<std::pair<uint32_t, uint16_t>> files;
 };
 
 // A RepairRequest's S/N as its 7-bit code: 0 for none, else 1 to 127 for
@@ -229,6 +240,22 @@ struct RepairRefused
     std::vector<uint32_t> files;
 };
 
+// Parity over items a seal lists (docs/PROTOCOL.md, "Parity"): the
+// items it covers, each as its encoded record padded with zeros to the
+// length of bytes, are the data symbols, named by their places in the
+// seal; this is the parity symbol named ITEM_PARITY_BASE + index. A
+// listener holding all but k of the items covered rebuilds them from any
+// k of these over the same items.
+constexpr uint16_t ITEM_PARITY_BASE = 256;
+
+struct ItemParity
+{
+    uint16_t seal = 0;
+    std::vector<bool> items;    // the items it covers, one per item in the seal
+    uint16_t index = 0;
+    std::vector<uint8_t> bytes;
+};
+
 // A type this version doesn't know: kept as it came, so it can be passed
 // on or shown.
 struct Unknown
@@ -238,7 +265,7 @@ struct Unknown
 };
 
 using Body = std::variant<Unknown, Hello, Status, Text, Ack, FileOffer, FileAnswer, FileData, FileSaved,
-                          FileCancel, FileAnnounce, FilePiece, Seal, RepairRequest, RepairRefused>;
+                          FileCancel, FileAnnounce, FilePiece, Seal, RepairRequest, RepairRefused, ItemParity>;
 
 struct Record
 {
@@ -293,14 +320,6 @@ inline bool decodeFrame(const std::vector<uint8_t>& frame, std::vector<Record>& 
 {
     return decodeFrame(frame.data(), frame.size(), out);
 }
-
-//-------------------------------------------------------------------------
-// Piece lists, as a RepairRequest carries them: a bitmap or ranges,
-// whichever is shorter.
-//-------------------------------------------------------------------------
-
-void putPieceList(std::vector<uint8_t>& out, std::vector<uint16_t> pieces);
-bool readPieceList(Reader& in, std::vector<uint16_t>& pieces);
 
 } // namespace protocol
 } // namespace ragtime

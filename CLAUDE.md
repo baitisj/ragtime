@@ -79,7 +79,12 @@ with the code when the seal rules change.
   in `Prefs`. Since 2026-10-24 a repair request carries the asker's S/N,
   repairs go gear by gear (`Seals::setLadder`, the "Slow repairs" cap in
   Settings), and a sender refuses what it won't repair (RepairRefused,
-  `0x42`).
+  `0x42`). Since 2026-10-25 repairs are Reed-Solomon parity
+  (`files/Parity`, PROTOCOL.md "Parity"): requests (`0x43`) ask how
+  many repair symbols they want, files get parity pieces and sealed
+  chat ItemParity (`0x44`), and `Seals::takeRebuilt` hands back lines
+  rebuilt from it. 0.1's request (`0x41`) is skipped, so 0.1 can't
+  repair with it.
 - Package I (packaging and the first release) gives the app icon
   (`app/res/`, drawn by `tools/icon/`), the Linux
   AppImage and the portable Windows zip (`packaging/`), the MinGW-w64
