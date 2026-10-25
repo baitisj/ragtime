@@ -372,12 +372,17 @@ void testSealAfterQuiet()
     Station& a = air.add("AG7EW", 1);
     Station& b = air.add("KC2G", 2);
     air.run(2000);
+    CHECK(!a.seals.nextSealMs());
     a.chat.send("one", "", now);
     a.chat.send("two", "", now);
     a.chat.send("three", "", now);
     air.run(10000);
     CHECK_EQ(b.heardFrom("AG7EW", protocol::RecordType::Seal), (size_t)0);
+    // The countdown: the over's quiet from its last item.
+    std::optional<uint64_t> due = a.seals.nextSealMs();
+    CHECK(due && *due > now && *due <= now + Seals::QUIET_MS);
     air.run(Seals::QUIET_MS);
+    CHECK(!a.seals.nextSealMs());
     CHECK_EQ(a.seals.sealsSent(), (size_t)1);
     CHECK_EQ(b.heardFrom("AG7EW", protocol::RecordType::Seal), (size_t)1);
 
@@ -1244,7 +1249,10 @@ void testChatUnsealed()
     air.run(2000);
     a.chat.send("CQ CQ", "", now);
     a.chat.send("de AG7EW", "", now);
-    air.run(Seals::QUIET_MS + 60000);
+    air.run(10000);
+    // No seal coming, so no countdown.
+    CHECK(!a.seals.nextSealMs());
+    air.run(Seals::QUIET_MS + 50000);
     CHECK_EQ(b.textsFrom("AG7EW"), (size_t)2);
     CHECK_EQ(a.seals.sealsSent(), (size_t)0);
     CHECK_EQ(b.heardFrom("AG7EW", protocol::RecordType::Seal), (size_t)0);

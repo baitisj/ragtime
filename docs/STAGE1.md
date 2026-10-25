@@ -154,8 +154,12 @@ bench"). Choices made there, for Jeff to keep or change:
   (`HostLink::broadcast`'s label; `link::channelLine`), and the tooltip
   lists them all, with the session's bytes not yet acknowledged. Then the
   mode the host last sent
-  in, and a line that will show the newest transfer (clicking it opens
-  Files); until then it shows the host's refusals and undecoded bursts.
+  in, and a line that shows the newest transfer, or the host's refusals
+  and undecoded bursts. Clicking it no longer opens Files (Jeff,
+  2026-10-25; View > Files, Ctrl+3, does). While a seal of ours waits
+  (our files, and our messages with "Seal my broadcast messages" on) the
+  line ends in a countdown, "Next seal in 0:42", then "Seal due" while a
+  repair round or Pause sending holds it (`Seals::nextSealMs`).
   At its right end, data2g-host's address and state (Connected,
   Reconnecting in 8 s), with the last error as its tooltip. It sat at the
   connection bar's left end until Jeff moved it (2026-10-23).

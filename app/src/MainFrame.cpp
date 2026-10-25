@@ -1,6 +1,7 @@
 #include "MainFrame.h"
 
 #include <algorithm>
+#include <cstdio>
 #include <ctime>
 #include <optional>
 #include <string>
@@ -472,12 +473,6 @@ void MainFrame::buildLayout()
         e.Skip();
         CallAfter([this]() { sizeStatusFields(); });
     });
-    GetStatusBar()->Bind(wxEVT_LEFT_DOWN, [this](wxMouseEvent& e) {
-        wxRect files;
-        if (GetStatusBar()->GetFieldRect(FIELD_TRANSFERS, files) && files.Contains(e.GetPosition()))
-            tabs_->SetSelection(TAB_FILES);
-        e.Skip();
-    });
     // On hover the host's field explains itself (or gives the last error),
     // and a field cut short shows its whole text, as wxSTB_SHOW_TIPS would.
     GetStatusBar()->Bind(wxEVT_MOTION, [this](wxMouseEvent& e) {
@@ -816,7 +811,19 @@ void MainFrame::showStatus()
     std::string mode = !modeUsed_.empty() ? modeUsed_ : link_.groupMode();
     SetStatusText(mode.empty() ? wxString("Mode: the host's") : "Mode " + utf8(gearshift_.shortName(mode)),
                   FIELD_MODE);
-    SetStatusText(utf8(transfersLine()), FIELD_TRANSFERS);
+    // With a seal of ours waiting, how long until it goes (Jeff,
+    // 2026-10-25).
+    std::string transfers = transfersLine();
+    if (std::optional<uint64_t> seal = seals_.nextSealMs())
+    {
+        uint64_t now = HostConnection::nowMs();
+        uint64_t left = *seal > now ? (*seal - now + 999) / 1000 : 0;
+        char clock[32];
+        std::snprintf(clock, sizeof clock, "%u:%02u", (unsigned)(left / 60), (unsigned)(left % 60));
+        transfers += DOT + (left == 0 ? std::string("Seal due") : "Next seal in " + std::string(clock));
+    }
+    wxString transfersText = utf8(transfers);
+    if (GetStatusBar()->GetStatusText(FIELD_TRANSFERS) != transfersText) SetStatusText(transfersText, FIELD_TRANSFERS);
 }
 
 void MainFrame::refreshMessages()
