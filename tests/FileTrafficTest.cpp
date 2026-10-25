@@ -15,9 +15,11 @@
 #include <vector>
 
 #include "Check.h"
+#include "ragtime/broadcast/Airtime.h"
 #include "ragtime/files/FileRows.h"
 #include "ragtime/files/FileTraffic.h"
 #include "ragtime/files/SessionFiles.h"
+#include "ragtime/link/Data2GLink.h"
 #include "ragtime/link/HostLink.h"
 #include "ragtime/protocol/Records.h"
 #include "ragtime/protocol/Stream.h"
@@ -299,6 +301,74 @@ void testFileBytesArePaced()
     }
     CHECK_EQ(heard, (size_t)1);
     CHECK(p.a.transfer(true)->state == State::Sending);
+}
+
+void testTheWindowFollowsTheMode()
+{
+    // Two of the mode's longest session bursts (12 s on OFDM, 24 s on
+    // FSK), between 1 and 8 KB.
+    using broadcast::findMode;
+    link::ModeInfo fast = findMode({}, "w48-16qam-r1/2");
+    link::ModeInfo qpsk = findMode({}, "qpsk-r1/3");
+    link::ModeInfo narrow = findMode({}, "n10-16qam-r1/2");
+    link::ModeInfo fsk = findMode({}, "fsk32r62-r1/3");
+    CHECK(fast.valid() && qpsk.valid() && narrow.valid() && fsk.valid());
+    CHECK_EQ(FileTraffic::burstBytes(fast), (uint64_t)236 * 19);  // 1.21 s, then 0.58 s a codeword
+    CHECK_EQ(FileTraffic::burstBytes(qpsk), (uint64_t)76 * 9);
+    CHECK_EQ(FileTraffic::burstBytes(narrow), (uint64_t)121 * 7);
+    CHECK_EQ(FileTraffic::burstBytes(fsk), (uint64_t)38 * 7);    // 24 s on FSK
+    CHECK_EQ(FileTraffic::burstBytes(link::ModeInfo()), (uint64_t)0);
+    // A mode slow enough that one codeword is all a burst holds.
+    link::ModeInfo crawl = fsk;
+    crawl.secondsAtOne = 30.0;
+    crawl.secondsAtMax = 90.0;
+    CHECK_EQ(FileTraffic::burstBytes(crawl), (uint64_t)38);
+    // One so fast that every codeword fits.
+    link::ModeInfo dash = fast;
+    dash.secondsAtMax = 5.0;
+    CHECK_EQ(FileTraffic::burstBytes(dash), (uint64_t)236 * 64);
+
+    SessionFiles files;
+    FileHistory history;
+    FileTraffic traffic(files, history);
+    CHECK_EQ(traffic.window(), FileTraffic::START_WINDOW);
+    traffic.setMode(fast);
+    CHECK_EQ(traffic.window(), FileTraffic::MAX_WINDOW);
+    traffic.setMode(qpsk);
+    CHECK_EQ(traffic.window(), (uint64_t)2 * 76 * 9);
+    traffic.setMode(narrow);
+    CHECK_EQ(traffic.window(), (uint64_t)2 * 121 * 7);
+    traffic.setMode(fsk);
+    CHECK_EQ(traffic.window(), FileTraffic::MIN_WINDOW);
+    traffic.setMode(link::ModeInfo());
+    CHECK_EQ(traffic.window(), FileTraffic::START_WINDOW);
+}
+
+void testAFastModeKeepsTheHostFull()
+{
+    // A fast mode: the host is handed the whole 8 KB window at once, not
+    // the 1 KB a measured rate starts from, and a fade doesn't shrink it.
+    Scratch scratch("fast");
+    Pair p;
+    p.perStep = 2000;
+    p.a.traffic.setMode(broadcast::findMode({}, "w48-16qam-r1/2"));
+    std::string sent = scratch.write("FAST.BIN", 60000);
+    std::string error;
+    p.a.files.offer("W1AW", sent, p.now, error);
+    p.connect();
+    p.steps(3);
+    const FileTransfer* theirs = p.b.transfer(false);
+    CHECK(theirs != nullptr && p.b.files.accept(theirs->id, scratch.path("got.bin"), error));
+    p.steps(3);
+    CHECK(p.a.mostWaiting > FileTraffic::MAX_WINDOW - 1024);
+    CHECK(p.a.mostWaiting <= FileTraffic::MAX_WINDOW + 300);
+
+    p.fading = true;
+    p.steps(40);
+    p.fading = false;
+    CHECK_EQ(p.a.traffic.window(), FileTraffic::MAX_WINDOW);
+    CHECK(p.until([&]() { return p.a.transfer(true)->state == State::Delivered; }));
+    CHECK_EQ(readFile(scratch.path("got.bin")), readFile(sent));
 }
 
 void testStalledWhileTheLinkFades()
@@ -762,6 +832,8 @@ int main()
 {
     testAFileGoesAndIsSaved();
     testFileBytesArePaced();
+    testTheWindowFollowsTheMode();
+    testAFastModeKeepsTheHostFull();
     testStalledWhileTheLinkFades();
     testAStationThatTakesNoFiles();
     testOffersWaitForTheHello();
