@@ -90,9 +90,8 @@ enum
     ID_BROADCAST_FILE,
     ID_AUTO_RECEIVE,
     // A broadcast file's menu on the Files tab.
-    ID_BROADCAST_FILE_TITLE,
     ID_BROADCAST_FILE_ACTION,
-    ID_BROADCAST_FILE_ACTION_LAST = ID_BROADCAST_FILE_ACTION + 7,
+    ID_BROADCAST_FILE_ACTION_LAST = ID_BROADCAST_FILE_ACTION + FILE_MENU_IDS - 1,
     ID_SEND_FILE,
     ID_OPEN_RECEIVED,
     ID_STATION_SEND_FILE,
@@ -116,7 +115,6 @@ enum
     ID_OPEN_FLIGHT,
 };
 
-constexpr size_t BROADCAST_FILE_ACTIONS = ID_BROADCAST_FILE_ACTION_LAST - ID_BROADCAST_FILE_ACTION + 1;
 
 enum Tab
 {
@@ -170,6 +168,15 @@ std::string durationText(double seconds)
     long minutes = (s + 30) / 60;
     if (minutes < 60) return std::to_string(minutes) + " min";
     return std::to_string(minutes / 60) + " h " + std::to_string(minutes % 60) + " min";
+}
+
+// When a file's repairs close: "21:50 (29 min)". Under an hour the Files
+// tab's expiryText counts down ("29:56"), which reads oddly after "until".
+std::string repairsUntilText(uint64_t untilMs, uint64_t nowMs, long utcOffsetS)
+{
+    if (untilMs > nowMs && untilMs - nowMs < 3600 * 1000)
+        return session::clockTime(untilMs, utcOffsetS) + " (" + session::sessionLength(untilMs - nowMs) + ")";
+    return files::expiryText(untilMs, nowMs, utcOffsetS);
 }
 
 // The local time so many seconds from now: "16:40".
@@ -697,6 +704,8 @@ void MainFrame::applyPrefs(bool reconnect)
     savedSeal_ = seals_.chain().number;
     seals_.setSealText(prefs_.sealChat);
     seals_.setSlowResendSeconds(prefs_.slowRepairMinutes * 60.0);
+    seals_.setRepairFloor(prefs_.repairFloor);
+    seals_.setRepairCapSeconds(prefs_.repairCap ? prefs_.repairCapMinutes * 60.0 : 0.0);
     session::SessionChat::Settings ss;
     ss.callsign = prefs_.callsign;
     ss.locator = prefs_.locator;
@@ -724,7 +733,10 @@ void MainFrame::applyPrefs(bool reconnect)
 
 void MainFrame::showSettings()
 {
-    SettingsDialog dialog(this, prefs_);
+    std::vector<std::pair<std::string, std::string>> gears;
+    for (const gearbox::Gear& gear : gearshift_.ladder())
+        gears.push_back({gear.mode, gear.name.empty() ? gear.mode : gear.name + "  (" + gear.mode + ")"});
+    SettingsDialog dialog(this, prefs_, gears);
     if (dialog.ShowModal() != wxID_OK) return;
     StationPrefs next = dialog.prefs();
     bool reconnect = next.callsign != prefs_.callsign || next.host != prefs_.host || next.kissPort != prefs_.kissPort
@@ -1722,9 +1734,28 @@ void MainFrame::sessionFileMenu(const files::FileRow& row, wxMenu& menu)
 void MainFrame::finishedFileMenu(const files::FinishedFile& file, wxMenu& menu)
 {
     using Result = files::FinishedFile::Result;
-    // A broadcast file's finished row needs nothing past what the tab
-    // gives every row (Open, Open folder, Remove from list).
-    if (file.via != files::Via::Session) return;
+    if (file.via == files::Via::Broadcast)
+    {
+        // Ours: Re-open repairs while its seal is held (Jeff, 2026-10-25),
+        // else Broadcast it again; its card's menu, as in the chat.
+        if (!file.outgoing || file.path.empty()) return;
+        uint64_t id = broadcastFiles_.findSent(file.path, file.size);
+        FileCard card;
+        if (id == 0 || !fileCard(id, card))
+        {
+            std::string path = file.path;
+            menu.Append(ID_FILE_SEND_AGAIN, "&Broadcast it again...");
+            menu.Enable(ID_FILE_SEND_AGAIN, wxFileName::FileExists(utf8(path)));
+            menu.Bind(wxEVT_MENU, [=](wxCommandEvent&) { CallAfter([=]() { broadcastFile(utf8(path)); }); },
+                      ID_FILE_SEND_AGAIN);
+            return;
+        }
+        card.title.clear();
+        fillFileMenu(menu, card, ID_BROADCAST_FILE_ACTION, [this, id](const std::string& action) {
+            CallAfter([this, id, action]() { broadcastFileAction(id, action); });
+        });
+        return;
+    }
     std::string peer = file.peer, name = file.name, path = file.path;
     if (!file.outgoing && file.result != Result::Saved && file.result != Result::Declined
         && file.result != Result::Cancelled)
@@ -1823,17 +1854,20 @@ void MainFrame::applySending()
 // Broadcast files
 //-------------------------------------------------------------------------
 
-void MainFrame::broadcastFile()
+void MainFrame::broadcastFile(wxString path)
 {
     if (prefs_.callsign.empty())
     {
         showSettings();
         return;
     }
-    wxFileDialog pick(this, "Broadcast a file to D2G", "", "", "All files|*",
-                      wxFD_OPEN | wxFD_FILE_MUST_EXIST);
-    if (pick.ShowModal() != wxID_OK) return;
-    wxString path = pick.GetPath();
+    if (path.empty())
+    {
+        wxFileDialog pick(this, "Broadcast a file to D2G", "", "", "All files|*",
+                          wxFD_OPEN | wxFD_FILE_MUST_EXIST);
+        if (pick.ShowModal() != wxID_OK) return;
+        path = pick.GetPath();
+    }
     wxString name = wxFileName(path).GetFullName();
     wxULongLong size = wxFileName::GetSize(path);
     if (size == wxInvalidSize || size == 0)
@@ -1929,7 +1963,7 @@ bool MainFrame::fileCard(uint64_t id, FileCard& card)
             if (!f.sealed)
                 card.state = "Sealing";
             else
-                card.state = "Repairs open until " + files::expiryText(f.repairsUntilMs, now, localOffsetSeconds())
+                card.state = "Repairs open until " + repairsUntilText(f.repairsUntilMs, now, localOffsetSeconds())
                              + (f.askers == 0 ? std::string()
                                               : ", " + std::to_string(f.askers) + (f.askers == 1 ? " station" : " stations")
                                                     + " asked");
@@ -1939,19 +1973,33 @@ bool MainFrame::fileCard(uint64_t id, FileCard& card)
             if (f.sealed)
             {
                 card.actions = {{"keep", "Keep open 30 min longer"}, {"close", "Close repairs now"}};
-                card.title = "Repairs open until " + files::expiryText(f.repairsUntilMs, now, localOffsetSeconds());
+                card.title = "Repairs open until " + repairsUntilText(f.repairsUntilMs, now, localOffsetSeconds());
+                if (f.repairSeconds > 0.0) card.title += ", " + durationText(f.repairSeconds) + " of repairs sent";
                 card.menu = {{"keep", "Keep open 30 min longer"},
                              {"keep2h", "Keep open 2 hours longer"},
                              {"keepuntil", "Keep open until..."},
                              {"close", "Close repairs now"}};
+                repairGearMenu(f, card);
             }
             break;
         case State::Sent:
-            card.state = "Sent";
-            card.good = true;
-            break;
         case State::Cancelled:
-            card.state = "Stopped";
+            card.state = f.state == State::Sent ? "Sent" : "Stopped";
+            card.good = f.state == State::Sent;
+            if (f.repairCapped)
+                card.state += ". Repairs closed after " + durationText(f.repairSeconds) + " of repair airtime";
+            // Repairs again (Jeff, 2026-10-25), while its seal is held.
+            if (f.reopenable)
+            {
+                card.menu = {{"reopen", "Re-open repairs for 30 min"},
+                             {"reopen2h", "Re-open repairs for 2 hours"},
+                             {"reopenuntil", "Re-open repairs until..."}};
+            }
+            else if (!f.path.empty())
+            {
+                card.menu = {{"", "Can't re-open repairs: its seal is over 2 hours old"},
+                             {"again", "Broadcast it again..."}};
+            }
             break;
         // Theirs. Rejecting throws away what came, so it is only on the
         // right-click menu, and asks first.
@@ -2052,6 +2100,16 @@ void MainFrame::broadcastFileAction(uint64_t id, const std::string& action)
         broadcastFiles_.keepOpen(id, std::max(f.repairsUntilMs, now) + 2 * 60 * 60 * 1000);
     else if (action == "keepuntil")
         keepRepairsUntil(id, f.repairsUntilMs);
+    else if (action == "reopen")
+        reopenRepairs(id, now + 30 * 60 * 1000);
+    else if (action == "reopen2h")
+        reopenRepairs(id, now + 2 * 60 * 60 * 1000);
+    else if (action == "reopenuntil")
+        keepRepairsUntil(id, now + 30 * 60 * 1000, true);
+    else if (action == "again" && !f.path.empty())
+        broadcastFile(utf8(f.path));
+    else if (action.rfind("gear:", 0) == 0)
+        broadcastFiles_.setRepairGear(id, action.substr(5));
     else if (action == "close")
         broadcastFiles_.closeRepairs(id);
     else if (action == "open" && !f.path.empty())
@@ -2090,51 +2148,62 @@ void MainFrame::askAgainOnBroadcast(uint64_t id)
     receiveFile(id);
 }
 
-void MainFrame::keepRepairsUntil(uint64_t id, uint64_t untilMs)
+void MainFrame::keepRepairsUntil(uint64_t id, uint64_t untilMs, bool reopen)
 {
     // A local time today, or tomorrow if that has gone by: "18:30".
+    wxString title = reopen ? "Re-open repairs" : "Keep repairs open";
     wxDateTime shown = untilMs != 0 ? wxDateTime((wxLongLong)(long long)untilMs) : wxDateTime::Now();
-    wxTextEntryDialog ask(this, "Keep repairs open until (your local time, such as 18:30):", "Keep repairs open",
-                          shown.Format("%H:%M"));
+    wxTextEntryDialog ask(this, (reopen ? "Re-open repairs until" : "Keep repairs open until")
+                                    + wxString(" (your local time, such as 18:30):"),
+                          title, shown.Format("%H:%M"));
     if (ask.ShowModal() != wxID_OK) return;
     wxDateTime at = wxDateTime::Now();
     wxString::const_iterator end;
     if (!at.ParseTime(ask.GetValue().Trim().Trim(false), &end))
     {
-        wxMessageBox("\"" + ask.GetValue() + "\" isn't a time of day, such as 18:30.", "Keep repairs open",
+        wxMessageBox("\"" + ask.GetValue() + "\" isn't a time of day, such as 18:30.", title,
                      wxOK | wxICON_INFORMATION, this);
         return;
     }
     if (at <= wxDateTime::Now()) at += wxDateSpan::Day();
     uint64_t ms = (uint64_t)at.GetValue().GetValue();
-    broadcastFiles_.keepOpen(id, ms);
+    if (reopen)
+        reopenRepairs(id, ms);
+    else
+        broadcastFiles_.keepOpen(id, ms);
+}
+
+void MainFrame::reopenRepairs(uint64_t id, uint64_t untilMs)
+{
+    std::string error;
+    if (!broadcastFiles_.reopen(id, untilMs, HostConnection::nowMs(), error))
+        wxMessageBox(utf8(error) + ".", "Re-open repairs", wxOK | wxICON_INFORMATION, this);
+}
+
+void MainFrame::repairGearMenu(const broadcast::BroadcastFile& f, FileCard& card)
+{
+    // Andrew's override (2026-10-25): this file's repairs in one gear,
+    // whatever the askers say; Auto goes by their S/N.
+    card.subLabel = "Repair gear";
+    card.sub.push_back({"gear:", "Auto, as the stations that ask hear you"});
+    bool listed = f.repairGear.empty();
+    for (const gearbox::Gear& gear : gearshift_.ladder())
+    {
+        card.sub.push_back({"gear:" + gear.mode, gear.name.empty() ? gear.mode : gear.name + "  (" + gear.mode + ")"});
+        listed = listed || gear.mode == f.repairGear;
+    }
+    if (!listed) card.sub.push_back({"gear:" + f.repairGear, f.repairGear});
+    card.subChosen = "gear:" + f.repairGear;
 }
 
 void MainFrame::broadcastFileMenu(const files::FileRow& row, wxMenu& menu)
 {
     FileCard card;
     if (!fileCard(row.id, card)) return;
-    const auto& actions = card.menu.empty() ? card.actions : card.menu;
-    if (!card.title.empty())
-    {
-        menu.Append(ID_BROADCAST_FILE_TITLE, utf8(card.title));
-        menu.Enable(ID_BROADCAST_FILE_TITLE, false);
-    }
     uint64_t id = row.id;
-    for (size_t i = 0; i < actions.size() && i < BROADCAST_FILE_ACTIONS; i++)
-    {
-        int itemId = ID_BROADCAST_FILE_ACTION + (int)i;
-        menu.Append(itemId, utf8(actions[i].second));
-        std::string action = actions[i].first;
-        if (action.empty())
-        {
-            menu.Enable(itemId, false);
-            continue;
-        }
-        menu.Bind(wxEVT_MENU, [this, id, action](wxCommandEvent&) {
-            CallAfter([this, id, action]() { broadcastFileAction(id, action); });
-        }, itemId);
-    }
+    fillFileMenu(menu, card, ID_BROADCAST_FILE_ACTION, [this, id](const std::string& action) {
+        CallAfter([this, id, action]() { broadcastFileAction(id, action); });
+    });
 }
 
 void MainFrame::setAutoReceive(bool on)

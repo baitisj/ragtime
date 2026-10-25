@@ -46,6 +46,10 @@ StationPrefs loadStationPrefs()
     p.sealChat = config().ReadBool("/Broadcast/SealChat", p.sealChat);
     p.slowRepairMinutes = (int)config().ReadLong("/Broadcast/SlowRepairMinutes", p.slowRepairMinutes);
     p.slowRepairMinutes = std::min(std::max(p.slowRepairMinutes, SLOW_REPAIR_MIN_MINUTES), SLOW_REPAIR_MAX_MINUTES);
+    p.repairFloor = readString("/Broadcast/RepairFloor", p.repairFloor);
+    p.repairCap = config().ReadBool("/Broadcast/RepairCap", p.repairCap);
+    p.repairCapMinutes = (int)config().ReadLong("/Broadcast/RepairCapMinutes", p.repairCapMinutes);
+    p.repairCapMinutes = std::min(std::max(p.repairCapMinutes, REPAIR_CAP_MIN_MINUTES), REPAIR_CAP_MAX_MINUTES);
     p.readDial = config().ReadBool("/Radio/ReadDial", p.readDial);
     p.rigHost = readString("/Radio/RigctldHost", p.rigHost);
     p.rigPort = (int)config().ReadLong("/Radio/RigctldPort", p.rigPort);
@@ -65,6 +69,9 @@ void saveStationPrefs(const StationPrefs& p)
     saveAutoAccept(p.autoAccept);
     config().Write("/Broadcast/SealChat", p.sealChat);
     config().Write("/Broadcast/SlowRepairMinutes", (long)p.slowRepairMinutes);
+    config().Write("/Broadcast/RepairFloor", wxString::FromUTF8(p.repairFloor));
+    config().Write("/Broadcast/RepairCap", p.repairCap);
+    config().Write("/Broadcast/RepairCapMinutes", (long)p.repairCapMinutes);
     config().Write("/Radio/ReadDial", p.readDial);
     config().Write("/Radio/RigctldHost", wxString::FromUTF8(p.rigHost));
     config().Write("/Radio/RigctldPort", (long)p.rigPort);

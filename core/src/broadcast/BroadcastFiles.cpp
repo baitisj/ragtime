@@ -356,7 +356,67 @@ bool BroadcastFiles::closeRepairs(uint64_t id)
     Outgoing* out = findOutgoing(id);
     if (out == nullptr || out->file.state != State::Repairing) return false;
     seals_.closeNow(out->file.seq);
+    out->capped = false;
     finishOutgoing(*out, out->file.stopped ? State::Cancelled : State::Sent, out->file.lastMs);
+    return true;
+}
+
+bool BroadcastFiles::reopen(uint64_t id, uint64_t untilMs, uint64_t nowMs, std::string& error)
+{
+    Outgoing* out = findOutgoing(id);
+    if (out == nullptr || (out->file.state != State::Sent && out->file.state != State::Cancelled))
+    {
+        error = "It isn't a finished broadcast of ours";
+        return false;
+    }
+    if (!seals_.sealOf(out->file.seq, nowMs).sealed)
+    {
+        error = "Its seal is over 2 hours old, or from before Ragtime last started: broadcast it again instead";
+        return false;
+    }
+    const protocol::FileAnnounce* a = out->announce.as<protocol::FileAnnounce>();
+    std::ifstream in(files::pathFromUtf8(out->file.path), std::ios::binary);
+    std::vector<uint8_t> content((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    if (!in.is_open() || (!in.good() && !in.eof()))
+    {
+        error = out->file.name + " can't be read";
+        return false;
+    }
+    if (a == nullptr || content.size() != out->file.size || protocol::digestOf(content) != a->digest)
+    {
+        error = out->file.name + " has changed since it went: broadcast it again instead";
+        return false;
+    }
+    if (!seals_.reopen(out->file.seq, untilMs, nowMs))
+    {
+        error = "Its seal is no longer held: broadcast it again instead";
+        return false;
+    }
+    out->content = std::move(content);
+    out->capped = false;
+    out->file.state = State::Repairing;
+    out->file.sealed = true;
+    out->file.lastMs = nowMs;
+    changed();
+    return true;
+}
+
+uint64_t BroadcastFiles::findSent(const std::string& path, uint64_t size) const
+{
+    // The newest, should it have gone more than once.
+    for (auto it = outgoing_.rbegin(); it != outgoing_.rend(); ++it)
+    {
+        if (it->file.path == path && it->file.size == size && !it->file.live()) return it->file.id;
+    }
+    return 0;
+}
+
+bool BroadcastFiles::setRepairGear(uint64_t id, const std::string& mode)
+{
+    Outgoing* out = findOutgoing(id);
+    if (out == nullptr || !out->file.live()) return false;
+    seals_.setRepairGear(out->file.seq, mode);
+    changed();
     return true;
 }
 
@@ -421,7 +481,17 @@ double BroadcastFiles::lossOf(const Incoming& in) const
 {
     // The last round's, when anything came of it; else the last known;
     // else the first pass's, counted from the first piece we heard (a
-    // station that tuned in part way didn't lose what went before).
+    // station that tuned in part way didn't lose what went before). A
+    // round's loss is of the parity pieces that went, from the first heard
+    // to the last: a round the sender's airtime cap cut short sent fewer
+    // than were asked for, and those never sent weren't lost (Jeff's
+    // AG7EW-KC2G test, 2026-10-25: 4 of 21 came in a capped round, read as
+    // 80% lost, and the next request asked for 41).
+    if (in.parityFrom != 0 && in.parityHeard != 0 && in.parityTop >= in.parityFrom)
+    {
+        uint32_t span = std::max((uint32_t)(in.parityTop - in.parityFrom) + 1, in.parityHeard);
+        return 1.0 - (double)in.parityHeard / (double)span;
+    }
     if (in.askedWant != 0 && in.came != 0)
         return 1.0 - std::min(1.0, (double)in.came / (double)in.askedWant);
     if (in.loss >= 0.0) return in.loss;
@@ -453,6 +523,8 @@ void BroadcastFiles::asked(const std::string& call, uint32_t seq, uint32_t want)
     in->loss = lossOf(*in);
     in->askedWant = want;
     in->came = 0;
+    // A sender's parity pieces count up from its piece count.
+    if (in->parityFrom == 0) in->parityFrom = in->parityTop != 0 ? (uint16_t)(in->parityTop + 1) : in->file.pieces;
 }
 
 //-------------------------------------------------------------------------
@@ -606,6 +678,8 @@ void BroadcastFiles::heardPiece(const protocol::Record& record, uint64_t nowMs)
         if (in->parity.count(p->index) != 0) return;
         in->parityBytes += p->bytes.size();
         in->parity.emplace(p->index, p->bytes);
+        in->parityTop = std::max(in->parityTop, p->index);
+        if (in->parityFrom != 0 && p->index >= in->parityFrom) in->parityHeard++;
     }
     else
     {
@@ -814,6 +888,7 @@ bool BroadcastFiles::stop(uint64_t id, uint64_t nowMs)
 {
     Incoming* in = findIncoming(id);
     if (in == nullptr || in->file.state != State::Receiving) return false;
+    in->refusedOut = false;
     in->file.state = State::Incomplete;
     in->file.stopped = true;
     in->file.expiresAtMs = nowMs + PART_KEEP_MS;
@@ -962,8 +1037,17 @@ void BroadcastFiles::tick(uint64_t nowMs)
         {
             Seals::SealView seal = seals_.sealOf(out.file.seq, nowMs);
             if (seal.sealed) out.file.sealed = true;
-            if (out.file.sealed && !seal.open)
+            if (out.file.sealed && seals_.repairCapReached(out.file.seq))
+            {
+                // Its repairs have had the airtime the operator allows.
+                seals_.closeNow(out.file.seq);
+                out.capped = true;
                 finishOutgoing(out, out.file.stopped ? State::Cancelled : State::Sent, nowMs);
+            }
+            else if (out.file.sealed && !seal.open)
+            {
+                finishOutgoing(out, out.file.stopped ? State::Cancelled : State::Sent, nowMs);
+            }
         }
     }
     for (auto it = incoming_.begin(); it != incoming_.end();)
@@ -981,12 +1065,25 @@ void BroadcastFiles::tick(uint64_t nowMs)
         // Repairs are over for it: we gave up asking (requests brought
         // nothing), the sender refused, its seal has aged out, or nothing
         // has come for long.
+        bool refused = seals_.refusal(in.file.from, in.file.seq).has_value();
         if (in.file.state == State::Receiving && !in.file.complete && in.announced
-            && ((sealed && seals_.gaveUp(in.file.from, in.file.seq)) || seals_.refusal(in.file.from, in.file.seq)
-                || (in.sealSeen && !sealed) || nowMs >= in.file.lastMs + INCOMPLETE_MS))
+            && ((sealed && seals_.gaveUp(in.file.from, in.file.seq)) || refused || (in.sealSeen && !sealed)
+                || nowMs >= in.file.lastMs + INCOMPLETE_MS))
         {
             in.file.state = State::Incomplete;
             in.file.expiresAtMs = nowMs + PART_KEEP_MS;
+            in.refusedOut = refused;
+            changed();
+        }
+        else if (in.file.state == State::Incomplete && in.refusedOut && !refused && sealed)
+        {
+            // The sender re-opened its repairs (its seal came again after
+            // the refusal): we were receiving it, so we ask again.
+            in.refusedOut = false;
+            in.file.state = State::Receiving;
+            in.file.expiresAtMs = 0;
+            in.file.lastMs = nowMs;
+            if (!seals_.askAgain(in.file.from, in.file.seq, nowMs)) seals_.askSoon(in.file.from, nowMs);
             changed();
         }
         else if (in.file.state == State::Incomplete && nowMs >= in.file.expiresAtMs)
@@ -1241,6 +1338,9 @@ BroadcastFiles::Incoming* BroadcastFiles::findIncoming(uint64_t id)
 BroadcastFile BroadcastFiles::view(const Outgoing& out, uint64_t nowMs) const
 {
     BroadcastFile f = out.file;
+    f.repairGear = seals_.repairGear(f.seq);
+    f.repairSeconds = seals_.repairAirtime(f.seq);
+    f.repairCapped = out.capped;
     if (f.state == State::Repairing)
     {
         Seals::SealView seal = seals_.sealOf(f.seq, nowMs);
@@ -1248,6 +1348,10 @@ BroadcastFile BroadcastFiles::view(const Outgoing& out, uint64_t nowMs) const
         f.repairsUntilMs = seal.openUntilMs;
         f.keptOpen = seal.keptOpen;
         f.askers = seal.askers;
+    }
+    else if ((f.state == State::Sent || f.state == State::Cancelled) && !f.path.empty())
+    {
+        f.reopenable = seals_.sealOf(f.seq, nowMs).sealed;
     }
     return f;
 }

@@ -25,6 +25,12 @@ struct StationPrefs
     // A repair round may spend this long in gears slower than its own, for
     // stations that hear us weakly (Seals::setSlowResendSeconds).
     int slowRepairMinutes = (int)(ragtime::broadcast::Seals::SLOW_RESEND_SECONDS / 60);
+    // Repairs never go slower than this mode (Data2G's name; empty: as
+    // slow as an asker needs), and a file's repairs close once they have
+    // taken this much airtime (Seals::setRepairFloor, setRepairCapSeconds).
+    std::string repairFloor;
+    bool repairCap = true;
+    int repairCapMinutes = 30;
     // The radio's dial, read (never set) from rigctld once a second: for
     // the path log's bands, and the data segment check below.
     bool readDial = false;
@@ -37,6 +43,8 @@ struct StationPrefs
 
 constexpr int SLOW_REPAIR_MIN_MINUTES = 1;
 constexpr int SLOW_REPAIR_MAX_MINUTES = 60;
+constexpr int REPAIR_CAP_MIN_MINUTES = 1;
+constexpr int REPAIR_CAP_MAX_MINUTES = 240;
 
 StationPrefs loadStationPrefs();
 void saveStationPrefs(const StationPrefs& prefs);

@@ -481,7 +481,8 @@ what goes on the air. Choices made there, for Jeff to keep or change:
   closes.
 - **Repair gears and Repair refused** (Jeff's idea, 2026-10-24, his
   choices on the proposal doc). A request carries the S/N its asker
-  heard the sender at (the lowest in 15 minutes) in the spare bits of
+  heard the sender at (the lowest in 15 minutes; since 0.1.2 the mean of
+  its last 5 bursts) in the spare bits of
   its flags byte, so it costs nothing on the air and 0.1 still works with
   it. Each item goes again in the fastest gear every station that asked
   for it can copy, with Auto's 3 dB margin, never faster than it first
@@ -542,6 +543,12 @@ The brief:
 - Right-click on a share: the first, greyed line shows when repairs end
   ("Repairs open until 15:42 (1 h 10 min)"), then Keep open 30 min
   longer, 2 hours longer, until..., and Close repairs now.
+- After Jeff's AG7EW–KC2G test (2026-10-25): requests carry the mean
+  S/N of the last 5 bursts, a listener counts loss only over the parity
+  pieces sent, Close repairs now takes back the round's queued bursts,
+  Re-open repairs (a closed share's menu, and Completed files), and
+  Andrew's three: Slowest repair gear and a repair airtime cap per file
+  (30 minutes) in Settings, and a Repair gear submenu per file.
 
 ## I. Packaging and the first release
 
