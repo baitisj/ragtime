@@ -178,6 +178,11 @@ public:
     void addAirtime(uint32_t seq, double seconds);
     // A file's pieces have all gone: seal now, not after QUIET_MS.
     void sealSoon() { sealSoon_ = true; }
+    // When our next seal is due, for the status bar's countdown (Jeff,
+    // 2026-10-25): items of ours have gone with no seal yet, and none is
+    // still going. It may be now or past while a resend round, a seal
+    // burst or Pause sending holds it. Nothing while no seal waits.
+    std::optional<uint64_t> nextSealMs() const;
 
     // A seal of ours as the screen shows it.
     struct SealView

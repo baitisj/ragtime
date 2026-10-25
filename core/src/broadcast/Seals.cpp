@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <limits>
+#include <optional>
 #include <string>
 #include <utility>
 
@@ -314,6 +315,25 @@ bool Seals::closeNow(uint32_t seq)
     asked_.erase(s->number);
     version_++;
     return true;
+}
+
+std::optional<uint64_t> Seals::nextSealMs() const
+{
+    if (callsign_.empty()) return std::nullopt;
+    // As sealIfDue reckons it.
+    bool anySent = false;
+    uint64_t oldestSent = std::numeric_limits<uint64_t>::max();
+    for (const OurItem& item : unsealed_)
+    {
+        if (item.fate == Fate::Going) return std::nullopt;
+        if (item.file && files_ != nullptr && files_->streaming(item.seq)) return std::nullopt;
+        if (item.fate != Fate::Sent) continue;
+        anySent = true;
+        oldestSent = std::min(oldestSent, item.sentMs);
+    }
+    if (!anySent) return std::nullopt;
+    if (sealSoon_) return lastItemMs_;
+    return std::min(lastItemMs_ + QUIET_MS, oldestSent + SEAL_EVERY_MS);
 }
 
 void Seals::sealIfDue(uint64_t nowMs)
