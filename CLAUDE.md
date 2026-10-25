@@ -100,6 +100,14 @@ with the code when the seal rules change.
   and `FileTraffic` keeps a flat 8 KB window where the host can cut
   (docs/PROTOCOL.md, "Cuts"). The fake hosts cut too (`--no-cut` for an
   older one).
+- The dial, the path log and the watch list (2026-10-25,
+  `docs/STAGE1.md`): `core/src/radio/` (`DialReader`, which only ever
+  asks rigctld `f`; `Bands`, the US data segments; `PathLog`, a line a
+  burst heard, appended, and each station's 24-hour strip by band),
+  `broadcast::WatchList` (bells, and Tell me when free), and in the app
+  `RigConnection`, `PathStripView`, `PathsDialog` and `WatchDialog`.
+  Receive only outside the US data segments ticks PLAN.md's last parity
+  box.
 - The flight recorder (2026-10-25, idea 2 of "Ideas before
   signatures"): `link::FlightRecorder` keeps every command line, KISS
   frame and session byte count to and from the host, with millisecond
@@ -176,14 +184,15 @@ with the code when the seal rules change.
   welcome. "Curmudgeons" and "lids" are flavour words for the docs and UI
   copy, never defined terms in the spec.
 - The radio is the source of truth for frequency: retune only when the
-  operator asks.
+  operator asks. Ragtime reads the dial from rigctld (`f` only, never a
+  set command: the operator's rigctld is shared).
 
 ## Layout
 
 | Path | What |
 | --- | --- |
-| `core/` | `ragtime_core`, the socket-free library: no wx, no sockets in the engines, all unit-tested. Headers in `core/include/ragtime/`, sources in `core/src/`, one subfolder per area: `protocol/`, `link/`, `text/`, `files/` (package B; G adds `FileRows`, `FileTraffic`), `globus/` (C), `gearbox/` (D), `broadcast/` (E, with `BroadcastLog`; H adds `Airtime`, `Seals`, `BroadcastFiles`), `session/` (F, and `SessionLog`; `StreamLog` for cuts). Add sources to `core/CMakeLists.txt` |
-| `app/` | The wxWidgets app (`app/src/`). It draws and wires; logic goes in core. `MainFrame` is the one main window and owns the engines; `HostConnection` is the only code with sockets; `Prefs` holds every wxConfig key, and `appDataDir()` is where Ragtime keeps its own files (never wx's `GetUserDataDir()`: on Linux that is `~/.Ragtime`, the settings file); `app/src/globus/` is the Globus pane (`GlobusPanel`, `GlobusView`, `GlobusToggle`) |
+| `core/` | `ragtime_core`, the socket-free library: no wx, no sockets in the engines, all unit-tested. Headers in `core/include/ragtime/`, sources in `core/src/`, one subfolder per area: `protocol/`, `link/`, `text/`, `files/` (package B; G adds `FileRows`, `FileTraffic`), `globus/` (C), `gearbox/` (D), `broadcast/` (E, with `BroadcastLog`; H adds `Airtime`, `Seals`, `BroadcastFiles`), `session/` (F, and `SessionLog`; `StreamLog` for cuts), `radio/` (the dial from rigctld, the US data segments, the path log). Add sources to `core/CMakeLists.txt` |
+| `app/` | The wxWidgets app (`app/src/`). It draws and wires; logic goes in core. `MainFrame` is the one main window and owns the engines; `HostConnection` (data2g-host) and `RigConnection` (rigctld, read only) are the only code with sockets; `Prefs` holds every wxConfig key, and `appDataDir()` is where Ragtime keeps its own files (never wx's `GetUserDataDir()`: on Linux that is `~/.Ragtime`, the settings file); `app/src/globus/` is the Globus pane (`GlobusPanel`, `GlobusView`, `GlobusToggle`) |
 | `tests/` | ctest unit tests for core, plain executables on `tests/Check.h` (`CHECK`, `CHECK_EQ`). Add one with `ragtime_test(<name> <source>)` in `tests/CMakeLists.txt`. `FakeHost.*` is a fake data2g-host on loopback sockets (POSIX, so its test and the bench build only `if(UNIX)`); `FakeAirMain.cpp` is the bench `ragtime_fake_air`, and `ReplayHost.*` its `--replay` |
 | `tools/` | Reference scripts: `icon/` (`make_leaf_svg.py` draws the icon, the Maple Leaf Rag's leaf going digital, as `app/res/ragtime.svg`; `make_icons.sh` renders its PNG and ICO), `globe/` (sunlit globe renderer, and the generators of the map tables in `core/src/globus/`: coasts and borders from Natural Earth, the big lakes from `ne_110m_lakes.geojson`, state and province lines from Natural Earth's 1:10m admin-1 lines, fetched for the run, for the countries in `gen_admin1_lines.py`), `gearbox/` (ladders), `ham_table/` (text table 0 generator and corpus: `gen_table.py --check`), `gcc16/check.py` (GCC 16 check) |
 | `cmake/` | CMake helpers. `ragtime_warnings(<target>)` gives every target `-Wall -Wextra` and, with `RAGTIME_WERROR` (on by default), `-Werror`; `Toolchain-mingw64.cmake` (the Windows cross build), `BuildWxWidgets.cmake` (wxWidgets 3.2.9 cloned and built statically with `-DRAGTIME_BUILD_WX=ON`), `EmbedFile.cmake` (the window icon built in) |
@@ -239,7 +248,9 @@ lose that share of the group frames they hear, so repairs happen, and
 every 6 minutes. A call
 from host A or B is answered on its second try. The hosts report SNRs,
 each bot at its own strength; `--no-snr` plays a host from before Data2G
-PR #98. Headless:
+PR #98. `--rig PORT` plays a rigctld for the dial (14.105 MHz, or
+`--dial HZ`; `--dial-hop` moves it outside the data segments one minute
+in three) and prints anything it is sent but `f`. Headless:
 `Xvfb :91 &`, `DISPLAY=:91 ragtime ...`, `xdotool` to click and type,
 `import -window root` for a screenshot. Never point the bench at Jeff's
 radio PC's real host ports while his data2g-host runs.

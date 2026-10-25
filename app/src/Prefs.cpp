@@ -46,6 +46,10 @@ StationPrefs loadStationPrefs()
     p.sealChat = config().ReadBool("/Broadcast/SealChat", p.sealChat);
     p.slowRepairMinutes = (int)config().ReadLong("/Broadcast/SlowRepairMinutes", p.slowRepairMinutes);
     p.slowRepairMinutes = std::min(std::max(p.slowRepairMinutes, SLOW_REPAIR_MIN_MINUTES), SLOW_REPAIR_MAX_MINUTES);
+    p.readDial = config().ReadBool("/Radio/ReadDial", p.readDial);
+    p.rigHost = readString("/Radio/RigctldHost", p.rigHost);
+    p.rigPort = (int)config().ReadLong("/Radio/RigctldPort", p.rigPort);
+    p.usSegmentsOnly = config().ReadBool("/Radio/UsSegmentsOnly", p.usSegmentsOnly);
     return p;
 }
 
@@ -61,6 +65,10 @@ void saveStationPrefs(const StationPrefs& p)
     saveAutoAccept(p.autoAccept);
     config().Write("/Broadcast/SealChat", p.sealChat);
     config().Write("/Broadcast/SlowRepairMinutes", (long)p.slowRepairMinutes);
+    config().Write("/Radio/ReadDial", p.readDial);
+    config().Write("/Radio/RigctldHost", wxString::FromUTF8(p.rigHost));
+    config().Write("/Radio/RigctldPort", (long)p.rigPort);
+    config().Write("/Radio/UsSegmentsOnly", p.usSegmentsOnly);
     config().Flush();
 }
 
@@ -164,10 +172,13 @@ void saveReceivedFolder(const std::string& folder)
     config().Write(keys::RECEIVED_FOLDER, wxString::FromUTF8(folder));
 }
 
-std::vector<std::string> loadAutoAccept()
+namespace
+{
+
+std::vector<std::string> readCalls(const char* key)
 {
     std::vector<std::string> calls;
-    wxStringTokenizer words(wxString::FromUTF8(readString(keys::AUTO_ACCEPT, "")), ", ");
+    wxStringTokenizer words(wxString::FromUTF8(readString(key, "")), ", ");
     while (words.HasMoreTokens())
     {
         std::string call = protocol::normalCallsign(std::string(words.GetNextToken().utf8_str()));
@@ -176,7 +187,7 @@ std::vector<std::string> loadAutoAccept()
     return calls;
 }
 
-void saveAutoAccept(const std::vector<std::string>& calls)
+void writeCalls(const char* key, const std::vector<std::string>& calls)
 {
     wxString saved;
     for (const std::string& call : calls)
@@ -184,7 +195,30 @@ void saveAutoAccept(const std::vector<std::string>& calls)
         if (!saved.empty()) saved += ",";
         saved += wxString::FromUTF8(call);
     }
-    config().Write(keys::AUTO_ACCEPT, saved);
+    config().Write(key, saved);
+}
+
+} // namespace
+
+std::vector<std::string> loadAutoAccept()
+{
+    return readCalls(keys::AUTO_ACCEPT);
+}
+
+void saveAutoAccept(const std::vector<std::string>& calls)
+{
+    writeCalls(keys::AUTO_ACCEPT, calls);
+}
+
+std::vector<std::string> loadWatchList()
+{
+    return readCalls(keys::WATCH_LIST);
+}
+
+void saveWatchList(const std::vector<std::string>& calls)
+{
+    writeCalls(keys::WATCH_LIST, calls);
+    config().Flush();
 }
 
 void setConfigPath(const std::string& path)
@@ -245,6 +279,13 @@ std::string broadcastPartsDir()
     wxFileName dir = wxFileName::DirName(wxString::FromUTF8(appDataDir()));
     dir.AppendDir("broadcast-parts");
     return std::string(dir.GetPath().utf8_str());
+}
+
+std::string pathLogPath()
+{
+    if (!configPath.empty()) return configPath + ".paths.log";
+    wxFileName file(wxString::FromUTF8(appDataDir()), "paths.log");
+    return std::string(file.GetFullPath().utf8_str());
 }
 
 std::string flightRecorderDir()

@@ -11,6 +11,7 @@
 
 #include "GlobusToggle.h"
 #include "GlobusView.h"
+#include "../PathStripView.h"
 #include "../Theme.h"
 #include "ragtime/globus/Globe.h"
 #include "ragtime/globus/Sun.h"
@@ -44,6 +45,8 @@ GlobusPanel::GlobusPanel(wxWindow* parent, wxWindowID id)
     caption_->SetFont(caption_->GetFont().Bold());
     details_ = new wxStaticText(this, wxID_ANY, "", wxDefaultPosition, wxDefaultSize,
                                 wxALIGN_CENTRE_HORIZONTAL | wxST_NO_AUTORESIZE);
+    strip_ = new PathStripView(this, 8);
+    strip_->Hide();
 
     auto* header = new wxBoxSizer(wxHORIZONTAL);
     header->Add(toggle_, 0, wxALIGN_CENTER_VERTICAL);
@@ -57,6 +60,7 @@ GlobusPanel::GlobusPanel(wxWindow* parent, wxWindowID id)
     sizer->Add(view_, 1, wxSHAPED | wxALIGN_CENTER_HORIZONTAL | wxLEFT | wxRIGHT, 6);
     sizer->Add(caption_, 0, wxEXPAND | wxLEFT | wxRIGHT | wxTOP, 6);
     sizer->Add(details_, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 6);
+    sizer->Add(strip_, 0, wxALIGN_CENTER_HORIZONTAL | wxLEFT | wxRIGHT | wxBOTTOM, 6);
     sizer->AddStretchSpacer(1);
     SetSizer(sizer);
 
@@ -81,7 +85,25 @@ void GlobusPanel::setStation(const std::string& callsign, const std::string& loc
     current_ = current;
     view_->setLocators(home_, locator_, current_);
     details_->SetLabel(utf8(details));
+    // Fixed size (it doesn't resize itself on every new label), but as
+    // tall as its lines.
+    int lines = 1;
+    for (char c : details) lines += c == '\n' ? 1 : 0;
+    int height = details.empty() ? 0 : lines * details_->GetCharHeight();
+    if (details_->GetMinSize().y != height) details_->SetMinSize(wxSize(-1, height));
     updateCaption();
+}
+
+void GlobusPanel::setPathStrip(const ragtime::radio::PathStrip* strip, uint64_t nowMs)
+{
+    stripWanted_ = strip != nullptr;
+    if (strip != nullptr) strip_->setStrip(*strip, nowMs);
+    bool show = stripWanted_ && view_->IsShown();
+    if (strip_->IsShown() != show)
+    {
+        strip_->Show(show);
+        Layout();
+    }
 }
 
 void GlobusPanel::setStations(const std::vector<std::pair<std::string, bool>>& stations)
@@ -96,6 +118,7 @@ void GlobusPanel::showGlobe(bool show)
     view_->Show(show);
     caption_->Show(show);
     details_->Show(show);
+    strip_->Show(show && stripWanted_);
     Layout();
 }
 

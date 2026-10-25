@@ -3,7 +3,12 @@
 #include <algorithm>
 #include <utility>
 
+#include <set>
+
+#include <wx/filesys.h>
+#include <wx/fs_mem.h>
 #include <wx/htmllbox.h>
+#include <wx/imaglist.h>
 #include <wx/listctrl.h>
 #include <wx/menu.h>
 #include <wx/settings.h>
@@ -11,6 +16,7 @@
 #include <wx/sizer.h>
 #include <wx/stattext.h>
 
+#include "DrawnIcon.h"
 #include "Html.h"
 #include "Theme.h"
 
@@ -33,6 +39,36 @@ enum Page
     PAGE_TABLE,
     PAGE_EMPTY,
 };
+
+// A row lights this long when its QRV comes.
+constexpr uint64_t FLASH_MS = 3000;
+constexpr int BELL_DIP = 12;
+
+// The bell for the narrow list's rows, drawn once a theme into wxHTML's
+// memory files.
+wxString bellHtml(const wxWindow* window, const wxColour& ink)
+{
+    int px = window->FromDIP(BELL_DIP);
+    wxString name = wxString::Format("ragtime-bell-%s-%d.png", ink.GetAsString(wxC2S_HTML_SYNTAX).Mid(1), px);
+    static std::set<wxString> made;
+    if (made.count(name) == 0)
+    {
+        static bool handler = false;
+        if (!handler)
+        {
+            // SealBadge may have added it already: wx keeps one of each.
+            if (!wxFileSystem::HasHandlerForPath("memory:x")) wxFileSystem::AddHandler(new wxMemoryFSHandler);
+            handler = true;
+        }
+        if (wxImage::FindHandler(wxBITMAP_TYPE_PNG) == nullptr) wxImage::AddHandler(new wxPNGHandler);
+        wxBitmap bitmap = bellIcon(ink, BELL_DIP).GetBitmap(wxSize(px, px));
+        if (!bitmap.IsOk()) return wxString();
+        wxMemoryFSHandler::AddFile(name, bitmap.ConvertToImage(), wxBITMAP_TYPE_PNG);
+        made.insert(name);
+    }
+    wxString side = wxString::Format("%d", px);
+    return "<img src=\"memory:" + name + "\" width=\"" + side + "\" height=\"" + side + "\">";
+}
 
 } // namespace
 
@@ -67,9 +103,16 @@ protected:
         bool ours = s->call == owner_->stations_.partner();
         wxColour dot = !status.filled ? secondaryText() : ours ? accentText() : status.word == "QRV" ? goodText() : busyText();
         wxString tint = picked ? wxString() : " color=\"" + htmlColour(dot) + "\"";
+        wxString bell = owner_->belled(s->call) ? "&nbsp;" + bellHtml(this, picked ? wxSystemSettings::GetColour(
+                                                                       wxSYS_COLOUR_HIGHLIGHTTEXT) : accentText())
+                                                : wxString();
+        wxString lit = owner_->flashing(s->call) && !picked
+                           ? " bgcolor=\"" + htmlColour(blendColour(wxSystemSettings::GetColour(wxSYS_COLOUR_LISTBOX),
+                                                                    accentText(), 0.25)) + "\""
+                           : wxString();
         wxString html;
-        html << "<table width=\"100%\" cellspacing=\"0\" cellpadding=\"1\">"
-             << "<tr><td nowrap><b>" << htmlEscape(s->call) << "</b>&nbsp;&nbsp;<font" << tint << ">"
+        html << "<table width=\"100%\" cellspacing=\"0\" cellpadding=\"1\"" << lit << ">"
+             << "<tr><td nowrap><b>" << htmlEscape(s->call) << "</b>" << bell << "&nbsp;&nbsp;<font" << tint << ">"
              << utf8(status.filled ? "\xe2\x97\x8f " : "\xe2\x97\x8b ") << htmlEscape(status.word) << "</font></td>"
              << "<td nowrap align=\"right\"><font" << grey << ">" << htmlEscape(heardAgo(s->lastHeardMs, owner_->nowMs_))
              << "</font></td></tr>"
@@ -107,8 +150,29 @@ protected:
         return utf8(owner_->stations_.cell(*s, owner_->columns_[(size_t)column], owner_->nowMs_));
     }
 
+    // The bell beside the call, in the first column.
+    int OnGetItemImage(long item) const override
+    {
+        const Station* s = owner_->stationAt((size_t)item);
+        return s != nullptr && owner_->belled(s->call) ? 0 : -1;
+    }
+
+    int OnGetItemColumnImage(long item, long column) const override
+    {
+        return column == 0 ? OnGetItemImage(item) : -1;
+    }
+
+    wxItemAttr* OnGetItemAttr(long item) const override
+    {
+        const Station* s = owner_->stationAt((size_t)item);
+        if (s == nullptr || !owner_->flashing(s->call)) return nullptr;
+        lit_.SetBackgroundColour(blendColour(wxSystemSettings::GetColour(wxSYS_COLOUR_LISTBOX), accentText(), 0.25));
+        return &lit_;
+    }
+
 private:
     StationList* owner_;
+    mutable wxItemAttr lit_;
 };
 
 //-------------------------------------------------------------------------
@@ -124,6 +188,12 @@ StationList::StationList(wxWindow* parent, const Stations& stations)
     scrollbarBeside(narrowView_);
     table_ = new StationTable(this);
     followThemeBackground(table_, wxSYS_COLOUR_LISTBOX);
+    {
+        int px = FromDIP(BELL_DIP);
+        auto* images = new wxImageList(px, px, true, 1);
+        images->Add(bellIcon(accentText(), BELL_DIP).GetBitmap(wxSize(px, px)));
+        table_->AssignImageList(images, wxIMAGE_LIST_SMALL);
+    }
 
     auto* empty = new wxPanel(book_);
     followThemeBackground(empty, wxSYS_COLOUR_LISTBOX);
@@ -225,7 +295,27 @@ wxString StationList::tooltip(long row) const
     if (s == nullptr) return wxString();
     std::string tip = stations_.status(*s, nowMs_).how;
     if (!s->software.empty()) tip += "\n" + s->software;
+    if (belled(s->call) && bellTip_) tip += "\n" + bellTip_(s->call);
     return utf8(tip);
+}
+
+void StationList::bells(BellFn belled, BellTipFn tip)
+{
+    belled_ = std::move(belled);
+    bellTip_ = std::move(tip);
+    refresh(nowMs_);
+}
+
+void StationList::flash(const std::string& call, uint64_t nowMs)
+{
+    flashCall_ = call;
+    flashUntilMs_ = nowMs + FLASH_MS;
+    refresh(nowMs);
+}
+
+bool StationList::flashing(const std::string& call) const
+{
+    return !flashCall_.empty() && call == flashCall_ && nowMs_ < flashUntilMs_;
 }
 
 void StationList::picked(long row)

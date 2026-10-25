@@ -33,6 +33,8 @@ using State = Message::State;
 namespace
 {
 
+const char* const PAUSED_LINE = "Sending is paused: messages wait as Queued until you press Pause sending again.";
+
 
 // Room for the seal badge (SEAL_BADGE_PX) in every row.
 constexpr int BADGE_ROOM = SEAL_BADGE_PX + 4;
@@ -356,7 +358,7 @@ BroadcastPage::BroadcastPage(wxWindow* parent, const BroadcastChat& chat)
     followThemeBackground(list_, wxSYS_COLOUR_LISTBOX);
     scrollbarBeside(list_);
     paused_ = new wxStaticText(this, wxID_ANY,
-                               "Sending is paused: messages wait as Queued until you press Pause sending again.");
+                               PAUSED_LINE);
     followThemeText(paused_, secondaryText);
     paused_->Hide();
 
@@ -518,9 +520,11 @@ void BroadcastPage::drawGearButton()
                                     GEAR_ICON_DIP));
 }
 
-void BroadcastPage::setPaused(bool paused)
+void BroadcastPage::setPaused(bool paused, const wxString& why)
 {
-    if (paused_->IsShown() == paused) return;
+    wxString line = why.empty() ? wxString(PAUSED_LINE) : why;
+    if (paused_->IsShown() == paused && paused_->GetLabel() == line) return;
+    paused_->SetLabel(line);
     paused_->Show(paused);
     Layout();
 }

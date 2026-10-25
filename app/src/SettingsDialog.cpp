@@ -110,6 +110,37 @@ SettingsDialog::SettingsDialog(wxWindow* parent, const StationPrefs& prefs)
     slowRow->Add(new wxStaticText(box, wxID_ANY, "minutes"), 0, wxALIGN_CENTER_VERTICAL);
     broadcast->Add(slowRow, 0, wxLEFT | wxRIGHT | wxBOTTOM, 6);
 
+    // The radio: read, never set. rigctld is often shared (fldigi), so
+    // Ragtime asks it the frequency and nothing else.
+    auto* radio = new wxStaticBoxSizer(wxVERTICAL, this, "Radio");
+    box = radio->GetStaticBox();
+    readDial_ = new wxCheckBox(box, wxID_ANY, "Read the dial from rigctld");
+    readDial_->SetValue(prefs.readDial);
+    readDial_->SetToolTip("Once a second Ragtime asks rigctld the radio's frequency, and nothing else: it never "
+                          "tunes the radio or sets anything. The band goes in the path log beside every station "
+                          "heard. Ragtime never starts rigctld: you run it.");
+    rigHost_ = new wxTextCtrl(box, wxID_ANY, wxString::FromUTF8(prefs.rigHost), wxDefaultPosition,
+                              wxSize(FromDIP(130), -1));
+    rigHost_->SetToolTip("The computer rigctld runs on");
+    rigPort_ = new wxSpinCtrl(box, wxID_ANY, "", wxDefaultPosition, wxDefaultSize, wxSP_ARROW_KEYS, 1, 65535,
+                              prefs.rigPort);
+    rigPort_->SetToolTip("rigctld's port, 4532 unless you started it with another");
+    auto* rigRow = new wxBoxSizer(wxHORIZONTAL);
+    rigRow->Add(readDial_, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 12);
+    rigRow->Add(new wxStaticText(box, wxID_ANY, "at"), 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 6);
+    rigRow->Add(rigHost_, 1, wxALIGN_CENTER_VERTICAL | wxRIGHT, 6);
+    rigRow->Add(new wxStaticText(box, wxID_ANY, "port"), 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 6);
+    rigRow->Add(rigPort_, 0, wxALIGN_CENTER_VERTICAL);
+    radio->Add(rigRow, 0, wxEXPAND | wxALL, 6);
+    usSegmentsOnly_ = new wxCheckBox(box, wxID_ANY, "Receive only outside the US data segments");
+    usSegmentsOnly_->SetValue(prefs.usSegmentsOnly);
+    usSegmentsOnly_->SetToolTip("Data2G bursts are data, and US rules allow data only in parts of each band "
+                                "(47 CFR 97.305). While this is ticked Ragtime hands data2g-host nothing to send, "
+                                "and takes no calls, unless the dial is at least 3 kHz inside a data segment; nor "
+                                "while it doesn't know the dial. It still receives. A session already up keeps "
+                                "its link: data2g-host still acknowledges what it hears.");
+    radio->Add(usSegmentsOnly_, 0, wxLEFT | wxRIGHT | wxBOTTOM, 6);
+
     problem_ = new wxStaticText(this, wxID_ANY, "");
     problem_->SetForegroundColour(badText());
 
@@ -118,6 +149,7 @@ SettingsDialog::SettingsDialog(wxWindow* parent, const StationPrefs& prefs)
     sizer->Add(host, 0, wxEXPAND | wxLEFT | wxRIGHT | wxTOP, 12);
     sizer->Add(files, 0, wxEXPAND | wxLEFT | wxRIGHT | wxTOP, 12);
     sizer->Add(broadcast, 0, wxEXPAND | wxLEFT | wxRIGHT | wxTOP, 12);
+    sizer->Add(radio, 0, wxEXPAND | wxLEFT | wxRIGHT | wxTOP, 12);
     sizer->Add(problem_, 0, wxEXPAND | wxLEFT | wxRIGHT | wxTOP, 12);
     sizer->Add(CreateStdDialogButtonSizer(wxOK | wxCANCEL), 0, wxEXPAND | wxALL, 12);
     SetSizer(sizer);
@@ -130,6 +162,7 @@ SettingsDialog::SettingsDialog(wxWindow* parent, const StationPrefs& prefs)
     autoAccept_->Bind(wxEVT_TEXT, changed);
     locator_->Bind(wxEVT_TEXT, changed);
     commandPort_->Bind(wxEVT_SPINCTRL, [this](wxSpinEvent&) { check(); });
+    readDial_->Bind(wxEVT_CHECKBOX, changed);
     check();
     callsign_->SetFocus();
 }
@@ -152,12 +185,21 @@ StationPrefs SettingsDialog::prefs() const
     }
     p.sealChat = sealChat_->GetValue();
     p.slowRepairMinutes = slowRepair_->GetValue();
+    p.readDial = readDial_->GetValue();
+    p.rigHost = text(rigHost_);
+    if (p.rigHost.empty()) p.rigHost = "127.0.0.1";
+    p.rigPort = rigPort_->GetValue();
+    p.usSegmentsOnly = p.readDial && usSegmentsOnly_->GetValue();
     return p;
 }
 
 void SettingsDialog::check()
 {
     dataPort_->SetLabel(wxString::Format("Session data on %d", commandPort_->GetValue() + 1));
+    // The segment check needs the dial.
+    rigHost_->Enable(readDial_->GetValue());
+    rigPort_->Enable(readDial_->GetValue());
+    usSegmentsOnly_->Enable(readDial_->GetValue());
     wxString problem;
     std::string call = text(callsign_);
     std::string locator = text(locator_);

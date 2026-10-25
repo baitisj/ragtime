@@ -30,6 +30,8 @@ ConnectionBar::ConnectionBar(wxWindow* parent)
     callsign_->SetToolTip("Your callsign: Settings > Station");
     auto* group = new wxStaticText(this, wxID_ANY, "Group D2G");
     group->SetToolTip("The broadcast group Ragtime opens on data2g-host");
+    dial_ = new wxStaticText(this, wxID_ANY, "");
+    dial_->Hide();
 
     narrow = new ToggleSwitch(this, wxID_ANY, "500 Hz");
     narrow->SetToolTip("On: data2g-host uses only 500 Hz modes (BW500). Off: any width (BW2300)");
@@ -59,6 +61,7 @@ ConnectionBar::ConnectionBar(wxWindow* parent)
     };
     add(left_, callsign_, 8);
     add(left_, group, 12);
+    add(left_, dial_, 12);
     left_->Add(divider(this), 0, wxEXPAND | wxLEFT | wxTOP | wxBOTTOM, FromDIP(8));
     add(left_, narrow, 8);
     add(left_, acceptSessions, 14);
@@ -121,6 +124,27 @@ void ConnectionBar::setCallsign(const wxString& callsign)
 {
     callsign_->SetLabel(callsign.empty() ? wxString("No callsign") : callsign);
     Layout();
+}
+
+void ConnectionBar::setDial(const wxString& text, const wxString& tip, bool held)
+{
+    if (text.empty())
+    {
+        if (!dial_->IsShown()) return;
+        dial_->Hide();
+        Layout();
+        arrange(GetSize().x);
+        return;
+    }
+    if (dial_->GetToolTipText() != tip) dial_->SetToolTip(tip);
+    if (dial_->IsShown() && dial_->GetLabel() == text && held_ == held) return;
+    held_ = held;
+    dial_->SetLabel(text);
+    dial_->SetForegroundColour(held ? badText() : wxNullColour);
+    dial_->Show();
+    Layout();
+    arrange(GetSize().x);
+    GetParent()->Layout();
 }
 
 void ConnectionBar::setNarrow(bool on)

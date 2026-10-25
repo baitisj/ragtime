@@ -79,7 +79,9 @@ public:
     // Redraws the messages when the chat has changed.
     void refresh();
     void setGearLabel(const wxString& label, const wxString& tooltip, double bitsPerSecond = 0.0);
-    void setPaused(bool paused);
+    // Pause sending shows a line saying so; with a reason (receive only,
+    // outside the US data segments) the line gives it instead.
+    void setPaused(bool paused, const wxString& why = wxString());
     // "@W1AW " at the start of the line, and the cursor after it.
     void address(const std::string& call);
     void focusCompose();

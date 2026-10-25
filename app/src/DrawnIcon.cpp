@@ -129,3 +129,28 @@ wxBitmapBundle checkIcon(const wxColour& ink, int sizeDip)
 {
     return drawnIcon([ink](wxGraphicsContext& gc, double size) { drawCheckIcon(gc, size, ink); }, sizeDip);
 }
+
+void drawBellIcon(wxGraphicsContext& gc, double size, const wxColour& ink)
+{
+    // Drawn on a 24-unit grid: a bell's dome flaring to a lip, the knob on
+    // top and the clapper under it.
+    const double u = size / 24.0;
+    gc.SetPen(*wxTRANSPARENT_PEN);
+    gc.SetBrush(gc.CreateBrush(wxBrush(ink)));
+    wxGraphicsPath bell = gc.CreatePath();
+    bell.MoveToPoint(12.0 * u, 3.5 * u);
+    bell.AddCurveToPoint(7.0 * u, 3.5 * u, 6.0 * u, 8.0 * u, 6.0 * u, 12.0 * u);
+    bell.AddCurveToPoint(6.0 * u, 15.0 * u, 4.5 * u, 16.5 * u, 3.5 * u, 17.5 * u);
+    bell.AddLineToPoint(20.5 * u, 17.5 * u);
+    bell.AddCurveToPoint(19.5 * u, 16.5 * u, 18.0 * u, 15.0 * u, 18.0 * u, 12.0 * u);
+    bell.AddCurveToPoint(18.0 * u, 8.0 * u, 17.0 * u, 3.5 * u, 12.0 * u, 3.5 * u);
+    bell.CloseSubpath();
+    gc.FillPath(bell);
+    gc.DrawEllipse(10.5 * u, 1.5 * u, 3.0 * u, 3.0 * u);
+    gc.DrawEllipse(9.5 * u, 18.0 * u, 5.0 * u, 4.0 * u);
+}
+
+wxBitmapBundle bellIcon(const wxColour& ink, int sizeDip)
+{
+    return drawnIcon([ink](wxGraphicsContext& gc, double size) { drawBellIcon(gc, size, ink); }, sizeDip);
+}

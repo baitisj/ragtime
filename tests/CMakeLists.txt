@@ -40,6 +40,7 @@ ragtime_test(ragtime_gearbox_test GearboxTest.cpp)
 
 ragtime_test(ragtime_broadcast_test BroadcastTest.cpp)
 ragtime_test(ragtime_broadcast_log_test BroadcastLogTest.cpp)
+ragtime_test(ragtime_watch_list_test WatchListTest.cpp)
 
 ragtime_test(ragtime_session_test SessionTest.cpp)
 ragtime_test(ragtime_stream_log_test StreamLogTest.cpp)
@@ -52,4 +53,5 @@ target_include_directories(ragtime_globus_test PRIVATE ${PROJECT_SOURCE_DIR}/cor
 ragtime_test(ragtime_broadcast_files_test BroadcastFilesTest.cpp)
 ragtime_test(ragtime_file_traffic_test FileTrafficTest.cpp)
 
+ragtime_test(ragtime_radio_test RadioTest.cpp)
 ragtime_test(ragtime_flight_recorder_test FlightRecorderTest.cpp)

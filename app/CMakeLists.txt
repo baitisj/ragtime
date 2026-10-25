@@ -31,6 +31,9 @@ add_executable(ragtime WIN32
     src/DrawnIcon.cpp
     src/GearshiftIcon.cpp
     src/HostConnection.cpp
+    src/PathStripView.cpp
+    src/PathsDialog.cpp
+    src/RigConnection.cpp
     src/Html.cpp
     src/PhraseHighlight.cpp
     src/SealBadge.cpp
@@ -43,6 +46,7 @@ add_executable(ragtime WIN32
     src/ToggleSwitch.cpp
     src/Theme.cpp
     src/TxLamp.cpp
+    src/WatchDialog.cpp
     src/globus/GlobusPanel.cpp
     src/globus/GlobusToggle.cpp
     src/globus/GlobusView.cpp
