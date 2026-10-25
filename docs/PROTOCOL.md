@@ -202,13 +202,18 @@ seal covers, and how many repair symbols it wants for it.
 | Field | Bytes | Meaning |
 | --- | --- | --- |
 | to | 2 to 8 | Whose seal |
-| seal | 2 | Its number |
+| seal | 2 | Its number; 0 to ask for the seals over the files listed (below) |
 | seal digest | 12 | Its record digest; zeros when asking for a seal not heard |
 | flags | 1 | Bit 0: send the seal itself again. Bits 1 to 7: the asker's S/N code (below) |
 | count | 1 | Items in the seal (0 when it wasn't heard) |
 | items | count / 8, rounded up | One bit per item, the first item in the top bit of the first byte: 1 = missing |
 | items wanted | 1 | Repair symbols wanted for the items missing: as many as are missing, or more for what the asker expects to lose (Parity, below) |
 | files | 5 each, to the end | For each file it lacks pieces of: its seq (3), then the parity pieces it wants (2) |
+
+**Seal 0.** Seals count from 1, so a request under seal 0 asks for
+whichever seals list the files it names: flag bit 0 set, count 0, and
+each file with a want of 0. A listener sends one when it heard a file
+(its announce or a piece) but no seal over it, every copy lost.
 
 **The S/N code** in bits 1 to 7 of flags says how well the asker hears
 the seal's sender, so the repairs can go in a gear it can copy. It is the
@@ -556,6 +561,12 @@ the host's `MODES` lists them.
   request was lost (NORM's flush, repeated).
 - A request that comes with no window open (a listener that pressed
   Receive late) opens one, so others can join it.
+- A request under seal 0 is answered with the seal over each file it
+  names, at the window's end as any seal asked for. A file not sealed
+  yet is left alone, since its seal is coming. One it no longer holds
+  is refused (reason 2, under seal 0, naming the file), and one whose
+  seal is closed is refused under that seal, naming the file, since the
+  asker doesn't hold the seal.
 - It answers a seal while the seal is in its **sensitivity window**: one
   of its newest 3 seals, or younger than 4 × the airtime of the items it
   covers, and never past 2 hours, unless the operator keeps it open
@@ -593,6 +604,18 @@ the host's `MODES` lists them.
   must decode as the item the seal lists at its place, with the digest
   the seal gives; a rebuilt file must match its whole-file digest. A
   rebuilt item is then taken as if heard.
+- **No seal at all.** A file heard (its announce, or a piece) with no
+  seal over it 3 minutes after the last of it came lost every copy of
+  its seal. It asks for that seal by the file, under seal 0, and again
+  every 3 minutes, at most 10 times, unless another station's request
+  asks for it first. With the announce held, only while the operator
+  receives the file; without it, the seal brings the announce too.
+- **A round's seal lost.** It asks only when it hears a seal, so a lost
+  seal at the end of a round would leave it waiting. A listener that
+  still lacks something under a seal, with nothing from the sender and
+  no request of its own (or speaking for it) for 3 minutes, asks again.
+- It keeps each item while a seal over it is kept, so it never seems to
+  lack what it holds.
 - It stops asking under a seal after 5 requests in a row that brought
   nothing, and asks for a missed seal at most 5 times.
 - A refusal heard stops it asking for what the refusal names, for 2

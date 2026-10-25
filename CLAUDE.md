@@ -85,7 +85,8 @@ with the code when the seal rules change.
   many repair symbols they want, files get parity pieces and sealed
   chat ItemParity (`0x44`), and `Seals::takeRebuilt` hands back lines
   rebuilt from it. 0.1's request (`0x41`) is skipped, so 0.1 can't
-  repair with it.
+  repair with it. A station that heard a file but lost every seal over
+  it asks for the seal by the file, under seal 0 (`SEAL_LATE_MS`).
 - Package I (packaging and the first release) gives the app icon
   (`app/res/`, drawn by `tools/icon/`), the Linux
   AppImage and the portable Windows zip (`packaging/`), the MinGW-w64

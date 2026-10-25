@@ -507,6 +507,15 @@ what goes on the air. Choices made there, for Jeff to keep or change:
   assumes it loses half, and a request that lacks a seal still can't be
   made (a station that missed every copy of a seal never asks; about one
   in ten at 60% loss).
+- **Asking for a seal by the file** (Jeff, 2026-10-25, the follow-up to
+  parity). A station that heard a file but no seal over it for
+  `Seals::SEAL_LATE_MS` (3 minutes) asks under seal 0, naming the file,
+  up to `MAX_SEAL_OVER_ASKS` (10) times, and the sender sends that seal
+  again or refuses by the file. A station still lacking under a seal,
+  with its sender and itself quiet for 3 minutes, asks again (the round's
+  seal was lost). Items are now kept while a seal over them is, which the
+  re-asking showed was needed. In the simulator every run of the heavy
+  loss cases now finishes, two stations at 75% included.
 - **Repaired lines in their place** (Jeff, 2026-10-24: repaired
   messages "did not get placed in the correct order in the chat"). A
   line heard after a later one of its sender's goes above that one, by

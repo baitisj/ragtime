@@ -149,6 +149,18 @@ works out how many pieces it lacks.
    more after a quiet window, in case the seal itself or a request was
    lost.
 
+**When every seal is lost.** A request names a seal, so a station that
+lost every copy of one (the first, the one ending each round, and a
+file's two repeats) wouldn't know what to ask under. At 60% loss that
+was about one station in ten. So a station that heard any of a file,
+its announce or a single piece, but no seal over it 3 minutes after the
+last of it came, asks for "the seal over this file" by the file's
+number, under seal 0, and again every 3 minutes, up to 10 times. The
+sender sends that seal again, and the repairs go on from there. And a
+station that still lacks something under a seal, with nothing from the
+sender for 3 minutes since its last request, asks again: the seal that
+ended the round was lost.
+
 A listener that has asked five times under a seal and got nothing stops
 asking, and the file shows as incomplete. *Ask again* on the file starts
 afresh, as long as the seal is under 2 hours old.
@@ -229,7 +241,10 @@ for the runs that finished.
 A 30 KB file with two stations at 60% took 9.5 rounds under 0.1 and
 finished once in ten runs; with parity, 1.5 rounds and 2 minutes, every
 time. The runs that still don't finish are stations that missed every
-copy of the seal, so never knew to ask (below). Sealed chat, twelve
+copy of the seal, so never knew to ask. Since then they ask for the
+seal by the file ("When every seal is lost", above), and every run of
+every case above finishes, as do two stations at 75% loss (in about 13
+minutes). Sealed chat, twelve
 lines to three stations each losing half: 5.3 rounds and 17 minutes
 under 0.1 (one run in ten unfinished), 1.3 rounds and 2 minutes with
 parity. Parity sends somewhat more repair records in that case (33
@@ -370,8 +385,7 @@ heard, a seal says only that it went.
   anyone can check a seal.
 - **They don't repair unsealed chat.** With "Seal my broadcast messages"
   off, a line lost in a fade is simply lost, as on a voice net.
-- **A station that misses every copy of a seal can't ask.** A request
-  names a seal, so a station that heard none of the copies of it (the
-  first, the ones that end each repair round, and a file's two repeats)
-  never learns what to ask for, until a later seal names it. At 60%
-  loss that is about one station in ten for a file sent once.
+- **They don't repair what nobody knows was sent.** A station that
+  heard nothing at all of a file (no piece, no announce) and no seal
+  over it doesn't know to ask. One that heard any of it does (see
+  "When every seal is lost", above).

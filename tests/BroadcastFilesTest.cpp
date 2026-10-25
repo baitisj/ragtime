@@ -783,6 +783,83 @@ void testLostSealOrRequest()
     }
 }
 
+// Every copy of a file's seal is lost (the first, and the two that go
+// again after quiet windows), and so are a piece and, in one run, the
+// announce. SEAL_LATE_MS after the last of the file came, the listener
+// asks for the seal over it under seal 0, the seal goes again, and the
+// repairs follow.
+void testAllSealsLost()
+{
+    for (int lostAnnounce = 0; lostAnnounce < 2; lostAnnounce++)
+    {
+        Air air;
+        Station& a = air.add("AG7EW", 1);
+        Station& b = air.add("KC2G", 2);
+        b.files.setAutoReceive(freshFolder(lostAnnounce ? "allseals-announce" : "allseals").string());
+        uint64_t start = now;
+        b.lose = [&](protocol::Record& r) {
+            if (r.as<protocol::Seal>() != nullptr) return now < start + 150000;
+            if (lostAnnounce && r.as<protocol::FileAnnounce>() != nullptr) return now < start + 150000;
+            const protocol::FilePiece* p = r.as<protocol::FilePiece>();
+            return p != nullptr && p->index == 2 && now < start + 150000;
+        };
+        size_t sealZero = 0;
+        a.lose = [&](protocol::Record& r) {
+            const protocol::RepairRequest* q = r.as<protocol::RepairRequest>();
+            if (q != nullptr && q->seal == 0)
+            {
+                sealZero++;
+                CHECK(q->wantSeal);
+                CHECK_EQ(q->files.size(), (size_t)1);
+            }
+            return false;
+        };
+        air.run(2000);
+        std::string error;
+        std::string path = makeFile("sealless.bin", 1500, 8);
+        CHECK(a.files.send(path, "qpsk-r1/3", now, error) != 0);
+        air.run(150000);
+        CHECK_EQ(b.heardFrom("AG7EW", protocol::RecordType::Seal), (size_t)0);
+        CHECK_EQ(sealZero, (size_t)0);
+        air.run(Seals::SEAL_LATE_MS + 120000);
+        CHECK_EQ(sealZero, (size_t)1);
+        CHECK(b.heardFrom("AG7EW", protocol::RecordType::Seal) >= 1);
+        BroadcastFile f = fileFrom(b, "AG7EW");
+        CHECK(f.id != 0 && f.state == FileState::Saved);
+        if (f.id != 0) CHECK(readAll(f.path) == readAll(path));
+    }
+}
+
+// The same, with the sender's repairs closed: the request for the seal is
+// refused, naming the file, and the listener's file ends Incomplete with
+// the reason instead of asking on.
+void testAllSealsLostRefused()
+{
+    Air air;
+    Station& a = air.add("AG7EW", 1);
+    Station& b = air.add("KC2G", 2);
+    b.files.setAutoReceive(freshFolder("allseals-refused").string());
+    b.lose = [](protocol::Record& r) {
+        const protocol::FilePiece* p = r.as<protocol::FilePiece>();
+        return r.as<protocol::Seal>() != nullptr || (p != nullptr && p->index == 2);
+    };
+    air.run(2000);
+    std::string error;
+    std::string path = makeFile("closed.bin", 1500, 9);
+    uint64_t id = a.files.send(path, "qpsk-r1/3", now, error);
+    CHECK(id != 0);
+    air.run(150000);
+    CHECK(a.files.closeRepairs(id));
+    air.run(Seals::SEAL_LATE_MS + 60000);
+    BroadcastFile f = fileFrom(b, "AG7EW");
+    CHECK(f.id != 0 && f.state == FileState::Incomplete);
+    CHECK(f.refusal.has_value());
+    CHECK_EQ(a.seals.refusalsSent(), (size_t)1);
+    size_t asked = b.seals.requestsSent();
+    air.run(4 * Seals::SEAL_LATE_MS);
+    CHECK_EQ(b.seals.requestsSent(), asked);
+}
+
 // The sender stops a share part way: what went is sealed, and a listener
 // that asks for the rest on the group gets all of it there, with nothing
 // for the sender's operator to do. Closing repairs ends it as Cancelled.
@@ -1759,6 +1836,8 @@ int main()
     testDigestMismatch();
     testLostAnnounce();
     testLostSealOrRequest();
+    testAllSealsLost();
+    testAllSealsLostRefused();
     testStoppedShare();
     testStopAndAskAgain();
     testGiveUpAndAskAgain();
