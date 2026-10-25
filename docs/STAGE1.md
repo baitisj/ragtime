@@ -657,6 +657,18 @@ Choices made here, for Jeff to keep or change: both settings off by
 default; the strip covers 14 days; 30 minutes of quiet before a watched
 station rings again; a Tell me when free bell lasts only the run.
 
+## The flight recorder
+
+Idea 2 of "Ideas before signatures" (Jeff, 2026-10-25), for the bugs only
+a real fading path shows: everything that crosses the link to
+data2g-host is kept on disk with millisecond UTC times
+(`link::FlightRecorder`, tapped in `HostConnection`), 7 days and 50 MB at
+most. **Help > Save a report** zips it with the settings, never a
+setting named like a secret; **Help > Open the flight recorder folder**
+shows it. `ragtime_fake_air --replay` plays a recording's host side back
+to a Ragtime (`tests/ReplayHost`). Session bytes are counted, not kept.
+Details in `docs/FLIGHT_RECORDER.md`.
+
 ## Waiting on Andrew (via Jeff)
 
 - 200 Hz and 1.2 kHz width caps; a TX level command for Auto ALC;

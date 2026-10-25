@@ -43,6 +43,7 @@
 #include "GearshiftDialog.h"
 #include "HostConnection.h"
 #include "PathsDialog.h"
+#include "Report.h"
 #include "RigConnection.h"
 #include "SessionPage.h"
 #include "SettingsDialog.h"
@@ -110,6 +111,8 @@ enum
     ID_STATION_WATCH,
     ID_STATION_WHEN_FREE,
     ID_STATION_PATHS,
+    ID_SAVE_REPORT,
+    ID_OPEN_FLIGHT,
 };
 
 constexpr size_t BROADCAST_FILE_ACTIONS = ID_BROADCAST_FILE_ACTION_LAST - ID_BROADCAST_FILE_ACTION + 1;
@@ -225,6 +228,7 @@ MainFrame::MainFrame()
     host_ = std::make_unique<HostConnection>(link_, [this](const std::vector<Event>& events) {
         onHostEvents(events);
     });
+    host_->recorder().setFolder(flightRecorderDir(), HostConnection::nowMs());
     HostConnection::DataSide data;
     data.bytes = [this](const uint8_t* bytes, size_t length) { onSessionData(bytes, length); };
     // Receive only holds the session's bytes too.
@@ -271,6 +275,7 @@ MainFrame::MainFrame()
         // What is under way ends here; a part received is kept, and the
         // log keeps it for next time.
         sessionFiles_.stopAll("Ragtime was closed");
+        host_->recorder().note("Ragtime closed", HostConnection::nowMs());
         fileTraffic_.update(HostConnection::nowMs());
         saveFilesLog(true);
         chat_.closeLog(HostConnection::nowMs());
@@ -357,6 +362,11 @@ void MainFrame::buildMenus()
     settings->AppendCheckItem(ID_NARROW, "&500 Hz only\tCtrl+5");
 
     auto* help = new wxMenu;
+    help->Append(ID_SAVE_REPORT, "Save a &report...",
+                 "Zips the flight recorder (the last 7 days of the link to data2g-host) with your settings, "
+                 "to send with a bug");
+    help->Append(ID_OPEN_FLIGHT, "Open the &flight recorder folder");
+    help->AppendSeparator();
     help->Append(wxID_ABOUT, "&About Ragtime");
 
     auto* menus = new wxMenuBar;
@@ -415,6 +425,18 @@ void MainFrame::buildMenus()
     Bind(wxEVT_UPDATE_UI, [this](wxUpdateUIEvent& e) { e.Enable(!stationList_->selected().empty()); },
          ID_MESSAGE_STATION);
     Bind(wxEVT_UPDATE_UI, [this](wxUpdateUIEvent& e) { e.Enable(!prefs_.callsign.empty()); }, ID_CHECK_IN);
+    Bind(wxEVT_MENU, [this](wxCommandEvent&) {
+        ReportFacts facts;
+        facts.callsign = prefs_.callsign;
+        facts.host = host_->address();
+        facts.hostState = host_->describe();
+        facts.lastError = host_->lastError();
+        saveReport(this, host_->recorder(), facts);
+    }, ID_SAVE_REPORT);
+    Bind(wxEVT_MENU, [this](wxCommandEvent&) {
+        wxFileName::Mkdir(wxString::FromUTF8(flightRecorderDir()), wxS_DIR_DEFAULT, wxPATH_MKDIR_FULL);
+        openWithDesktop(flightRecorderDir());
+    }, ID_OPEN_FLIGHT);
     Bind(wxEVT_MENU, [this](wxCommandEvent&) {
         wxAboutDialogInfo info;
         info.SetName("Ragtime");

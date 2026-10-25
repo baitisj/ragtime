@@ -65,6 +65,10 @@ Set any callsign and locator in Settings > Station; the address
 127.0.0.1 and ports 8100 and 8300 are the defaults. A second Ragtime
 with its own `--config` file and ports 8110 and 8310 talks to the first.
 
+A tester's report (Help > Save a report) plays back the same way:
+`ragtime_fake_air --replay flight/` gives a Ragtime the host's side of
+the recording, at the spacing the tester saw (docs/FLIGHT_RECORDER.md).
+
 ## The idea
 
 - **Welcome to the D2G net.** D2G is a net that never closes. You check
