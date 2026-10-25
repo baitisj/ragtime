@@ -248,7 +248,8 @@ void SessionFiles::queueCancel(Entry& entry, CancelReason reason)
 }
 
 // The transfer is over: files are closed, and a part file of one not
-// saved is kept for the same file sent again, or deleted.
+// saved is kept for the same file sent again, or deleted. One of ours
+// that some of went out is kept as a part sent.
 void SessionFiles::finish(Entry& entry, FileTransfer::State state, const std::string& error)
 {
     FileTransfer& t = entry.transfer;
@@ -257,12 +258,26 @@ void SessionFiles::finish(Entry& entry, FileTransfer::State state, const std::st
     if (entry.in.is_open()) entry.in.close();
     if (entry.out.is_open())
     {
+        // What has come of a piece still arriving is as good as the rest:
+        // the session's stream comes in order, and the digest checks the
+        // whole file in the end.
+        size_t more = entry.arrivingData.size();
+        if (state != FileTransfer::State::Saved && !entry.spoiled && more > 0 && entry.arrivingAt == t.done
+            && t.done + more < t.size)
+        {
+            entry.out.write((const char*)entry.arrivingData.data(), (std::streamsize)more);
+            entry.out.flush();
+            if (entry.out) t.done += more;
+            else entry.spoiled = true;
+        }
         entry.out.close();
         if (state != FileTransfer::State::Saved) keep(entry);
     }
+    if (t.outgoing) keepSent(entry);
     entry.part.clear();
     entry.pieces.clear();
     entry.arriving = 0;
+    entry.arrivingData.clear();
     changed();
 }
 
@@ -335,6 +350,10 @@ uint64_t SessionFiles::offer(const std::string& peer, const std::string& path, u
     t.digest = digest;
     t.atMs = nowMs;
     entry.sinceMs = nowMs;
+    // Sent again: the far end carries on from its part, and this transfer
+    // stands for the part sent.
+    auto sent = findSent(entry);
+    if (sent != kept_.end()) dropKept(sent, false);
     changed();
     uint64_t id = t.id;
     prune();
@@ -362,8 +381,23 @@ std::filesystem::path SessionFiles::freePart(const std::string& path) const
 std::list<SessionFiles::Kept>::iterator SessionFiles::findKept(const Entry& entry)
 {
     const FileTransfer& t = entry.transfer;
-    return std::find_if(kept_.begin(), kept_.end(),
-                        [&](const Kept& k) { return k.peer == t.peer && k.size == t.size && k.digest == t.digest; });
+    return std::find_if(kept_.begin(), kept_.end(), [&](const Kept& k) {
+        return !k.outgoing && k.peer == t.peer && k.size == t.size && k.digest == t.digest;
+    });
+}
+
+// A part sent of the same file to the same station, if any.
+std::list<SessionFiles::Kept>::iterator SessionFiles::findSent(const Entry& entry)
+{
+    const FileTransfer& t = entry.transfer;
+    return std::find_if(kept_.begin(), kept_.end(), [&](const Kept& k) {
+        return k.outgoing && k.peer == t.peer && k.size == t.size && k.digest == t.digest;
+    });
+}
+
+size_t SessionFiles::keptCount() const
+{
+    return (size_t)std::count_if(kept_.begin(), kept_.end(), [](const Kept& k) { return !k.outgoing; });
 }
 
 // Keeps what has come of a transfer of theirs that ended unfinished, if
@@ -395,13 +429,93 @@ void SessionFiles::keep(Entry& entry)
     changed();
 }
 
+// Ours, ended unfinished with some of it written into the session: the
+// far end keeps what came as its part, so the file isn't finished here
+// either. The host sends what it has been handed, cancelled or not, and
+// it is counted as it is acknowledged; a far end that has stopped takes
+// no more.
+void SessionFiles::keepSent(Entry& entry)
+{
+    using State = FileTransfer::State;
+    FileTransfer& t = entry.transfer;
+    bool unfinished = t.state == State::Cancelled || t.state == State::CancelledThere || t.state == State::Failed;
+    if (!unfinished || entry.written == 0) return;
+    auto older = findSent(entry);
+    if (older != kept_.end()) dropKept(older, false);
+    Kept& k = kept_.emplace_back();
+    k.id = nextId_++;
+    k.outgoing = true;
+    k.transferId = t.id;
+    t.partKept = true;
+    k.peer = t.peer;
+    k.name = t.name;
+    k.size = t.size;
+    k.digest = t.digest;
+    k.path = t.path;
+    k.bytes = t.done;
+    k.handed = k.bytes;
+    k.offer = entry.offer;
+    if (t.state != State::CancelledThere)
+    {
+        k.handed = std::max(k.bytes, entry.written);
+        k.pieces = entry.pieces;
+    }
+    k.keptAtMs = nowMs_;
+    limitKept(nowMs_);
+    changed();
+}
+
 void SessionFiles::dropKept(std::list<Kept>::iterator it, bool ended)
 {
     if (ended && it->hasEnding) ended_.push_back(it->ending);
     std::error_code ec;
-    std::filesystem::remove(it->part, ec);
+    if (!it->part.empty()) std::filesystem::remove(it->part, ec);
     kept_.erase(it);
     changed();
+}
+
+// A part sent that is done with now: delivered after all, or with none of
+// it acknowledged when the session ended. Its transfer's ending goes to
+// Completed (as Sent, delivered); one not yet taken there goes by itself.
+void SessionFiles::endSent(std::list<Kept>::iterator it, bool delivered)
+{
+    if (it->hasEnding)
+    {
+        FinishedFile f = it->ending;
+        if (delivered)
+        {
+            f.result = FinishedFile::Result::Sent;
+            f.reason.clear();
+        }
+        ended_.push_back(std::move(f));
+    }
+    else
+    {
+        for (Entry& e : entries_)
+        {
+            if (e.transfer.id == it->transferId) e.transfer.partKept = false;
+        }
+    }
+    kept_.erase(it);
+    changed();
+}
+
+// The session with the station is over (or every one is, for an empty
+// peer): what the host still had of a part sent won't go now.
+void SessionFiles::stopSent(const std::string& peer)
+{
+    for (auto it = kept_.begin(); it != kept_.end();)
+    {
+        auto next = std::next(it);
+        if (it->outgoing && (peer.empty() || it->peer == peer) && !it->pieces.empty())
+        {
+            it->pieces.clear();
+            it->handed = it->bytes;
+            changed();
+            if (it->bytes == 0) endSent(it, false);
+        }
+        it = next;
+    }
 }
 
 void SessionFiles::limitKept(uint64_t nowMs)
@@ -416,7 +530,22 @@ void SessionFiles::limitKept(uint64_t nowMs)
         if (old) dropKept(it, true);
         it = next;
     }
-    while (kept_.size() > KEPT_MAX) dropKept(kept_.begin(), true);
+    // So many each way at most, the oldest going first.
+    for (bool outgoing : {false, true})
+    {
+        size_t n = (size_t)std::count_if(kept_.begin(), kept_.end(),
+                                         [outgoing](const Kept& k) { return k.outgoing == outgoing; });
+        for (auto it = kept_.begin(); it != kept_.end() && n > KEPT_MAX;)
+        {
+            auto next = std::next(it);
+            if (it->outgoing == outgoing)
+            {
+                dropKept(it, true);
+                n--;
+            }
+            it = next;
+        }
+    }
 }
 
 // Carries on in the part file kept for the offer, with the rest asked for.
@@ -690,38 +819,54 @@ bool SessionFiles::takePiece(const std::string& peer, protocol::Numbering& numbe
     return false;
 }
 
+bool SessionFiles::advance(std::deque<Piece>& pieces, uint64_t streamAcked, uint64_t& done)
+{
+    uint64_t was = done;
+    while (!pieces.empty() && pieces.front().streamStart + pieces.front().length <= streamAcked)
+    {
+        done = pieces.front().fileStart + pieces.front().length;
+        pieces.pop_front();
+    }
+    // Into the piece now going: to the step, so a fast modem doesn't
+    // redraw the screen for every frame.
+    if (!pieces.empty() && streamAcked > pieces.front().streamStart)
+    {
+        const Piece& piece = pieces.front();
+        uint64_t into = (streamAcked - piece.streamStart) / PROGRESS_STEP * PROGRESS_STEP;
+        done = std::max(done, piece.fileStart + into);
+    }
+    return done != was;
+}
+
 void SessionFiles::acknowledged(const std::string& peer, uint64_t streamAcked)
 {
     for (Entry& entry : entries_)
     {
         FileTransfer& t = entry.transfer;
         if (!t.outgoing || t.peer != peer || t.state != FileTransfer::State::Sending) continue;
-        uint64_t done = t.done;
-        while (!entry.pieces.empty() && entry.pieces.front().streamStart + entry.pieces.front().length <= streamAcked)
+        if (advance(entry.pieces, streamAcked, t.done)) changed();
+    }
+    // Parts sent, still going out after a cancel.
+    for (Kept& k : kept_)
+    {
+        if (!k.outgoing || k.peer != peer || k.pieces.empty()) continue;
+        if (advance(k.pieces, streamAcked, k.bytes)) changed();
+        k.handed = std::max(k.handed, k.bytes);
+        if (k.pieces.empty())
         {
-            done = entry.pieces.front().fileStart + entry.pieces.front().length;
-            entry.pieces.pop_front();
-        }
-        // Into the piece now going: to the step, so a fast modem doesn't
-        // redraw the screen for every frame.
-        if (!entry.pieces.empty() && streamAcked > entry.pieces.front().streamStart)
-        {
-            const Entry::Piece& piece = entry.pieces.front();
-            uint64_t into = (streamAcked - piece.streamStart) / PROGRESS_STEP * PROGRESS_STEP;
-            done = std::max(done, piece.fileStart + into);
-        }
-        if (done != t.done)
-        {
-            t.done = done;
+            k.handed = k.bytes;
             changed();
         }
     }
 }
 
-void SessionFiles::arriving(const std::string& peer, uint32_t offer, size_t bytes)
+void SessionFiles::arriving(const std::string& peer, uint32_t offer, uint32_t offset, const uint8_t* data,
+                            size_t bytes)
 {
     Entry* entry = findIncoming(peer, offer);
     if (entry == nullptr || entry->transfer.state != FileTransfer::State::Receiving) return;
+    entry->arrivingAt = offset;
+    entry->arrivingData.assign(data, data + bytes);
     uint64_t stepped = bytes / PROGRESS_STEP * PROGRESS_STEP;
     if (stepped == entry->arriving) return;
     entry->arriving = stepped;
@@ -853,6 +998,14 @@ void SessionFiles::onRecord(const std::string& peer, const protocol::Record& rec
             }
             if (entry == nullptr) return;
             entry->awaitingSaved = false;
+            for (auto it = kept_.begin(); it != kept_.end(); ++it)
+            {
+                if (it->outgoing && it->transferId == entry->transfer.id)
+                {
+                    endSent(it, true);
+                    break;
+                }
+            }
         }
         else if (entry->transfer.state != State::Sending)
         {
@@ -907,6 +1060,7 @@ void SessionFiles::receive(Entry& entry, const protocol::FileData& data)
     }
     t.done += length;
     entry.arriving = 0;
+    entry.arrivingData.clear();
     changed();
     if (t.done == t.size) completeReceive(entry);
 }
@@ -1004,6 +1158,7 @@ void SessionFiles::sessionEnded(const std::string& peer, uint64_t nowMs)
         if (t.state == FileTransfer::State::Waiting) entry.sinceMs = nowMs; // for the next session
         else finish(entry, FileTransfer::State::Failed, "The session with " + peer + " ended.");
     }
+    stopSent(peer);
 }
 
 void SessionFiles::noSession(const std::string& peer, const std::string& why)
@@ -1045,6 +1200,7 @@ void SessionFiles::stopAll(const std::string& why)
         entry.awaitingSaved = false;
         if (entry.transfer.live()) finish(entry, FileTransfer::State::Failed, why);
     }
+    stopSent(std::string());
 }
 
 void SessionFiles::tick(uint64_t nowMs)
@@ -1133,6 +1289,7 @@ std::vector<KeptPart> SessionFiles::keptParts() const
     {
         KeptPart p;
         p.id = k.id;
+        p.outgoing = k.outgoing;
         p.peer = k.peer;
         p.name = !k.name.empty() ? k.name : utf8FromPath(pathFromUtf8(k.path).filename());
         p.size = k.size;
@@ -1140,6 +1297,7 @@ std::vector<KeptPart> SessionFiles::keptParts() const
         p.path = k.path;
         p.part = utf8FromPath(k.part);
         p.bytes = k.bytes;
+        p.handed = std::max(k.handed, k.bytes);
         p.keptAtMs = k.keptAtMs;
         p.keepUntilMs = k.keepUntilMs != 0 ? k.keepUntilMs : k.keptAtMs + KEPT_MS;
         p.hasEnding = k.hasEnding;
@@ -1153,22 +1311,41 @@ void SessionFiles::restoreKept(const std::vector<KeptPart>& parts, uint64_t nowM
 {
     for (const KeptPart& p : parts)
     {
-        std::filesystem::path part = pathFromUtf8(p.part);
-        std::error_code ec;
-        uint64_t bytes = std::filesystem::file_size(part, ec);
         uint64_t until = p.keepUntilMs != 0 ? p.keepUntilMs : p.keptAtMs + KEPT_MS;
-        if (ec || bytes != p.bytes || p.bytes == 0 || p.bytes >= p.size || nowMs >= until)
+        std::filesystem::path part;
+        if (p.outgoing)
         {
-            // Gone, changed or too old: whatever is left of it goes, and
-            // the file with it.
-            if (!ec && nowMs >= until) std::filesystem::remove(part, ec);
-            if (p.hasEnding) ended_.push_back(p.ending);
-            continue;
+            // A part sent: the far end's is its own to keep.
+            if (p.peer.empty() || p.bytes == 0 || p.bytes > p.size || nowMs >= until)
+            {
+                if (p.hasEnding) ended_.push_back(p.ending);
+                continue;
+            }
+            bool known = std::any_of(kept_.begin(), kept_.end(), [&](const Kept& k) {
+                return k.outgoing && k.peer == protocol::normalCallsign(p.peer) && k.size == p.size
+                       && std::equal(k.digest.begin(), k.digest.end(), p.digest);
+            });
+            if (known) continue;
         }
-        bool known = std::any_of(kept_.begin(), kept_.end(), [&](const Kept& k) { return k.part == part; });
-        if (known) continue;
+        else
+        {
+            part = pathFromUtf8(p.part);
+            std::error_code ec;
+            uint64_t bytes = std::filesystem::file_size(part, ec);
+            if (ec || bytes != p.bytes || p.bytes == 0 || p.bytes >= p.size || nowMs >= until)
+            {
+                // Gone, changed or too old: whatever is left of it goes, and
+                // the file with it.
+                if (!ec && nowMs >= until) std::filesystem::remove(part, ec);
+                if (p.hasEnding) ended_.push_back(p.ending);
+                continue;
+            }
+            bool known = std::any_of(kept_.begin(), kept_.end(), [&](const Kept& k) { return k.part == part; });
+            if (known) continue;
+        }
         Kept& k = kept_.emplace_back();
         k.id = nextId_++;
+        k.outgoing = p.outgoing;
         k.peer = protocol::normalCallsign(p.peer);
         k.name = p.name;
         k.size = p.size;
@@ -1176,6 +1353,7 @@ void SessionFiles::restoreKept(const std::vector<KeptPart>& parts, uint64_t nowM
         k.path = p.path;
         k.part = part;
         k.bytes = p.bytes;
+        k.handed = p.bytes;
         k.keptAtMs = p.keptAtMs;
         k.keepUntilMs = until;
         k.hasEnding = p.hasEnding;

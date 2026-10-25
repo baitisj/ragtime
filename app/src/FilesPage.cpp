@@ -66,7 +66,7 @@ long long dayOf(uint64_t ms, long utcOffsetS)
 std::string progressLabel(const FileRow& r)
 {
     std::string text = progressText(r.done, r.size);
-    if (r.look == FileRow::Look::Kept) return text + " kept";
+    if (r.look == FileRow::Look::Kept) return text + (r.outgoing ? " sent" : " kept");
     std::string rate = rateText(r.bytesPerSecond);
     if (!rate.empty()) text += " \xc2\xb7 " + rate;
     return text;

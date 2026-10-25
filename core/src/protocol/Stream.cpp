@@ -102,6 +102,13 @@ void StreamReader::reset()
 
 bool StreamReader::partialFileData(uint32_t& offer, size_t& bytes) const
 {
+    uint32_t offset = 0;
+    const uint8_t* data = nullptr;
+    return partialFileData(offer, offset, data, bytes);
+}
+
+bool StreamReader::partialFileData(uint32_t& offer, uint32_t& offset, const uint8_t*& data, size_t& bytes) const
+{
     // What feed() leaves is the start of one record, never more.
     if (foreign_ || !greeted_ || pending_.empty() || pending_[0] != (uint8_t)RecordType::FileData) return false;
     const uint8_t* end = pending_.data() + pending_.size();
@@ -109,10 +116,12 @@ bool StreamReader::partialFileData(uint32_t& offer, size_t& bytes) const
     if (readLength(pending_.data() + 1, end, length, fieldBytes) != LengthRead::Ok) return false;
     Reader in(pending_.data() + 1 + fieldBytes, end);
     std::string call;
-    uint32_t seq = 0, time = 0, offset = 0;
-    if (!in.callsign(call) || !in.u24(seq) || !in.u32(time) || !in.u32(offset)) return false;
+    uint32_t seq = 0, time = 0, at = 0;
+    if (!in.callsign(call) || !in.u24(seq) || !in.u32(time) || !in.u32(at)) return false;
     offer = seq;
+    offset = at;
     bytes = in.left();
+    data = end - bytes;
     return true;
 }
 

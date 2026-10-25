@@ -179,7 +179,10 @@ public:
 
     // The part files kept, for the log, and back after a restart: a part
     // whose file is gone, isn't the size noted or is past its time is
-    // dropped. Parts restored take fresh ids.
+    // dropped. Parts restored take fresh ids. Parts sent go with them
+    // (KeptPart::outgoing): a file of ours that ended unfinished with
+    // some of it sent stays here, not finished, until it is sent again,
+    // forgotten (deleteKept) or past its time, like the far end's part.
     std::vector<KeptPart> keptParts() const;
     void restoreKept(const std::vector<KeptPart>& parts, uint64_t nowMs);
     // Keep 7 days longer (from now or from when it would have gone,
@@ -217,9 +220,11 @@ public:
     // The far end's modem has acknowledged the session's bytes up to here.
     void acknowledged(const std::string& peer, uint64_t streamAcked);
 
-    // Of a FileData still coming in from the station, this much of the
-    // file has arrived (see protocol::StreamReader::partialFileData).
-    void arriving(const std::string& peer, uint32_t offer, size_t bytes);
+    // Of a FileData still coming in from the station, these bytes of the
+    // file, from offset, have arrived (see
+    // protocol::StreamReader::partialFileData). If the transfer ends
+    // before the rest of the record comes, they are kept with the part.
+    void arriving(const std::string& peer, uint32_t offer, uint32_t offset, const uint8_t* data, size_t bytes);
 
     void onRecord(const std::string& peer, const protocol::Record& record, uint64_t nowMs);
 
@@ -247,8 +252,8 @@ public:
     // Expires offers left unanswered, and part files kept too long.
     void tick(uint64_t nowMs);
 
-    // Part files kept for a transfer to carry on in.
-    size_t keptCount() const { return kept_.size(); }
+    // Part files kept for a transfer to carry on in (not parts sent).
+    size_t keptCount() const;
 
     // Sending is not allowed here (receive only): every file going either
     // way fails, the far end of one already offered told so in the
@@ -268,6 +273,14 @@ public:
     bool busyWith(const std::string& peer) const;
 
 private:
+    // A FileData of ours in the session's stream.
+    struct Piece
+    {
+        uint64_t streamStart;   // where in the session's stream its file bytes start
+        uint64_t fileStart;     // and where in the file
+        uint64_t length;
+    };
+
     struct Entry
     {
         FileTransfer transfer;
@@ -278,28 +291,30 @@ private:
         std::filesystem::path part; // where out writes, while it does
         uint64_t written = 0;       // ours: bytes of the file written into the session
         bool awaitingSaved = false; // ours, cancelled with all of it written: a FileSaved still delivers it
-        struct Piece
-        {
-            uint64_t streamStart;   // where in the session's stream its file bytes start
-            uint64_t fileStart;     // and where in the file
-            uint64_t length;
-        };
         std::deque<Piece> pieces;   // ours, written and not yet all acknowledged
         uint64_t arriving = 0;      // theirs: file bytes of the record coming in, to the step
+        // Theirs: those bytes themselves, from arrivingAt in the file.
+        uint64_t arrivingAt = 0;
+        std::vector<uint8_t> arrivingData;
         bool spoiled = false;       // theirs: what is written can't be trusted, so it is not kept
     };
 
-    // A part file kept from a transfer of theirs that ended unfinished.
+    // A part file kept from a transfer of theirs that ended unfinished,
+    // or (outgoing) part of ours sent.
     struct Kept
     {
         uint64_t id = 0;
+        bool outgoing = false;
         std::string peer;
         std::string name;               // the name offered, made safe
         uint64_t size = 0;
         protocol::Digest digest{};
-        std::string path;               // where it was to be saved
-        std::filesystem::path part;
-        uint64_t bytes = 0;
+        std::string path;               // where it was to be saved, or the file sent
+        std::filesystem::path part;     // empty for one sent
+        uint64_t bytes = 0;             // held, or acknowledged by the far end's modem
+        uint64_t handed = 0;            // outgoing: handed to the host
+        uint32_t offer = 0;             // outgoing: the offer, this session
+        std::deque<Piece> pieces;       // outgoing: still going out, as the host sends what it has
         uint64_t keptAtMs = 0;
         uint64_t keepUntilMs = 0;       // 0: KEPT_MS from keptAtMs
         uint64_t transferId = 0;        // the transfer that left it, this run
@@ -317,10 +332,16 @@ private:
     bool openPart(Entry& entry, const std::string& path, std::string& error);
     bool resumePart(Entry& entry, const std::string& path);
     std::list<Kept>::iterator findKept(const Entry& entry);
+    std::list<Kept>::iterator findSent(const Entry& entry);
     void keep(Entry& entry);
+    void keepSent(Entry& entry);
+    // Moves done on by what the far end's modem has acknowledged.
+    static bool advance(std::deque<Piece>& pieces, uint64_t streamAcked, uint64_t& done);
     // ended: the file is done for (deleted, too old, too many), so its
     // ending goes to takeEnded(); otherwise another transfer carries on.
     void dropKept(std::list<Kept>::iterator it, bool ended);
+    void endSent(std::list<Kept>::iterator it, bool delivered);
+    void stopSent(const std::string& peer);
     void limitKept(uint64_t nowMs);
     void receive(Entry& entry, const protocol::FileData& data);
     void completeReceive(Entry& entry);

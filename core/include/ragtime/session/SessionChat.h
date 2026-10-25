@@ -146,8 +146,10 @@ public:
     virtual void greeted(const std::string& peer, const protocol::Hello& hello) = 0;
     // A record from the far end that isn't Hello, Status or Text.
     virtual void onRecord(const std::string& peer, const protocol::Record& record, uint64_t nowMs) = 0;
-    // Of a FileData still arriving, this much of the file is in.
-    virtual void arriving(const std::string& peer, uint32_t offer, size_t bytes) = 0;
+    // Of a FileData still arriving, these bytes of the file are in, from
+    // offset in it.
+    virtual void arriving(const std::string& peer, uint32_t offer, uint32_t offset, const uint8_t* data,
+                          size_t bytes) = 0;
     // Records to write now, appended to out, numbered by the session's
     // numbering; streamOffset is where out's first byte will sit in our
     // stream. Called whenever SessionChat writes, and on every tick.

@@ -182,6 +182,9 @@ Delivered and Not delivered keep theirs.
 - Two panes, newest first: "In progress and parts" on top, "Completed"
   below (columns in `STAGE1.md`). The de column (sender → receiver, "W1AW → OM") says "OM → **Broadcast**" for a file
   you broadcast.
+- A part kept reads "4,082 of 5,734 kept" in Progress and "Part kept,
+  cancelled" in State; a part sent reads "6,698 of 91,339 sent" and
+  "Stopping, 1,135 bytes still going out", then "Part sent, cancelled".
 - Right-click on a broadcast share you are sending: first line greyed,
   "Repairs open until 15:42 (1 h 10 min)", then Keep open 30 min longer,
   Keep open 2 hours longer, Keep open until..., Close repairs now.

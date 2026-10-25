@@ -368,10 +368,17 @@ One file goes to a station at a time; the next waits for it.
    **FileSaved**; a mismatch is thrown away and cancelled (`0x82`). The
    sender counts the file delivered only on FileSaved.
 6. Either side can **FileCancel** at any time. A FileSaved that crosses
-   the sender's cancel still counts as delivered.
-7. A session ending under a transfer fails it. The receiver keeps the
-   part file, for 7 days and at most 8 of them, across restarts, so the
-   same file from the same station carries on from it next time.
+   the sender's cancel still counts as delivered. The session's stream
+   is one queue, so a sender's cancel goes out behind the file bytes the
+   host already has, and the receiver takes those until the cancel
+   comes. A receiver that cancels drops what comes after.
+7. A transfer cancelled, or a session ending under it, leaves the
+   receiver with a part file: every byte that arrived, including those
+   of a FileData still coming in (the stream is in order, and the digest
+   checks the whole file in the end). It keeps it for 7 days and at most
+   8 of them, across restarts, so the same file from the same station
+   carries on from it next time. The sender keeps a note of the part it
+   sent for as long, so its operator can send the rest.
 8. **Leaving** with a transfer under way, a station writes its
    FileCancel (`0x01` or `0x81`) before the farewell, so the far end
    hears why. A file still waiting its turn is offered in the next
@@ -379,7 +386,7 @@ One file goes to a station at a time; the next waits for it.
 
 A sender offers nothing until the far end's Hello has come and says it
 takes session files. It keeps no more file bytes waiting at the host than
-about a minute of the session's acknowledged rate, so a Text typed during
+10 s of the session's acknowledged rate (at least 1 KB), so a Text typed during
 a transfer goes out behind at most that much; how much is the sender's
 own business and not part of the protocol.
 

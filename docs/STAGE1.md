@@ -288,9 +288,15 @@ and offer their bulletin (`ragtime_fake_air --call AG7EW`, then type
 "send the file again"; `--rate` sets how fast session bytes cross).
 Choices made there, for Jeff to keep or change:
 
-- **Pacing.** No more file bytes wait at data2g-host than about a minute
-  of the session's acknowledged rate (1 to 16 KB, 4 KB until the rate is
-  known), and a FileData carries at most half of that. A message typed
+- **Pacing.** No more file bytes wait at data2g-host than 10 s of the
+  session's acknowledged rate (1 to 16 KB, 1 KB until the rate is
+  known), and a FileData carries at most half of that. Until 2026-10-24
+  it was a minute, and 4 KB at the start. Data2G's longest bursts are
+  24 s on FSK and 12 s on OFDM, so 10 s gives up a little speed, and on
+  a fading path shorter bursts may even gain by catching an uptick
+  (Andrew); Jeff picked 10 s so a cancel or a message waits less.
+  Andrew means to add a dequeue to data2g-host, which would let a cancel
+  drop what the host hasn't sent yet. A message typed
   mid-file goes out behind at most that much, not behind the whole file.
 - **Offers wait for the far end's Hello,** and go only if it takes
   session files; a file queued for a station that doesn't ends Not taken.
@@ -322,9 +328,24 @@ Choices made there, for Jeff to keep or change:
   `K` line's last two fields). It goes into Completed as it ended when
   the part is deleted, runs out of time or is pushed out by newer ones,
   or as Saved when carried on. A log from before this moves a matching
-  Completed entry back onto its part when it loads. Sending files have
-  no part to keep, so an interrupted send is Completed at once, with
-  **Send it to W1AW again** on its menu.
+  Completed entry back onto its part when it loads. The state says how
+  it ended: "Part kept, cancelled by AG7EW".
+- **A cancelled send stops here and stays in Parts** (Jeff, 2026-10-24).
+  data2g-host sends what it has been handed and can't take it back, so
+  Cancel hands it nothing more, and the row reads "Stopping, 1,135 bytes
+  still going out" until those are acknowledged, then "Part sent,
+  cancelled", with the far end's share of the file in its bar. Any send
+  that ends unfinished with some of it gone (cancelled either end, or
+  the session lost) is a part sent like this, not Completed: its menu
+  has **Send the rest to W1AW** (the file offered again; the far end
+  carries on from its part), **Keep 7 days longer** and **Forget it**,
+  which puts it into Completed as it ended, as running out of time
+  does. Its log line is an `S` line, a `K` line's fields with the file
+  sent for the path and no part file; older Ragtimes keep it as it is.
+  A FileSaved that crosses the cancel ends it as Sent.
+- **A receiver keeps what came of a piece still arriving** (2026-10-24),
+  so the bar never goes back when it cancels: 3,000 of 3,741 shown is
+  3,000 kept, where it used to keep only the 1,244 in whole pieces.
 - **Closing Ragtime** mid-transfer fails it and keeps the part.
 - **An offer in the background** raises a desktop notification and
   counts on the Session tab's badge.

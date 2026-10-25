@@ -5,9 +5,10 @@
 //   files (docs/PROTOCOL.md, Hello); files queued for a station that
 //   doesn't end Not taken.
 // - File bytes are paced: no more of them go to data2g-host than about a
-//   minute of the session's acknowledged rate (WINDOW_MS), between
+//   10 s of the session's acknowledged rate (WINDOW_MS), between
 //   MIN_WINDOW and MAX_WINDOW bytes waiting, so a message typed during a
-//   transfer isn't stuck behind the whole file.
+//   transfer isn't stuck behind the whole file, and a cancel isn't
+//   either: data2g-host can't take back what it has been handed.
 // - Leave cancels what is under way in the session, so the far end hears
 //   it, and keeps the files still queued for the next session with the
 //   station. A part received is kept, to carry on next time.
@@ -40,10 +41,14 @@ class FileTraffic : public session::SessionTraffic
 public:
     // File bytes waiting at the host, unacknowledged: this much of the
     // session's rate, within these bounds, and START_WINDOW until the rate
-    // is known.
-    static constexpr uint64_t WINDOW_MS = 60 * 1000;
+    // is known. The host sends whatever it has been handed, so a cancel
+    // waits behind it: the window starts at its smallest. 10 s is
+    // shorter than Data2G's longest bursts (24 s on FSK, 12 s on OFDM),
+    // which costs a little speed, and on a fading path shorter bursts can
+    // seize an uptick (Andrew, 2026-10-24; Jeff's pick).
+    static constexpr uint64_t WINDOW_MS = 10 * 1000;
     static constexpr uint64_t MIN_WINDOW = 1024;
-    static constexpr uint64_t START_WINDOW = 4096;
+    static constexpr uint64_t START_WINDOW = MIN_WINDOW;
     static constexpr uint64_t MAX_WINDOW = 16384;
     // A FileData carries at most half the window, and at least this much.
     static constexpr size_t MIN_PIECE = 256;
@@ -76,7 +81,8 @@ public:
     // SessionTraffic.
     void greeted(const std::string& peer, const protocol::Hello& hello) override;
     void onRecord(const std::string& peer, const protocol::Record& record, uint64_t nowMs) override;
-    void arriving(const std::string& peer, uint32_t offer, size_t bytes) override;
+    void arriving(const std::string& peer, uint32_t offer, uint32_t offset, const uint8_t* data,
+                  size_t bytes) override;
     void write(const std::string& peer, protocol::Numbering& numbering, uint64_t streamOffset, uint64_t nowMs,
                std::vector<uint8_t>& out) override;
     void acknowledged(const std::string& peer, uint64_t streamAcked) override;

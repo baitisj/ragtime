@@ -547,9 +547,10 @@ struct Traffic : session::SessionTraffic
     {
         records.push_back(record.type());
     }
-    void arriving(const std::string&, uint32_t offer, size_t bytes) override
+    void arriving(const std::string&, uint32_t offer, uint32_t offset, const uint8_t*, size_t bytes) override
     {
         arrivingOffer = offer;
+        arrivingOffset = offset;
         arrivingBytes = bytes;
     }
     void write(const std::string&, protocol::Numbering& numbering, uint64_t streamOffset, uint64_t nowMs,
@@ -578,6 +579,7 @@ struct Traffic : session::SessionTraffic
     std::vector<std::string> greetings;
     std::vector<uint8_t> records;
     uint32_t arrivingOffer = 0;
+    uint32_t arrivingOffset = 0;
     size_t arrivingBytes = 0;
     bool offer = true;
     uint64_t offset = 0;

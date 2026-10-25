@@ -1157,7 +1157,7 @@ void MainFrame::saveFilesLog(bool force)
     // Saved when the log or the kept parts change, not as bytes move.
     uint64_t state = history_.version() * 1000003u;
     for (const files::KeptPart& k : sessionFiles_.keptParts())
-        state = state * 31 + k.bytes + k.keepUntilMs * 7 + std::hash<std::string>()(k.part);
+        state = state * 31 + k.bytes + k.keepUntilMs * 7 + std::hash<std::string>()(k.part) + (k.outgoing ? 5 : 0);
     if (!force && state == savedLog_) return;
     savedLog_ = state;
     wxFileName path(utf8(filesLogPath()));
@@ -1224,7 +1224,7 @@ void MainFrame::onFileEvents()
             // A file whose part is kept is still in progress, in the
             // Files tab, and not yet in Completed.
             const files::FinishedFile* f = &e.finished;
-            std::string result = files::resultLabel(*f) + (e.partKept ? ", part kept" : "");
+            std::string result = files::resultLabel(*f) + (e.partKept ? (f->outgoing ? ", part sent" : ", part kept") : "");
             note_ = f->name + (f->outgoing ? " to " : " from ") + f->peer + ": " + result;
             if (f->via == files::Via::Session)
             {
@@ -1374,6 +1374,32 @@ void MainFrame::sessionFileMenu(const files::FileRow& row, wxMenu& menu)
 {
     using Look = files::FileRow::Look;
     uint64_t id = row.id;
+    if (row.look == Look::Kept && row.outgoing)
+    {
+        // A part sent: the far end keeps what came, so sent again, only
+        // the rest goes.
+        std::string peer = row.peer, path;
+        for (const files::KeptPart& k : sessionFiles_.keptParts())
+        {
+            if (k.id == id) path = k.path;
+        }
+        menu.Append(ID_FILE_SEND_AGAIN, "&Send the rest to " + utf8(peer));
+        menu.Enable(ID_FILE_SEND_AGAIN, !path.empty() && wxFileName::FileExists(utf8(path)));
+        menu.Append(ID_FILE_KEEP_LONGER, "&Keep 7 days longer");
+        menu.AppendSeparator();
+        menu.Append(ID_FILE_DELETE_PART, "&Forget it");
+        menu.Bind(wxEVT_MENU, [=](wxCommandEvent&) { CallAfter([=]() { sendAgain(peer, path); }); },
+                  ID_FILE_SEND_AGAIN);
+        menu.Bind(wxEVT_MENU, [this, id](wxCommandEvent&) {
+            sessionFiles_.keepLonger(id, files::SessionFiles::KEPT_MS, HostConnection::nowMs());
+            refreshFiles();
+        }, ID_FILE_KEEP_LONGER);
+        menu.Bind(wxEVT_MENU, [this, id](wxCommandEvent&) {
+            sessionFiles_.deleteKept(id);
+            refreshFiles();
+        }, ID_FILE_DELETE_PART);
+        return;
+    }
     if (row.look == Look::Kept)
     {
         // A part kept from before.
@@ -1450,14 +1476,16 @@ void MainFrame::finishedFileMenu(const files::FinishedFile& file, wxMenu& menu)
     {
         menu.Append(ID_FILE_SEND_AGAIN, "&Send it to " + utf8(peer) + " again");
         menu.Enable(ID_FILE_SEND_AGAIN, wxFileName::FileExists(utf8(path)));
-        menu.Bind(wxEVT_MENU, [=](wxCommandEvent&) {
-            CallAfter([=]() {
-                bool inSession = session_.peer() == peer && session_.phase() == session::SessionChat::Phase::Connected;
-                queueFiles(peer, {path});
-                if (!inSession) callStation(peer);
-            });
-        }, ID_FILE_SEND_AGAIN);
+        menu.Bind(wxEVT_MENU, [=](wxCommandEvent&) { CallAfter([=]() { sendAgain(peer, path); }); },
+                  ID_FILE_SEND_AGAIN);
     }
+}
+
+void MainFrame::sendAgain(const std::string& peer, const std::string& path)
+{
+    bool inSession = session_.peer() == peer && session_.phase() == session::SessionChat::Phase::Connected;
+    queueFiles(peer, {path});
+    if (!inSession) callStation(peer);
 }
 
 //-------------------------------------------------------------------------

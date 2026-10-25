@@ -93,6 +93,9 @@ private:
     // "Please send FRED.TXT again": a line in the session, now if one is
     // up with the station, or once a call to it connects.
     void askAgain(const std::string& call, const std::string& name, uint64_t kept, uint64_t size);
+    // Queues the file for the station again, calling it if no session
+    // with it is up; a far end with part of it carries on from there.
+    void sendAgain(const std::string& peer, const std::string& path);
     void sessionFileMenu(const ragtime::files::FileRow& row, wxMenu& menu);
     void finishedFileMenu(const ragtime::files::FinishedFile& file, wxMenu& menu);
     void onFileEvents();

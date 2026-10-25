@@ -211,6 +211,17 @@ std::string resultLabel(const FinishedFile& file)
     return "Failed";
 }
 
+std::string partStateText(const KeptPart& part)
+{
+    if (part.outgoing && part.handed > part.bytes)
+        return "Stopping, " + sizeText(part.handed - part.bytes) + " still going out";
+    std::string text = part.outgoing ? "Part sent" : "Part kept";
+    if (!part.hasEnding) return text;
+    std::string how = resultLabel(part.ending);
+    if (!how.empty() && how[0] >= 'A' && how[0] <= 'Z') how[0] = (char)(how[0] - 'A' + 'a');
+    return text + ", " + how;
+}
+
 std::string bpsText(const FinishedFile& file)
 {
     if (file.movedBytes == 0 || file.movedMs < 1000) return std::string();
@@ -263,6 +274,9 @@ const FinishedFile* FileHistory::find(uint64_t id) const
 //     [<tab> moved bytes <tab> moved ms]   (added 2026-10-22; older readers ignore them)
 //   K <tab> peer <tab> name <tab> size <tab> digest (hex) <tab> path <tab> part <tab> bytes <tab> kept ms <tab> until ms
 //     [<tab> ending result <tab> ending reason]   (added 2026-10-23; empty result: none)
+//   S <tab> the same as K, for a part sent: path is the file sent, part
+//     is empty and bytes is what the far end's modem acknowledged (added
+//     2026-10-24; older readers keep the line as it is)
 //-------------------------------------------------------------------------
 
 std::string saveFilesText(const FileHistory& history, const std::vector<KeptPart>& kept,
@@ -288,7 +302,7 @@ std::string saveFilesText(const FileHistory& history, const std::vector<KeptPart
     }
     for (const KeptPart& k : kept)
     {
-        std::vector<std::string> fields = {"K",
+        std::vector<std::string> fields = {k.outgoing ? "S" : "K",
                                            k.peer,
                                            k.name,
                                            std::to_string(k.size),
@@ -345,16 +359,18 @@ bool loadFilesText(const std::string& text, FileHistory& history, std::vector<Ke
                 file.movedBytes = file.movedMs = 0;
             history.add(std::move(file));
         }
-        else if (f[0] == "K" && f.size() >= 10)
+        else if ((f[0] == "K" || f[0] == "S") && f.size() >= 10)
         {
             KeptPart k;
+            k.outgoing = f[0] == "S";
             k.peer = f[1];
             k.name = f[2];
             if (!number(f[3], k.size) || !unhex(f[4], k.digest, sizeof(k.digest))) continue;
             k.path = f[5];
             k.part = f[6];
             if (!number(f[7], k.bytes) || !number(f[8], k.keptAtMs) || !number(f[9], k.keepUntilMs)) continue;
-            if (k.peer.empty() || k.part.empty()) continue;
+            if (k.peer.empty() || (k.outgoing ? k.path.empty() : k.part.empty())) continue;
+            k.handed = k.bytes;
             if (f.size() >= 12 && !f[10].empty() && resultFromKey(f[10], k.ending.result))
             {
                 k.hasEnding = true;
@@ -362,7 +378,7 @@ bool loadFilesText(const std::string& text, FileHistory& history, std::vector<Ke
             }
             kept.push_back(std::move(k));
         }
-        else if (other != nullptr && f[0] != "F" && f[0] != "K")
+        else if (other != nullptr && f[0] != "F" && f[0] != "K" && f[0] != "S")
         {
             other->push_back(line);
         }
@@ -372,7 +388,7 @@ bool loadFilesText(const std::string& text, FileHistory& history, std::vector<Ke
     for (size_t i = keptFrom; i < kept.size(); i++)
     {
         KeptPart& k = kept[i];
-        if (!k.hasEnding)
+        if (!k.hasEnding && !k.outgoing)
         {
             // A log from before 2026-10-23 put the file in Completed when
             // its part was kept; it comes out until the part goes.
@@ -390,11 +406,11 @@ bool loadFilesText(const std::string& text, FileHistory& history, std::vector<Ke
         }
         // The rest of the ending is the part's own.
         k.ending.via = Via::Session;
-        k.ending.outgoing = false;
+        k.ending.outgoing = k.outgoing;
         k.ending.peer = k.peer;
         k.ending.name = k.name;
         k.ending.size = k.size;
-        k.ending.path.clear();
+        k.ending.path = k.outgoing ? k.path : std::string();
         k.ending.id = 0;
     }
     return true;
