@@ -201,8 +201,7 @@ const int ID_CANCEL = wxID_HIGHEST + 402;
 const int ID_RESEND = wxID_HIGHEST + 403;
 const int ID_COPY = wxID_HIGHEST + 404;
 const int ID_SEAL_LINE = wxID_HIGHEST + 405;
-const int ID_FILE_TITLE = wxID_HIGHEST + 409;
-const int ID_FILE_ACTION = wxID_HIGHEST + 410;     // and the actions after it
+const int ID_FILE_ACTION = wxID_HIGHEST + 410;     // and FILE_MENU_IDS after it
 
 } // namespace
 
@@ -597,6 +596,56 @@ void BroadcastPage::showMenu(int row)
     PopupMenu(&menu);
 }
 
+void fillFileMenu(wxMenu& menu, const FileCard& card, int firstId, std::function<void(const std::string&)> act)
+{
+    // Ids in order: the title, the actions, then the submenu's items.
+    std::vector<std::string> actionOf;
+    auto next = [&](const std::string& action) {
+        int id = firstId + (int)actionOf.size();
+        actionOf.push_back(action);
+        return id;
+    };
+    if (!card.title.empty())
+    {
+        int id = next("");
+        menu.Append(id, wxString::FromUTF8(card.title));
+        menu.Enable(id, false);
+    }
+    const auto& actions = card.menu.empty() ? card.actions : card.menu;
+    for (const auto& action : actions)
+    {
+        if (actionOf.size() >= (size_t)FILE_MENU_IDS) break;
+        int id = next(action.first);
+        menu.Append(id, wxString::FromUTF8(action.second));
+        if (action.first.empty()) menu.Enable(id, false);
+    }
+    wxMenu* sub = nullptr;
+    if (!card.sub.empty())
+    {
+        sub = new wxMenu;
+        for (const auto& item : card.sub)
+        {
+            if (actionOf.size() >= (size_t)FILE_MENU_IDS) break;
+            int id = next(item.first);
+            sub->AppendRadioItem(id, wxString::FromUTF8(item.second));
+            if (item.first == card.subChosen) sub->Check(id, true);
+        }
+        menu.AppendSubMenu(sub, wxString::FromUTF8(card.subLabel));
+    }
+    auto handler = [actionOf, firstId, act](wxCommandEvent& e) {
+        int index = e.GetId() - firstId;
+        if (index < 0 || (size_t)index >= actionOf.size() || actionOf[(size_t)index].empty())
+        {
+            e.Skip();
+            return;
+        }
+        act(actionOf[(size_t)index]);
+    };
+    int last = firstId + FILE_MENU_IDS - 1;
+    menu.Bind(wxEVT_MENU, handler, firstId, last);
+    if (sub != nullptr) sub->Bind(wxEVT_MENU, handler, firstId, last);
+}
+
 void BroadcastPage::showFileMenu(const Message& m)
 {
     uint64_t file = m.file;
@@ -604,29 +653,18 @@ void BroadcastPage::showFileMenu(const Message& m)
     if (fileCard_ && file != 0) fileCard_(file, card);
     wxString name = wxString::FromUTF8(m.text);
 
-    const auto& actions = card.menu.empty() ? card.actions : card.menu;
     wxMenu menu;
-    if (!card.title.empty())
-    {
-        menu.Append(ID_FILE_TITLE, wxString::FromUTF8(card.title));
-        menu.Enable(ID_FILE_TITLE, false);
-    }
-    for (size_t i = 0; i < actions.size(); i++)
-    {
-        menu.Append(ID_FILE_ACTION + (int)i, wxString::FromUTF8(actions[i].second));
-        if (actions[i].first.empty()) menu.Enable(ID_FILE_ACTION + (int)i, false);
-    }
+    fillFileMenu(menu, card, ID_FILE_ACTION, [this, file](const std::string& action) {
+        if (onFileAction_) onFileAction_(file, action);
+    });
     if (menu.GetMenuItemCount() > 0) menu.AppendSeparator();
     menu.Append(ID_COPY, "Copy file name");
     menu.Bind(wxEVT_MENU, [=](wxCommandEvent& e) {
-        int index = e.GetId() - ID_FILE_ACTION;
-        if (index >= 0 && (size_t)index < actions.size() && onFileAction_)
-            onFileAction_(file, actions[(size_t)index].first);
         if (e.GetId() == ID_COPY && wxTheClipboard->Open())
         {
             wxTheClipboard->SetData(new wxTextDataObject(name));
             wxTheClipboard->Close();
         }
-    });
+    }, ID_COPY);
     PopupMenu(&menu);
 }

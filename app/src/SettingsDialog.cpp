@@ -4,6 +4,7 @@
 
 #include <wx/button.h>
 #include <wx/checkbox.h>
+#include <wx/choice.h>
 #include <wx/filepicker.h>
 #include <wx/tokenzr.h>
 #include <wx/sizer.h>
@@ -26,7 +27,8 @@ std::string text(const wxTextCtrl* control)
 
 } // namespace
 
-SettingsDialog::SettingsDialog(wxWindow* parent, const StationPrefs& prefs)
+SettingsDialog::SettingsDialog(wxWindow* parent, const StationPrefs& prefs,
+                               const std::vector<std::pair<std::string, std::string>>& gears)
     : wxDialog(parent, wxID_ANY, "Station settings")
 {
     // Controls go inside their static boxes, as wx wants them.
@@ -110,6 +112,54 @@ SettingsDialog::SettingsDialog(wxWindow* parent, const StationPrefs& prefs)
     slowRow->Add(new wxStaticText(box, wxID_ANY, "minutes"), 0, wxALIGN_CENTER_VERTICAL);
     broadcast->Add(slowRow, 0, wxLEFT | wxRIGHT | wxBOTTOM, 6);
 
+    // Andrew's floor and cap (2026-10-25).
+    repairFloor_ = new wxChoice(box, wxID_ANY);
+    repairFloor_->Append("None: as slow as a station needs");
+    floorModes_.push_back("");
+    bool listed = prefs.repairFloor.empty();
+    for (const auto& gear : gears)
+    {
+        repairFloor_->Append(wxString::FromUTF8(gear.second));
+        floorModes_.push_back(gear.first);
+        listed = listed || gear.first == prefs.repairFloor;
+    }
+    // Chosen at another width: kept, under its own name.
+    if (!listed)
+    {
+        repairFloor_->Append(wxString::FromUTF8(prefs.repairFloor));
+        floorModes_.push_back(prefs.repairFloor);
+    }
+    for (size_t i = 0; i < floorModes_.size(); i++)
+    {
+        if (floorModes_[i] == prefs.repairFloor) repairFloor_->SetSelection((int)i);
+    }
+    const char* floorTip = "Repairs never go in a slower gear than this, even for a station that says it hears "
+                           "you worse: it still gains from what it copies, and the rest of the net isn't held up "
+                           "by the slowest gear. A file's own Repair gear (its right-click menu) goes before this.";
+    repairFloor_->SetToolTip(floorTip);
+    auto* floorRow = new wxBoxSizer(wxHORIZONTAL);
+    auto* floorLabel = new wxStaticText(box, wxID_ANY, "Slowest repair gear:");
+    floorLabel->SetToolTip(floorTip);
+    floorRow->Add(floorLabel, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 6);
+    floorRow->Add(repairFloor_, 1, wxALIGN_CENTER_VERTICAL);
+    broadcast->Add(floorRow, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 6);
+
+    repairCap_ = new wxCheckBox(box, wxID_ANY, "Close a file's repairs after");
+    repairCap_->SetValue(prefs.repairCap);
+    repairCapMinutes_ = new wxSpinCtrl(box, wxID_ANY, wxEmptyString, wxDefaultPosition, wxDefaultSize,
+                                       wxSP_ARROW_KEYS, REPAIR_CAP_MIN_MINUTES, REPAIR_CAP_MAX_MINUTES,
+                                       prefs.repairCapMinutes);
+    const char* capTip = "Once a file's repairs have taken this much airtime in all, they close, and stations "
+                         "that ask hear that they have. Re-open repairs on its right-click menu gives it as much "
+                         "again.";
+    repairCap_->SetToolTip(capTip);
+    repairCapMinutes_->SetToolTip(capTip);
+    auto* capRow = new wxBoxSizer(wxHORIZONTAL);
+    capRow->Add(repairCap_, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 6);
+    capRow->Add(repairCapMinutes_, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 6);
+    capRow->Add(new wxStaticText(box, wxID_ANY, "minutes of repair airtime"), 0, wxALIGN_CENTER_VERTICAL);
+    broadcast->Add(capRow, 0, wxLEFT | wxRIGHT | wxBOTTOM, 6);
+
     // The radio: read, never set. rigctld is often shared (fldigi), so
     // Ragtime asks it the frequency and nothing else.
     auto* radio = new wxStaticBoxSizer(wxVERTICAL, this, "Radio");
@@ -163,6 +213,7 @@ SettingsDialog::SettingsDialog(wxWindow* parent, const StationPrefs& prefs)
     locator_->Bind(wxEVT_TEXT, changed);
     commandPort_->Bind(wxEVT_SPINCTRL, [this](wxSpinEvent&) { check(); });
     readDial_->Bind(wxEVT_CHECKBOX, changed);
+    repairCap_->Bind(wxEVT_CHECKBOX, changed);
     check();
     callsign_->SetFocus();
 }
@@ -185,6 +236,10 @@ StationPrefs SettingsDialog::prefs() const
     }
     p.sealChat = sealChat_->GetValue();
     p.slowRepairMinutes = slowRepair_->GetValue();
+    int floor = repairFloor_->GetSelection();
+    p.repairFloor = floor > 0 && (size_t)floor < floorModes_.size() ? floorModes_[(size_t)floor] : std::string();
+    p.repairCap = repairCap_->GetValue();
+    p.repairCapMinutes = repairCapMinutes_->GetValue();
     p.readDial = readDial_->GetValue();
     p.rigHost = text(rigHost_);
     if (p.rigHost.empty()) p.rigHost = "127.0.0.1";
@@ -196,6 +251,7 @@ StationPrefs SettingsDialog::prefs() const
 void SettingsDialog::check()
 {
     dataPort_->SetLabel(wxString::Format("Session data on %d", commandPort_->GetValue() + 1));
+    repairCapMinutes_->Enable(repairCap_->GetValue());
     // The segment check needs the dial.
     rigHost_->Enable(readDial_->GetValue());
     rigPort_->Enable(readDial_->GetValue());

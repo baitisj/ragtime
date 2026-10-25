@@ -14,6 +14,7 @@
 
 class wxBitmapButton;
 class wxBoxSizer;
+class wxMenu;
 class wxButton;
 class wxStaticText;
 class wxTextCtrl;
@@ -36,7 +37,19 @@ struct FileCard
     // greyed: it says why something can't be done.
     std::string title;
     std::vector<std::pair<std::string, std::string>> menu;
+    // A submenu after them when it has items (subLabel, "Repair gear"):
+    // radio items (action, label), the one whose action is subChosen ticked.
+    std::string subLabel;
+    std::vector<std::pair<std::string, std::string>> sub;
+    std::string subChosen;
 };
+
+// A file card's right-click menu, the same in the chat and on the Files
+// tab: its greyed title, its menu (or links), and its submenu, with ids
+// from firstId on (FILE_MENU_IDS of them at most). act gets the action
+// picked.
+constexpr int FILE_MENU_IDS = 48;
+void fillFileMenu(wxMenu& menu, const FileCard& card, int firstId, std::function<void(const std::string&)> act);
 
 // The Broadcast tab (docs/STAGE1.md, package E): the messages on D2G; the
 // line to type in, where "@W1AW" at the start addresses one station; the

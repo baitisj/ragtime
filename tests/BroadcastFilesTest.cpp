@@ -1823,6 +1823,198 @@ void testRefusedAfterRestart()
     CHECK(!b.seals.askAgain("AG7EW", two, now));
 }
 
+// The S/N a request carries is the mean of the sender's last few bursts,
+// not the lowest of 15 minutes: one deep fade no longer puts every repair
+// in the slowest gear (Jeff's AG7EW-KC2G test, 2026-10-25).
+void testRequestSnrIsMean()
+{
+    Air air;
+    Station& a = air.add("AG7EW", 1);
+    Station& b = air.add("KC2G", 2);
+    a.seals.setSealText(false);
+    air.run(2000);
+    b.hearsAt["AG7EW"] = -14.0;
+    a.chat.send("in a fade", "", now);
+    air.run(5000);
+    CHECK_EQ(b.seals.snrOf("AG7EW", now).value_or(99), -14.0);
+    b.hearsAt["AG7EW"] = 6.0;
+    for (int i = 0; i < 4; i++)
+    {
+        a.chat.send("out of it " + std::to_string(i), "", now);
+        air.run(5000);
+    }
+    // (-14 + 4 x 6) / 5.
+    CHECK_EQ(b.seals.snrOf("AG7EW", now).value_or(99), 2.0);
+    a.chat.send("and one more", "", now);
+    air.run(5000);
+    CHECK_EQ(b.seals.snrOf("AG7EW", now).value_or(99), 6.0);
+}
+
+// The repair pieces of a file, by the mode they went in.
+std::map<std::string, size_t> parityModes(const Air& air, uint16_t pieces)
+{
+    std::map<std::string, size_t> modes;
+    for (const Aired& on : air.aired)
+    {
+        const protocol::FilePiece* p = on.record.as<protocol::FilePiece>();
+        if (p != nullptr && p->index >= pieces) modes[on.mode]++;
+    }
+    return modes;
+}
+
+// A weak station whose first pass was all lost, and the sender's file.
+struct WeakFile
+{
+    Air air;
+    Station* a = nullptr;
+    Station* b = nullptr;
+    uint64_t id = 0;
+    std::string path;
+    bool sealed = false;
+    bool loseAll = false;
+
+    explicit WeakFile(const std::string& name)
+    {
+        a = &air.add("AG7EW", 1);
+        b = &air.add("KC2G", 2);
+        a->seals.setLadder(ladder());
+        b->hearsAt["AG7EW"] = -5.0;  // gear 1, fsk16r25-r1/3, by Auto
+        b->files.setAutoReceive(freshFolder(name).string());
+        b->lose = [this](protocol::Record& r) {
+            if (r.as<protocol::Seal>() != nullptr) sealed = true;
+            return r.as<protocol::FilePiece>() != nullptr && (!sealed || loseAll);
+        };
+        air.run(2000);
+        std::string error;
+        path = makeFile(name + ".bin", 1200, 41);
+        id = a->files.send(path, "qpsk-r1/3", now, error);
+        CHECK(id != 0);
+    }
+
+    BroadcastFile ours() const
+    {
+        BroadcastFile f;
+        a->files.find(id, now, f);
+        return f;
+    }
+};
+
+// A round the slow cap cuts short sends fewer pieces than were asked for;
+// the listener doesn't count those never sent as lost, so it doesn't ask
+// for more and more (in Jeff's test 21, then 41).
+void testCappedRoundNotLoss()
+{
+    WeakFile w("capped-round");
+    w.a->seals.setSlowResendSeconds(100);   // about one piece a round in gear 1
+    w.air.run(60 * 60 * 1000, 1000);
+    BroadcastFile f = fileFrom(*w.b, "AG7EW");
+    CHECK(f.state == FileState::Saved);
+    std::vector<uint32_t> wants;
+    for (const Aired& on : w.air.aired)
+    {
+        const protocol::RepairRequest* r = on.record.as<protocol::RepairRequest>();
+        if (r == nullptr || on.record.header.callsign != "KC2G") continue;
+        for (const auto& file : r->files) wants.push_back(file.second);
+    }
+    CHECK(wants.size() >= 3);
+    for (size_t i = 1; i < wants.size(); i++) CHECK(wants[i] <= wants[i - 1]);
+}
+
+// The floor: repairs go no slower than it, though the asker hears us
+// worse.
+void testRepairFloor()
+{
+    WeakFile w("floor");
+    w.a->seals.setRepairFloor("qpsk-r1/3");
+    w.air.run(30 * 60 * 1000, 1000);
+    CHECK(fileFrom(*w.b, "AG7EW").state == FileState::Saved);
+    std::map<std::string, size_t> modes = parityModes(w.air, w.ours().pieces);
+    CHECK(modes["qpsk-r1/3"] > 0);
+    CHECK_EQ(modes["fsk16r25-r1/3"], (size_t)0);
+}
+
+// The operator's gear for a file wins over the askers' S/N, faster than
+// the first pass and all.
+void testRepairGearOverride()
+{
+    WeakFile w("override");
+    CHECK(w.a->files.setRepairGear(w.id, "w48-16qam-r1/2"));
+    CHECK_EQ(w.ours().repairGear, std::string("w48-16qam-r1/2"));
+    w.air.run(30 * 60 * 1000, 1000);
+    CHECK(fileFrom(*w.b, "AG7EW").state == FileState::Saved);
+    std::map<std::string, size_t> modes = parityModes(w.air, w.ours().pieces);
+    CHECK(modes["w48-16qam-r1/2"] > 0);
+    CHECK_EQ(modes.size(), (size_t)1);
+    // Back to Auto.
+    CHECK(w.a->files.setRepairGear(w.id, ""));
+    CHECK_EQ(w.ours().repairGear, std::string());
+}
+
+// The cap on a file's repair airtime: once its repairs have had it, they
+// close, the asker hears so, and Re-open repairs gives as much again.
+void testRepairCapAndReopen()
+{
+    WeakFile w("cap");
+    w.loseAll = true;   // nothing ever comes: it asks until refused
+    w.a->seals.setRepairCapSeconds(200);
+    w.air.run(60 * 60 * 1000, 1000);
+    BroadcastFile f = w.ours();
+    CHECK(f.state == FileState::Sent);
+    CHECK(f.repairCapped);
+    CHECK(f.repairSeconds >= 200.0 && f.repairSeconds < 200.0 + 2 * 90.0);
+    CHECK(f.reopenable);
+    BroadcastFile theirs = fileFrom(*w.b, "AG7EW");
+    CHECK(theirs.state == FileState::Incomplete);
+    CHECK(theirs.refusal && *theirs.refusal == (uint8_t)protocol::RefusalReason::Closed);
+
+    // Re-opened, and now the pieces come: the seal goes again, the
+    // listener asks again, and the file is saved.
+    w.loseAll = false;
+    std::string error;
+    CHECK(w.a->files.reopen(w.id, now + 30 * 60 * 1000, now, error));
+    CHECK(w.ours().state == FileState::Repairing);
+    CHECK_EQ(w.ours().repairSeconds, 0.0);
+    // Room enough this time.
+    w.a->seals.setRepairCapSeconds(30 * 60);
+    // The listener asks again by itself, as it was receiving it.
+    w.air.run(30 * 60 * 1000, 1000);
+    CHECK(fileFrom(*w.b, "AG7EW").state == FileState::Saved);
+    // Its seal gone (pruned), it can't re-open: broadcast it again.
+    w.a->files.closeRepairs(w.id);
+    CHECK(w.ours().state == FileState::Sent);
+    w.air.run(3 * 60 * 60 * 1000, 10000);
+    CHECK(!w.ours().reopenable);
+    CHECK(!w.a->files.reopen(w.id, now + 60000, now, error));
+    CHECK(!error.empty());
+    CHECK_EQ(w.a->files.findSent(w.path, 1200), w.id);
+}
+
+// Close repairs now takes back the round's queued repair bursts: only the
+// one already with the host still goes.
+void testCloseTakesBack()
+{
+    WeakFile w("take-back");
+    w.loseAll = true;
+    std::map<std::string, size_t> before;
+    uint16_t pieces = w.ours().pieces;
+    for (int i = 0; i < 3600 && before.empty(); i++)
+    {
+        w.air.run(1000, 1000);
+        before = parityModes(w.air, pieces);
+    }
+    CHECK(!before.empty());
+    size_t queued = 0;
+    for (const auto& o : w.a->link.outgoing()) queued += o.label == "repairs" ? 1 : 0;
+    CHECK(queued >= 2);
+    CHECK(w.a->files.closeRepairs(w.id));
+    w.air.run(20 * 60 * 1000, 1000);
+    size_t sentBefore = 0, sentAfter = 0;
+    for (const auto& m : before) sentBefore += m.second;
+    for (const auto& m : parityModes(w.air, pieces)) sentAfter += m.second;
+    // The burst with the host carries one piece in gear 1.
+    CHECK(sentAfter <= sentBefore + 1);
+}
+
 int main()
 {
     testAirtime();
@@ -1858,6 +2050,12 @@ int main()
     testHeavyLossFile();
     testHeavyLossChat();
     testItemParityBeforeSeal();
+    testRequestSnrIsMean();
+    testCappedRoundNotLoss();
+    testRepairFloor();
+    testRepairGearOverride();
+    testRepairCapAndReopen();
+    testCloseTakesBack();
     std::filesystem::remove_all(scratch());
     return ragtime_test::finish();
 }

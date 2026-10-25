@@ -42,7 +42,7 @@
 // MAX_OPEN_MS. When a station's seal comes, what we lack under it (and
 // under its other recent seals, and a missing previous seal) is asked for
 // in one RepairRequest a seal, at a random time within the window, with
-// the lowest S/N we heard the station at in SNR_WINDOW_MS, and a want for
+// the mean S/N of the station's last few bursts, and a want for
 // each lack sized by the share we lost of the last round (or of the first
 // pass). A request heard from another station first speaks for ours when
 // its asker's gear is no faster than ours and it wants at least as much
@@ -149,9 +149,12 @@ public:
     static constexpr int MAX_ASKS = 5;
     // A late request (Receive pressed after the seal) waits up to this long.
     static constexpr uint64_t LATE_SPREAD_MS = 10 * 1000;
-    // The S/N a request carries: the lowest of the sender's bursts heard
-    // in this long (the latest flatters a fading path: the bursts lost went
-    // by in fades we never measured).
+    // The S/N a request carries: the mean of the sender's last SNR_BURSTS
+    // heard in SNR_WINDOW_MS, the figure the gearshift's Auto shifts for.
+    // Not the lowest (Jeff, 2026-10-25): one deep fade put every repair in
+    // the slowest gear while the path ran 10 dB above it, and the parity
+    // covers the bursts a fade takes.
+    static constexpr size_t SNR_BURSTS = gearbox::PathSnr::BURSTS;
     static constexpr uint64_t SNR_WINDOW_MS = 15 * 60 * 1000;
     // Repairs go in the fastest gear needing no more than the asker's S/N
     // less this, as Auto picks.
@@ -180,6 +183,23 @@ public:
     void setLadder(std::vector<gearbox::Gear> ladder) { ladder_ = std::move(ladder); }
     void setSlowResendSeconds(double seconds) { slowResendSeconds_ = seconds; }
     double slowResendSeconds() const { return slowResendSeconds_; }
+    // Andrew's three (2026-10-25, Jeff took all three). The floor: repairs
+    // never go slower than this mode, though an asker says it hears us
+    // worse (empty: no floor). A file's own gear (the operator's, from its
+    // menu): its pieces go again in that mode whatever the askers say, and
+    // the round's queued repairs of it are taken back so the next round
+    // goes in it (empty: Auto). The cap: a file's repairs close once their
+    // airtime reaches it (0: no cap).
+    void setRepairFloor(const std::string& mode) { floor_ = mode; }
+    const std::string& repairFloor() const { return floor_; }
+    void setRepairGear(uint32_t seq, const std::string& mode);
+    std::string repairGear(uint32_t seq) const;
+    void setRepairCapSeconds(double seconds) { repairCapSeconds_ = seconds; }
+    double repairCapSeconds() const { return repairCapSeconds_; }
+    // The airtime a file's repairs have taken (bursts sent), and whether
+    // that has reached the cap.
+    double repairAirtime(uint32_t seq) const;
+    bool repairCapReached(uint32_t seq) const;
     // Our Texts are sealed too (Settings, "Seal my broadcast messages").
     // Off, a Text is never listed, so a chat over goes with no seal and no
     // repair; a file is sealed either way. It applies to Texts sent from
@@ -230,9 +250,15 @@ public:
     };
     // The seal our item seq is listed in.
     SealView sealOf(uint32_t seq, uint64_t nowMs) const;
-    // The operator keeps it open until then, or closes it now.
+    // The operator keeps it open until then (re-opening it, if closed), or
+    // closes it now: the round's repairs under it still with HostLink are
+    // taken back (the burst on the air goes on).
     bool keepOpen(uint32_t seq, uint64_t untilMs);
     bool closeNow(uint32_t seq);
+    // Closed (by the operator or the cap) or out of its window, while still
+    // held: open until then, its files' repair airtime counted afresh, and
+    // the seal sent again so stations we refused ask once more.
+    bool reopen(uint32_t seq, uint64_t untilMs, uint64_t nowMs);
 
     //---------------------------------------------------------------------
     // Everything heard and settled
@@ -266,8 +292,8 @@ public:
     // everything a record heard goes through (BroadcastChat::onRebuilt,
     // this onRecord, BroadcastFiles::onRecord, the station list).
     std::vector<protocol::Record> takeRebuilt();
-    // The lowest S/N heard from call in the last SNR_WINDOW_MS (the host's
-    // reports), what our requests to it carry.
+    // The mean S/N of call's last SNR_BURSTS heard in SNR_WINDOW_MS (the
+    // host's reports), what our requests to it carry.
     std::optional<double> snrOf(const std::string& call, uint64_t nowMs) const;
     // call refused to repair its item seq: why (a protocol::RefusalReason).
     std::optional<uint8_t> refusal(const std::string& call, uint32_t seq) const;
@@ -358,6 +384,7 @@ private:
         uint64_t sentMs = 0;
         uint64_t keepUntilMs = 0;   // the operator's: open until then
         bool closed = false;        // the operator closed it
+        bool capped = false;        // closed as a file under it reached the repair airtime cap
         std::map<std::string, uint64_t> askers;
         size_t asks = 0;
         int flushes = 0;            // sent again after a quiet window
@@ -412,7 +439,13 @@ private:
     std::optional<std::string> gearFor(std::optional<double> snr) const;
     // An item that first went in mode first goes again in this mode for a
     // station that heard us at snr.
-    std::string repairMode(std::optional<double> snr, const std::string& first) const;
+    // seq, when given, is the item: its own gear, when the operator set
+    // one, wins.
+    std::string repairMode(std::optional<double> snr, const std::string& first, uint32_t seq = 0) const;
+    std::string faster(const std::string& a, const std::string& b) const;
+    // The round's queued bursts that carry nothing but repairs under seal
+    // number go back from HostLink.
+    void takeBackRepairs(uint16_t number);
 
     //----- theirs
 
@@ -521,6 +554,10 @@ private:
     std::string mode_;
     std::vector<gearbox::Gear> ladder_;
     double slowResendSeconds_ = SLOW_RESEND_SECONDS;
+    std::string floor_;
+    std::map<uint32_t, std::string> gears_;     // the operator's, by item
+    double repairCapSeconds_ = 0.0;
+    std::map<uint32_t, double> repairAir_;      // a file's repairs sent, by its announce
     bool sealText_ = false;
     std::string callsign_;
 
@@ -538,6 +575,14 @@ private:
     std::map<std::pair<uint16_t, uint8_t>, uint64_t> refusedMs_;  // the last went then
     std::set<uint64_t> resendBursts_;
     uint64_t resendLast_ = 0;               // the round's last burst, with the seals
+    // The round's bursts before its seals: the seals they carry repairs
+    // under, and each file's share of their airtime.
+    struct RoundBurst
+    {
+        std::set<uint16_t> seals;
+        std::map<uint32_t, double> fileAir;
+    };
+    std::map<uint64_t, RoundBurst> roundBursts_;
     std::string lastRoundMode_;             // the gear the round's seals went in
 
     std::map<std::string, Station> stations_;

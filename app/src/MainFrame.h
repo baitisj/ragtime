@@ -121,11 +121,14 @@ private:
     // Broadcast files (docs/STAGE1.md, package H): Broadcast a file... with
     // the estimate box, each file's card on the Broadcast tab, what its
     // links do, and keeping the seal chain across restarts.
-    void broadcastFile();
+    // Asks which file when path is empty.
+    void broadcastFile(wxString path = wxString());
     bool fileCard(uint64_t id, FileCard& card);
     void broadcastFileAction(uint64_t id, const std::string& action);
     void broadcastFileMenu(const ragtime::files::FileRow& row, wxMenu& menu);
-    void keepRepairsUntil(uint64_t id, uint64_t untilMs);
+    void keepRepairsUntil(uint64_t id, uint64_t untilMs, bool reopen = false);
+    void reopenRepairs(uint64_t id, uint64_t untilMs);
+    void repairGearMenu(const ragtime::broadcast::BroadcastFile& f, FileCard& card);
     void rejectFile(uint64_t id);
     void askAgainOnBroadcast(uint64_t id);
     void receiveFile(uint64_t id);

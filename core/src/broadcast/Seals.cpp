@@ -133,6 +133,9 @@ void Seals::setChain(const std::string& callsign, const Chain& chain)
         refusedMs_.clear();
         resendBursts_.clear();
         resendLast_ = 0;
+        roundBursts_.clear();
+        repairAir_.clear();
+        gears_.clear();
         sealSoon_ = false;
         settled_.clear();
         roundItems_.clear();
@@ -175,14 +178,79 @@ std::optional<std::string> Seals::gearFor(std::optional<double> snr) const
     return ladder_[(size_t)pick].mode;
 }
 
-std::string Seals::repairMode(std::optional<double> snr, const std::string& first) const
+std::string Seals::faster(const std::string& a, const std::string& b) const
 {
+    if (a == b) return a;
+    double sa = speedOf(a), sb = speedOf(b);
+    if (sa <= 0.0) return b;
+    if (sb <= 0.0) return a;
+    return sb > sa ? b : a;
+}
+
+std::string Seals::repairMode(std::optional<double> snr, const std::string& first, uint32_t seq) const
+{
+    if (seq != 0)
+    {
+        auto own = gears_.find(seq);
+        if (own != gears_.end()) return own->second;
+    }
     std::optional<std::string> gear = gearFor(snr);
     if (!gear) return first;
     // Never faster than it first went: that gear failed someone already.
     // Empty, it went in the group's mode as it stood.
     const std::string& went = !first.empty() ? first : !link_.groupMode().empty() ? link_.groupMode() : mode_;
-    return slower(*gear, went);
+    std::string mode = slower(*gear, went);
+    // Never slower than the floor, though: but no faster than it went.
+    if (!floor_.empty() && speedOf(floor_) > 0.0) mode = faster(mode, slower(floor_, went));
+    return mode;
+}
+
+void Seals::setRepairGear(uint32_t seq, const std::string& mode)
+{
+    if (mode.empty())
+        gears_.erase(seq);
+    else
+        gears_[seq] = mode;
+    // What the round has queued in the old gear goes back; the round's
+    // seals still go, and the requests they bring are answered in this one.
+    const OurSeal* s = sealFor(seq);
+    if (s != nullptr) takeBackRepairs(s->number);
+    version_++;
+}
+
+std::string Seals::repairGear(uint32_t seq) const
+{
+    auto own = gears_.find(seq);
+    return own != gears_.end() ? own->second : std::string();
+}
+
+double Seals::repairAirtime(uint32_t seq) const
+{
+    auto air = repairAir_.find(seq);
+    return air != repairAir_.end() ? air->second : 0.0;
+}
+
+bool Seals::repairCapReached(uint32_t seq) const
+{
+    return repairCapSeconds_ > 0.0 && repairAirtime(seq) >= repairCapSeconds_;
+}
+
+void Seals::takeBackRepairs(uint16_t number)
+{
+    for (auto it = roundBursts_.begin(); it != roundBursts_.end();)
+    {
+        const std::set<uint16_t>& under = it->second.seals;
+        if (under.size() == 1 && *under.begin() == number && link_.cancel(it->first))
+        {
+            resendBursts_.erase(it->first);
+            it = roundBursts_.erase(it);
+            version_++;
+        }
+        else
+        {
+            ++it;
+        }
+    }
 }
 
 //-------------------------------------------------------------------------
@@ -334,6 +402,32 @@ bool Seals::keepOpen(uint32_t seq, uint64_t untilMs)
     return true;
 }
 
+bool Seals::reopen(uint32_t seq, uint64_t untilMs, uint64_t nowMs)
+{
+    const OurSeal* found = sealFor(seq);
+    if (found == nullptr || !found->sent) return false;
+    OurSeal* s = findSeal(found->number);
+    bool closed = s->closed || s->capped || !open(*s, nowMs);
+    if (!keepOpen(seq, untilMs)) return false;
+    if (!closed) return true;
+    // Its files' repairs start afresh under the cap, and what we refused
+    // may be refused again.
+    s->capped = false;
+    for (uint32_t i = s->first; i < s->first + s->count; i++) repairAir_.erase(i);
+    for (auto it = refusedMs_.begin(); it != refusedMs_.end();)
+        it = it->first.first == s->number ? refusedMs_.erase(it) : std::next(it);
+    // The seal again: a station that heard us refuse asks once more.
+    uint64_t id = link_.broadcast({protocol::encodeFrame({s->record})}, s->mode, nowMs, "seal again");
+    if (id != 0 && resendLast_ == 0)
+    {
+        resendBursts_.insert(id);
+        resendLast_ = id;
+        lastRoundMode_ = s->mode;
+    }
+    version_++;
+    return true;
+}
+
 bool Seals::closeNow(uint32_t seq)
 {
     const OurSeal* found = sealFor(seq);
@@ -342,6 +436,7 @@ bool Seals::closeNow(uint32_t seq)
     s->closed = true;
     s->keepUntilMs = 0;
     asked_.erase(s->number);
+    takeBackRepairs(s->number);
     version_++;
     return true;
 }
@@ -497,7 +592,7 @@ void Seals::onSealOver(const std::string& from, const protocol::RepairRequest& r
         }
         OurSeal* s = findSeal(found->number);
         if (!s->sent) continue;
-        std::string mode = repairMode(request.snr, s->mode);
+        std::string mode = repairMode(request.snr, s->mode, seq);
         if (!open(*s, nowMs))
         {
             auto reason = !s->closed ? protocol::RefusalReason::Closed
@@ -551,12 +646,22 @@ void Seals::onRequest(const std::string& from, const protocol::RepairRequest& re
         version_++;
     }
     if (!s->sent) return;
+    // A file under it whose repairs have had the airtime allowed closes it.
+    for (uint32_t seq = s->first; seq < s->first + s->count && !s->closed; seq++)
+    {
+        const OurItem* item = findItem(seq);
+        if (item != nullptr && item->file && repairCapReached(seq))
+        {
+            closeNow(seq);
+            s->capped = true;
+        }
+    }
     if (!open(*s, nowMs))
     {
         // Closed by the operator: the file under it cancelled, or sharing
-        // stopped; else out of its sensitivity window.
+        // stopped; else out of its sensitivity window, or at the cap.
         auto reason = protocol::RefusalReason::Closed;
-        if (s->closed)
+        if (s->closed && !s->capped)
         {
             reason = protocol::RefusalReason::StoppedSharing;
             for (uint32_t seq = s->first; seq < s->first + s->count && files_ != nullptr; seq++)
@@ -583,7 +688,7 @@ void Seals::onRequest(const std::string& from, const protocol::RepairRequest& re
         if (!request.missingItems[i]) continue;
         const OurItem* item = findItem(s->first + (uint32_t)i);
         if (item == nullptr || item->fate != Fate::Sent) continue;
-        std::string mode = repairMode(request.snr, item->mode);
+        std::string mode = repairMode(request.snr, item->mode, item->seq);
         auto have = a.items.find(item->seq);
         a.items[item->seq] = have == a.items.end() ? mode : slower(have->second, mode);
         lacked.insert(item->seq);
@@ -599,7 +704,7 @@ void Seals::onRequest(const std::string& from, const protocol::RepairRequest& re
         if (seq < s->first || seq >= s->first + s->count || files_ == nullptr || file.second == 0) continue;
         uint16_t pieces = files_->pieceCount(seq);
         const OurItem* item = findItem(seq);
-        std::string mode = repairMode(request.snr, item != nullptr ? item->mode : s->mode);
+        std::string mode = repairMode(request.snr, item != nullptr ? item->mode : s->mode, seq);
         if (pieces == 0)
         {
             // Asked for pieces we no longer hold.
@@ -673,6 +778,13 @@ void Seals::resend(uint64_t nowMs)
     std::vector<std::string> sealModes;
     roundItems_.clear();
     uint32_t time = seconds(nowMs);
+    // The round's own gear is its newest seal's. Parity pieces are made to
+    // fit its slow gears' cap, as they're numbered one after another: one
+    // made and then cut from the round would look lost to the listener.
+    const OurSeal* newestAsked = !asked_.empty() ? findSeal(asked_.rbegin()->first) : nullptr;
+    std::string ownPlan = newestAsked != nullptr ? newestAsked->mode : mode_;
+    double ownPlanSpeed = speedOf(ownPlan);
+    double slowPlanned = 0.0;
     for (const auto& entry : asked_)
     {
         OurSeal* s = findSeal(entry.first);
@@ -732,6 +844,24 @@ void Seals::resend(uint64_t nowMs)
                         std::vector<protocol::Record> some(MAX_FRAMES_PER_BURST, piece);
                         double each = airOf(some, info) / MAX_FRAMES_PER_BURST;
                         if (each > 0.0) limit = std::min<uint32_t>(limit, (uint32_t)(RESEND_MAX_SECONDS / each) + 1);
+                        // And no more than the cap has left for it.
+                        if (each > 0.0 && repairCapSeconds_ > 0.0)
+                        {
+                            double left = std::max(0.0, repairCapSeconds_ - repairAirtime(seq));
+                            limit = std::min<uint32_t>(limit, (uint32_t)std::ceil(left / each));
+                        }
+                        // Nor more than the slow gears' share has left: the
+                        // round's first burst always goes.
+                        bool slow = gear.first != ownPlan && ownPlanSpeed > 0.0 && speedOf(gear.first) < ownPlanSpeed;
+                        if (each > 0.0 && slow)
+                        {
+                            double left = std::max(0.0, slowResendSeconds_ - slowPlanned);
+                            uint32_t fits = (uint32_t)(left / each);
+                            if (fits == 0 && slowPlanned == 0.0) fits = 1;
+                            limit = std::min(limit, fits);
+                            slowPlanned += each * limit;
+                        }
+                        if (limit == 0) break;
                     }
                     byMode[gear.first].push_back(std::move(piece));
                     paritySent_++;
@@ -794,15 +924,38 @@ void Seals::resend(uint64_t nowMs)
     std::vector<std::vector<uint8_t>> closing;
     for (const OurSeal* s : seals) closing.push_back(protocol::encodeFrame({s->record}));
     for (const auto& frame : packFrames(refusals)) closing.push_back(frame);
+
+    size_t repairs = bursts.size();
     for (auto& burst : packBursts(closing, modeInfo(end))) bursts.push_back({end, std::move(burst)});
 
-    for (const auto& burst : bursts)
+    roundBursts_.clear();
+    for (size_t i = 0; i < bursts.size(); i++)
     {
+        const auto& burst = bursts[i];
         uint64_t id = link_.broadcast(burst.second, burst.first, nowMs,
                                       seals.empty() ? "repairs refused" : "repairs");
         if (id == 0) continue;
         resendBursts_.insert(id);
         resendLast_ = id;
+        if (i >= repairs) continue;
+        // What it carries: repairs under which seals, and each file's
+        // share of its airtime, counted to the file once it has gone.
+        RoundBurst& round = roundBursts_[id];
+        double each = burstSeconds(burst.second, modeInfo(burst.first)) / (double)burst.second.size();
+        for (const auto& frame : burst.second)
+        {
+            std::vector<protocol::Record> records;
+            if (!protocol::decodeFrame(frame, records)) continue;
+            for (const protocol::Record& r : records)
+            {
+                const protocol::ItemParity* p = r.as<protocol::ItemParity>();
+                const OurSeal* under = p != nullptr ? nullptr : sealFor(r.header.seq);
+                if (p != nullptr) round.seals.insert(p->seal);
+                else if (under != nullptr) round.seals.insert(under->number);
+            }
+            if (!records.empty() && records.front().as<protocol::FilePiece>() != nullptr)
+                round.fileAir[records.front().header.seq] += each;
+        }
     }
     lastRoundMode_ = end;
     version_++;
@@ -972,6 +1125,24 @@ void Seals::onEvent(const Event& event, uint64_t nowMs)
         }
     }
 
+    auto round = roundBursts_.find(event.id);
+    if (round != roundBursts_.end())
+    {
+        std::map<uint32_t, double> fileAir = round->second.fileAir;
+        roundBursts_.erase(round);
+        for (const auto& air : fileAir)
+        {
+            if (!sent) continue;
+            repairAir_[air.first] += air.second;
+            // Its repairs have had the airtime allowed: closed, the rest of
+            // the round's repairs under its seal taken back.
+            const OurSeal* under = sealFor(air.first);
+            if (under == nullptr || under->closed || !repairCapReached(air.first)) continue;
+            closeNow(air.first);
+            findSeal(under->number)->capped = true;
+        }
+        version_++;
+    }
     if (resendBursts_.erase(event.id) != 0 && event.id == resendLast_)
     {
         resendLast_ = 0;
@@ -1099,7 +1270,12 @@ void Seals::prune(uint64_t nowMs)
         bool old = s.sent && nowMs >= s.sentMs + MAX_OPEN_MS && (s.keepUntilMs == 0 || nowMs >= s.keepUntilMs);
         if (!old && seals_.size() <= MAX_SEALS_KEPT) break;
         settle(s);
-        for (uint32_t seq = s.first; seq < s.first + s.count; seq++) sealedItems_.erase(seq);
+        for (uint32_t seq = s.first; seq < s.first + s.count; seq++)
+        {
+            sealedItems_.erase(seq);
+            gears_.erase(seq);
+            repairAir_.erase(seq);
+        }
         asked_.erase(s.number);
         seals_.pop_front();
         version_++;
@@ -1745,13 +1921,18 @@ std::optional<double> Seals::snrOf(const std::string& call, uint64_t nowMs) cons
 {
     auto found = stations_.find(protocol::normalCallsign(call));
     if (found == stations_.end()) return std::nullopt;
-    std::optional<double> lowest;
-    for (const auto& report : found->second.snrs)
+    // The mean of the last SNR_BURSTS in the window, newest first.
+    const auto& snrs = found->second.snrs;
+    double sum = 0.0;
+    size_t n = 0;
+    for (auto it = snrs.rbegin(); it != snrs.rend() && n < SNR_BURSTS; ++it)
     {
-        if (nowMs >= report.first + SNR_WINDOW_MS) continue;
-        if (!lowest || report.second < *lowest) lowest = report.second;
+        if (nowMs >= it->first + SNR_WINDOW_MS) break;
+        sum += it->second;
+        n++;
     }
-    return lowest;
+    if (n == 0) return std::nullopt;
+    return sum / (double)n;
 }
 
 void Seals::heardRefusal(const std::string& call, const protocol::RepairRefused& refused, uint64_t nowMs)

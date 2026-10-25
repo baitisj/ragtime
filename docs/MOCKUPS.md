@@ -194,5 +194,18 @@ Delivered and Not delivered keep theirs.
   cancelled" in State; a part sent reads "6,698 of 91,339 sent" and
   "Stopping, 1,135 bytes still going out", then "Part sent, cancelled".
 - Right-click on a broadcast share you are sending: first line greyed,
-  "Repairs open until 15:42 (1 h 10 min)", then Keep open 30 min longer,
-  Keep open 2 hours longer, Keep open until..., Close repairs now.
+  "Repairs open until 15:42 (1 h 10 min)" (and ", 3 min of repairs
+  sent" once some have gone), then Keep open 30 min longer, Keep open 2
+  hours longer, Keep open until..., Close repairs now, and a Repair gear
+  submenu: "Auto, as the stations that ask hear you" and each gear of
+  the ladder ("E2C  (n10-qpsk-r1/5)"), the one in use ticked.
+- Right-click on one whose repairs have closed (here or in Completed
+  files): Re-open repairs for 30 min, Re-open repairs for 2 hours,
+  Re-open repairs until... While its seal is no longer held: greyed
+  "Can't re-open repairs: its seal is over 2 hours old", then Broadcast
+  it again.... Its state reads "Sent. Repairs closed after 30 min of
+  repair airtime" when the cap closed them.
+- Settings > Broadcast, below "Maximum time spent in repairs per round":
+  "Slowest repair gear:" [None: as slow as a station needs | the
+  ladder's gears], and [x] "Close a file's repairs after" [30] "minutes
+  of repair airtime".

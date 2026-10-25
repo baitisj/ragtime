@@ -217,9 +217,13 @@ each file with a want of 0. A listener sends one when it heard a file
 
 **The S/N code** in bits 1 to 7 of flags says how well the asker hears
 the seal's sender, so the repairs can go in a gear it can copy. It is the
-lowest SNR the asker's data2g-host reported for that sender's bursts
-in the last 15 minutes: the lowest rather than the latest, because the
-bursts the asker lost went by in fades it never measured. Code v = 0
+mean of the SNRs the asker's data2g-host reported for that sender's
+last 5 bursts in the last 15 minutes, the figure the gearshift's Auto
+shifts for. Until 0.1.2 it was the lowest of the 15 minutes, which in
+Jeff's AG7EW–KC2G test (2026-10-25) put every repair in the slowest
+gear for one deep fade while the path ran up to 10 dB above it; the
+parity covers what a fade takes. Senders read either the same way.
+Code v = 0
 means no figure (a host from before Data2G PR #98, or nothing heard
 lately); 1 to 127 mean −24 + (v − 1) × 0.5 dB, so −24 to +39 dB in
 half-dB steps, rounded to the nearest and held at both ends.
@@ -230,7 +234,7 @@ what was asked for, once for every station that asked.
 | Field | Bytes | Meaning |
 | --- | --- | --- |
 | seal | 2 | The seal the refusal is about |
-| reason | 1 | 0 stopped sharing (the operator closed its repairs), 1 cancelled (the operator stopped the file and closed its repairs), 2 no longer held (expired, or lost in a restart), 3 closed (out of its sensitivity window) |
+| reason | 1 | 0 stopped sharing (the operator closed its repairs), 1 cancelled (the operator stopped the file and closed its repairs), 2 no longer held (expired, or lost in a restart), 3 closed (out of its sensitivity window, or a file under it had the repair airtime its sender allows) |
 | count | 1 | Files the reason covers; 0 means everything under the seal, chat lines too |
 | files | 3 each | Each file's seq |
 
@@ -536,8 +540,12 @@ the host's `MODES` lists them.
   gearshift's Auto sum), or gear 1 when even gear 1 needs more. An item
   or piece goes again in the slowest gear of the stations that asked for
   it, and never in a faster gear than it first went in, which failed
-  someone already. A request with no S/N, or a sender with no ladder,
-  means the gear it first went in. This holds whether the operator chose
+  someone already, nor in a slower gear than the sender's floor
+  (Ragtime's "Slowest repair gear", none by default) unless it first
+  went slower still. A file the operator gave its own repair gear (its
+  menu's Repair gear) goes in that gear, whatever the askers say. A
+  request with no S/N, or a sender with no ladder, means the gear it
+  first went in. This holds whether the operator chose
   the gear or Auto did. The resend goes gear by gear, fastest first,
   each in sequence order, and the seals go last in the slowest gear
   used, so every asker can copy them; the next window is sized for that
@@ -546,7 +554,21 @@ the host's `MODES` lists them.
   seal's) may take at most 5 minutes of airtime a round (Ragtime's
   "Maximum time spent in repairs per round", 1 to 60 minutes). What doesn't fit is asked for again
   next round, so other stations get a word in between. A round's first
-  burst always goes.
+  burst always goes. A file's parity pieces are made to fit the cap, as
+  they are numbered one after another: one made and then cut would look
+  lost to its listeners (below, Wants).
+- **The repair airtime cap.** Once a file's repairs have taken the
+  airtime its sender allows (Ragtime's "Close a file's repairs after N
+  minutes of repair airtime", 30 by default), its seal closes, and a
+  request under it is refused (reason 3). The operator may re-open it
+  while the seal is still held: the seal goes again, the count starts
+  afresh, and a listener that heard the seal after the refusal asks
+  again.
+- **Closing.** When the operator closes a seal's repairs, or picks a
+  file's repair gear, the round's bursts still queued that carry only
+  repairs under that seal are taken back. The one with the host goes
+  on; the round's seals still go, so the next requests are answered in
+  the new gear, or refused.
 - **Refusals.** A request under a seal the sender won't serve is
   refused at the window's end, in the gear of the weakest station that
   asked, after the seals: a seal closed by the operator (reason 1 if a
@@ -661,7 +683,12 @@ x^16 + x^12 + x^3 + x + 1 (`0x1100B`).
   any repair round, p is the share of the first pass it lost (for a
   file, counted from the first piece it heard, so a late joiner doesn't
   count what went before it; half when it heard none). After one, p is
-  the share of the symbols asked for that didn't come, when some came.
+  the share of the symbols asked for that didn't come, when some came;
+  for a file, of the parity pieces sent since it first asked, counted
+  by their index from the first after the highest it held then to the
+  highest it has heard, so pieces a round cut short never sent don't
+  count as lost (in Jeff's test 4 of 21 came of a round cut at 5
+  minutes, and the next request asked for 41).
   A file's want is capped by the sender at four times its pieces.
 
 On paths where some stations lose most of every burst, this matters

@@ -83,9 +83,12 @@ with the code when the seal rules change.
   whole on disk across restarts, in `broadcastPartsDir()`); file cards and the file button (a floppy disk, drawn in `DrawnIcon`) in `BroadcastPage`,
   the File menu items and share menus in `MainFrame`, and the seal chain
   in `Prefs`. Since 2026-10-24 a repair request carries the asker's S/N,
-  repairs go gear by gear (`Seals::setLadder`, the "Slow repairs" cap in
+  repairs go gear by gear (`Seals::setLadder`, the per-round cap in
   Settings), and a sender refuses what it won't repair (RepairRefused,
-  `0x42`). Since 2026-10-25 repairs are Reed-Solomon parity
+  `0x42`). Since 2026-10-25 the S/N is the mean of the last 5 bursts,
+  repairs have a floor, a per-file gear and an airtime cap
+  (`setRepairFloor`, `setRepairGear`, `setRepairCapSeconds`), and a
+  closed share can re-open (`BroadcastFiles::reopen`). Since 2026-10-25 repairs are Reed-Solomon parity
   (`files/Parity`, PROTOCOL.md "Parity"): requests (`0x43`) ask how
   many repair symbols they want, files get parity pieces and sealed
   chat ItemParity (`0x44`), and `Seals::takeRebuilt` hands back lines

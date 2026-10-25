@@ -99,6 +99,14 @@ struct BroadcastFile
     uint64_t repairsUntilMs = 0;// ours: when repairs close, as things stand; 0 once closed
     bool keptOpen = false;      // ours: the operator moved repairsUntilMs
     size_t askers = 0;          // ours: stations that have asked for repairs
+    // Ours: the operator's repair gear for it (empty: Auto), the airtime
+    // its repairs have taken, and whether they closed at the cap.
+    std::string repairGear;
+    double repairSeconds = 0.0;
+    bool repairCapped = false;
+    // Ours, finished: its seal is still held and the file on disk is the
+    // one sent, so its repairs can open again (reopen).
+    bool reopenable = false;
     uint64_t expiresAtMs = 0;   // theirs: when a kept or unanswered one is dropped
     // Each piece: files::PIECE_WAITING, PIECE_HELD or PIECE_MISSED.
     std::vector<uint8_t> pieceMap;
@@ -161,6 +169,16 @@ public:
     // Ours, sealed: repairs stay open until then, or close now.
     bool keepOpen(uint64_t id, uint64_t untilMs);
     bool closeRepairs(uint64_t id);
+    // Ours, finished (Sent, or stopped part way) while its seal is still
+    // held (MAX_OPEN_MS): repairs open again until then. The file is read
+    // again from where it was sent, and must be the same bytes. 0, with the
+    // reason, if it can't.
+    bool reopen(uint64_t id, uint64_t untilMs, uint64_t nowMs, std::string& error);
+    // A finished broadcast of ours (the Files tab's Completed row) by the
+    // file it sent: its id, or 0.
+    uint64_t findSent(const std::string& path, uint64_t size) const;
+    // Ours: the gear its repairs go in (empty: Auto, from the askers' S/N).
+    bool setRepairGear(uint64_t id, const std::string& mode);
 
     // Theirs: save it at path once all of it is here (at once if it is),
     // asking for what is missing until then; an empty path keeps the one
@@ -247,6 +265,7 @@ private:
         files::RateMeter rate;
         uint64_t firstPassMs = 0;       // when the first pass ended, for the bps column
         bool finished = false;          // its FinishedFile is out
+        bool capped = false;            // its repairs closed at the airtime cap
     };
 
     struct Incoming
@@ -265,11 +284,20 @@ private:
         double loss = -1.0;
         uint32_t askedWant = 0;         // parity pieces last asked for, by us or a request speaking for ours
         uint32_t came = 0;              // pieces and parity pieces heard since
+        // Parity pieces by index: a sender numbers them one after another,
+        // so from the first after those heard when we first asked
+        // (parityFrom) to the highest heard (parityTop) is how many went,
+        // though a round cut short sent fewer than were asked for; and
+        // parityHeard of them came.
+        uint16_t parityFrom = 0;        // 0: not asked yet
+        uint16_t parityTop = 0;         // 0: none heard
+        uint32_t parityHeard = 0;
         int digestFailures = 0;
         bool chosenPath = false;        // the operator gave the path
         files::RateMeter rate;
         bool finished = false;
         bool sealSeen = false;          // a seal listing it was heard
+        bool refusedOut = false;        // Incomplete as the sender refused: back to Receiving if it re-opens
         protocol::Record announceRecord;
         std::string partFile;           // its file in the parts folder, once written
         std::string savedSig;           // what was last written, in short

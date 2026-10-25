@@ -292,6 +292,35 @@ round (Settings, "Maximum time spent in repairs per round", 1 to 60
 minutes). What doesn't fit goes in the next round, after the seal, so
 other stations get a word in between.
 
+**Which S/N?** A request carries the mean of the S/N its asker measured
+over our last five bursts. It used to carry the lowest of 15 minutes,
+on the thought that the bursts it lost went by in fades it never
+measured. On the air (AG7EW and KC2G, 2026-10-25) that was the wrong
+trade: one fade to −8 dB put every repair in the slowest gear, about
+80 s a piece, while the path ran between −4 and +10 dB. Parity doesn't
+need every burst to arrive, only enough of them, so a gear that gets
+through most of the time at four times the speed wins. The mean is the
+figure the gearshift's Auto already shifts for.
+
+**Three knobs for the sender** (Andrew's ask, 2026-10-25):
+
+- *Slowest repair gear* (Settings): repairs never go slower than it,
+  though an asker says it hears worse. It still gains from the parity
+  it does copy, and the rest of the net isn't held up.
+- *Repair gear* (a file's right-click menu, while its repairs are
+  open): Auto, or one gear for this file's repairs whatever the askers
+  say. What the round had queued in the old gear is taken back.
+- *Close a file's repairs after N minutes of repair airtime*
+  (Settings, 30 by default): then its seal closes, and askers hear so.
+
+**Closing and re-opening.** Close repairs now takes back the round's
+repairs still queued; the burst already on the air finishes. A file
+whose repairs closed, by hand or at the cap, has **Re-open repairs** on
+its right-click menu (in the chat and in Completed files) for the 2
+hours its seal is held, if the file on disk hasn't changed. The seal
+goes again, and a station that was receiving it asks once more. After
+that it can only be broadcast again.
+
 ### When the sender says no
 
 Sometimes the sender won't repair what was asked for: its operator
