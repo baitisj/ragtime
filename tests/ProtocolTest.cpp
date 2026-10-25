@@ -212,6 +212,42 @@ void testEveryRecord()
         CHECK(back.as<Ack>() != nullptr && back.as<Ack>()->to == "W1AW" && back.as<Ack>()->item == 0x123456);
     }
     {
+        Ping ping;
+        ping.to = "W1AW";
+        ping.number = 0xBEEF;
+        ping.mode = "fsk16r25-r1/3";
+        Record back = roundTrip(make(ping));
+        const Ping* p = back.as<Ping>();
+        CHECK(p != nullptr && p->to == "W1AW" && p->number == 0xBEEF && p->mode == "fsk16r25-r1/3");
+        CHECK_EQ((int)back.type(), 0x12);
+        // With a five-character call each way, an empty mode: 20 bytes.
+        Record plain = make(Ping{"AG7EW", 1, ""});
+        plain.header.callsign = "KC2GG";
+        CHECK_EQ(encodeRecord(plain).size(), (size_t)20);
+
+        Pong pong;
+        pong.to = "W1AW";
+        pong.number = 0xBEEF;
+        pong.snr = -7.5;
+        back = roundTrip(make(pong));
+        const Pong* q = back.as<Pong>();
+        CHECK(q != nullptr && q->to == "W1AW" && q->number == 0xBEEF && q->snr && *q->snr == -7.5);
+        CHECK_EQ((int)back.type(), 0x13);
+        // No figure: code 0.
+        pong.snr.reset();
+        std::vector<uint8_t> bytes = encodeRecord(make(pong));
+        CHECK_EQ((int)bytes.back(), 0);
+        back = roundTrip(make(pong));
+        CHECK(back.as<Pong>() != nullptr && !back.as<Pong>()->snr);
+        // A Pong cut short is malformed, not misread.
+        Record cut = make(pong);
+        cut.body = Unknown{(uint8_t)RecordType::Pong, {}};
+        std::vector<uint8_t> cutBytes = encodeRecord(cut);
+        const uint8_t* at = cutBytes.data();
+        Record out;
+        CHECK(decodeRecord(at, cutBytes.data() + cutBytes.size(), out) == DecodeResult::Malformed);
+    }
+    {
         FileOffer offer;
         offer.size = 7000;
         offer.digest = digestOf(std::vector<uint8_t>(7000, 'x'));

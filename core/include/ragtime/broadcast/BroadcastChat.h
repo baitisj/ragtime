@@ -11,6 +11,11 @@
 //   answers on the group by itself, and the message shows Acknowledged.
 // - A message too long for one frame goes as several Texts, split between
 //   words, one frame each, all in one burst.
+// - Ping (ping()): a Ping to one station, which answers with a Pong by
+//   itself, in the Ping's mode, saying the S/N it heard us at; we read the
+//   S/N we hear the Pong at from the host. The row shows both. A Ping to
+//   us is answered the same way, once the host has said how well it heard
+//   it. Never retried by itself: Ping again is the operator's.
 // - A Hello rides along in the first frame after the group opens, after
 //   the station's settings change, and at most every 10 minutes after
 //   that, so the station list learns locators without a burst of its own.
@@ -27,9 +32,11 @@
 #include <deque>
 #include <functional>
 #include <map>
+#include <optional>
 #include <set>
 #include <string>
 #include <tuple>
+#include <utility>
 #include <vector>
 
 #include "ragtime/link/HostLink.h"
@@ -63,6 +70,7 @@ struct Message
         Text,
         File,
         Rule,
+        Ping,           // a ping of ours and its pong, or a station's ping to us and our pong
     };
 
     uint64_t id = 0;            // this list's own number
@@ -83,11 +91,40 @@ struct Message
     uint64_t file = 0;
     bool past = false;          // from before Ragtime last closed, read from the BroadcastLog
     std::string outcome;        // a file line from the log: how it ended, when known
+
+    // A ping row (Kind::Ping): ours to `to`, or `from`'s to us. State is
+    // its burst's (ours: the Ping's; theirs: our Pong's), and Acknowledged
+    // once the Pong came back. Not kept in the log.
+    uint16_t pingNumber = 0;
+    std::optional<double> theyHear; // ours: the S/N its Pong says it heard our Ping at
+    std::optional<double> weHear;   // the S/N our host heard its Pong (ours) or its Ping (theirs) at
+    uint64_t sentMs = 0;            // ours: when the Ping went
+    uint64_t dueMs = 0;             // ours: when it counts as unanswered
+    uint64_t answeredMs = 0;        // ours: when the Pong came
+    bool unanswered = false;        // ours: no Pong by dueMs (a late one still counts)
 };
 
 // "Queued", "Sending", "Waiting for the session to go idle", "Sent",
 // "Not sent", "Cancelled", "Acknowledged"; "" for one heard.
 const char* stateLabel(Message::State state);
+
+// The ping row's words: "Ping W1AW, waiting for its pong", "Pong from W1AW
+// in 12 s: it hears us at −8.0 dB, we hear it at −3.5 dB", "W1AW pinged
+// us; we hear it at −3.5 dB. Pong sent".
+std::string pingLine(const Message& m);
+
+// A Pong waits this long for the host to say how well it heard the Ping
+// (its BCAST HEARD may come just before or just after the frame), then goes
+// without a figure.
+constexpr uint64_t PONG_SNR_WAIT_MS = 3000;
+// A host's S/N for a station this recent is the burst just heard.
+constexpr uint64_t SNR_SAME_BURST_MS = 2000;
+// At most one Pong to a station this often, however often it pings.
+constexpr uint64_t PONG_GAP_MS = 15 * 1000;
+// A Ping is unanswered after this long, at least: twice the listening
+// window in its mode, after the Pong's wait for its figure.
+constexpr uint64_t MIN_PONG_WAIT_MS = 20 * 1000;
+uint64_t pongWaitMs(const link::ModeInfo& mode);
 
 // How often a Hello rides along with our messages.
 constexpr uint64_t HELLO_EVERY_MS = 10 * 60 * 1000;
@@ -163,6 +200,16 @@ public:
     // A Hello of its own: "check in".
     bool checkIn(const std::string& mode, uint64_t nowMs);
 
+    // Pings call in mode (empty: the group's mode as it stands). Returns
+    // the ping's row; 0 with no callsign set, or call not a callsign or
+    // our own.
+    uint64_t ping(const std::string& call, const std::string& mode, uint64_t nowMs);
+    // A ping of ours to call is still going or waiting for its Pong.
+    bool pinging(const std::string& call) const;
+    // Moves the pings on: Pongs that waited long enough for their figure
+    // go, and Pings with no Pong by their time show as unanswered.
+    void tick(uint64_t nowMs);
+
     // Our session state on the group (docs/PLAN.md, "Busy stations"): a
     // QRL naming the partner on entering a session, a QRV on leaving it.
     // A QRV goes only after a QRL; a QRL still queued when the session ends
@@ -215,9 +262,25 @@ private:
     // sender's newest.
     std::deque<Message>::iterator placeFor(const Message& m);
     void flushAcks(const std::string& mode, uint64_t nowMs);
+    void onPing(const protocol::Record& record, const protocol::Ping& ping, uint64_t nowMs);
+    void onPong(const protocol::Record& record, const protocol::Pong& pong, uint64_t nowMs);
+    void heardSnr(const std::string& call, double dB, uint64_t nowMs);
+    // The host's S/N for call's burst just heard, if it has said.
+    std::optional<double> recentSnr(const std::string& call, uint64_t nowMs) const;
+    struct PongDue
+    {
+        std::string to;
+        uint16_t number = 0;
+        std::string mode;           // the Ping's
+        uint64_t untilMs = 0;       // goes without a figure then
+        uint64_t row = 0;
+    };
+    void sendPong(const PongDue& due, std::optional<double> snr, uint64_t nowMs);
     void logState(const Message& m);
-    // A file's bursts hold off while an addressed message waits for its Ack.
+    // A file's bursts hold off while an addressed message waits for its
+    // Ack, and a ping for its Pong.
     void holdForAck(const Message& m, uint64_t nowMs);
+    void hold(uint64_t id, uint64_t untilMs, uint64_t nowMs);
     void ackHeard(uint64_t id, uint64_t nowMs);
 
     link::HostLink& link_;
@@ -230,7 +293,12 @@ private:
     std::set<ItemKey> seen_;
     std::set<uint64_t> ackBursts_;
     std::vector<protocol::Record> acksDue_;
-    std::map<uint64_t, uint64_t> ackHolds_;         // message id: until when its Ack holds files off
+    std::map<uint64_t, uint64_t> ackHolds_;         // message id: until when its Ack (or Pong) holds files off
+
+    uint16_t pingNumber_ = 0;
+    std::vector<PongDue> pongsDue_;                 // waiting for the host's figure
+    std::map<std::string, uint64_t> pongedMs_;      // station: when we last answered its ping
+    std::map<std::string, std::pair<double, uint64_t>> snrs_;   // station: its last burst's S/N, and when
     uint64_t nextId_ = 1;
     uint64_t version_ = 0;
     size_t foreign_ = 0;

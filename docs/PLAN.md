@@ -259,6 +259,8 @@ The Broadcast tab is the first tab and never closes. It is where CQs, roundtable
 
 Since Data2G PR #98 the host ends each `BCAST HEARD` with the burst's SNR, so the list shows signal strength beside last heard.
 
+**Ping** (your ask, 2026-10-25). Right-click a station and pick **Ping W1AW**. A Ping goes in the gear you're in; W1AW's Ragtime answers by itself with a Pong in the same gear, saying the S/N its host heard the Ping at, and our host tells us the S/N we hear the Pong at. One dim line in the Broadcast tab follows it: "Ping W1AW, waiting for its pong", then "Pong from W1AW in 12 s: it hears us at −8.0 dB, we hear it at −3.5 dB", or "No pong from W1AW in 45 s". A pong back means the gear works both ways right now. It never goes again by itself: the line's menu has **Ping W1AW again**. It is greyed, with the reason, while a session holds D2G, while W1AW is in one, when W1AW's Hello says its Ragtime doesn't answer pings (0.1.1 and older), or while an earlier ping to it waits. A station's ping to us shows as "W1AW pinged us; we hear it at −3.5 dB. Pong sent". Answering is automatic, as Acks are, at most one Pong to a station every 15 s: an unattended station answering raises the same Part 97 question Acks do.
+
 ## File transfer
 
 Session files keep the ideas that worked on the air (offer and answer, carrying on, a whole-file hash check), in the new protocol's records, with a clearer screen around them. Broadcast files use seal-driven repair (Signing, below) from the start. Offers appear where they happen, in the Session tab or the Broadcast tab, and every transfer, past and present, is in the **Files** tab.

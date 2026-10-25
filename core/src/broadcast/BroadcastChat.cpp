@@ -1,11 +1,13 @@
 #include "ragtime/broadcast/BroadcastChat.h"
 
 #include <algorithm>
+#include <optional>
 #include <string>
 #include <utility>
 
 #include "ragtime/broadcast/Airtime.h"
 #include "ragtime/broadcast/BroadcastLog.h"
+#include "ragtime/gearbox/Gearbox.h"
 
 namespace ragtime
 {
@@ -83,6 +85,66 @@ const char* stateLabel(Message::State state)
             return "Acknowledged";
     }
     return "";
+}
+
+std::string pingLine(const Message& m)
+{
+    if (m.ours)
+    {
+        const std::string ping = "Ping " + m.to;
+        switch (m.state)
+        {
+            case State::Queued:
+                return ping + ", queued";
+            case State::Sending:
+                return ping + ", sending";
+            case State::Held:
+                return ping + ", held until the session goes idle";
+            case State::NotSent:
+                return ping + " not sent";
+            case State::Cancelled:
+                return ping + " cancelled";
+            case State::Sent:
+            case State::Heard:
+                break;
+            case State::Acknowledged:
+            {
+                uint64_t took = m.answeredMs > m.sentMs ? (m.answeredMs - m.sentMs + 500) / 1000 : 0;
+                std::string line = "Pong from " + m.to + " in " + std::to_string(took) + " s: ";
+                line += m.theyHear ? "it hears us at " + gearbox::formatDb(*m.theyHear) : "it gave no S/N for us";
+                line += m.weHear ? ", we hear it at " + gearbox::formatDb(*m.weHear) : ", our host gave no S/N for it";
+                return line;
+            }
+        }
+        if (!m.unanswered) return ping + ", waiting for its pong";
+        uint64_t waited = m.dueMs > m.sentMs ? (m.dueMs - m.sentMs + 500) / 1000 : 0;
+        return "No pong from " + m.to + " in " + std::to_string(waited) + " s";
+    }
+    std::string line = m.from + " pinged us";
+    if (m.weHear) line += "; we hear it at " + gearbox::formatDb(*m.weHear);
+    switch (m.state)
+    {
+        case State::Sent:
+            return line + ". Pong sent";
+        case State::NotSent:
+            return line + ". Pong not sent";
+        case State::Cancelled:
+            return line + ". Pong cancelled";
+        case State::Held:
+            return line + ". Pong held until the session goes idle";
+        case State::Sending:
+            return line + ". Pong sending";
+        case State::Queued:
+        case State::Heard:
+        case State::Acknowledged:
+            break;
+    }
+    return line + ". Pong queued";
+}
+
+uint64_t pongWaitMs(const link::ModeInfo& mode)
+{
+    return std::max(MIN_PONG_WAIT_MS, PONG_SNR_WAIT_MS + 2 * listeningWindowMs(mode));
 }
 
 BroadcastChat::BroadcastChat(link::HostLink& link) : link_(link)
@@ -304,6 +366,191 @@ bool BroadcastChat::announce(protocol::Status::State state, const std::string& p
     return id != 0;
 }
 
+uint64_t BroadcastChat::ping(const std::string& call, const std::string& mode, uint64_t nowMs)
+{
+    std::string to = protocol::normalCallsign(call);
+    if (settings_.callsign.empty() || to.empty() || to == settings_.callsign) return 0;
+    if (++pingNumber_ == 0) pingNumber_ = 1;
+    protocol::Ping p;
+    p.to = to;
+    p.number = pingNumber_;
+    // The mode it goes in, so the Pong comes back in it: the gear is
+    // tried both ways.
+    p.mode = mode.empty() ? link_.groupMode() : mode;
+    std::vector<uint8_t> frame = protocol::encodeFrame({numbering_.record(p, seconds(nowMs))});
+    if (frame.empty()) return 0;
+
+    Message m;
+    m.id = nextId_++;
+    m.kind = Message::Kind::Ping;
+    m.ours = true;
+    m.from = settings_.callsign;
+    m.to = to;
+    m.time = seconds(nowMs);
+    m.atMs = nowMs;
+    m.state = State::Queued;
+    m.mode = mode;
+    m.pingNumber = p.number;
+    m.burst = link_.broadcast({frame}, mode, nowMs, "ping " + to);
+    if (m.burst == 0) m.state = State::NotSent;
+    messages_.push_back(std::move(m));
+    trim();
+    version_++;
+    return messages_.back().id;
+}
+
+bool BroadcastChat::pinging(const std::string& call) const
+{
+    for (const Message& m : messages_)
+    {
+        if (m.kind != Message::Kind::Ping || !m.ours || m.to != call) continue;
+        if (m.state == State::Queued || m.state == State::Sending || m.state == State::Held) return true;
+        if (m.state == State::Sent && !m.unanswered) return true;
+    }
+    return false;
+}
+
+void BroadcastChat::tick(uint64_t nowMs)
+{
+    for (size_t i = 0; i < pongsDue_.size();)
+    {
+        if (pongsDue_[i].untilMs > nowMs)
+        {
+            i++;
+            continue;
+        }
+        PongDue due = pongsDue_[i];
+        pongsDue_.erase(pongsDue_.begin() + (long)i);
+        sendPong(due, std::nullopt, nowMs);
+    }
+    for (Message& m : messages_)
+    {
+        if (m.kind != Message::Kind::Ping || !m.ours || m.state != State::Sent || m.unanswered) continue;
+        if (nowMs < m.dueMs) continue;
+        m.unanswered = true;
+        ackHeard(m.id, nowMs);
+        version_++;
+    }
+}
+
+void BroadcastChat::onPing(const protocol::Record& record, const protocol::Ping& ping, uint64_t nowMs)
+{
+    const std::string& from = record.header.callsign;
+    if (settings_.callsign.empty() || ping.to != settings_.callsign) return;
+    // A station pinging again and again gets one Pong in PONG_GAP_MS.
+    auto last = pongedMs_.find(from);
+    if (last != pongedMs_.end() && nowMs < last->second + PONG_GAP_MS) return;
+    for (const PongDue& due : pongsDue_)
+    {
+        if (due.to == from) return;
+    }
+    pongedMs_[from] = nowMs;
+
+    PongDue due;
+    due.to = from;
+    due.number = ping.number;
+    due.mode = ping.mode;
+    due.untilMs = nowMs + PONG_SNR_WAIT_MS;
+
+    Message m;
+    m.id = nextId_++;
+    m.kind = Message::Kind::Ping;
+    m.from = from;
+    m.to = settings_.callsign;
+    m.seq = record.header.seq;
+    m.time = record.header.time;
+    m.atMs = nowMs;
+    m.state = State::Queued;
+    m.pingNumber = ping.number;
+    m.weHear = recentSnr(from, nowMs);
+    due.row = m.id;
+    messages_.push_back(std::move(m));
+    trim();
+    version_++;
+
+    // The host's figure for the Ping's burst may be here already, or come
+    // in a moment.
+    if (std::optional<double> snr = recentSnr(from, nowMs))
+        sendPong(due, snr, nowMs);
+    else
+        pongsDue_.push_back(due);
+}
+
+void BroadcastChat::sendPong(const PongDue& due, std::optional<double> snr, uint64_t nowMs)
+{
+    protocol::Pong p;
+    p.to = due.to;
+    p.number = due.number;
+    p.snr = snr;
+    // Back in the Ping's mode, so a Pong says the gear works both ways;
+    // the group's when our host doesn't offer it.
+    std::string mode = findMode(link_.modes(), due.mode).valid() ? due.mode : std::string();
+    std::vector<uint8_t> frame = protocol::encodeFrame({numbering_.record(p, seconds(nowMs))});
+    uint64_t burst = frame.empty() ? 0 : link_.broadcast({frame}, mode, nowMs, "pong " + due.to);
+    for (Message& m : messages_)
+    {
+        if (m.id != due.row) continue;
+        m.burst = burst;
+        m.mode = mode.empty() ? link_.groupMode() : mode;
+        if (burst == 0) m.state = State::NotSent;
+        version_++;
+    }
+}
+
+void BroadcastChat::onPong(const protocol::Record& record, const protocol::Pong& pong, uint64_t nowMs)
+{
+    const std::string& from = record.header.callsign;
+    if (settings_.callsign.empty() || pong.to != settings_.callsign) return;
+    for (Message& m : messages_)
+    {
+        if (m.kind != Message::Kind::Ping || !m.ours || m.to != from || m.pingNumber != pong.number) continue;
+        if (m.state == State::Acknowledged || m.state == State::Cancelled) continue;
+        // Its own Sent may be on its way still: the Pong says it went.
+        if (m.sentMs == 0) m.sentMs = nowMs;
+        m.state = State::Acknowledged;
+        m.unanswered = false;
+        m.answeredMs = nowMs;
+        m.theyHear = pong.snr;
+        m.weHear = recentSnr(from, nowMs);
+        ackHeard(m.id, nowMs);
+        version_++;
+    }
+}
+
+void BroadcastChat::heardSnr(const std::string& call, double dB, uint64_t nowMs)
+{
+    snrs_[call] = {dB, nowMs};
+    for (size_t i = 0; i < pongsDue_.size();)
+    {
+        if (pongsDue_[i].to != call)
+        {
+            i++;
+            continue;
+        }
+        PongDue due = pongsDue_[i];
+        pongsDue_.erase(pongsDue_.begin() + (long)i);
+        sendPong(due, dB, nowMs);
+    }
+    // A figure that came just after its Pong (or its Ping) was taken.
+    for (Message& m : messages_)
+    {
+        if (m.kind != Message::Kind::Ping || m.weHear) continue;
+        bool pong = m.ours && m.to == call && m.state == State::Acknowledged
+                    && nowMs <= m.answeredMs + PONG_SNR_WAIT_MS;
+        bool ping = !m.ours && m.from == call && nowMs <= m.atMs + PONG_SNR_WAIT_MS;
+        if (!pong && !ping) continue;
+        m.weHear = dB;
+        version_++;
+    }
+}
+
+std::optional<double> BroadcastChat::recentSnr(const std::string& call, uint64_t nowMs) const
+{
+    auto it = snrs_.find(call);
+    if (it == snrs_.end() || nowMs > it->second.second + SNR_SAME_BURST_MS) return std::nullopt;
+    return it->second.first;
+}
+
 Message* BroadcastChat::findMine(uint64_t id)
 {
     for (Message& m : messages_)
@@ -441,12 +688,19 @@ std::vector<protocol::Record> BroadcastChat::onEvent(const Event& event, uint64_
             }
             for (Message& m : messages_)
             {
-                if (!m.ours || m.burst != event.id) continue;
+                // Ours, and the Pongs we answer pings with.
+                if (m.burst != event.id || (!m.ours && m.kind != Message::Kind::Ping)) continue;
                 if (m.state == State::Cancelled || m.state == State::Acknowledged) continue;
                 State state = fromBurst(event.burstState);
                 if (state == m.state) continue;
                 m.state = state;
                 if (state == State::Sent && m.ackWanted) holdForAck(m, nowMs);
+                if (state == State::Sent && m.ours && m.kind == Message::Kind::Ping)
+                {
+                    m.sentMs = nowMs;
+                    m.dueMs = nowMs + pongWaitMs(findMode(link_.modes(), m.mode, link_.groupMode()));
+                    hold(m.id, m.dueMs, nowMs);
+                }
                 logState(m);
                 version_++;
             }
@@ -461,6 +715,9 @@ std::vector<protocol::Record> BroadcastChat::onEvent(const Event& event, uint64_
                     version_++;
                 }
             }
+            break;
+        case Event::Type::HeardFrom:
+            if (event.snr) heardSnr(event.text, *event.snr, nowMs);
             break;
         case Event::Type::Heard:
         {
@@ -515,6 +772,14 @@ void BroadcastChat::onRecord(const protocol::Record& record, uint64_t nowMs)
         trim();
         version_++;
     }
+    else if (const protocol::Ping* ping = record.as<protocol::Ping>())
+    {
+        onPing(record, *ping, nowMs);
+    }
+    else if (const protocol::Pong* pong = record.as<protocol::Pong>())
+    {
+        onPong(record, *pong, nowMs);
+    }
     else if (const protocol::Ack* ack = record.as<protocol::Ack>())
     {
         if (ack->to != settings_.callsign) return;
@@ -566,7 +831,12 @@ void BroadcastChat::holdForAck(const Message& m, uint64_t nowMs)
 {
     link::ModeInfo info = findMode(link_.modes(), m.mode, link_.groupMode());
     if (!info.valid()) return;
-    ackHolds_[m.id] = nowMs + listeningWindowMs(info);
+    hold(m.id, nowMs + listeningWindowMs(info), nowMs);
+}
+
+void BroadcastChat::hold(uint64_t id, uint64_t untilMs, uint64_t nowMs)
+{
+    ackHolds_[id] = untilMs;
     uint64_t until = 0;
     for (auto it = ackHolds_.begin(); it != ackHolds_.end();)
     {

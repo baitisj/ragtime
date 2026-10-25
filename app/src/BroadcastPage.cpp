@@ -167,6 +167,21 @@ std::string statusLine(const Message& m, const ragtime::broadcast::Seals::ItemMa
     return mark == nullptr ? std::string() : sealLine(m, *mark);
 }
 
+// A ping row's tooltip: what the figures are.
+wxString pingTip(const Message& m)
+{
+    if (!m.ours)
+        return "Its Ragtime asked how well we hear it; ours answered by itself, with our data2g-host's S/N "
+               "for its ping, in the gear it pinged in.";
+    if (m.state == State::Acknowledged)
+        return "It hears us at: the S/N its data2g-host gave for our ping. We hear it at: ours for its pong. "
+               "Both in dB in 2500 Hz, the gearshift's scale; the pong came back in the ping's gear.";
+    if (m.unanswered)
+        return "No pong yet: it may not have heard the ping, we may not have heard the pong, or its Ragtime is "
+               "older than 0.1.2. A late pong still counts. Right click to ping again.";
+    return "It answers by itself, in the same gear, with the S/N its host heard us at.";
+}
+
 // The Gear button's speedometer, as wide as fits over the gear's name
 // with the button no taller than Send.
 constexpr int GEAR_ICON_DIP = 30;
@@ -245,6 +260,7 @@ protected:
         if (m->kind == Message::Kind::Rule) return ruleItem(*m, picked);
         if (m->file != 0) return fileItem(*m, picked);
         if (m->kind == Message::Kind::File) return pastFileItem(*m, picked);
+        if (m->kind == Message::Kind::Ping) return pingItem(*m, picked);
         const std::string& me = owner_->chat_.settings().callsign;
         // What came before Ragtime last closed reads in grey.
         wxString body = m->past ? colour(secondaryText()) : wxString();
@@ -292,6 +308,57 @@ private:
              << "<td nowrap valign=\"middle\"><font size=\"-1\"" << font << ">Ragtime closed " << clock(m.atMs)
              << "</font></td>"
              << "<td width=\"50%\" valign=\"middle\"><hr></td>"
+             << "</tr></table>";
+        return html;
+    }
+
+    // A ping and its pong, or a station's ping to us: one line, greyed,
+    // with its state's badge while it goes, Acknowledged's once the pong is
+    // back, and the gear on the right.
+    wxString pingItem(const Message& m, bool picked) const
+    {
+        wxString font = picked ? wxString() : " color=\"" + htmlColour(secondaryText()) + "\"";
+        wxString badge;
+        if (m.ours)
+        {
+            switch (m.state)
+            {
+                case State::Queued:
+                    badge = statusBadgeHtml(StatusBadge::Queued, this);
+                    break;
+                case State::Sending:
+                    badge = statusBadgeHtml(StatusBadge::Sending, this);
+                    break;
+                case State::Held:
+                    badge = statusBadgeHtml(StatusBadge::Held, this);
+                    break;
+                case State::NotSent:
+                    badge = statusBadgeHtml(StatusBadge::NotSent, this);
+                    break;
+                case State::Cancelled:
+                    badge = statusBadgeHtml(StatusBadge::Cancelled, this);
+                    break;
+                case State::Acknowledged:
+                    badge = statusBadgeHtml(StatusBadge::Acknowledged, this);
+                    break;
+                case State::Sent:
+                    if (!m.unanswered) badge = statusBadgeHtml(StatusBadge::Sent, this);
+                    break;
+                case State::Heard:
+                    break;
+            }
+        }
+        wxString gear;
+        if (!m.mode.empty())
+            gear << "<font" << font << ">"
+                 << htmlEscape(owner_->nameMode_ ? owner_->nameMode_(m.mode) : m.mode) << "</font>";
+        wxString html;
+        html << "<table width=\"100%\" cellspacing=\"0\" cellpadding=\"2\"><tr>"
+             << "<td width=\"" << BADGE_ROOM << "\" valign=\"top\">" << badge << "</td>"
+             << "<td valign=\"top\" nowrap><font" << font << ">" << clock(m.atMs) << "</font></td>"
+             << "<td valign=\"top\" width=\"100%\"><font" << font << "><i>"
+             << htmlEscape(pingLine(m)) << "</i></font></td>"
+             << "<td valign=\"top\" nowrap align=\"right\">" << gear << "</td>"
              << "</tr></table>";
         return html;
     }
@@ -448,6 +515,8 @@ BroadcastPage::BroadcastPage(wxWindow* parent, const BroadcastChat& chat)
                 if (!m->mode.empty()) tip += ", " + wxString::FromUTF8(nameMode_ ? nameMode_(m->mode) : m->mode);
             }
         }
+        if (m != nullptr && m->kind == Message::Kind::Ping && list_->VirtualHitTest(e.GetPosition().y) != wxNOT_FOUND)
+            tip = pingTip(*m);
         list_->SetToolTip(tip);
         e.Skip();
     });
@@ -563,6 +632,11 @@ void BroadcastPage::showMenu(int row)
         showFileMenu(*m);
         return;
     }
+    if (m->kind == Message::Kind::Ping)
+    {
+        showPingMenu(*m);
+        return;
+    }
     uint64_t id = m->id;
     std::string from = m->from;
     wxString text = wxString::FromUTF8(m->text);
@@ -644,6 +718,35 @@ void fillFileMenu(wxMenu& menu, const FileCard& card, int firstId, std::function
     int last = firstId + FILE_MENU_IDS - 1;
     menu.Bind(wxEVT_MENU, handler, firstId, last);
     if (sub != nullptr) sub->Bind(wxEVT_MENU, handler, firstId, last);
+}
+
+void BroadcastPage::showPingMenu(const Message& m)
+{
+    uint64_t id = m.id;
+    std::string call = m.ours ? m.to : m.from;
+    wxString line = wxString::FromUTF8(pingLine(m));
+    std::string why = whyNoPing_ ? whyNoPing_(call) : std::string("not here");
+
+    wxMenu menu;
+    if (m.ours && m.state == State::Queued) menu.Append(ID_CANCEL, "Cancel");
+    // Never again by itself: the operator's to ask (Jeff's proposal,
+    // 2026-10-22).
+    wxString again = (m.ours ? "Ping " : "Ping back ") + wxString::FromUTF8(call) + (m.ours ? " again" : "");
+    if (!why.empty()) again += " (" + wxString::FromUTF8(why) + ")";
+    menu.Append(ID_RESEND, again);
+    menu.Enable(ID_RESEND, why.empty());
+    menu.AppendSeparator();
+    menu.Append(ID_COPY, "Copy text");
+    menu.Bind(wxEVT_MENU, [=](wxCommandEvent& e) {
+        if (e.GetId() == ID_CANCEL && onCancel_) onCancel_(id);
+        if (e.GetId() == ID_RESEND && onPing_) onPing_(call);
+        if (e.GetId() == ID_COPY && wxTheClipboard->Open())
+        {
+            wxTheClipboard->SetData(new wxTextDataObject(line));
+            wxTheClipboard->Close();
+        }
+    });
+    PopupMenu(&menu);
 }
 
 void BroadcastPage::showFileMenu(const Message& m)

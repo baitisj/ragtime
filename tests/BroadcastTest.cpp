@@ -2,6 +2,7 @@
 // BroadcastChat on its own HostLink, joined by a little host in memory
 // that answers the command lines and carries every ACKMODE frame to the
 // other station. No sockets, so it runs everywhere the core builds.
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <filesystem>
@@ -11,6 +12,7 @@
 #include <vector>
 
 #include "Check.h"
+#include "ragtime/broadcast/Airtime.h"
 #include "ragtime/broadcast/BroadcastChat.h"
 #include "ragtime/broadcast/BroadcastLog.h"
 #include "ragtime/broadcast/Stations.h"
@@ -68,12 +70,24 @@ struct End
     std::vector<protocol::Record> heard;
     bool hold = false;          // the host keeps our frames
     bool dropNext = false;      // the host drops our next frames
+    // How the other end's host hears our bursts: the S/N on its HEARD
+    // (none: no figure, as a host from before Data2G PR #98), and whether
+    // the HEARD comes a step after the frames rather than before.
+    std::optional<double> snr;
+    bool heardLate = false;
+    std::string late;           // command bytes for this end, held a step
 };
 
 // The host in memory: OK to everything, the group's port, a MODES list,
 // and every ACKMODE frame carried to the other end and acknowledged.
 void step(End& a, End& b)
 {
+    for (End* end : {&a, &b})
+    {
+        if (end->late.empty()) continue;
+        end->link.commandBytes(end->late.data(), end->late.size(), now);
+        end->late.clear();
+    }
     for (End* end : {&a, &b})
     {
         End& other = end == &a ? b : a;
@@ -108,8 +122,13 @@ void step(End& a, End& b)
         }
         std::string heard = "PTT ON\rMODE qpsk-r1/3\r";
         end->link.commandBytes(heard.data(), heard.size(), now);
-        std::string from = "BCAST " + std::to_string(GROUP_PORT) + " HEARD " + end->link.settings().callsign + "\r";
-        other.link.commandBytes(from.data(), from.size(), now);
+        std::string from = "BCAST " + std::to_string(GROUP_PORT) + " HEARD " + end->link.settings().callsign;
+        if (end->snr) from += " " + std::to_string(*end->snr);
+        from += "\r";
+        if (end->heardLate)
+            other.late += from;
+        else
+            other.link.commandBytes(from.data(), from.size(), now);
         for (const link::KissFrame& f : frames)
         {
             if (f.command != link::KISS_ACKMODE || f.payload.size() < 2) continue;
@@ -128,6 +147,8 @@ void step(End& a, End& b)
     b.link.tick(now);
     a.events();
     b.events();
+    a.chat.tick(now);
+    b.chat.tick(now);
 }
 
 void settle(End& a, End& b, int steps = 8)
@@ -676,6 +697,135 @@ void testAnAckHoldsFilesOff()
     CHECK_EQ(a.link.yieldHold(), (uint64_t)0);
 }
 
+const Message* pingRow(const End& end, bool ours)
+{
+    const Message* found = nullptr;
+    for (const Message& m : end.chat.messages())
+    {
+        if (m.kind == Message::Kind::Ping && m.ours == ours) found = &m;
+    }
+    return found;
+}
+
+void testPingAndPong()
+{
+    End a("TEST1", "CN87"), b("TEST2", "FN31");
+    a.link.commandUp(now);
+    b.link.commandUp(now);
+    settle(a, b);
+    a.snr = -7.5;   // TEST2's host hears TEST1 at -7.5 dB
+    b.snr = 3.0;    // and TEST1's hears TEST2 at +3.0
+
+    CHECK_EQ(a.chat.ping("TEST1", "", now), (uint64_t)0);   // never ourselves
+    uint64_t id = a.chat.ping("test2", "fsk16r25-r1/3", now);
+    CHECK(id != 0);
+    const Message* mine = a.chat.find(id);
+    CHECK(mine != nullptr && mine->kind == Message::Kind::Ping && mine->to == "TEST2");
+    CHECK(mine->state == State::Queued);
+    CHECK_EQ(broadcast::pingLine(*mine), std::string("Ping TEST2, queued"));
+    CHECK(a.chat.pinging("TEST2"));
+    CHECK_EQ(link::channelLine(a.link).find("ping TEST2") != std::string::npos, true);
+    settle(a, b);
+
+    // TEST2 heard it, said how well, and answered in the Ping's mode.
+    const protocol::Ping* heard = nullptr;
+    for (const protocol::Record& r : b.heard)
+        if (r.as<protocol::Ping>() != nullptr) heard = r.as<protocol::Ping>();
+    CHECK(heard != nullptr && heard->to == "TEST2" && heard->mode == "fsk16r25-r1/3");
+    const Message* theirs = pingRow(b, false);
+    CHECK(theirs != nullptr && theirs->from == "TEST1" && theirs->state == State::Sent);
+    CHECK(theirs->weHear && std::fabs(*theirs->weHear + 7.5) < 0.01);
+    CHECK_EQ(theirs->mode, std::string("fsk16r25-r1/3"));
+    CHECK_EQ(broadcast::pingLine(*theirs), std::string("TEST1 pinged us; we hear it at \xE2\x88\x92" "7.5 dB. Pong sent"));
+
+    // The Pong came back: both figures on our row.
+    CHECK(mine->state == State::Acknowledged);
+    CHECK(mine->theyHear && std::fabs(*mine->theyHear + 7.5) < 0.01);
+    CHECK(mine->weHear && std::fabs(*mine->weHear - 3.0) < 0.01);
+    CHECK(!a.chat.pinging("TEST2"));
+    std::string line = broadcast::pingLine(*mine);
+    CHECK(line.find("Pong from TEST2 in ") == 0);
+    CHECK(line.find("it hears us at \xE2\x88\x92" "7.5 dB, we hear it at +3.0 dB") != std::string::npos);
+    // It no longer holds a file's bursts off.
+    CHECK_EQ(a.link.yieldHold(), (uint64_t)0);
+
+    // Pinged again at once: one Pong in PONG_GAP_MS, so no second.
+    size_t rows = b.chat.messages().size();
+    id = a.chat.ping("TEST2", "", now);
+    settle(a, b);
+    CHECK_EQ(b.chat.messages().size(), rows);
+    CHECK(a.chat.find(id)->state == State::Sent);
+    // Later, it is answered.
+    now += broadcast::PONG_GAP_MS;
+    id = a.chat.ping("TEST2", "", now);
+    settle(a, b);
+    CHECK(a.chat.find(id)->state == State::Acknowledged);
+    CHECK_EQ(b.chat.messages().size(), rows + 1);
+}
+
+void testPongWaitsForItsFigure()
+{
+    End a("TEST1", "CN87"), b("TEST2", "FN31");
+    a.link.commandUp(now);
+    b.link.commandUp(now);
+    settle(a, b);
+
+    // TEST2's host says how well it heard the Ping only after the frame:
+    // the Pong waits for it.
+    a.snr = -12.0;
+    a.heardLate = true;
+    uint64_t id = a.chat.ping("TEST2", "", now);
+    settle(a, b);
+    const Message* mine = a.chat.find(id);
+    CHECK(mine->state == State::Acknowledged);
+    CHECK(mine->theyHear && std::fabs(*mine->theyHear + 12.0) < 0.01);
+    // No S/N from TEST1's host for the Pong (b.snr unset).
+    CHECK(!mine->weHear);
+    CHECK(broadcast::pingLine(*mine).find("our host gave no S/N for it") != std::string::npos);
+
+    // A host that gives no figure: the Pong goes without one after a wait.
+    now += broadcast::PONG_GAP_MS;
+    a.snr.reset();
+    a.heardLate = false;
+    id = a.chat.ping("TEST2", "", now);
+    settle(a, b);
+    mine = a.chat.find(id);
+    CHECK(mine->state == State::Sent);
+    for (int i = 0; i < 40 && mine->state != State::Acknowledged; i++) settle(a, b, 1);
+    CHECK(mine->state == State::Acknowledged);
+    CHECK(!mine->theyHear);
+    CHECK(broadcast::pingLine(*mine).find("it gave no S/N for us") != std::string::npos);
+}
+
+void testPingUnanswered()
+{
+    End a("TEST1", "CN87"), b("TEST2", "FN31");
+    a.link.commandUp(now);
+    b.link.commandUp(now);
+    settle(a, b);
+
+    uint64_t id = a.chat.ping("W1AW", "", now);
+    settle(a, b);
+    const Message* mine = a.chat.find(id);
+    CHECK(mine->state == State::Sent && !mine->unanswered);
+    CHECK_EQ(broadcast::pingLine(*mine), std::string("Ping W1AW, waiting for its pong"));
+    // A file's bursts wait while it does.
+    CHECK(a.link.yieldHold() >= mine->dueMs);
+    uint64_t wait = mine->dueMs - mine->sentMs;
+    CHECK(wait >= broadcast::MIN_PONG_WAIT_MS);
+    // The qpsk mode's window: 3 one-codeword bursts and 4 s, twice, after
+    // the Pong's own wait.
+    link::ModeInfo qpsk = broadcast::findMode(a.link.modes(), "qpsk-r1/3");
+    CHECK_EQ(broadcast::pongWaitMs(qpsk),
+             std::max(broadcast::MIN_PONG_WAIT_MS, broadcast::PONG_SNR_WAIT_MS + 2 * broadcast::listeningWindowMs(qpsk)));
+
+    now += wait;
+    settle(a, b, 1);
+    CHECK(mine->unanswered && mine->state == State::Sent);
+    CHECK(!a.chat.pinging("W1AW"));
+    CHECK_EQ(broadcast::pingLine(*mine), "No pong from W1AW in " + std::to_string((wait + 500) / 1000) + " s");
+}
+
 int main()
 {
     testAddressee();
@@ -683,6 +833,9 @@ int main()
     testMessageBothWays();
     testAddressedAndAcknowledged();
     testAnAckHoldsFilesOff();
+    testPingAndPong();
+    testPongWaitsForItsFigure();
+    testPingUnanswered();
     testLongMessageSplits();
     testPauseCancelResend();
     testDuplicateFrame();

@@ -116,6 +116,10 @@ private:
     bool sendTyped(const std::string& typed);
     std::string broadcastMode() const;
     void checkIn();
+    // Ping a station (BroadcastChat::ping), in the broadcast gear; why not,
+    // when it can't go or wouldn't be answered ("in a session"), or "".
+    void pingStation(const std::string& call);
+    std::string whyNoPing(const std::string& call) const;
     void setPaused(bool paused);
 
     // Broadcast files (docs/STAGE1.md, package H): Broadcast a file... with

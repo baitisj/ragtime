@@ -93,6 +93,19 @@ bool encodeBody(const Body& body, std::vector<uint8_t>& out, bool canonical)
                 putNumber(out, b.item, 3);
                 return true;
             }
+            else if constexpr (std::is_same_v<T, Ping>)
+            {
+                if (!putCallsign(out, b.to)) return false;
+                putNumber(out, b.number, 2);
+                return putShortString(out, b.mode, 255);
+            }
+            else if constexpr (std::is_same_v<T, Pong>)
+            {
+                if (!putCallsign(out, b.to)) return false;
+                putNumber(out, b.number, 2);
+                out.push_back(repairSnrCode(b.snr));
+                return true;
+            }
             else if constexpr (std::is_same_v<T, FileOffer>)
             {
                 putNumber(out, b.size, 4);
@@ -264,6 +277,20 @@ DecodeResult decodeBody(uint8_t type, Reader& in, Record& out)
             if (!in.callsign(b.to) || !in.u24(b.item)) return DecodeResult::Malformed;
             return decoded(out, std::move(b));
         }
+        case RecordType::Ping:
+        {
+            Ping b;
+            if (!in.callsign(b.to) || !in.u16(b.number) || !in.shortString(b.mode)) return DecodeResult::Malformed;
+            return decoded(out, std::move(b));
+        }
+        case RecordType::Pong:
+        {
+            Pong b;
+            uint8_t code = 0;
+            if (!in.callsign(b.to) || !in.u16(b.number) || !in.u8(code)) return DecodeResult::Malformed;
+            b.snr = repairSnr(code);
+            return decoded(out, std::move(b));
+        }
         case RecordType::FileOffer:
         {
             FileOffer b;
@@ -421,6 +448,8 @@ uint8_t Record::type() const
             else if constexpr (std::is_same_v<T, Status>) return (uint8_t)RecordType::Status;
             else if constexpr (std::is_same_v<T, Text>) return (uint8_t)RecordType::Text;
             else if constexpr (std::is_same_v<T, Ack>) return (uint8_t)RecordType::Ack;
+            else if constexpr (std::is_same_v<T, Ping>) return (uint8_t)RecordType::Ping;
+            else if constexpr (std::is_same_v<T, Pong>) return (uint8_t)RecordType::Pong;
             else if constexpr (std::is_same_v<T, FileOffer>) return (uint8_t)RecordType::FileOffer;
             else if constexpr (std::is_same_v<T, FileAnswer>) return (uint8_t)RecordType::FileAnswer;
             else if constexpr (std::is_same_v<T, FileData>) return (uint8_t)RecordType::FileData;

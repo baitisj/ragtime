@@ -56,6 +56,11 @@ void fillFileMenu(wxMenu& menu, const FileCard& card, int firstId, std::function
 // Gear button, a speedometer over the gear's short name, which opens the
 // gearshift; and Send.
 //
+// A ping is a row of its own, greyed: "Ping W1AW, waiting for its pong",
+// then "Pong from W1AW in 12 s: it hears us at −8.0 dB, we hear it at
+// −3.5 dB" or "No pong from W1AW in 45 s"; a station's ping to us reads
+// "W1AW pinged us; we hear it at −3.5 dB. Pong sent".
+//
 // Each message row has a badge on its left (SealBadge.h), and hovering it
 // says what it means. Ours show their state (Queued, Sending, Sent,
 // Acknowledged, Not sent...) until a seal says more: whether its seal has
@@ -72,6 +77,14 @@ public:
     void onGear(std::function<void()> fn) { onGear_ = std::move(fn); }
     void onCancel(std::function<void(uint64_t id)> fn) { onCancel_ = std::move(fn); }
     void onResend(std::function<void(uint64_t id)> fn) { onResend_ = std::move(fn); }
+    // A ping row's Ping again (and Ping back, on a station's ping to us):
+    // ping goes, and whyNot says why it can't ("in a session"), or "".
+    void onPing(std::function<void(const std::string& call)> ping,
+                std::function<std::string(const std::string& call)> whyNot)
+    {
+        onPing_ = std::move(ping);
+        whyNoPing_ = std::move(whyNot);
+    }
     // Broadcast files: the File... button, each card's look, and its links.
     void onBroadcastFile(std::function<void()> fn) { onBroadcastFile_ = std::move(fn); }
     void fileCards(std::function<bool(uint64_t file, FileCard& card)> fn) { fileCard_ = std::move(fn); }
@@ -107,6 +120,7 @@ private:
     void showPhrases();
     void showMenu(int row);
     void showFileMenu(const ragtime::broadcast::Message& m);
+    void showPingMenu(const ragtime::broadcast::Message& m);
     void arrange(int width);
     // Redraws the Gear button's speedometer and gear name, in the theme's colours.
     void drawGearButton();
@@ -130,6 +144,8 @@ private:
     std::function<bool(const std::string&)> onSend_;
     std::function<void()> onGear_;
     std::function<void(uint64_t)> onCancel_, onResend_;
+    std::function<void(const std::string&)> onPing_;
+    std::function<std::string(const std::string&)> whyNoPing_;
     std::function<void()> onBroadcastFile_;
     std::function<bool(uint64_t, FileCard&)> fileCard_;
     std::function<void(uint64_t, const std::string&)> onFileAction_;
