@@ -325,6 +325,14 @@ Choices made there, for Jeff to keep or change:
   too; `--no-cut` plays a host from before #118. A session also starts
   in the mode the host last reported, since the host repeats MODE only
   when it changes.
+- **Room to answer on D2G** (2026-10-25, after Andrew's on-air report
+  that his replies doubled with our file bursts). A file's bursts and a
+  repair round's yield in `HostLink`: each waits `YIELD_GAP_MS` (4 s)
+  after any burst of ours, chat included (it was 3 s between file bursts
+  only, so a piece followed our own chat line 0.4 s later), and while an
+  addressed message waits for its Ack (`BroadcastChat`, a listening
+  window in its mode at most). Raising data2g-host's KISS P, so a reply
+  queued under our burst takes the first slot after it, waits for Jeff.
 - **Offers wait for the far end's Hello,** and go only if it takes
   session files; a file queued for a station that doesn't ends Not taken.
 - **Leave** cancels what is under way, so the far end hears why and keeps

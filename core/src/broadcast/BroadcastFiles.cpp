@@ -272,7 +272,7 @@ void BroadcastFiles::nextBurst(Outgoing& out, uint64_t nowMs)
     out.burstPieces = pieces;
     out.tries = 1;
     out.firstBurst = first;
-    out.burst = link_.broadcast(frames, out.file.mode, nowMs, fileLabel(out.file, out.burstPieces));
+    out.burst = link_.broadcast(frames, out.file.mode, nowMs, fileLabel(out.file, out.burstPieces), true);
     if (first) seals_.going({out.announce}, out.burst, out.file.mode, nowMs);
 }
 
@@ -917,7 +917,8 @@ void BroadcastFiles::onEvent(const HostEvent& event, uint64_t nowMs)
             if (out.tries < BURST_TRIES && out.file.state == State::Sending)
             {
                 out.tries++;
-                out.burst = link_.broadcast(out.frames, out.file.mode, nowMs, fileLabel(out.file, out.burstPieces));
+                out.burst = link_.broadcast(out.frames, out.file.mode, nowMs, fileLabel(out.file, out.burstPieces),
+                                            true);
                 // The announce's own fate follows its first burst; once
                 // that is retried, it follows this one.
                 if (out.firstBurst)
