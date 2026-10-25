@@ -5,7 +5,7 @@
 //   files (docs/PROTOCOL.md, Hello); files queued for a station that
 //   doesn't end Not taken.
 // - File bytes are paced: no more of them go to data2g-host than about a
-//   minute of the session's acknowledged rate (WINDOW_MS), between
+//   10 s of the session's acknowledged rate (WINDOW_MS), between
 //   MIN_WINDOW and MAX_WINDOW bytes waiting, so a message typed during a
 //   transfer isn't stuck behind the whole file, and a cancel isn't
 //   either: data2g-host can't take back what it has been handed.
@@ -42,8 +42,11 @@ public:
     // File bytes waiting at the host, unacknowledged: this much of the
     // session's rate, within these bounds, and START_WINDOW until the rate
     // is known. The host sends whatever it has been handed, so a cancel
-    // waits behind it: the window starts at its smallest.
-    static constexpr uint64_t WINDOW_MS = 60 * 1000;
+    // waits behind it: the window starts at its smallest. 10 s is
+    // shorter than Data2G's longest bursts (24 s on FSK, 12 s on OFDM),
+    // which costs a little speed, and on a fading path shorter bursts can
+    // seize an uptick (Andrew, 2026-10-24; Jeff's pick).
+    static constexpr uint64_t WINDOW_MS = 10 * 1000;
     static constexpr uint64_t MIN_WINDOW = 1024;
     static constexpr uint64_t START_WINDOW = MIN_WINDOW;
     static constexpr uint64_t MAX_WINDOW = 16384;

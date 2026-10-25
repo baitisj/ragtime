@@ -287,7 +287,7 @@ void testFileBytesArePaced()
     CHECK(row.look == Look::Moving && row.state == "QRL");
     CHECK(row.bytesPerSecond > 80 && row.bytesPerSecond < 120);
     CHECK(row.finishAtMs > p.now + 400000 && row.finishAtMs < p.now + 700000);
-    CHECK(p.a.traffic.window() > 4000 && p.a.traffic.window() < 8000);
+    CHECK_EQ(p.a.traffic.window(), FileTraffic::MIN_WINDOW); // 10 s at 100 B/s is under 1 KB
     CHECK(row.done > 5000 && row.done <= row.handed && row.handed <= row.size);
 
     size_t heard = 0;

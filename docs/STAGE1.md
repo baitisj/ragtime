@@ -288,10 +288,15 @@ and offer their bulletin (`ragtime_fake_air --call AG7EW`, then type
 "send the file again"; `--rate` sets how fast session bytes cross).
 Choices made there, for Jeff to keep or change:
 
-- **Pacing.** No more file bytes wait at data2g-host than about a minute
-  of the session's acknowledged rate (1 to 16 KB, 1 KB until the rate is
-  known, which was 4 KB until 2026-10-24), and a FileData carries at
-  most half of that. A message typed
+- **Pacing.** No more file bytes wait at data2g-host than 10 s of the
+  session's acknowledged rate (1 to 16 KB, 1 KB until the rate is
+  known), and a FileData carries at most half of that. Until 2026-10-24
+  it was a minute, and 4 KB at the start. Data2G's longest bursts are
+  24 s on FSK and 12 s on OFDM, so 10 s gives up a little speed, and on
+  a fading path shorter bursts may even gain by catching an uptick
+  (Andrew); Jeff picked 10 s so a cancel or a message waits less.
+  Andrew means to add a dequeue to data2g-host, which would let a cancel
+  drop what the host hasn't sent yet. A message typed
   mid-file goes out behind at most that much, not behind the whole file.
 - **Offers wait for the far end's Hello,** and go only if it takes
   session files; a file queued for a station that doesn't ends Not taken.

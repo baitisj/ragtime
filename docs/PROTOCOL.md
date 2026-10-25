@@ -386,7 +386,7 @@ One file goes to a station at a time; the next waits for it.
 
 A sender offers nothing until the far end's Hello has come and says it
 takes session files. It keeps no more file bytes waiting at the host than
-about a minute of the session's acknowledged rate, so a Text typed during
+10 s of the session's acknowledged rate (at least 1 KB), so a Text typed during
 a transfer goes out behind at most that much; how much is the sender's
 own business and not part of the protocol.
 
