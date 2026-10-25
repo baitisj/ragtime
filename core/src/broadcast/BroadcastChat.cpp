@@ -473,6 +473,12 @@ std::vector<protocol::Record> BroadcastChat::onEvent(const Event& event, uint64_
     return heard;
 }
 
+void BroadcastChat::onRebuilt(const protocol::Record& record, uint64_t nowMs)
+{
+    onRecord(record, nowMs);
+    flushAcks(std::string(), nowMs);
+}
+
 void BroadcastChat::onRecord(const protocol::Record& record, uint64_t nowMs)
 {
     const std::string& from = record.header.callsign;

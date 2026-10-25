@@ -487,6 +487,26 @@ what goes on the air. Choices made there, for Jeff to keep or change:
   repair" has the rules; the airtime figures were in the proposal: six
   lines and their seal are about 6 s in `qpsk-r1/3` and 94 s in
   `fsk16r25-r1/3`.
+- **Parity repairs** (Jeff, 2026-10-25, idea 1 of "Ideas before
+  signatures": "Let's do #1", sealed broadcast messages "more useful
+  than expected" on faded paths, loss often over 50%). Repairs are
+  Cauchy Reed-Solomon parity over GF(2^16) (`files::parity`,
+  `core/src/files/Parity.cpp`): a request asks how many repair symbols
+  it wants (`parity::wantFor`, sized by the share it lost), and the
+  sender answers with that many parity pieces, or ItemParity over the
+  lines asked for, as the neediest asker in each gear wants. Requests
+  are a new type (`0x43`) and ItemParity is `0x44`; 0.1's request
+  (`0x41`) is skipped as unknown, so 0.1 chats with this version but
+  can't repair with it. Rebuilt lines come out of `Seals::takeRebuilt`
+  and go wherever a line heard goes (`BroadcastChat::onRebuilt`, the
+  station list, `BroadcastFiles`). In the simulator, a file to five
+  stations with two or three losing half or more now takes about 2
+  rounds instead of 5 to 10, most of which never finished
+  (HOW_SEALS_WORK.md has the table). Builder's choices: a file's want is
+  capped at four times its pieces, a station that heard none of a file
+  assumes it loses half, and a request that lacks a seal still can't be
+  made (a station that missed every copy of a seal never asks; about one
+  in ten at 60% loss).
 - **Repaired lines in their place** (Jeff, 2026-10-24: repaired
   messages "did not get placed in the correct order in the chat"). A
   line heard after a later one of its sender's goes above that one, by

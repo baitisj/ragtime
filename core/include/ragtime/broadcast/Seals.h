@@ -15,12 +15,18 @@
 // item it lists.
 //
 // After a seal goes, a listening window (3 one-codeword bursts in its
-// mode, plus 4 s). The requests heard in it are joined, and their union
-// goes again, in sequence order, with the seals it falls under at the end,
-// which opens the next window. Each request says the S/N its asker heard
-// us at, so each item goes again in the fastest gear every station that
-// asked for it can copy (Auto's sum, with its margin), never faster than
-// it first went: gear by gear, fastest first, the seals last in the
+// mode, plus 4 s). The requests heard in it are joined and answered with
+// parity (docs/PROTOCOL.md, "Parity"): each request says what its asker
+// lacks and how many repair symbols it wants (more than it lacks, for what
+// it expects to lose), and one parity symbol fills a different gap for
+// every asker, so the round sends what the neediest asker wants, not the
+// union of every gap. A file gets parity pieces; chat lines, which differ
+// in length, get the lines themselves when they are cheaper, else
+// ItemParity over the lines asked for. The seals it falls under go at the
+// end, which opens the next window. Each request says the S/N its asker
+// heard us at, so each item goes again in the fastest gear every station
+// that asked for it can copy (Auto's sum, with its margin), never faster
+// than it first went: gear by gear, fastest first, the seals last in the
 // slowest gear used. Slower gears than the round's own may take at most
 // setSlowResendSeconds of airtime a round; the rest waits for the next.
 // What we won't repair (a seal closed, a file cancelled or no longer
@@ -36,12 +42,15 @@
 // MAX_OPEN_MS. When a station's seal comes, what we lack under it (and
 // under its other recent seals, and a missing previous seal) is asked for
 // in one RepairRequest a seal, at a random time within the window, with
-// the lowest S/N we heard the station at in SNR_WINDOW_MS; a request heard
-// from another station first takes off what it asks for, if its asker's
-// gear is no faster than ours, and ours goes only if something is left.
-// A refusal heard stops asking for what it names. A file's pieces are
-// asked for only while the operator receives it (BroadcastFiles says
-// which).
+// the lowest S/N we heard the station at in SNR_WINDOW_MS, and a want for
+// each lack sized by the share we lost of the last round (or of the first
+// pass). A request heard from another station first speaks for ours when
+// its asker's gear is no faster than ours and it wants at least as much
+// (and, for chat lines, asks for every line we lack); ours goes only for
+// what is left. ItemParity heard rebuilds the lines it covers once enough
+// of it is here (takeRebuilt). A refusal heard stops asking for what it
+// names. A file's pieces are asked for only while the operator receives
+// it (BroadcastFiles says which).
 //
 // No sockets and no clock: HostLink is the socket-free one the app feeds,
 // the time is passed in, and the randomness is seeded.
@@ -56,6 +65,7 @@
 #include <random>
 #include <set>
 #include <string>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -82,7 +92,8 @@ public:
     virtual uint16_t pieceCount(uint32_t seq) const = 0;
     // Ours: its first pass is still going, so its announce isn't sealed yet.
     virtual bool streaming(uint32_t seq) const = 0;
-    // Ours: piece index of it as a FilePiece record, stamped with time.
+    // Ours: piece index of it as a FilePiece record, stamped with time; an
+    // index at or past pieceCount is a parity piece.
     virtual bool piece(uint32_t seq, uint16_t index, uint32_t time, protocol::Record& out) = 0;
     // Ours: the operator cancelled it (stopped its first pass).
     virtual bool stopped(uint32_t seq) const
@@ -90,9 +101,18 @@ public:
         (void)seq;
         return false;
     }
-    // Theirs: the pieces of call's file (announce seq) we want and lack;
-    // false when we want none of it (not receiving it, or it is whole).
-    virtual bool wanted(const std::string& call, uint32_t seq, std::vector<uint16_t>& missing) const = 0;
+    // Theirs: of call's file (announce seq), how many pieces we lack (need)
+    // and how many parity pieces to ask for (want); false when we want
+    // none of it (not receiving it, or it is whole).
+    virtual bool wanted(const std::string& call, uint32_t seq, uint32_t& need, uint32_t& want) const = 0;
+    // Theirs: a request for want parity pieces of it has gone, ours or one
+    // that spoke for ours, so the next round shows what share we lose.
+    virtual void asked(const std::string& call, uint32_t seq, uint32_t want)
+    {
+        (void)call;
+        (void)seq;
+        (void)want;
+    }
 };
 
 // A refusal's reason in words, after the sender's call: "stopped sharing
@@ -230,6 +250,10 @@ public:
     bool sealHeard(const std::string& call, uint32_t seq) const;
     // A request of ours waits to go to call.
     bool asking(const std::string& call) const;
+    // Items rebuilt from ItemParity since last asked: each is to go through
+    // everything a record heard goes through (BroadcastChat::onRebuilt,
+    // this onRecord, BroadcastFiles::onRecord, the station list).
+    std::vector<protocol::Record> takeRebuilt();
     // The lowest S/N heard from call in the last SNR_WINDOW_MS (the host's
     // reports), what our requests to it carry.
     std::optional<double> snrOf(const std::string& call, uint64_t nowMs) const;
@@ -278,6 +302,8 @@ public:
     size_t sealsSent() const { return sealsSent_; }
     size_t refusalsSent() const { return refusalsSent_; }
     size_t refusalsHeard() const { return refusalsHeard_; }
+    size_t paritySent() const { return paritySent_; }     // ItemParity and parity pieces of ours
+    size_t itemsRebuilt() const { return itemsRebuilt_; }
     // Moves with every change the screen shows.
     uint64_t version() const { return version_; }
 
@@ -302,6 +328,7 @@ private:
         double air = 0.0;
         std::string mode;
         bool file = false;
+        uint32_t nextParity = 0;    // a file's next parity piece, counted from its piece count
     };
 
     struct OurSeal
@@ -322,19 +349,23 @@ private:
         std::map<std::string, uint64_t> askers;
         size_t asks = 0;
         int flushes = 0;            // sent again after a quiet window
+        uint32_t nextParity = 0;    // the next ItemParity's index
         // Per item, from the requests heard under it: who holds it, and
         // who asked for it and hasn't had it sent again yet.
         std::map<uint32_t, std::set<std::string>> holders, wanting, servedTo;
     };
 
-    // What the requests in a window asked for under one seal, each in the
-    // gear (mode) it goes again in.
+    // What the requests in a window asked for under one seal: each item in
+    // the gear (mode) it goes again in; each asker's items and the repair
+    // symbols it wants for them; and for each file the most parity pieces
+    // an asker wants in each gear.
     struct Asked
     {
         bool seal = false;
         std::string sealMode;
         std::map<uint32_t, std::string> items;
-        std::map<uint32_t, std::map<uint16_t, std::string>> pieces;
+        std::vector<std::pair<std::set<uint32_t>, uint32_t>> itemAskers;
+        std::map<uint32_t, std::map<std::string, uint32_t>> files;
     };
 
     // A refusal to go at the window's end: for these files under a seal,
@@ -377,6 +408,7 @@ private:
         protocol::Digest digest{};
         uint8_t type = 0;
         uint64_t heardMs = 0;
+        std::vector<uint8_t> bytes;     // its encoded record, a symbol for ItemParity
     };
 
     struct HeardSeal
@@ -387,20 +419,43 @@ private:
         int asks = 0;               // requests of ours that brought nothing
         size_t lackWhenAsked = 0;
         bool givenUp = false;
+        // The share of its items we lose: of the first pass, then of the
+        // last round (repair symbols that came of those asked for).
+        double itemLoss = -1.0;
+        uint32_t itemsAsked = 0;    // repair symbols asked for last, by us or a request speaking for ours
+        uint32_t came = 0;          // its items and ItemParity heard since
     };
 
-    // What one request asks for, or what we lack, under one seal.
+    // What one request asks for, or what we lack, under one seal: the
+    // items, and for each file the pieces lacked (need); with the repair
+    // symbols wanted for them.
+    struct FileLack
+    {
+        uint32_t need = 0;
+        uint32_t want = 0;
+    };
     struct Lack
     {
         uint16_t seal = 0;
         protocol::Digest sealDigest{};  // zeros: the seal itself wasn't heard
         bool wantSeal = false;
         std::vector<bool> items;
-        std::map<uint32_t, std::set<uint16_t>> pieces;
+        uint32_t itemsWant = 0;
+        std::map<uint32_t, FileLack> files;
 
         bool any() const;
         size_t size() const;
+        size_t missingItems() const;
     };
+
+    // Parity over a station's items heard: the seal, the items covered and
+    // the symbol length name a batch; its symbols by index.
+    struct ParityBatch
+    {
+        std::map<uint16_t, std::vector<uint8_t>> symbols;
+        uint64_t heardMs = 0;
+    };
+    using ParityKey = std::tuple<uint16_t, std::vector<bool>, size_t>;
 
     struct Refused
     {
@@ -417,11 +472,12 @@ private:
         std::map<uint16_t, Refused> refused;            // by seal
         std::map<uint16_t, HeardSeal> seals;
         uint64_t askAtMs = 0;                   // our request goes then; 0: none waiting
-        std::map<uint16_t, Lack> covered;       // asked for by others since it was set
+        std::map<uint16_t, std::vector<Lack>> covered;  // others' requests heard since it was set
         std::map<uint16_t, int> sealAsks;       // requests for a seal never heard
         // Files we heard pieces of (their announce's number, when): the
         // announce itself may be what was lost.
         std::map<uint32_t, uint64_t> piecesOf;
+        std::map<ParityKey, ParityBatch> parity;
     };
 
     std::vector<Lack> lacks(const std::string& call, const Station& station, uint64_t nowMs) const;
@@ -431,6 +487,12 @@ private:
     void heardRequest(const std::string& from, const protocol::RepairRequest& request, uint64_t nowMs);
     void heardRefusal(const std::string& call, const protocol::RepairRefused& refused, uint64_t nowMs);
     void heardSnr(const std::string& call, double dB, uint64_t nowMs);
+    void heardItemParity(const std::string& call, const protocol::Record& record, uint64_t nowMs);
+    void rebuildItems(const std::string& call, Station& station, const ParityKey& key);
+    // Our answer to the items asked for in one gear under seal s: the lines
+    // themselves, parity over them, or the lines and parity after them.
+    std::vector<protocol::Record> itemRepairs(OurSeal& s, const std::vector<uint32_t>& items, uint32_t want,
+                                              const std::string& mode, uint32_t time);
     void forget(uint64_t nowMs);
     void flush(uint64_t nowMs);
 
@@ -480,6 +542,9 @@ private:
     size_t sealsSent_ = 0;
     size_t refusalsSent_ = 0;
     size_t refusalsHeard_ = 0;
+    size_t paritySent_ = 0;
+    size_t itemsRebuilt_ = 0;
+    std::vector<protocol::Record> rebuilt_;
     uint64_t version_ = 0;
 };
 

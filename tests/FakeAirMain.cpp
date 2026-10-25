@@ -360,10 +360,18 @@ struct Bot
             session.onEvent(e, now);
             seals.onEvent(e, now);
             broadcasts.onEvent(e, now);
-            for (const protocol::Record& r : chat.onEvent(e, now))
+            std::vector<protocol::Record> heard = chat.onEvent(e, now);
+            for (size_t i = 0; i < heard.size(); i++)
             {
+                const protocol::Record r = heard[i];
                 seals.onRecord(r, now);
                 broadcasts.onRecord(r, now);
+                // Lines rebuilt from parity are taken as heard.
+                for (const protocol::Record& again : seals.takeRebuilt())
+                {
+                    chat.onRebuilt(again, now);
+                    heard.push_back(again);
+                }
                 const protocol::Text* text = r.as<protocol::Text>();
                 if (text != nullptr && text->to == profile.call)
                 {

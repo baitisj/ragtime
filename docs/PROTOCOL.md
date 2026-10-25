@@ -93,8 +93,14 @@ length.
 | `0x30` | FileAnnounce | size, piece size, digest, name | **yes** |
 | `0x31` | FilePiece | index, bytes | part of its announce |
 | `0x40` | Seal | number, previous, first item, count, digests | no |
-| `0x41` | RepairRequest | to, seal, seal digest, flags, items, files | no |
 | `0x42` | RepairRefused | seal, reason, count, files | no |
+| `0x43` | RepairRequest | to, seal, seal digest, flags, items, items wanted, files | no |
+| `0x44` | ItemParity | seal, count, items, index, bytes | no |
+
+`0x41` was Ragtime 0.1's RepairRequest, which listed the pieces missing.
+It is retired: a newer station skips it as a type it doesn't know, and
+0.1 skips `0x43` and `0x44` the same way. So 0.1 and newer stations
+still chat, but can't repair each other.
 
 Square brackets mark optional trailing fields: a record may end before
 them.
@@ -106,7 +112,7 @@ frame as a check-in.
 | --- | --- | --- |
 | version | 1 | The protocol version the sender speaks: 0 |
 | flags | 1 | Bit 0: accepts sessions. Bit 1: automatic (nobody at the controls; Stage 2 gives it its rules). Other bits 0 |
-| takes | 1 | The records the sender takes. Bit 0: Text and Ack. Bit 1: Status. Bit 2: session files (FileOffer to FileCancel). Bit 3: broadcast files (FileAnnounce, FilePiece). Bit 4: Seal, RepairRequest and RepairRefused. Version 0 sends `0x1F` |
+| takes | 1 | The records the sender takes. Bit 0: Text and Ack. Bit 1: Status. Bit 2: session files (FileOffer to FileCancel). Bit 3: broadcast files (FileAnnounce, FilePiece). Bit 4: Seal, RepairRequest, RepairRefused and ItemParity. Version 0 sends `0x1F` |
 | locator | 4, optional | Maidenhead, packed (Fields); 0 for none |
 | software | 1 + n, optional | A short string, at most 64 bytes, such as `Ragtime 0.1.0` |
 
@@ -169,7 +175,10 @@ never 0), digest (12, the whole file's), name (short string). An item.
 
 **FilePiece** (`0x31`): index (2), then the piece's bytes. Its header's
 seq is the announce's. Piece i holds bytes i × piece size up to the next
-piece's start; the last may be short.
+piece's start; the last may be short. An index at or past the piece
+count names a **parity piece** (Parity, below), as long as the piece
+size rounded up to even; Ragtime makes the piece size even, so a parity
+piece is no longer than a piece.
 
 **Seal** (`0x40`): the table of contents of what a station has sent
 since its last seal.
@@ -187,8 +196,8 @@ size, piece size and whole-file digest. There is no digest per piece:
 Data2G's own coding catches a damaged piece, and the whole-file digest
 proves the result. Stage 2 signs seals; version 0's seals are unsigned.
 
-**RepairRequest** (`0x41`): a listener's word that it lacks something a
-seal covers.
+**RepairRequest** (`0x43`): a listener's word that it lacks something a
+seal covers, and how many repair symbols it wants for it.
 
 | Field | Bytes | Meaning |
 | --- | --- | --- |
@@ -198,7 +207,8 @@ seal covers.
 | flags | 1 | Bit 0: send the seal itself again. Bits 1 to 7: the asker's S/N code (below) |
 | count | 1 | Items in the seal (0 when it wasn't heard) |
 | items | count / 8, rounded up | One bit per item, the first item in the top bit of the first byte: 1 = missing |
-| files | the rest | For each file with pieces missing: its seq (3), then a piece list |
+| items wanted | 1 | Repair symbols wanted for the items missing: as many as are missing, or more for what the asker expects to lose (Parity, below) |
+| files | 5 each, to the end | For each file it lacks pieces of: its seq (3), then the parity pieces it wants (2) |
 
 **The S/N code** in bits 1 to 7 of flags says how well the asker hears
 the seal's sender, so the repairs can go in a gear it can copy. It is the
@@ -207,9 +217,7 @@ in the last 15 minutes: the lowest rather than the latest, because the
 bursts the asker lost went by in fades it never measured. Code v = 0
 means no figure (a host from before Data2G PR #98, or nothing heard
 lately); 1 to 127 mean −24 + (v − 1) × 0.5 dB, so −24 to +39 dB in
-half-dB steps, rounded to the nearest and held at both ends. Ragtime
-0.1 sends these bits as 0 and reads only bit 0, so a 0.1 station and a
-newer one still work together: 0.1's requests carry no figure.
+half-dB steps, rounded to the nearest and held at both ends.
 
 **RepairRefused** (`0x42`): the seal's sender saying it won't repair
 what was asked for, once for every station that asked.
@@ -225,10 +233,16 @@ A refusal over one file is 20 bytes with a 5-character call: one
 codeword in every Data2G mode. A reason this version doesn't know is a
 refusal all the same.
 
-A **piece list** opens with its encoding byte. Encoding 0 is a bitmap:
-first piece (2), span (2), then span bits, the first piece in the top
-bit, 1 = missing. Encoding 1 is ranges: count (1), then each range's
-first piece (2) and length minus one (1). The encoder picks the shorter.
+**ItemParity** (`0x44`): a repair symbol over some of the items a seal
+lists (Parity, below).
+
+| Field | Bytes | Meaning |
+| --- | --- | --- |
+| seal | 2 | The seal whose items it covers |
+| count | 1 | Items in the seal |
+| items | count / 8, rounded up | One bit per item, as in RepairRequest: 1 = covered |
+| index | 2 | Which parity symbol: it is named 256 + index |
+| bytes | the rest | The symbol, an even number of bytes |
 
 ### Fields
 
@@ -498,10 +512,20 @@ the host's `MODES` lists them.
 - When a seal burst is Sent, a **listening window** opens: 3 × the
   airtime of a one-codeword burst in its mode, plus 4 s (52 s in
   fsk16r25-r1/3, 13 s in qpsk-r1/3).
-- At the window's end it resends the union of what was asked: items and
-  pieces in sequence order (each file's pieces after its announce), cut
-  at 10 minutes of airtime a round, and then the seals asked under,
-  which opens the next window when that last burst is Sent.
+- At the window's end it answers with parity (below), under each seal
+  and in each repair gear: as many symbols as the neediest asker in that
+  gear wants, not the union of everyone's gaps. For the items, that is
+  the items themselves when the wants are at least as many as the items
+  asked for, followed by ItemParity for the rest; with fewer wanted,
+  that many ItemParity, unless the items themselves take no more
+  airtime; and always the items themselves when an ItemParity record
+  wouldn't fit a frame. For each file, that many parity pieces, never
+  the same one twice. Then come the seals asked under, which open the
+  next window when that last burst is Sent. A round is cut at 10
+  minutes of airtime, and the rest is asked for again.
+- **Sizing per gear.** An asker that lacks M items and wants w symbols
+  for them, and lacks m of the items going in one gear, is counted as
+  wanting w × m / M of that gear's symbols, rounded up.
 - **The repair gear.** Each asker's gear is the fastest on the sender's
   own ladder needing no more than the asker's S/N less 3 dB (the
   gearshift's Auto sum), or gear 1 when even gear 1 needs more. An item
@@ -542,30 +566,86 @@ the host's `MODES` lists them.
 - It keeps what it heard of each station (items, seals, and which files
   it heard pieces of) for 2 hours.
 - On a seal it works out what it lacks: items it never heard or heard
-  differently, the pieces it lacks of files it is receiving, and a seal
-  it missed (each seal names the previous one; the request then has the
-  missed seal's number, a zero digest and flag bit 0).
+  differently, how many pieces it lacks of files it is receiving (less
+  the parity pieces it holds), and a seal it missed (each seal names the
+  previous one; the request then has the missed seal's number, a zero
+  digest and flag bit 0). For each it asks a want sized for its loss
+  (Parity, below).
 - It asks only about overs it was there for: it holds an item of the
   seal, or a piece of a file the seal lists (the announce may be what it
   lost), or an older seal or item of that station. A station that just
   tuned in doesn't ask for what went before.
 - It waits a random time within the window less its own request's
   airtime and 2 s, reckoned in its own mode. Requests it hears from
-  others to the same station meanwhile are taken off what it lacks, if
-  their asker's gear is no faster than its own (both worked out on its
-  own ladder from the two S/N figures; a figure missing counts as the
-  gear in use); if nothing is left, it stays quiet. A request from a
+  others to the same station meanwhile speak for it, if their asker's
+  gear is no faster than its own (both worked out on its own ladder from
+  the two S/N figures; a figure missing counts as the gear in use): the
+  seal if they ask for it; its items if one request lacks every item it
+  lacks and wants at least as many symbols; a file if one request wants
+  at least as many of its parity pieces. If nothing is left, it stays
+  quiet. A request from a
   station that hears the sender better would bring the repair back in a
   gear it may not copy, so then it asks too.
 - Its request carries its S/N code for the sender.
-- A request is one frame. A list of pieces too long for it is halved
-  (the lowest kept), and the rest asked for next round.
+- A request is one frame. Files past what fits are asked for next round.
+- It rebuilds items from ItemParity, and a file's missing pieces from
+  parity pieces, as soon as it holds enough (below). An item rebuilt
+  must decode as the item the seal lists at its place, with the digest
+  the seal gives; a rebuilt file must match its whole-file digest. A
+  rebuilt item is then taken as if heard.
 - It stops asking under a seal after 5 requests in a row that brought
   nothing, and asks for a missed seal at most 5 times.
 - A refusal heard stops it asking for what the refusal names, for 2
   hours, and a file it covers shows as not repaired, with the reason;
   Ask again is greyed. Hearing a seal again that was refused whole (the
   operator kept it open after all) lifts that refusal.
+
+### Parity
+
+Repairs are **parity**, worked by a Cauchy Reed-Solomon code over
+GF(2^16): the 65,536 16-bit numbers, where adding is XOR and
+multiplying is done by log tables on the primitive polynomial
+x^16 + x^12 + x^3 + x + 1 (`0x1100B`).
+
+- **Symbols.** The data symbols are byte strings of one even length,
+  read as 16-bit numbers, most significant byte first. A shorter one
+  counts as padded with zeros. Each has a name y: a file's piece by its
+  index, an item by its place in the seal (0 for the first item). A
+  parity symbol has a name x that is none of the ys: a file's parity
+  piece by its index, which is at least the piece count; an ItemParity
+  by 256 + index.
+- **The sum.** Parity symbol x is, word by word, the sum over every data
+  symbol of d_y × 1 / (x + y).
+- **Why.** Any k of the data and parity symbols give back all k data
+  symbols, whichever k they are (the code is MDS). So one parity symbol
+  fills a different gap for each listener that lacks one, and a round
+  sized to the neediest listener serves them all. Rebuilding uses the
+  inverse of a Cauchy matrix, which has a closed form, so m missing
+  symbols take m² work per word.
+- **Files.** A file's pieces are the data. A parity piece is as long as
+  the piece size rounded up to even. A rebuilt piece is cut back to its
+  own length (the last is short).
+- **Items.** The items an ItemParity covers are the data, each as its
+  encoded record (type, length, header and body, as it went on the
+  air), padded to the longest of them rounded up to even. Its bytes are
+  that long. ItemParity over the same seal, the same items and the same
+  length rebuild together.
+- **Wants.** A listener that lacks n symbols and loses about a share p
+  of what is sent asks for
+  (n + sqrt(n × p / (1 − p))) / (1 − p), rounded up, with p held at 0 to
+  0.75: n, plus enough over for the losses, plus about one standard
+  deviation of them, so about nine rounds in ten fill every gap. Before
+  any repair round, p is the share of the first pass it lost (for a
+  file, counted from the first piece it heard, so a late joiner doesn't
+  count what went before it; half when it heard none). After one, p is
+  the share of the symbols asked for that didn't come, when some came.
+  A file's want is capped by the sender at four times its pieces.
+
+On paths where some stations lose most of every burst, this matters
+most: Ragtime 0.1 sent again the union of every piece anyone lacked,
+round after round, and its losers were still missing pieces hours
+later. With parity, a file usually reaches every station in a round or
+two.
 
 ### Broadcast files
 
@@ -597,6 +677,10 @@ the host's `MODES` lists them.
   seal there is nothing to ask under, and the screen says why; the
   pieces kept still count if the sender broadcasts the file again.
   Rejecting a file throws away what came and is logged as Declined.
+- A listener asks for parity pieces, not pieces (Parity, above), and
+  keeps the parity pieces it hears, those for other stations included,
+  until it holds as many pieces and parity pieces as the file has
+  pieces; then the missing ones are rebuilt.
 - With every piece in, the whole-file digest is checked. A file that
   fails it is fetched once more from the start; a second failure ends
   it. A file announced again with the same size, piece size, digest and
@@ -622,8 +706,8 @@ the host's `MODES` lists them.
 - A receiver ignores bytes after the fields it knows in records with a
   fixed layout (Hello, Status, Ack, FileOffer, FileAnswer, FileSaved,
   FileCancel, FileAnnounce, Seal, RepairRefused), so new fields go on the end.
-  Text, FileData, FilePiece and RepairRequest run to the end of the
-  record and can't grow that way.
+  Text, FileData, FilePiece, RepairRequest and ItemParity run to the end
+  of the record and can't grow that way.
 - A new text table takes a new coding number in Text's flags.
 - A change an old receiver would misread takes a new version: `0xA1`,
   and Hello's version 1.
