@@ -190,6 +190,16 @@ void lines()
     CHECK(!back.snrDb);
     CHECK(back.band.empty() && back.dialHz == 0 && back.session);
 
+    // A contact: worked, not a burst heard.
+    PathEntry work = entry(T0, "W1AW", std::nullopt, "20 m");
+    work.worked = true;
+    line = pathLine(work);
+    CHECK_EQ(line, std::string("2026-10-22T00:00:00Z\tW1AW\t\t\t20 m\t\t\twork"));
+    CHECK(parsePathLine(line, back));
+    CHECK(back.worked && !back.session);
+    CHECK(parsePathLine(pathLine(e), back));
+    CHECK(!back.worked);
+
     CHECK(!parsePathLine("", back));
     CHECK(!parsePathLine("2026-10-22T00:00:00Z\tW1AW", back));
     CHECK(!parsePathLine("2026-10-22T00:00:00Z\tW1AW\tloud\t\t\t\t\tD2G", back));
@@ -211,6 +221,10 @@ void strip()
     all.push_back(entry(T0 + 6 * HOUR, "W1AW", 3.0, "20 m"));
     // Too old for the strip.
     all.push_back(entry(T0 - 20 * 24 * HOUR, "KC2G", -1.0, "40 m"));
+    // A contact isn't a burst heard: no 80 m row.
+    PathEntry contact = entry(T0 + 7 * HOUR, "KC2G", std::nullopt, "80 m");
+    contact.worked = true;
+    all.push_back(contact);
 
     std::vector<const PathEntry*> ptrs;
     for (const PathEntry& e : all) ptrs.push_back(&e);

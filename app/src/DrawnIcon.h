@@ -5,8 +5,10 @@
 
 #include <wx/bmpbndl.h>
 #include <wx/colour.h>
+#include <wx/string.h>
 
 class wxGraphicsContext;
+class wxWindow;
 
 // The small button icons Ragtime draws itself, in the theme's text colour
 // so they follow light and dark: the gearshift's speedometer and the file
@@ -39,5 +41,8 @@ wxBitmapBundle checkIcon(const wxColour& ink, int sizeDip = 16);
 // free).
 void drawBellIcon(wxGraphicsContext& gc, double size, const wxColour& ink);
 wxBitmapBundle bellIcon(const wxColour& ink, int sizeDip = 14);
+// The bell as an <img> for a wxHTML list's row, drawn once for each ink
+// and size into wxHTML's memory files; "" if it couldn't be drawn.
+wxString bellHtml(const wxWindow* window, int sizeDip, const wxColour& ink);
 
 #endif

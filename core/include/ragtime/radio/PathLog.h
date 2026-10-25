@@ -4,9 +4,12 @@
 // net"). Each line has the UTC time, the station, the S/N data2g-host
 // measured, the burst's mode when the host named it, the band and dial
 // from rigctld when Ragtime reads it, and the gear we were sending in.
+// A contact adds a line too, marked worked: a session with the station,
+// or a message between it and us.
 //
 // From the recent lines it draws each station's 24-hour strip by band
-// for the station details: "17 m: 2000-0000Z on 5 days, median -6 dB".
+// for the station details: "17 m: 2000-0000Z on 5 days, median -6 dB";
+// and Recent work (RecentWork.h) ranks the stations from them.
 //
 // No wx, and the time is passed in.
 #ifndef RAGTIME_RADIO_PATH_LOG_H
@@ -35,6 +38,9 @@ struct PathEntry
     uint64_t dialHz = 0;            // 0 while the dial isn't read
     std::string gear;               // the mode we were sending in, Data2G's name; empty for the host's
     bool session = false;           // our session partner's burst, else a D2G broadcast
+    // Not a burst heard but a contact: a session came up with the station,
+    // it sent us a message, or we sent it one. No S/N or mode.
+    bool worked = false;
 };
 
 // "2026-10-25T16:30:12Z", and back (false for anything else).
@@ -42,8 +48,8 @@ std::string utcStamp(uint64_t ms);
 bool parseUtcStamp(const std::string& text, uint64_t& ms);
 
 // One line of the file, without its newline: tab-separated time, call,
-// S/N, mode, band, dial, gear, and "D2G" or "session"; an unknown field is
-// empty. And back: false for a line that isn't one.
+// S/N, mode, band, dial, gear, and "D2G", "session" or "work"; an unknown
+// field is empty. And back: false for a line that isn't one.
 std::string pathLine(const PathEntry& entry);
 bool parsePathLine(const std::string& line, PathEntry& entry);
 
@@ -66,7 +72,8 @@ struct BandRow
 };
 
 // A station's strip: a row for each band it was heard on in the last
-// `days` days, lowest band first and the dial-unknown row last.
+// `days` days, lowest band first and the dial-unknown row last. Worked
+// lines aren't bursts heard, so they are left out.
 struct PathStrip
 {
     std::string call;

@@ -47,6 +47,14 @@ meter, its reading such as `−4 dB`), and the TX light (`TX Off` / `TX`).
   with last heard, and under it the locator and distance
   (`FN31 · 3,951 km`).
 - Status always pairs a word with its dot (never colour alone).
+- Under the list, past a divider that drags, **Recent work** (Jeff,
+  2026-10-25): a bold title with the order menu (Likely now, Most
+  worked, Latest) at its right, then two lines a station in the narrow
+  list's style: the call (with its bell), "● on now" in green or when
+  last heard, and under it in grey "At this hour 10 days, 17 m · worked
+  4". Empty, it says the stations you hear and work gather there.
+
+![Recent work under the station list, a station not heard this run picked](images/recent-work.png)
 
 As built in package E (the bench, `ragtime_fake_air`, at 1280×720),
 beside Globus and with Globus off:

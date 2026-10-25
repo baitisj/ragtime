@@ -45,6 +45,8 @@ public:
     void refresh(uint64_t nowMs);
 
     std::string selected() const { return selected_; }
+    // Picking in Recent work unpicks here, without a callback.
+    void clearSelection();
 
     // A bell on a row (the watch list, Tell me when free), with how it
     // came to be for the row's tooltip.

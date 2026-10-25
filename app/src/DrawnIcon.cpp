@@ -2,11 +2,15 @@
 
 #include <cmath>
 #include <memory>
+#include <set>
 
 #include <wx/bitmap.h>
 #include <wx/brush.h>
+#include <wx/filesys.h>
+#include <wx/fs_mem.h>
 #include <wx/graphics.h>
 #include <wx/image.h>
+#include <wx/window.h>
 
 wxBitmapBundle drawnIcon(const IconDrawing& draw, int sizeDip)
 {
@@ -153,4 +157,23 @@ void drawBellIcon(wxGraphicsContext& gc, double size, const wxColour& ink)
 wxBitmapBundle bellIcon(const wxColour& ink, int sizeDip)
 {
     return drawnIcon([ink](wxGraphicsContext& gc, double size) { drawBellIcon(gc, size, ink); }, sizeDip);
+}
+
+wxString bellHtml(const wxWindow* window, int sizeDip, const wxColour& ink)
+{
+    int px = window->FromDIP(sizeDip);
+    wxString name = wxString::Format("ragtime-bell-%s-%d.png", ink.GetAsString(wxC2S_HTML_SYNTAX).Mid(1), px);
+    static std::set<wxString> made;
+    if (made.count(name) == 0)
+    {
+        // SealBadge may have added the handler already: wx keeps one of each.
+        if (!wxFileSystem::HasHandlerForPath("memory:x")) wxFileSystem::AddHandler(new wxMemoryFSHandler);
+        if (wxImage::FindHandler(wxBITMAP_TYPE_PNG) == nullptr) wxImage::AddHandler(new wxPNGHandler);
+        wxBitmap bitmap = bellIcon(ink, sizeDip).GetBitmap(wxSize(px, px));
+        if (!bitmap.IsOk()) return wxString();
+        wxMemoryFSHandler::AddFile(name, bitmap.ConvertToImage(), wxBITMAP_TYPE_PNG);
+        made.insert(name);
+    }
+    wxString side = wxString::Format("%d", px);
+    return "<img src=\"memory:" + name + "\" width=\"" + side + "\" height=\"" + side + "\">";
 }

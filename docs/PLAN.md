@@ -4,12 +4,13 @@ Started 2026-10-20 by Jeff (AG7EW) as "Data2G client: plan", a Claude Doc he edi
 
 ## Summary
 
-The proposal is a new, plain desktop client for Data2G, built from what Glissando's Data2G mode learned on the air. Everything in it is seen through two ideas:
+The proposal is a new, plain desktop client for Data2G, built from what Glissando's Data2G mode learned on the air. Everything in it is seen through three ideas:
 
 - **Welcome to the net.** D2G is a net that never closes. You check in, net control asks for traffic, and the traffic gets passed. Every burst teaches the net who hears whom.
 - **Sometimes we ragchew.** When operators want to talk, they enter a ragchew on purpose and leave it on purpose. While they're in it, they're off traffic duty.
+- **Keep in touch** (your ask, 2026-10-25). Every burst heard teaches the client when, and on which band, each friend gets through. So it can say who is likely around now, and the best time of day to check in to the D2G net to find them: Recent work, under the station list, and the path strip in each station's details.
 
-Broadcasts, files, signed messages, pages, boards, and store and forward all hang off those two. Glissando then goes back to being the chirp mode only.
+Broadcasts, files, signed messages, pages, boards, and store and forward all hang off the first two; the third is what the client learns from all of them. Glissando then goes back to being the chirp mode only.
 
 **Stage 1** (agreed with Andrew, 2026-10-21) is parity with Glissando's Data2G mode, in three tabs: Broadcast, Session and Files. The net and everything else build on it.
 
@@ -293,7 +294,7 @@ Session files keep the ideas that worked on the air (offer and answer, carrying 
 One ordinary window in the system theme, laid out like a messaging app: connection bar on top, stations and sessions on the left, tabs in the middle, a status bar at the foot.
 
 - **Connection bar:** my callsign, broadcast group name (D2G), width (2400 Hz or 500 Hz, sending `BW2300`/`BW500`), **Accept sessions**, **Pause sending**, and a TX light from the host's `PTT` report.
-- **Left pane:** Stations heard in broadcast mode, with the session partner pinned at the top while a session is up.
+- **Left pane:** Stations heard in broadcast mode, with the session partner pinned at the top while a session is up. Under it, past a divider that drags, **Recent work** (your ask, 2026-10-25): the stations heard and worked in the last two weeks, by default the ones likely around now first, from how often you have worked them and the days they were heard at this hour on this band (docs/STAGE1.md, "Recent work").
 - **Right pane: the map** (your ask, 2026-10-22). Glissando's globe at the top, showing the picked station's path, with a caption in Glissando's form, `W1AW · FN31 · 3,951 km · 81°`, and the station's details below. The theme is new: light blue oceans (#A8D4F2), near-white land (#F7F5EE), and dark blue coasts and borders (#143068). The globe is lit from the sun's real position: the light source sits over the subsolar point, so the night side falls in shadow and the greyline shows as the soft edge between them. The twilight is blended from 3° above the horizon to 12° below it.
 - **Globus on or off** (your ask, 2026-10-22). A toggle button labelled **Globus** sits where the map's heading was. It turns blue when the globe is showing, and when the globe is hidden it moves to the right end of the tab strip, so the Broadcast and Session messages can use the full width. View > Globus does the same. Beside the button, the time the globe is lit for, in UTC and local time: `22:36 UTC / 15:36 PDT`. The dividers between the station list, the tabs and the globe drag, and the client remembers where you left them. The globe also draws state and province lines, thin and light, from Natural Earth simplified to about a quarter of a degree, so the whole set stays small: for the United States, Canada, Mexico, Russia, China, India, Brazil, Argentina and Australia (your ask, 2026-10-22).
 - **Station list columns.** Call, Status, Heard, Locator, Distance, Bearing, Key (the seal badge) and Services, chosen from a Columns menu and sortable by any of them, and SNR, from the host's reports (Data2G PR #98). With the map shown, the narrow list keeps locator and distance under the last-heard time.

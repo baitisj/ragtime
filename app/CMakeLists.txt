@@ -41,6 +41,7 @@ add_executable(ragtime WIN32
     src/Report.cpp
     src/SessionPage.cpp
     src/SettingsDialog.cpp
+    src/RecentWorkPane.cpp
     src/StationList.cpp
     src/Thresholds.cpp
     src/ToggleSwitch.cpp
