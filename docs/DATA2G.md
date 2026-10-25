@@ -135,7 +135,8 @@ are in `data2g/codes_data/mode_thresholds.json` (GEARBOX.md).
 - One queued while a burst is being received waits. After that it takes
   each slot with probability (P + 1)/256: P is 63 by default (25%), the
   slot at least 1 s. A client may set P (KISS command 2) and lengthen the
-  slot (KISS command 3, in 10 ms units). Ragtime sets neither today.
+  slot (KISS command 3, in 10 ms units). P is the host's, for every
+  client. Ragtime 0.1 sets neither; PR #64 sends P = 191 (75% a slot).
 - The hold follows a burst being received, from its preamble on. The
   `BUSY` the host reports is that, held only while the burst's pilots
   check out or energy is 3 dB over the noise floor.
