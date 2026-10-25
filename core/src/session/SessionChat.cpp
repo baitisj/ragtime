@@ -1032,7 +1032,11 @@ SessionChat::Strip SessionChat::strip(uint64_t nowMs, long utcOffsetS) const
                 case Ending::LinkLost:
                 {
                     uint64_t silent = sinceMs_ > lastHeardMs_ ? sinceMs_ - lastHeardMs_ : 0;
-                    if (silent >= 60000)
+                    if (silent + HOST_IDLE_EARLY_MS >= HOST_IDLE_CLOSE_MS
+                        && silent < HOST_IDLE_CLOSE_MS + HOST_IDLE_LATE_MS)
+                        s.text = "data2g-host closed the quiet session with " + peer_ + " at " + at
+                                 + ": it hangs up after 5 minutes with nothing sent either way";
+                    else if (silent >= 60000)
                         s.text = "Link lost at " + at + " after " + sessionLength(silent) + " without contact";
                     else
                         s.text = "The session with " + peer_ + " ended at " + at;

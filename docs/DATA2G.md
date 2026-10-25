@@ -154,8 +154,10 @@ are in `data2g/codes_data/mode_thresholds.json` (GEARBOX.md).
   that session.
 - The answering side takes the smaller of the two width caps.
 - **An idle session is hung up.** With no data either way for 5 minutes
-  (`IDLE_CLOSE_S`), the host disconnects on its own. Ragtime shows that
-  as "Link lost", and a quiet ragchew ends without a Leave. While idle,
+  (`IDLE_CLOSE_S`), the host disconnects on its own, so a quiet ragchew
+  ends without a Leave. Ragtime says so ("data2g-host closed the quiet
+  session", `SessionChat::HOST_IDLE_CLOSE_MS`) rather than "Link lost".
+  Keeping it up is an ask (below). While idle,
   the caller polls every 15 to 30 s (`KEEPALIVE_S`). With nothing heard
   from the partner for 90 s (`LINK_LOST_S`) the session is lost.
 

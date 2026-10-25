@@ -244,6 +244,12 @@ keep or change:
 - **A farewell.** Leave writes a Status QRV into the session before
   `DISCONNECT`, so the far end can say "Session ended by AG7EW" rather
   than "Link lost" (`PROTOCOL.md`, "Sessions").
+- **The host's idle hang-up.** data2g-host closes a session after 5
+  minutes with nothing sent either way (`docs/DATA2G.md`, "Sessions").
+  A session that ends after about that long without data says "data2g-host
+  closed the quiet session with W1AW at 14:32: it hangs up after 5
+  minutes with nothing sent either way", not "Link lost" (Jeff's pick,
+  2026-10-25, with an ask to Andrew for a way to keep it up).
 - **The buttons follow the moment:** Cancel while calling, Leave in a
   session, Leave now once leaving (as PLAN.md describes it), and Call
   again once it has ended. All are on the Station menu too (Ctrl+K,
