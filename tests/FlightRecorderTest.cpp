@@ -146,7 +146,8 @@ void testRecordAndRead()
     recorder.setFolder("", T0 + 20);
     recorder.commandIn("OK\r", 3, T0 + 21);
     CHECK_EQ(readAll(dir / names[0]), text);
-    std::filesystem::remove_all(dir);
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
 }
 
 void testRolling()
@@ -197,7 +198,10 @@ void testRolling()
     recorder.prune(oldDayEnd + FlightRecorder::KEEP_MS);
     CHECK(!std::filesystem::exists(old));
     CHECK(std::filesystem::exists(stranger));
-    std::filesystem::remove_all(dir);
+    // Windows won't remove a file still open: close the recorder's first.
+    recorder.setFolder("", midnight + 30000);
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
 }
 
 void testUnwritableFolder()
@@ -209,7 +213,8 @@ void testUnwritableFolder()
     recorder.setFolder((dir / "flight").string(), T0);
     recorder.commandIn("OK\r", 3, T0 + 1);
     CHECK(recorder.fileNames().empty());
-    std::filesystem::remove(dir);
+    std::error_code ec;
+    std::filesystem::remove(dir, ec);
 }
 
 void testReportableSettings()
