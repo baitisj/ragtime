@@ -216,6 +216,9 @@ private:
     std::deque<Message>::iterator placeFor(const Message& m);
     void flushAcks(const std::string& mode, uint64_t nowMs);
     void logState(const Message& m);
+    // A file's bursts hold off while an addressed message waits for its Ack.
+    void holdForAck(const Message& m, uint64_t nowMs);
+    void ackHeard(uint64_t id, uint64_t nowMs);
 
     link::HostLink& link_;
     ItemsFn onItems_;
@@ -227,6 +230,7 @@ private:
     std::set<ItemKey> seen_;
     std::set<uint64_t> ackBursts_;
     std::vector<protocol::Record> acksDue_;
+    std::map<uint64_t, uint64_t> ackHolds_;         // message id: until when its Ack holds files off
     uint64_t nextId_ = 1;
     uint64_t version_ = 0;
     size_t foreign_ = 0;
