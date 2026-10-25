@@ -236,7 +236,11 @@ The bench's fake hosts are POSIX, but `wine ragtime.exe` talks to a Linux
    CI run, started by hand on its branch (no `[skip ci]`).
 2. After Jeff merges it, build from the merge commit:
    `packaging/linux/make-appimage.sh` and `packaging/windows/make-zip.sh`.
-   Files are named `Ragtime-<version>-beta-<hash>-...` (`release-name.sh`).
+   Or take the AppImage and zip from a full CI run on that commit (the
+   artifacts download from `*.blob.core.windows.net`); those jobs print
+   each file's sha256sum in the log and the run summary, so check the
+   download against it. Files are named
+   `Ragtime-<version>-beta-<hash>-...` (`release-name.sh`).
 3. Write `SHA256SUMS-<version>-beta` beside them (`sha256sum`), and
    smoke-test headless: the AppImage under Xvfb and `ragtime.exe` under
    Wine, each against `ragtime_fake_air`. Put the files in the project's
