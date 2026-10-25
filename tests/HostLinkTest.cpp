@@ -578,6 +578,63 @@ void testSnippets()
              std::string("\xe2\x80\x9c" "abc\xc3\xa9\xc3\xa9\xe2\x80\xa6\xe2\x80\x9d"));
 }
 
+void testBurstsThatYield()
+{
+    const uint64_t gap = HostLink::YIELD_GAP_MS;
+    HostLink link = opened(0);
+    // A chat line goes, and is sent at 1000.
+    uint64_t chat = link.broadcast({{0xA0, 1}}, "", 100, "hi");
+    ackTags(link, 2, tagsWritten(link, 2), 1000);
+    CHECK(link.burstState(chat) == BurstState::Sent);
+    CHECK_EQ(link.lastSentMs(), (uint64_t)1000);
+
+    // A file's bursts right behind it wait the gap, Queued and cancellable.
+    uint64_t piece = link.broadcast({{0xA0, 2}}, "", 1100, "piece 1", true);
+    uint64_t piece2 = link.broadcast({{0xA0, 3}}, "", 1100, "piece 2", true);
+    CHECK(link.takeKissOutput().empty());
+    CHECK(link.burstState(piece) == BurstState::Queued);
+
+    // A message typed meanwhile goes ahead of them, and its own Sent
+    // starts the gap again.
+    uint64_t reply = link.broadcast({{0xA0, 4}}, "", 2000, "reply");
+    std::vector<uint16_t> tags = tagsWritten(link, 2);
+    CHECK_EQ(tags.size(), (size_t)1);
+    CHECK(link.burstState(reply) == BurstState::Sending);
+    ackTags(link, 2, tags, 3000);
+    link.tick(1000 + gap);
+    CHECK(link.takeKissOutput().empty());
+    CHECK(link.burstState(piece) == BurstState::Queued);
+    link.tick(3000 + gap - 1);
+    CHECK(link.takeKissOutput().empty());
+
+    // Then the first piece, in its turn; the second waits behind it.
+    link.tick(3000 + gap);
+    std::vector<std::vector<uint8_t>> frames;
+    tags = tagsWritten(link, 2, &frames);
+    CHECK(frames == std::vector<std::vector<uint8_t>>({{0xA0, 2}}));
+    CHECK(link.burstState(piece2) == BurstState::Queued);
+    ackTags(link, 2, tags, 20000);
+    CHECK(link.burstState(piece) == BurstState::Sent);
+    CHECK(link.cancel(piece2));
+
+    // A hold keeps them waiting past the gap, and ends when lifted.
+    uint64_t piece3 = link.broadcast({{0xA0, 5}}, "", 20000, "piece 3", true);
+    link.holdYielding(40000, 20000);
+    link.tick(20000 + gap);
+    CHECK(link.takeKissOutput().empty());
+    CHECK(link.yieldHold() == 40000);
+    link.holdYielding(0, 30000);
+    tags = tagsWritten(link, 2);
+    CHECK_EQ(tags.size(), (size_t)1);
+    CHECK(link.burstState(piece3) == BurstState::Sending);
+
+    // Bursts that don't yield never wait the gap.
+    ackTags(link, 2, tags, 31000);
+    uint64_t chat2 = link.broadcast({{0xA0, 6}}, "", 31100, "hi again");
+    CHECK_EQ(tagsWritten(link, 2).size(), (size_t)1);
+    CHECK(link.burstState(chat2) == BurstState::Sending);
+}
+
 int main()
 {
     testTheOpening();
@@ -590,6 +647,7 @@ int main()
     testASessionHoldsTheGroup();
     testDroppedAndPortLost();
     testPauseSending();
+    testBurstsThatYield();
     testCallingAndLeaving();
     testCuts();
     testTheLastModeReported();

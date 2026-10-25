@@ -17,6 +17,7 @@
 #include <vector>
 
 #include "ragtime/link/Data2GLink.h"
+#include "ragtime/link/HostLink.h"
 #include "ragtime/protocol/Records.h"
 
 namespace ragtime
@@ -83,9 +84,10 @@ double burstSeconds(const std::vector<std::vector<uint8_t>>& frames, const link:
 // A file's announce goes again ahead of every this many pieces, so a
 // station that tunes in part way knows what it is hearing.
 constexpr int ANNOUNCE_EVERY_PIECES = 20;
-// A file's bursts leave the channel this long between them, so other
-// stations can get a word in.
-constexpr uint64_t FILE_BURST_GAP_MS = 3000;
+// A file's bursts and a repair round's leave the channel this long after
+// any burst of ours, so other stations can get a word in (HostLink's
+// bursts that yield).
+constexpr uint64_t FILE_BURST_GAP_MS = link::HostLink::YIELD_GAP_MS;
 // The longest a seal stays open for repairs unless the operator keeps it
 // open longer.
 constexpr uint64_t MAX_OPEN_MS = 2 * 60 * 60 * 1000;

@@ -122,6 +122,7 @@ void HostLink::kissBytes(const uint8_t* bytes, size_t length, uint64_t nowMs)
             burst->tags.erase(it);
             if (burst->tags.empty())
             {
+                lastSentMs_ = std::max<uint64_t>(nowMs, 1);
                 setBurst(*burst, BurstState::Sent);
                 bursts_.pop_front();
             }
@@ -455,7 +456,7 @@ HostLink::Burst* HostLink::current()
 }
 
 uint64_t HostLink::broadcast(const std::vector<std::vector<uint8_t>>& frames, const std::string& mode,
-                             uint64_t nowMs, const std::string& label)
+                             uint64_t nowMs, const std::string& label, bool yields)
 {
     if (frames.empty()) return 0;
     advance(nowMs);
@@ -464,6 +465,7 @@ uint64_t HostLink::broadcast(const std::vector<std::vector<uint8_t>>& frames, co
     burst.frames = frames;
     burst.mode = mode;
     burst.label = label;
+    burst.yields = yields;
     Event e;
     e.type = Event::Type::Burst;
     e.id = burst.id;
@@ -524,6 +526,12 @@ std::vector<HostLink::Outgoing> HostLink::outgoing() const
     return out;
 }
 
+void HostLink::holdYielding(uint64_t untilMs, uint64_t nowMs)
+{
+    yieldHoldMs_ = untilMs;
+    pump(nowMs);
+}
+
 void HostLink::setPaused(bool paused, uint64_t nowMs)
 {
     advance(nowMs);
@@ -560,12 +568,30 @@ void HostLink::writeBurst(Burst& burst)
     setBurst(burst, session_ == SessionState::None ? BurstState::Sending : BurstState::Held);
 }
 
+bool HostLink::mayGo(const Burst& burst, uint64_t nowMs) const
+{
+    if (!burst.yields) return true;
+    if (lastSentMs_ != 0 && nowMs < lastSentMs_ + YIELD_GAP_MS) return false;
+    return nowMs >= yieldHoldMs_;
+}
+
 // Hands the host the next burst, once it has none of ours.
 void HostLink::pump(uint64_t nowMs)
 {
     Burst* burst = current();
     if (burst == nullptr || burst->state != BurstState::Queued || modeAsked_) return;
     if (!commandUp_ || groupPort_ < 0 || paused_) return;
+    if (!mayGo(*burst, nowMs))
+    {
+        // A burst that doesn't yield goes ahead of those waiting, which
+        // keep their order.
+        auto next = std::find_if(bursts_.begin(), bursts_.end(), [](const Burst& b) { return !b.yields; });
+        if (next == bursts_.end()) return;
+        Burst ahead = std::move(*next);
+        bursts_.erase(next);
+        bursts_.push_front(std::move(ahead));
+        burst = current();
+    }
     if (!burst->mode.empty() && burst->mode != groupMode_)
     {
         // The answer must be the mode's, so ask once the host has answered

@@ -4,6 +4,7 @@
 #include <string>
 #include <utility>
 
+#include "ragtime/broadcast/Airtime.h"
 #include "ragtime/broadcast/BroadcastLog.h"
 
 namespace ragtime
@@ -445,6 +446,7 @@ std::vector<protocol::Record> BroadcastChat::onEvent(const Event& event, uint64_
                 State state = fromBurst(event.burstState);
                 if (state == m.state) continue;
                 m.state = state;
+                if (state == State::Sent && m.ackWanted) holdForAck(m, nowMs);
                 logState(m);
                 version_++;
             }
@@ -521,6 +523,7 @@ void BroadcastChat::onRecord(const protocol::Record& record, uint64_t nowMs)
             if (m.ours && !m.past && m.to == from && m.seq == ack->item && m.state != State::Acknowledged)
             {
                 m.state = State::Acknowledged;
+                ackHeard(m.id, nowMs);
                 logState(m);
                 version_++;
             }
@@ -553,6 +556,40 @@ void BroadcastChat::flushAcks(const std::string& mode, uint64_t nowMs)
                  frames.end());
     uint64_t id = link_.broadcast(frames, mode, nowMs, label);
     if (id != 0) ackBursts_.insert(id);
+}
+
+// Its Ack goes as soon as the station decodes it, in a burst of one
+// codeword or so: a listening window's worth (docs/PLAN.md, "Windows in
+// Data2G terms") lets it in before a file's next burst. A mode we can't
+// time holds nothing beyond the usual gap.
+void BroadcastChat::holdForAck(const Message& m, uint64_t nowMs)
+{
+    link::ModeInfo info = findMode(link_.modes(), m.mode, link_.groupMode());
+    if (!info.valid()) return;
+    ackHolds_[m.id] = nowMs + listeningWindowMs(info);
+    uint64_t until = 0;
+    for (auto it = ackHolds_.begin(); it != ackHolds_.end();)
+    {
+        if (it->second <= nowMs)
+        {
+            it = ackHolds_.erase(it);
+            continue;
+        }
+        until = std::max(until, it->second);
+        ++it;
+    }
+    link_.holdYielding(until, nowMs);
+}
+
+void BroadcastChat::ackHeard(uint64_t id, uint64_t nowMs)
+{
+    if (ackHolds_.erase(id) == 0) return;
+    uint64_t until = 0;
+    for (const auto& h : ackHolds_)
+    {
+        if (h.second > nowMs) until = std::max(until, h.second);
+    }
+    link_.holdYielding(until, nowMs);
 }
 
 void BroadcastChat::setLog(BroadcastLog* log, uint64_t nowMs)

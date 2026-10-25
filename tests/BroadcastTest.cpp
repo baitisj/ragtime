@@ -635,12 +635,54 @@ void testReconnect()
 
 } // namespace
 
+// An addressed message holds a file's bursts off for its Ack: until the
+// Ack comes, or a listening window in its mode has passed.
+void testAnAckHoldsFilesOff()
+{
+    End a("TEST1", "CN87"), b("TEST2", "FN31");
+    a.link.commandUp(now);
+    b.link.commandUp(now);
+    settle(a, b);
+    CHECK_EQ(a.link.yieldHold(), (uint64_t)0);
+
+    // Acknowledged: the hold is lifted.
+    b.hold = true;
+    std::vector<uint64_t> ids = a.chat.send("@test2 are you there?", "", now);
+    settle(a, b, 2);
+    CHECK(a.chat.find(ids[0])->state == State::Sent);
+    uint64_t sentAt = a.link.lastSentMs();
+    CHECK(sentAt != 0);
+    CHECK(a.link.yieldHold() > sentAt);
+    // A file's burst waits for it.
+    uint64_t piece = a.link.broadcast({{0xA0, 1}}, "", now, "piece", true);
+    settle(a, b, 2);
+    CHECK(a.link.burstState(piece) == HostLink::BurstState::Queued);
+    b.hold = false;
+    settle(a, b);
+    CHECK(a.chat.find(ids[0])->state == State::Acknowledged);
+    CHECK_EQ(a.link.yieldHold(), (uint64_t)0);
+
+    // No Ack: the hold runs out by itself, a listening window after.
+    ids = a.chat.send("@W1AW hello", "", now);
+    settle(a, b, 2);
+    CHECK(a.chat.find(ids[0])->state == State::Sent);
+    uint64_t window = a.link.yieldHold() - a.link.lastSentMs();
+    CHECK(window >= 4000 && window <= 20000);
+
+    // A message for nobody holds nothing.
+    a.link.holdYielding(0, now);
+    a.chat.send("cq cq", "", now);
+    settle(a, b, 2);
+    CHECK_EQ(a.link.yieldHold(), (uint64_t)0);
+}
+
 int main()
 {
     testAddressee();
     testPhrasesTyped();
     testMessageBothWays();
     testAddressedAndAcknowledged();
+    testAnAckHoldsFilesOff();
     testLongMessageSplits();
     testPauseCancelResend();
     testDuplicateFrame();

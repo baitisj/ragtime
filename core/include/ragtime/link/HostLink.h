@@ -132,6 +132,12 @@ public:
     static constexpr uint64_t ABORT_WAIT_MS = 15 * 1000;
     // SN is asked at most this often.
     static constexpr uint64_t SN_GAP_MS = 5 * 1000;
+    // A burst that yields (a file's pieces, a repair round) waits this long
+    // after our last burst went, of any kind, so another station can answer
+    // it. Counted from the host's Sent, about half a second before PTT OFF;
+    // the far end's reply is seen here only once its header decodes, about
+    // a second after it keys.
+    static constexpr uint64_t YIELD_GAP_MS = 4000;
 
     explicit HostLink(Settings settings);
 
@@ -174,9 +180,12 @@ public:
     // Queues a burst of frames for the D2G group, in mode (empty: the
     // group's mode as it stands). Returns its id; 0 for no frames. The
     // label says what it is, for the status bar: "seal", "QRV", or the
-    // start of a message (snippet()).
+    // start of a message (snippet()). A burst that yields waits YIELD_GAP_MS
+    // after our last burst was sent, and while a yield hold runs; bursts
+    // that don't yield go ahead of it, and those that do keep their order.
+    // It is Queued while it waits.
     uint64_t broadcast(const std::vector<std::vector<uint8_t>>& frames, const std::string& mode, uint64_t nowMs,
-                       const std::string& label = std::string());
+                       const std::string& label = std::string(), bool yields = false);
     // Drops a burst still queued; false once the host has it.
     bool cancel(uint64_t id);
     BurstState burstState(uint64_t id) const;
@@ -193,6 +202,13 @@ public:
         size_t frames = 0;
     };
     std::vector<Outgoing> outgoing() const;
+
+    // Bursts that yield wait until untilMs too (0: no hold): an addressed
+    // message waits for its Ack. Replaces the hold before it.
+    void holdYielding(uint64_t untilMs, uint64_t nowMs);
+    uint64_t yieldHold() const { return yieldHoldMs_; }
+    // When our last burst was sent (0: none yet).
+    uint64_t lastSentMs() const { return lastSentMs_; }
 
     // Pause sending: queued bursts stay queued. One the host has goes on.
     void setPaused(bool paused, uint64_t nowMs);
@@ -254,6 +270,7 @@ private:
         BurstState state = BurstState::Queued;
         std::vector<uint16_t> tags;     // written, not yet acknowledged
         uint64_t unsentMs = 0;          // time with the host, no session up
+        bool yields = false;
     };
 
     void advance(uint64_t nowMs);
@@ -261,6 +278,7 @@ private:
     void onLine(const std::string& line, uint64_t nowMs);
     void answered(bool ok, uint64_t nowMs);
     void pump(uint64_t nowMs);
+    bool mayGo(const Burst& burst, uint64_t nowMs) const;
     void writeBurst(Burst& burst);
     void setBurst(Burst& burst, BurstState state);
     void finishSession(SessionEnd end);
@@ -303,6 +321,8 @@ private:
     uint16_t nextTag_ = 1;
     bool paused_ = false;
     uint64_t lastMs_ = 0;
+    uint64_t lastSentMs_ = 0;           // our last burst Sent
+    uint64_t yieldHoldMs_ = 0;          // yielding bursts wait until then
 
     SessionState session_ = SessionState::None;
     std::string peer_;

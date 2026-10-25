@@ -702,10 +702,22 @@ two.
 - A file is at most 300 KB. Its pieces fill a frame: three codewords in
   the FSK modes, otherwise as much as the 255-byte frame takes, with the
   sender's callsign in each piece's header.
-- The first pass goes one burst at a time with 3 s between bursts, so
-  others can get a word in: the announce, then the pieces, with the
-  announce again ahead of every 20 pieces. A burst Not sent goes once
-  more. The operator sees the estimate (pieces, airtime, when repairs end
+- The first pass goes one burst at a time, so others can get a word
+  in: the announce, then the pieces, with the announce again ahead of
+  every 20 pieces. A burst Not sent goes once more.
+- **Room to answer.** A file's burst (and a repair round's) yields: it
+  goes no sooner than 4 s after any burst of ours was sent, a chat line
+  included, while our own messages may go ahead of it. 4 s is counted
+  from the host's Sent, about half a second before its PTT goes off; a
+  station answering at once keys about a second in, and its header
+  decodes here about a second after that, which holds our next burst.
+  After a message addressed to a station, which asks for its Ack, a
+  file's bursts also wait until the Ack is heard or a listening window
+  in the message's mode has passed (3 one-codeword bursts and 4 s). An
+  Ack goes as soon as the station decodes the message; a reply typed
+  while our burst was on air waits in data2g-host's own
+  p-persistent slots after it (KISS P and SLOTTIME), so it can still
+  meet our next burst. The operator sees the estimate (pieces, airtime, when repairs end
   at the latest) before it goes; Ragtime refuses a file that would take
   over 2 hours of airtime and warns over 15 minutes.
 - **Stopping a share** ends its first pass, not its repairs. What went is
