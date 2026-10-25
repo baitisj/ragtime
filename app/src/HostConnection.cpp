@@ -138,6 +138,7 @@ void HostConnection::closeData()
     data_.up = false;
     data_.out.clear();
     dataRetryMs_ = nowMs() + DATA_RETRY_MS;
+    if (wasUp) recorder_.dataUp(false, nowMs());
     if (wasUp && dataSide_.up) dataSide_.up(false);
 }
 
@@ -156,7 +157,11 @@ void HostConnection::closeBoth(const std::string& why)
         port->out.clear();
     }
     closeData();
-    if (wasUp) link_.commandDown(nowMs());
+    if (wasUp)
+    {
+        recorder_.down(why.empty() ? "closed by Ragtime" : why, nowMs());
+        link_.commandDown(nowMs());
+    }
     if (!why.empty())
     {
         error_ = why;
@@ -175,6 +180,7 @@ void HostConnection::onSocket(wxSocketEvent& event)
         {
             case wxSOCKET_CONNECTION:
                 data_.up = true;
+                recorder_.dataUp(true, nowMs());
                 if (dataSide_.up) dataSide_.up(true);
                 break;
             case wxSOCKET_INPUT:
@@ -185,6 +191,7 @@ void HostConnection::onSocket(wxSocketEvent& event)
                     data_.socket->Read(buffer, sizeof buffer);
                     size_t n = data_.socket->LastReadCount();
                     if (n == 0) break;
+                    recorder_.dataIn(n, nowMs());
                     if (dataSide_.bytes) dataSide_.bytes((const uint8_t*)buffer, n);
                     if (data_.socket == nullptr) return;
                 }
@@ -216,6 +223,8 @@ void HostConnection::onSocket(wxSocketEvent& event)
                 state_ = State::Connected;
                 reconnect_.connected();
                 error_.clear();
+                recorder_.up(host_ + " KISS " + std::to_string(kissPort_) + " commands " + std::to_string(commandPort_),
+                             nowMs());
                 link_.commandUp(nowMs());
             }
             break;
@@ -243,9 +252,15 @@ void HostConnection::read(Port& port, bool command)
         size_t n = port.socket->LastReadCount();
         if (n == 0) break;
         if (command)
+        {
+            recorder_.commandIn(buffer, n, nowMs());
             link_.commandBytes(buffer, n, nowMs());
+        }
         else
+        {
+            recorder_.kissIn((const uint8_t*)buffer, n, nowMs());
             link_.kissBytes((const uint8_t*)buffer, n, nowMs());
+        }
         if (port.socket == nullptr) return;
     }
 }
@@ -255,7 +270,19 @@ void HostConnection::write(Port& port)
     if (port.socket == nullptr || !port.up || port.out.empty()) return;
     port.socket->Write(port.out.data(), (wxUint32)port.out.size());
     size_t n = port.socket->LastWriteCount();
+    recordWritten(port, port.out.data(), n);
     port.out.erase(0, n);
+}
+
+void HostConnection::recordWritten(const Port& port, const char* bytes, size_t length)
+{
+    if (length == 0) return;
+    if (&port == &command_)
+        recorder_.commandOut(bytes, length, nowMs());
+    else if (&port == &kiss_)
+        recorder_.kissOut((const uint8_t*)bytes, length, nowMs());
+    else
+        recorder_.dataOut(length, nowMs());
 }
 
 void HostConnection::flush()

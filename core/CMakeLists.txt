@@ -40,6 +40,8 @@ add_library(ragtime_core STATIC
     src/session/SessionChat.cpp
     src/session/StreamLog.cpp
     src/session/SessionLog.cpp
+    # The flight recorder: the host link on disk, for reports and --replay.
+    src/link/FlightRecorder.cpp
 )
 
 target_include_directories(ragtime_core PUBLIC

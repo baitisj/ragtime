@@ -7,6 +7,7 @@
 //
 //   ragtime_fake_air [--bots N] [--airtime MS] [--call CALL] [--fade] [--rate BPS]
 //                    [--loss PCT] [--files] [--no-snr] [--no-cut]
+//   ragtime_fake_air --replay FILE|FOLDER... [--from TIME] [--speed X]
 //
 // --call CALL has the first bot that takes sessions call CALL half a
 // minute in, for an incoming session, and offer you its bulletin, a small
@@ -30,6 +31,13 @@
 // as hosts before it did. They take DATA2G ON and cut what a session holds
 // (CLEANTXBUFFER), as data2g-host does since Data2G PR #118; --no-cut plays
 // a host from before it.
+//
+// --replay plays a flight recording's host side back on host A's ports,
+// instead of the air and its bots (tests/ReplayHost.h,
+// docs/FLIGHT_RECORDER.md): a report's flight/ folder, or some of its
+// files. --from 2026-10-25T16:20 starts at that recorded time (UTC), and
+// --speed 4 plays four times as fast. It prints what it plays and what
+// the Ragtime writes.
 //
 // Host A listens on 127.0.0.1:8100 (KISS) and 8300 (commands), host B on
 // 8110 and 8310, so two Ragtimes (each with its own --config file) can talk
@@ -56,11 +64,13 @@
 #include <unistd.h>
 
 #include "FakeHost.h"
+#include "ReplayHost.h"
 #include "ragtime/broadcast/BroadcastChat.h"
 #include "ragtime/broadcast/BroadcastFiles.h"
 #include "ragtime/broadcast/Seals.h"
 #include "ragtime/files/FileTraffic.h"
 #include "ragtime/files/SessionFiles.h"
+#include "ragtime/link/FlightRecorder.h"
 #include "ragtime/link/HostLink.h"
 #include "ragtime/protocol/Records.h"
 #include "ragtime/session/SessionChat.h"
@@ -442,6 +452,49 @@ struct Bot
     int shared = 0;
 };
 
+int replay(const std::vector<std::string>& paths, ReplayHost::Options options)
+{
+    std::vector<link::FlightLine> recording;
+    std::string why;
+    if (!loadRecording(paths, recording, why))
+    {
+        std::fprintf(stderr, "ragtime_fake_air: %s\n", why.c_str());
+        return 1;
+    }
+    std::unique_ptr<ReplayHost> host;
+    try
+    {
+        host = std::make_unique<ReplayHost>(recording, options, 8100, 8300);
+    }
+    catch (const std::exception& e)
+    {
+        std::fprintf(stderr, "ragtime_fake_air: %s (is another bench or data2g-host running?)\n", e.what());
+        return 1;
+    }
+    host->onLog = [](const std::string& line) {
+        std::printf("%s\n", line.c_str());
+        std::fflush(stdout);
+    };
+    std::signal(SIGINT, [](int) { stopping = 1; });
+    std::signal(SIGTERM, [](int) { stopping = 1; });
+    std::printf("Replaying %zu recorded connection%s on 127.0.0.1: KISS 8100, commands 8300, session data 8301,\n"
+                "at %g times the recorded speed. Point a Ragtime at it; Ctrl-C to stop.\n",
+                host->connections(), host->connections() == 1 ? "" : "s", options.speed);
+    std::fflush(stdout);
+    bool told = false;
+    while (!stopping)
+    {
+        host->step(50);
+        if (host->finished() && !told)
+        {
+            std::printf("Replay done: every recorded connection has played.\n");
+            std::fflush(stdout);
+            told = true;
+        }
+    }
+    return 0;
+}
+
 } // namespace
 
 int main(int argc, char** argv)
@@ -455,6 +508,8 @@ int main(int argc, char** argv)
     int rate = 400;
     bool snr = true;
     bool cuts = true;
+    std::vector<std::string> replayPaths;
+    ReplayHost::Options replayOptions;
     for (int i = 1; i < argc; i++)
     {
         if (std::strcmp(argv[i], "--bots") == 0 && i + 1 < argc)
@@ -475,13 +530,25 @@ int main(int argc, char** argv)
             snr = false;
         else if (std::strcmp(argv[i], "--no-cut") == 0)
             cuts = false;
+        else if (std::strcmp(argv[i], "--replay") == 0 && i + 1 < argc)
+        {
+            while (i + 1 < argc && argv[i + 1][0] != '-') replayPaths.push_back(argv[++i]);
+        }
+        else if (std::strcmp(argv[i], "--from") == 0 && i + 1 < argc
+                 && link::parseFlightTime(argv[i + 1], replayOptions.fromMs))
+            i++;
+        else if (std::strcmp(argv[i], "--speed") == 0 && i + 1 < argc && std::atof(argv[i + 1]) > 0)
+            replayOptions.speed = std::atof(argv[++i]);
         else
         {
             std::fprintf(stderr, "usage: ragtime_fake_air [--bots N] [--airtime MS] [--call CALL] [--fade] "
-                                 "[--rate BPS] [--loss PCT] [--files] [--no-snr] [--no-cut]\n");
+                                 "[--rate BPS] [--loss PCT] [--files] [--no-snr] [--no-cut]\n"
+                                 "       ragtime_fake_air --replay FILE|FOLDER... [--from 2026-10-25T16:20] "
+                                 "[--speed X]\n");
             return 2;
         }
     }
+    if (!replayPaths.empty()) return replay(replayPaths, replayOptions);
     const int maxBots = (int)(sizeof(PROFILES) / sizeof(PROFILES[0]));
     if (bots < 0) bots = 0;
     if (bots > maxBots) bots = maxBots;
