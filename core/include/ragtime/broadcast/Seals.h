@@ -50,7 +50,13 @@
 // what is left. ItemParity heard rebuilds the lines it covers once enough
 // of it is here (takeRebuilt). A refusal heard stops asking for what it
 // names. A file's pieces are asked for only while the operator receives
-// it (BroadcastFiles says which).
+// it (BroadcastFiles says which). A file heard with no seal over it
+// SEAL_LATE_MS after the last of it came lost every copy of its seal: a
+// request under seal 0 names the file, and the sender sends the seal over
+// it again (or refuses), so the asking can start. Likewise a listener
+// that still lacks something under a seal, with nothing heard from its
+// sender and no request since for SEAL_LATE_MS, lost the seal that ended
+// the last round: it asks again without it.
 //
 // No sockets and no clock: HostLink is the socket-free one the app feeds,
 // the time is passed in, and the randomness is seeded.
@@ -155,6 +161,12 @@ public:
     static constexpr double SLOW_RESEND_SECONDS = 5 * 60;
     // The same refusal goes at most once in this long.
     static constexpr uint64_t REFUSE_EVERY_MS = 10 * 60 * 1000;
+    // A file heard with no seal over it this long after the last of it
+    // came: every copy of its seal was lost, so ask for it by the file.
+    static constexpr uint64_t SEAL_LATE_MS = 3 * 60 * 1000;
+    // Asking for it goes on longer than under a seal heard: a request and
+    // a short seal are cheap, and each copy of the seal may be lost too.
+    static constexpr int MAX_SEAL_OVER_ASKS = 10;
 
     Seals(link::HostLink& link, BroadcastChat& chat);
 
@@ -385,6 +397,7 @@ private:
     const OurItem* findItem(uint32_t seq) const;
     void sealIfDue(uint64_t nowMs);
     void onRequest(const std::string& from, const protocol::RepairRequest& request, uint64_t nowMs);
+    void onSealOver(const std::string& from, const protocol::RepairRequest& request, uint64_t nowMs);
     bool ours(uint16_t number) const;
     void refuse(uint16_t seal, protocol::RefusalReason reason, uint32_t file, const std::string& mode,
                 uint64_t nowMs);
@@ -424,6 +437,7 @@ private:
         double itemLoss = -1.0;
         uint32_t itemsAsked = 0;    // repair symbols asked for last, by us or a request speaking for ours
         uint32_t came = 0;          // its items and ItemParity heard since
+        uint64_t askedMs = 0;       // we last asked under it, or a request spoke for ours
     };
 
     // What one request asks for, or what we lack, under one seal: the
@@ -478,6 +492,10 @@ private:
         // announce itself may be what was lost.
         std::map<uint32_t, uint64_t> piecesOf;
         std::map<ParityKey, ParityBatch> parity;
+        // Requests for the seal over a file (by its announce's number)
+        // never heard: how many, and when the last went.
+        std::map<uint32_t, std::pair<int, uint64_t>> sealOverAsks;
+        uint64_t lastHeardMs = 0;   // anything of its came then
     };
 
     std::vector<Lack> lacks(const std::string& call, const Station& station, uint64_t nowMs) const;
@@ -534,6 +552,7 @@ private:
     std::deque<std::pair<std::string, uint32_t>> theirOrder_;
     std::set<uint32_t> roundItems_;         // ours, in the repair round going now
     uint64_t forgotMs_ = 0;
+    uint64_t lateCheckMs_ = 0;              // files with no seal were last looked for then
 
     size_t requestsSent_ = 0;
     size_t requestsHeld_ = 0;

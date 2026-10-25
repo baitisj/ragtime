@@ -478,8 +478,52 @@ void Seals::sealIfDue(uint64_t nowMs)
     version_++;
 }
 
+void Seals::onSealOver(const std::string& from, const protocol::RepairRequest& request, uint64_t nowMs)
+{
+    // Seal 0: the asker heard these files and none of the seals over
+    // them. Each seal goes again; one we can't send is refused.
+    for (const auto& file : request.files)
+    {
+        uint32_t seq = file.first;
+        const OurSeal* found = sealFor(seq);
+        if (found == nullptr)
+        {
+            // Not sealed yet (its first pass is still going, or its seal
+            // is about to go): the seal comes anyway. Gone: refused.
+            const OurItem* item = findItem(seq);
+            if (item == nullptr && !callsign_.empty())
+                refuse(0, protocol::RefusalReason::NotHeld, seq, repairMode(request.snr, mode_), nowMs);
+            continue;
+        }
+        OurSeal* s = findSeal(found->number);
+        if (!s->sent) continue;
+        std::string mode = repairMode(request.snr, s->mode);
+        if (!open(*s, nowMs))
+        {
+            auto reason = !s->closed ? protocol::RefusalReason::Closed
+                          : files_ != nullptr && files_->stopped(seq) ? protocol::RefusalReason::Cancelled
+                                                                       : protocol::RefusalReason::StoppedSharing;
+            // Naming the file: the asker doesn't hold the seal.
+            refuse(s->number, reason, seq, mode, nowMs);
+            continue;
+        }
+        Asked& a = asked_[s->number];
+        a.sealMode = a.seal ? slower(a.sealMode, mode) : mode;
+        a.seal = true;
+        s->askers[from] = nowMs;
+        s->asks++;
+        openWindow(s->mode, nowMs);
+        version_++;
+    }
+}
+
 void Seals::onRequest(const std::string& from, const protocol::RepairRequest& request, uint64_t nowMs)
 {
+    if (request.seal == 0)
+    {
+        onSealOver(from, request, nowMs);
+        return;
+    }
     OurSeal* s = findSeal(request.seal);
     if (s == nullptr)
     {
@@ -946,6 +990,8 @@ void Seals::onRecord(const protocol::Record& record, uint64_t nowMs)
 {
     const std::string& from = record.header.callsign;
     if (from.empty() || from == callsign_) return;
+    // Their own sending, not repair talk about others'.
+    if (record.as<protocol::RepairRequest>() == nullptr) stations_[from].lastHeardMs = nowMs;
 
     if (record.as<protocol::Seal>() != nullptr)
     {
@@ -1014,6 +1060,27 @@ void Seals::tick(uint64_t nowMs)
         version_++;
     }
     sealIfDue(nowMs);
+    if (nowMs >= lateCheckMs_ + FORGET_EVERY_MS)
+    {
+        // Files whose seals were all lost: a request soon.
+        lateCheckMs_ = nowMs;
+        for (auto& entry : stations_)
+        {
+            Station& station = entry.second;
+            if (station.askAtMs != 0 || (station.piecesOf.empty() && station.items.empty())) continue;
+            std::vector<Lack> lacking = lacks(entry.first, station, nowMs);
+            // Lacking under a seal, with the station and us quiet since:
+            // the seal that ended the last round was lost.
+            bool late = std::any_of(lacking.begin(), lacking.end(), [&](const Lack& l) {
+                if (l.seal == 0) return true;
+                auto heard = station.seals.find(l.seal);
+                if (heard == station.seals.end() || heard->second.digest != l.sealDigest) return false;
+                uint64_t last = std::max({heard->second.heardMs, heard->second.askedMs, station.lastHeardMs});
+                return nowMs >= last + SEAL_LATE_MS;
+            });
+            if (late) armAsk(entry.first, station, LATE_SPREAD_MS, nowMs);
+        }
+    }
     for (auto& entry : stations_)
     {
         if (entry.second.askAtMs != 0 && nowMs >= entry.second.askAtMs) ask(entry.first, entry.second, nowMs);
@@ -1144,6 +1211,42 @@ std::vector<Seals::Lack> Seals::lacks(const std::string& call, const Station& st
         out.push_back(lack);
         listed.insert(number);
     }
+
+    // Files heard with no seal over them, long after the last of them
+    // came: every copy of the seal was lost. One request under seal 0
+    // names them all.
+    std::map<uint32_t, uint64_t> heardFiles = station.piecesOf;
+    for (const auto& item : station.items)
+    {
+        if (item.second.type != (uint8_t)protocol::RecordType::FileAnnounce) continue;
+        uint64_t& last = heardFiles[item.first];
+        last = std::max(last, item.second.heardMs);
+    }
+    Lack late;
+    late.wantSeal = true;
+    auto refusedLate = station.refused.find(0);
+    for (const auto& file : heardFiles)
+    {
+        uint32_t seq = file.first;
+        if (nowMs < file.second + SEAL_LATE_MS) continue;
+        bool sealed = std::any_of(station.seals.begin(), station.seals.end(),
+                                  [seq](const auto& seal) { return covers(seal.second.seal, seq); });
+        if (sealed) continue;
+        if (refusedLate != station.refused.end() && refusedLate->second.files.count(seq) != 0) continue;
+        auto asks = station.sealOverAsks.find(seq);
+        if (asks != station.sealOverAsks.end()
+            && (asks->second.first >= MAX_SEAL_OVER_ASKS || nowMs < asks->second.second + SEAL_LATE_MS))
+            continue;
+        // Its announce held: only while the operator receives it. Not
+        // held, the announce is lost too, and the seal brings it.
+        auto announce = station.items.find(seq);
+        uint32_t need = 0, want = 0;
+        bool announced = announce != station.items.end()
+                         && announce->second.type == (uint8_t)protocol::RecordType::FileAnnounce;
+        if (announced && (files_ == nullptr || !files_->wanted(call, seq, need, want))) continue;
+        late.files[seq] = FileLack();
+    }
+    if (!late.files.empty()) out.push_back(late);
     return out;
 }
 
@@ -1269,12 +1372,28 @@ void Seals::ask(const std::string& call, Station& station, uint64_t nowMs)
                 }
             }
         }
+        // Asking for the seal over files: once a SEAL_LATE_MS, at most
+        // MAX_SEAL_OVER_ASKS times, whoever asks.
+        if (lack.seal == 0)
+        {
+            for (const auto& file : filesComing) station.sealOverAsks[file.first].second = nowMs;
+            for (const auto& file : lack.files)
+            {
+                auto& asks = station.sealOverAsks[file.first];
+                asks.first++;
+                asks.second = nowMs;
+            }
+        }
         auto heard = station.seals.find(lack.seal);
         bool heardIt = heard != station.seals.end() && heard->second.digest == lack.sealDigest && !zero(lack.sealDigest);
-        if (heardIt) heard->second.itemsAsked = itemsComing;
+        if (heardIt)
+        {
+            heard->second.itemsAsked = itemsComing;
+            heard->second.askedMs = nowMs;
+        }
         for (const auto& file : filesComing)
         {
-            if (files_ != nullptr) files_->asked(call, file.first, file.second);
+            if (files_ != nullptr && lack.seal != 0) files_->asked(call, file.first, file.second);
         }
         if (!lack.any())
         {
@@ -1296,7 +1415,7 @@ void Seals::ask(const std::string& call, Station& station, uint64_t nowMs)
             h.lackWhenAsked = lack.size();
             if (lack.itemsWant != 0) h.itemsAsked = lack.itemsWant;
         }
-        else
+        else if (lack.seal != 0)
         {
             station.sealAsks[lack.seal]++;
         }
@@ -1321,7 +1440,7 @@ void Seals::ask(const std::string& call, Station& station, uint64_t nowMs)
             if (r->files.empty()) break;
             r->files.pop_back();
         }
-        if (files_ != nullptr)
+        if (files_ != nullptr && lack.seal != 0)
         {
             for (const auto& file : record.as<protocol::RepairRequest>()->files)
                 files_->asked(call, file.first, file.second);
@@ -1671,12 +1790,19 @@ void Seals::forget(uint64_t nowMs)
     forgotMs_ = nowMs;
     for (auto station = stations_.begin(); station != stations_.end();)
     {
-        auto& items = station->second.items;
-        for (auto it = items.begin(); it != items.end();)
-            it = nowMs >= it->second.heardMs + MAX_OPEN_MS ? items.erase(it) : std::next(it);
         auto& seals = station->second.seals;
         for (auto it = seals.begin(); it != seals.end();)
             it = nowMs >= it->second.heardMs + MAX_OPEN_MS ? seals.erase(it) : std::next(it);
+        // An item is kept while a seal over it is, or we would seem to
+        // lack it.
+        auto& items = station->second.items;
+        for (auto it = items.begin(); it != items.end();)
+        {
+            uint32_t seq = it->first;
+            bool sealed = std::any_of(seals.begin(), seals.end(),
+                                      [seq](const auto& seal) { return covers(seal.second.seal, seq); });
+            it = !sealed && nowMs >= it->second.heardMs + MAX_OPEN_MS ? items.erase(it) : std::next(it);
+        }
         auto& pieces = station->second.piecesOf;
         for (auto it = pieces.begin(); it != pieces.end();)
             it = nowMs >= it->second + MAX_OPEN_MS ? pieces.erase(it) : std::next(it);
@@ -1685,6 +1811,9 @@ void Seals::forget(uint64_t nowMs)
         auto& refused = station->second.refused;
         for (auto it = refused.begin(); it != refused.end();)
             it = nowMs >= it->second.heardMs + MAX_OPEN_MS ? refused.erase(it) : std::next(it);
+        auto& sealOver = station->second.sealOverAsks;
+        for (auto it = sealOver.begin(); it != sealOver.end();)
+            it = nowMs >= it->second.second + MAX_OPEN_MS ? sealOver.erase(it) : std::next(it);
         auto& parity = station->second.parity;
         for (auto it = parity.begin(); it != parity.end();)
             it = nowMs >= it->second.heardMs + MAX_OPEN_MS ? parity.erase(it) : std::next(it);
