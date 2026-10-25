@@ -122,7 +122,7 @@ The chain does two jobs:
 When a seal arrives, each listener compares the list with what it holds.
 For every listed line it either has (with the same fingerprint), lacks,
 or holds a copy of that doesn't match. For a file it is receiving, it
-works out which pieces it lacks.
+works out how many pieces it lacks.
 
 ![A repair round: the seal goes, a listener asks for a lost line, another stays quiet, the line goes again](images/how-seals-work/repair-round.svg)
 
@@ -132,16 +132,17 @@ works out which pieces it lacks.
    `fsk16r25-r1/3`.
 2. **A listener that lacks something waits a random moment** within the
    window, then sends one short *repair request* naming the seal and,
-   one bit per line, what it lacks, plus a list of the file pieces it
-   lacks. The request also says how well the listener hears the sender
-   (below).
+   one bit per line, what it lacks, and for each file how many repair
+   pieces it wants: a count, not a list. It asks for more than it lacks,
+   allowing for what it expects to lose (below). The request also says
+   how well the listener hears the sender (below too).
 3. **Others keep quiet when they can.** A listener that hears someone
-   else ask for the same lines takes those off its own list, as long as
-   that station hears the sender no better than it does. If nothing is
-   left, it never transmits. On a busy net one request usually speaks
-   for many.
-4. **The sender sends it all again, once.** At the window's end it
-   resends everything that was asked for, by anyone, in order, each line
+   else ask for at least as much as it lacks keeps quiet about it, as
+   long as that station hears the sender no better than it does. If
+   nothing is left, it never transmits. On a busy net one request
+   usually speaks for many.
+4. **The sender answers once, with parity.** At the window's end it
+   sends as many repair pieces as the neediest listener asked for, each
    in a gear the stations that asked for it can copy, then the seal
    again. That opens another window.
 5. **A quiet window ends it.** A seal over a file goes up to twice
@@ -151,6 +152,88 @@ works out which pieces it lacks.
 A listener that has asked five times under a seal and got nothing stops
 asking, and the file shows as incomplete. *Ask again* on the file starts
 afresh, as long as the seal is under 2 hours old.
+
+### Parity: one repair piece fills many gaps
+
+Ragtime 0.1 repaired the plain way: every piece anyone lacked went
+again. On Jeff's nets that was the wrong shape. With stations spread
+across the US on one band, someone is always the "loser", dropping half
+or more of every burst, and the gaps of five stations are five
+different sets. Sending them all again sends most pieces to stations
+that already hold them, and the loser loses half of the repairs too, so
+it asks again, and again.
+
+![Three listeners each lost a different piece; sending the pieces again takes three, one parity piece fills all three gaps](images/how-seals-work/parity.svg)
+
+A **parity piece** is a weighted sum of all the file's pieces. Think of
+the file's pieces as unknowns, #1 to #6. A parity piece is one equation
+in them:
+
+  P = c1·#1 + c2·#2 + c3·#3 + c4·#4 + c5·#5 + c6·#6
+
+A station holding five pieces knows five of the six terms, so one
+equation gives it the sixth. A station missing two needs two equations,
+but *any* two will do, provided the weights are chosen well. Ragtime's
+weights come from a Cauchy matrix, c = 1 / (x + y), where y names the
+piece and x names the parity piece. With them, any set of equations is
+solvable: every square block of a Cauchy matrix can be inverted.
+
+That is the whole trick. Every parity piece is useful to every station
+that lacks anything, whichever pieces it lacks. So the sender doesn't
+add up the gaps. It sends what the neediest station asked for, and
+every other station takes what it needs from the same pieces.
+
+The arithmetic isn't ordinary arithmetic, which would overflow and
+round. It is done in GF(2^16), the "Galois field" of 16-bit numbers. In
+it, adding is XOR, multiplying is done with a table of logarithms, and
+every number but 0 can be divided by. So a piece is read as a row of
+16-bit numbers, and each number is summed separately. This is the
+Reed-Solomon code of CDs and QR codes, in the Cauchy form used by
+storage systems for lost disks. We use it for *erasures*: Data2G's own
+coding already tells a station which pieces it lost, so it never has to
+find them, only fill them.
+
+**Asking for enough.** A station that lacks n pieces and loses a share p
+of what it hears asks for
+
+  want = (n + √(n·p/(1−p))) / (1−p)
+
+The n/(1−p) part is what it expects to need: lacking 10 and losing half,
+it needs about 20 sent to catch 10. The square-root part is about one
+standard deviation more, for bad luck. Together they fill every gap in
+one round about nine times in ten. A station judges p from the first
+pass (the share of the file it lost since the first piece it heard),
+then from each round (the share of the parity it asked for that didn't
+come). Below 0.75 that sum stays modest; at 0.75 it is held, so a
+station that hears nothing doesn't ask for the moon.
+
+**Chat lines** are repaired the same way, with ItemParity records over
+the lines a station asked for: each line's record is a symbol, padded
+to the longest. When every station that asked lacks only a few of
+several lines, a few ItemParity records cost less than the lines.
+When the wants add up to the lines or more, the lines themselves go
+first, with parity after them for the losses. A line rebuilt from
+parity must match the seal's fingerprint, and then shows as if heard.
+
+**What it bought,** in Ragtime's own simulator: a 6 KB file (29
+pieces) to five stations, losing what the table says of every record,
+ten runs of each. "Finished" is within three hours; the minutes are
+for the runs that finished.
+
+| Path | 0.1: rounds, finished, minutes | Parity: rounds, finished, minutes |
+| --- | --- | --- |
+| all five losing 10% | 2.0, 10 of 10, 2 | 1.0, 10 of 10, 1 |
+| three at 50%, two at 20% | 9.9, 5 of 10, 4 | 1.9, 9 of 10, 2 |
+| two at 60%, three at 10% | 4.8, 0 of 10, – | 1.8, 8 of 10, 2 |
+
+A 30 KB file with two stations at 60% took 9.5 rounds under 0.1 and
+finished once in ten runs; with parity, 1.5 rounds and 2 minutes, every
+time. The runs that still don't finish are stations that missed every
+copy of the seal, so never knew to ask (below). Sealed chat, twelve
+lines to three stations each losing half: 5.3 rounds and 17 minutes
+under 0.1 (one run in ten unfinished), 1.3 rounds and 2 minutes with
+parity. Parity sends somewhat more repair records in that case (33
+against 25), the price of asking for enough the first time.
 
 ### Which gear a repair goes in
 
@@ -166,8 +249,6 @@ the listener's data2g-host measured it.
   nearest it can get to the bottom of the fade.
 - **It costs nothing on the air.** It rides in seven spare bits of a
   byte the request already had, in half-dB steps from −24 to +39 dB.
-  Ragtime 0.1 sent those bits as zero and ignores them, so 0.1 and later
-  versions still work together; a 0.1 request simply says "no figure".
 - **The sender picks the gear,** with the same sum the gearshift's Auto
   uses: the fastest gear on its own ladder that needs no more than the
   listener's S/N less 3 dB. A measurement travels better than a mode
@@ -209,8 +290,11 @@ It goes at the end of the listening window, once however many stations
 asked, in the gear of the weakest of them, and the same refusal goes at
 most once in 10 minutes. A listener that hears it stops asking, and the
 Files tab says why: "Not repaired: AG7EW cancelled it", with *Ask again*
-greyed. A 0.1 station doesn't know the record, skips it, and keeps
-asking as before.
+greyed.
+
+A Ragtime 0.1 station and a newer one still chat, but can't repair each
+other: the new request and parity records are types 0.1 doesn't know,
+and 0.1's old request is one the new version skips.
 
 ### Repaired lines go in their place
 
@@ -286,3 +370,8 @@ heard, a seal says only that it went.
   anyone can check a seal.
 - **They don't repair unsealed chat.** With "Seal my broadcast messages"
   off, a line lost in a fade is simply lost, as on a voice net.
+- **A station that misses every copy of a seal can't ask.** A request
+  names a seal, so a station that heard none of the copies of it (the
+  first, the ones that end each repair round, and a file's two repeats)
+  never learns what to ask for, until a later seal names it. At 60%
+  loss that is about one station in ten for a file sent once.

@@ -27,9 +27,6 @@ constexpr uint8_t REPAIR_WANT_SEAL = 0x01;
 constexpr int REPAIR_SNR_SHIFT = 1;
 constexpr uint8_t REPAIR_SNR_CODES = 127;
 
-constexpr uint8_t PIECES_BITMAP = 0;
-constexpr uint8_t PIECES_RANGES = 1;
-
 constexpr uint32_t MAX_SEQ = 0xFFFFFF;
 
 bool putShortString(std::vector<uint8_t>& out, const std::string& text, size_t limit)
@@ -165,11 +162,12 @@ bool encodeBody(const Body& body, std::vector<uint8_t>& out, bool canonical)
                     if (b.missingItems[i]) bitmap[i / 8] |= (uint8_t)(0x80 >> (i % 8));
                 }
                 out.insert(out.end(), bitmap.begin(), bitmap.end());
+                out.push_back(b.itemsWant);
                 for (const auto& file : b.files)
                 {
                     if (file.first > MAX_SEQ) return false;
                     putNumber(out, file.first, 3);
-                    putPieceList(out, file.second);
+                    putNumber(out, file.second, 2);
                 }
                 return true;
             }
@@ -184,6 +182,21 @@ bool encodeBody(const Body& body, std::vector<uint8_t>& out, bool canonical)
                     if (seq > MAX_SEQ) return false;
                     putNumber(out, seq, 3);
                 }
+                return true;
+            }
+            else if constexpr (std::is_same_v<T, ItemParity>)
+            {
+                if (b.items.size() > 255) return false;
+                putNumber(out, b.seal, 2);
+                out.push_back((uint8_t)b.items.size());
+                std::vector<uint8_t> bitmap((b.items.size() + 7) / 8, 0);
+                for (size_t i = 0; i < b.items.size(); i++)
+                {
+                    if (b.items[i]) bitmap[i / 8] |= (uint8_t)(0x80 >> (i % 8));
+                }
+                out.insert(out.end(), bitmap.begin(), bitmap.end());
+                putNumber(out, b.index, 2);
+                out.insert(out.end(), b.bytes.begin(), b.bytes.end());
                 return true;
             }
         },
@@ -332,11 +345,12 @@ DecodeResult decodeBody(uint8_t type, Reader& in, Record& out)
             if (!in.bytes(bitmap, ((size_t)count + 7) / 8)) return DecodeResult::Malformed;
             b.missingItems.resize(count);
             for (size_t i = 0; i < count; i++) b.missingItems[i] = (bitmap[i / 8] & (0x80 >> (i % 8))) != 0;
+            if (!in.u8(b.itemsWant)) return DecodeResult::Malformed;
             while (!in.done())
             {
-                std::pair<uint32_t, std::vector<uint16_t>> file;
-                if (!in.u24(file.first) || !readPieceList(in, file.second)) return DecodeResult::Malformed;
-                b.files.push_back(std::move(file));
+                std::pair<uint32_t, uint16_t> file;
+                if (!in.u24(file.first) || !in.u16(file.second)) return DecodeResult::Malformed;
+                b.files.push_back(file);
             }
             return decoded(out, std::move(b));
         }
@@ -350,6 +364,18 @@ DecodeResult decodeBody(uint8_t type, Reader& in, Record& out)
             {
                 if (!in.u24(seq)) return DecodeResult::Malformed;
             }
+            return decoded(out, std::move(b));
+        }
+        case RecordType::ItemParity:
+        {
+            ItemParity b;
+            uint8_t count = 0;
+            if (!in.u16(b.seal) || !in.u8(count)) return DecodeResult::Malformed;
+            std::vector<uint8_t> bitmap;
+            if (!in.bytes(bitmap, ((size_t)count + 7) / 8) || !in.u16(b.index)) return DecodeResult::Malformed;
+            b.items.resize(count);
+            for (size_t i = 0; i < count; i++) b.items[i] = (bitmap[i / 8] & (0x80 >> (i % 8))) != 0;
+            b.bytes = in.rest();
             return decoded(out, std::move(b));
         }
     }
@@ -404,7 +430,8 @@ uint8_t Record::type() const
             else if constexpr (std::is_same_v<T, FilePiece>) return (uint8_t)RecordType::FilePiece;
             else if constexpr (std::is_same_v<T, Seal>) return (uint8_t)RecordType::Seal;
             else if constexpr (std::is_same_v<T, RepairRequest>) return (uint8_t)RecordType::RepairRequest;
-            else return (uint8_t)RecordType::RepairRefused;
+            else if constexpr (std::is_same_v<T, RepairRefused>) return (uint8_t)RecordType::RepairRefused;
+            else return (uint8_t)RecordType::ItemParity;
         },
         body);
 }
@@ -499,81 +526,6 @@ bool decodeFrame(const uint8_t* bytes, size_t length, std::vector<Record>& out)
         }
     }
     return true;
-}
-
-void putPieceList(std::vector<uint8_t>& out, std::vector<uint16_t> pieces)
-{
-    std::sort(pieces.begin(), pieces.end());
-    pieces.erase(std::unique(pieces.begin(), pieces.end()), pieces.end());
-
-    std::vector<std::pair<uint16_t, uint16_t>> ranges; // first, count
-    for (uint16_t p : pieces)
-    {
-        if (!ranges.empty() && ranges.back().first + ranges.back().second == p && ranges.back().second < 256)
-        {
-            ranges.back().second++;
-        }
-        else
-        {
-            ranges.push_back({p, 1});
-        }
-    }
-    size_t span = pieces.empty() ? 0 : (size_t)(pieces.back() - pieces.front() + 1);
-    size_t bitmapBytes = 1 + 2 + 2 + (span + 7) / 8;
-    size_t rangeBytes = 1 + 1 + 3 * ranges.size();
-    if (ranges.size() <= 255 && rangeBytes <= bitmapBytes)
-    {
-        out.push_back(PIECES_RANGES);
-        out.push_back((uint8_t)ranges.size());
-        for (const auto& r : ranges)
-        {
-            putNumber(out, r.first, 2);
-            out.push_back((uint8_t)(r.second - 1));
-        }
-        return;
-    }
-    out.push_back(PIECES_BITMAP);
-    uint16_t first = pieces.empty() ? 0 : pieces.front();
-    putNumber(out, first, 2);
-    putNumber(out, span, 2);
-    std::vector<uint8_t> bitmap((span + 7) / 8, 0);
-    for (uint16_t p : pieces)
-    {
-        size_t i = (size_t)(p - first);
-        bitmap[i / 8] |= (uint8_t)(0x80 >> (i % 8));
-    }
-    out.insert(out.end(), bitmap.begin(), bitmap.end());
-}
-
-bool readPieceList(Reader& in, std::vector<uint16_t>& pieces)
-{
-    uint8_t encoding = 0;
-    if (!in.u8(encoding)) return false;
-    if (encoding == PIECES_RANGES)
-    {
-        uint8_t count = 0;
-        if (!in.u8(count)) return false;
-        for (int i = 0; i < count; i++)
-        {
-            uint16_t first = 0;
-            uint8_t extra = 0;
-            if (!in.u16(first) || !in.u8(extra)) return false;
-            for (uint32_t p = first; p <= (uint32_t)first + extra && p <= 0xFFFF; p++) pieces.push_back((uint16_t)p);
-        }
-        return true;
-    }
-    if (encoding == PIECES_BITMAP)
-    {
-        uint16_t first = 0, span = 0;
-        std::vector<uint8_t> bitmap;
-        if (!in.u16(first) || !in.u16(span) || !in.bytes(bitmap, ((size_t)span + 7) / 8)) return false;
-        for (size_t i = 0; i < span; i++)
-        {
-            if ((bitmap[i / 8] & (0x80 >> (i % 8))) != 0 && first + i <= 0xFFFF) pieces.push_back((uint16_t)(first + i));
-        }
-        return true;
-    }
-    return false;
 }
 
 } // namespace protocol

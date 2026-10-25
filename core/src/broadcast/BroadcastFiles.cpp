@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "ragtime/broadcast/BroadcastParts.h"
+#include "ragtime/files/Parity.h"
 #include "ragtime/files/SessionFiles.h"
 
 namespace ragtime
@@ -291,6 +292,8 @@ void BroadcastFiles::finishOutgoing(Outgoing& out, State state, uint64_t nowMs)
     out.file.lastMs = nowMs;
     out.content.clear();
     out.content.shrink_to_fit();
+    out.slices.clear();
+    out.slices.shrink_to_fit();
     if (!out.finished)
     {
         out.finished = true;
@@ -381,33 +384,75 @@ bool BroadcastFiles::streaming(uint32_t seq) const
 
 bool BroadcastFiles::piece(uint32_t seq, uint16_t index, uint32_t time, protocol::Record& record)
 {
-    const Outgoing* out = outgoingBySeq(seq);
-    if (out == nullptr || out->content.empty() || index >= out->file.pieces) return false;
-    size_t start = (size_t)index * out->pieceBytes;
-    size_t length = pieceLength(out->file.size, out->pieceBytes, index);
+    Outgoing* out = outgoingBySeq(seq);
+    if (out == nullptr || out->content.empty() || out->file.pieces == 0) return false;
     protocol::FilePiece p;
     p.index = index;
-    p.bytes.assign(out->content.begin() + (std::ptrdiff_t)start,
-                   out->content.begin() + (std::ptrdiff_t)(start + length));
+    if (index < out->file.pieces)
+    {
+        size_t start = (size_t)index * out->pieceBytes;
+        size_t length = pieceLength(out->file.size, out->pieceBytes, index);
+        p.bytes.assign(out->content.begin() + (std::ptrdiff_t)start,
+                       out->content.begin() + (std::ptrdiff_t)(start + length));
+    }
+    else
+    {
+        // A parity piece, over all the pieces.
+        if (out->slices.empty())
+        {
+            for (uint16_t i = 0; i < out->file.pieces; i++)
+            {
+                size_t start = (size_t)i * out->pieceBytes;
+                size_t length = pieceLength(out->file.size, out->pieceBytes, i);
+                out->slices.emplace_back(out->content.begin() + (std::ptrdiff_t)start,
+                                         out->content.begin() + (std::ptrdiff_t)(start + length));
+            }
+        }
+        std::vector<files::parity::Symbol> data;
+        for (uint16_t i = 0; i < out->file.pieces; i++) data.push_back({i, &out->slices[i]});
+        p.bytes = files::parity::parityOf(index, data, files::parity::symbolLength(out->pieceBytes));
+        if (p.bytes.empty()) return false;
+    }
     record = chat_.record(std::move(p), time, seq);
     return true;
 }
 
-bool BroadcastFiles::wanted(const std::string& call, uint32_t seq, std::vector<uint16_t>& missing) const
+double BroadcastFiles::lossOf(const Incoming& in) const
+{
+    // The last round's, when anything came of it; else the last known;
+    // else the first pass's, counted from the first piece we heard (a
+    // station that tuned in part way didn't lose what went before).
+    if (in.askedWant != 0 && in.came != 0)
+        return 1.0 - std::min(1.0, (double)in.came / (double)in.askedWant);
+    if (in.loss >= 0.0) return in.loss;
+    if (in.pieces.empty()) return 0.5;
+    size_t span = (size_t)in.file.pieces - in.pieces.begin()->first;
+    return span == 0 ? 0.0 : 1.0 - std::min(1.0, (double)in.pieces.size() / (double)span);
+}
+
+bool BroadcastFiles::wanted(const std::string& call, uint32_t seq, uint32_t& need, uint32_t& want) const
 {
     for (const Incoming& in : incoming_)
     {
         if (in.file.from != call || in.file.seq != seq) continue;
         if (!in.announced || in.file.complete) return false;
         if (in.file.state != State::Receiving) return false;
-        missing.clear();
-        for (uint16_t i = 0; i < in.file.pieces; i++)
-        {
-            if (in.pieces.count(i) == 0) missing.push_back(i);
-        }
-        return !missing.empty();
+        size_t held = in.pieces.size() + in.parity.size();
+        if (held >= in.file.pieces) return false;
+        need = (uint32_t)(in.file.pieces - held);
+        want = files::parity::wantFor(need, lossOf(in));
+        return true;
     }
     return false;
+}
+
+void BroadcastFiles::asked(const std::string& call, uint32_t seq, uint32_t want)
+{
+    Incoming* in = incomingFor(call, seq);
+    if (in == nullptr) return;
+    in->loss = lossOf(*in);
+    in->askedWant = want;
+    in->came = 0;
 }
 
 //-------------------------------------------------------------------------
@@ -452,12 +497,23 @@ void BroadcastFiles::heardAnnounce(const protocol::Record& record, uint64_t nowM
     in->file.pieces = pieces;
     in->file.pieceMap.assign(pieces, files::PIECE_WAITING);
 
-    // Pieces heard before the announce that don't fit it go.
+    // Pieces heard before the announce: past its piece count, parity
+    // pieces; any that don't fit it go.
     for (auto it = in->pieces.begin(); it != in->pieces.end();)
     {
         bool fits = it->first < pieces && it->second.size() == pieceLength(a->size, a->pieceBytes, it->first);
-        if (!fits) in->bytes -= it->second.size();
-        it = fits ? std::next(it) : in->pieces.erase(it);
+        if (fits)
+        {
+            ++it;
+            continue;
+        }
+        in->bytes -= it->second.size();
+        if (it->first >= pieces && it->second.size() == files::parity::symbolLength(a->pieceBytes))
+        {
+            in->parityBytes += it->second.size();
+            in->parity.emplace(it->first, std::move(it->second));
+        }
+        it = in->pieces.erase(it);
     }
     in->file.held = (uint16_t)in->pieces.size();
 
@@ -476,6 +532,15 @@ void BroadcastFiles::heardAnnounce(const protocol::Record& record, uint64_t nowM
             {
                 in->bytes += p.second.size();
                 in->pieces.emplace(p.first, std::move(p.second));
+            }
+        }
+        // Parity pieces with the same index over the same file are the same.
+        for (auto& p : other->parity)
+        {
+            if (in->parity.count(p.first) == 0)
+            {
+                in->parityBytes += p.second.size();
+                in->parity.emplace(p.first, std::move(p.second));
             }
         }
         in->file.held = (uint16_t)in->pieces.size();
@@ -525,21 +590,31 @@ void BroadcastFiles::heardPiece(const protocol::Record& record, uint64_t nowMs)
     }
     State s = in->file.state;
     if (s != State::Heard && s != State::Receiving && s != State::Incomplete) return;
-    if (in->announced)
+    bool parity = in->announced && p->index >= in->file.pieces;
+    if (parity)
     {
-        if (p->index >= in->file.pieces
-            || p->bytes.size() != pieceLength(in->announce.size, in->announce.pieceBytes, p->index))
-            return;
+        if (p->bytes.size() != files::parity::symbolLength(in->announce.pieceBytes)) return;
     }
-    else if (p->index >= MAX_PIECES)
+    else if (in->announced && p->bytes.size() != pieceLength(in->announce.size, in->announce.pieceBytes, p->index))
     {
         return;
     }
     in->file.lastMs = nowMs;
-    if (in->pieces.count(p->index) != 0) return;
-    in->bytes += p->bytes.size();
-    in->pieces.emplace(p->index, p->bytes);
-    in->file.held = (uint16_t)in->pieces.size();
+    if (in->file.complete) return;
+    if (parity)
+    {
+        if (in->parity.count(p->index) != 0) return;
+        in->parityBytes += p->bytes.size();
+        in->parity.emplace(p->index, p->bytes);
+    }
+    else
+    {
+        if (in->pieces.count(p->index) != 0) return;
+        in->bytes += p->bytes.size();
+        in->pieces.emplace(p->index, p->bytes);
+        in->file.held = (uint16_t)in->pieces.size();
+    }
+    in->came++;
     if (in->file.state == State::Incomplete && !in->file.stopped)
     {
         // Repairs came after all.
@@ -552,18 +627,58 @@ void BroadcastFiles::heardPiece(const protocol::Record& record, uint64_t nowMs)
     limitSpool();
 }
 
+void BroadcastFiles::clearPieces(Incoming& in)
+{
+    in.pieces.clear();
+    in.bytes = 0;
+    in.parity.clear();
+    in.parityBytes = 0;
+    in.file.held = 0;
+}
+
+void BroadcastFiles::tryRebuild(Incoming& in)
+{
+    size_t k = in.file.pieces;
+    if (in.pieces.size() >= k || in.pieces.size() + in.parity.size() < k) return;
+    std::vector<files::parity::Symbol> known, parity;
+    std::vector<uint16_t> missing;
+    for (const auto& p : in.pieces) known.push_back({p.first, &p.second});
+    for (uint16_t i = 0; i < k; i++)
+    {
+        if (in.pieces.count(i) == 0) missing.push_back(i);
+    }
+    for (const auto& p : in.parity)
+    {
+        if (parity.size() == missing.size()) break;
+        parity.push_back({p.first, &p.second});
+    }
+    std::vector<std::vector<uint8_t>> out;
+    bool ok = files::parity::rebuild(known, parity, missing, files::parity::symbolLength(in.announce.pieceBytes), out);
+    in.parity.clear();
+    in.parityBytes = 0;
+    if (!ok) return;
+    for (size_t i = 0; i < missing.size(); i++)
+    {
+        // Rebuilt to the parity's length: the last piece is shorter.
+        out[i].resize(pieceLength(in.announce.size, in.announce.pieceBytes, missing[i]));
+        in.bytes += out[i].size();
+        in.pieces.emplace(missing[i], std::move(out[i]));
+    }
+    in.file.held = (uint16_t)in.pieces.size();
+}
+
 void BroadcastFiles::tryComplete(Incoming& in, uint64_t nowMs)
 {
-    if (!in.announced || in.file.complete || in.pieces.size() < in.file.pieces) return;
+    if (!in.announced || in.file.complete) return;
+    tryRebuild(in);
+    if (in.pieces.size() < in.file.pieces) return;
     std::vector<uint8_t> content;
     content.reserve(in.announce.size);
     for (const auto& p : in.pieces) content.insert(content.end(), p.second.begin(), p.second.end());
     if (content.size() != in.announce.size || protocol::digestOf(content) != in.announce.digest)
     {
         // Something in it is wrong: all of it again, once.
-        in.pieces.clear();
-        in.bytes = 0;
-        in.file.held = 0;
+        clearPieces(in);
         in.digestFailures++;
         if (in.digestFailures >= 2) finishIncoming(in, State::Failed, nowMs, "its digest didn't match");
         changed();
@@ -618,8 +733,7 @@ void BroadcastFiles::finishIncoming(Incoming& in, State state, uint64_t nowMs, c
     in.file.state = state;
     in.file.error = error;
     in.file.lastMs = nowMs;
-    in.pieces.clear();
-    in.bytes = 0;
+    clearPieces(in);
     if (!in.finished && in.announced)
     {
         in.finished = true;
@@ -747,14 +861,12 @@ void BroadcastFiles::limitSpool()
         Incoming* oldest = nullptr;
         for (Incoming& in : incoming_)
         {
-            if (in.file.state != State::Heard || in.pieces.empty()) continue;
-            total += in.bytes;
+            if (in.file.state != State::Heard || (in.pieces.empty() && in.parity.empty())) continue;
+            total += in.bytes + in.parityBytes;
             if (oldest == nullptr || in.file.lastMs < oldest->file.lastMs) oldest = &in;
         }
         if (total <= SPOOL_BYTES || oldest == nullptr) return;
-        oldest->pieces.clear();
-        oldest->bytes = 0;
-        oldest->file.held = 0;
+        clearPieces(*oldest);
         changed();
     }
 }
@@ -946,13 +1058,14 @@ void BroadcastFiles::writeParts()
     {
         // Saved, ignored and the like were dropped as they finished; a
         // spool cleared of its pieces has nothing left to keep.
-        if (!in.announced || !keptState(in.file.state) || in.pieces.empty())
+        if (!in.announced || !keptState(in.file.state) || (in.pieces.empty() && in.parity.empty()))
         {
             dropPart(in);
             continue;
         }
         std::vector<KeptSeal> seals = seals_.sealsOver(in.file.from, in.file.seq);
-        std::string sig = std::to_string((int)in.file.state) + " " + std::to_string(in.pieces.size()) + " "
+        std::string sig = std::to_string((int)in.file.state) + " " + std::to_string(in.pieces.size()) + "+"
+                          + std::to_string(in.parity.size()) + " "
                           + std::to_string(in.file.stopped) + " " + std::to_string(in.file.expiresAtMs) + " "
                           + in.file.path + " " + std::to_string(seals.size());
         for (const KeptSeal& s : seals) sig += " " + std::to_string(s.heardMs);
@@ -969,7 +1082,9 @@ void BroadcastFiles::writeParts()
         part.lastMs = in.file.lastMs;
         part.expiresAtMs = in.file.state == State::Heard ? in.file.startedMs + KEEP_MS : in.file.expiresAtMs;
         part.seals = std::move(seals);
+        // Parity pieces with the rest, by their indexes past the piece count.
         part.pieces = in.pieces;
+        part.pieces.insert(in.parity.begin(), in.parity.end());
 
         std::error_code ec;
         std::filesystem::create_directories(folder, ec);
@@ -1054,6 +1169,12 @@ void BroadcastFiles::loadParts(uint64_t nowMs)
         // Nothing read back is trusted: a piece must fit the announce.
         for (auto& p : part.pieces)
         {
+            if (p.first >= pieces && p.second.size() == files::parity::symbolLength(a->pieceBytes))
+            {
+                kept.parityBytes += p.second.size();
+                kept.parity.emplace(p.first, std::move(p.second));
+                continue;
+            }
             if (p.first >= pieces || p.second.size() != pieceLength(a->size, a->pieceBytes, p.first)) continue;
             kept.bytes += p.second.size();
             kept.pieces.emplace(p.first, std::move(p.second));
@@ -1238,7 +1359,8 @@ std::vector<files::FileRow> BroadcastFiles::rows(uint64_t nowMs) const
         files::FileRow row = base(f);
         row.done = std::min<uint64_t>(f.size, in.bytes);
         row.handed = row.done;
-        size_t missing = (size_t)f.pieces - in.pieces.size();
+        size_t have = in.pieces.size() + in.parity.size();
+        size_t missing = have < f.pieces ? (size_t)f.pieces - have : 0;
         if (f.state == State::Heard)
         {
             row.state = "Heard: Receive or Reject";

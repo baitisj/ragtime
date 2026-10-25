@@ -60,7 +60,7 @@ int pieceFrameBytes(const link::ModeInfo& mode);
 
 // The bytes of a file each FilePiece carries, for a sender with this
 // callsign, so its frame (FRAME_BYTE and the record) fills
-// pieceFrameBytes. At least 16.
+// pieceFrameBytes. Even, so a parity piece is no longer, and at least 16.
 int pieceBytesFor(const link::ModeInfo& mode, const std::string& callsign);
 
 // Records into frames of at most MAX_BROADCAST_FRAME, in order, as many to

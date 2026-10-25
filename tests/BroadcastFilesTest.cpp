@@ -12,8 +12,10 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <random>
 #include <set>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "Check.h"
@@ -22,6 +24,7 @@
 #include "ragtime/broadcast/BroadcastFiles.h"
 #include "ragtime/broadcast/Seals.h"
 #include "ragtime/files/FileRows.h"
+#include "ragtime/files/Parity.h"
 #include "ragtime/gearbox/Gearbox.h"
 #include "ragtime/link/Data2GLink.h"
 #include "ragtime/link/HostLink.h"
@@ -81,6 +84,16 @@ struct Station
                 files.onRecord(r, now);
                 heard.push_back(r);
             }
+            for (std::vector<protocol::Record> again = seals.takeRebuilt(); !again.empty(); again = seals.takeRebuilt())
+            {
+                for (const protocol::Record& r : again)
+                {
+                    chat.onRebuilt(r, now);
+                    seals.onRecord(r, now);
+                    files.onRecord(r, now);
+                    rebuilt.push_back(r);
+                }
+            }
         }
     }
 
@@ -118,6 +131,7 @@ struct Station
     BroadcastFiles files;
     link::KissDecoder kiss;
     std::vector<protocol::Record> heard;
+    std::vector<protocol::Record> rebuilt;  // from parity
     // Decides whether this station hears a record (true: lost), and may
     // spoil it.
     std::function<bool(protocol::Record&)> lose;
@@ -538,8 +552,8 @@ void testMissedSeal()
     air.run(Seals::QUIET_MS + 120000);
     CHECK(b.heardFrom("AG7EW", protocol::RecordType::Seal) >= 2);
     CHECK(b.seals.requestsSent() >= 1);
-    // "two" itself is lost each time it goes, so it is asked for until the
-    // listener gives up; the seal came, which is what this checks.
+    // "two" itself is lost each time it goes as a line, but parity over it
+    // comes too and rebuilds it.
     bool sealOne = false;
     for (const protocol::Record& r : b.heard)
     {
@@ -547,7 +561,8 @@ void testMissedSeal()
         if (s != nullptr && s->number == 1) sealOne = true;
     }
     CHECK(sealOne);
-    CHECK_EQ(b.textsFrom("AG7EW"), (size_t)2);
+    CHECK_EQ(b.textsFrom("AG7EW"), (size_t)3);
+    CHECK(b.seals.itemsRebuilt() >= 1);
 }
 
 // A file, received automatically by one station, on request by another,
@@ -574,7 +589,8 @@ void testFiles()
         };
     };
     d.lose = losePieces({3, 7});
-    c.lose = losePieces({5});
+    // More than the parity sent for D's gaps will fill.
+    c.lose = losePieces({1, 5, 9, 11});
     air.run(2000);
 
     std::string path = makeFile("fred.txt", 3000);
@@ -616,8 +632,8 @@ void testFiles()
         CHECK(rows[0].expiresAtMs > now);
     }
 
-    // C presses Receive late: its request opens a window, and the piece
-    // it lacked comes again.
+    // C presses Receive late: what came for D fills some of its gaps, its
+    // request opens a window, and parity for the rest comes.
     size_t rounds = a.seals.rounds();
     if (fc.id != 0) CHECK(c.files.receive(fc.id, (cDir / "fred-c.txt").string(), now, error));
     air.run(60000);
@@ -1040,9 +1056,170 @@ void testManyLost()
     BroadcastFile f = fileFrom(b, "AG7EW");
     CHECK(f.id != 0 && f.state == FileState::Saved);
     if (f.id != 0) CHECK(readAll(f.path) == readAll(path));
-    // 135 pieces lost, every other one: one request's bitmap holds them.
+    // 135 pieces lost, every other one: one request asks for parity
+    // enough for them all, and one round brings it.
     CHECK_EQ(b.seals.requestsSent(), (size_t)1);
     CHECK_EQ(a.seals.rounds(), (size_t)1);
+}
+
+// Loses a share of what from sends, at random.
+std::function<bool(protocol::Record&)> loseShare(const std::string& from, double share, uint32_t seed)
+{
+    auto rng = std::make_shared<std::mt19937>(seed);
+    return [from, share, rng](protocol::Record& r) {
+        if (r.header.callsign != from) return false;
+        return std::bernoulli_distribution(share)(*rng);
+    };
+}
+
+// The path Jeff sees across the US: one band for everyone leaves some
+// stations losing most of every burst. Parity, asked for with the loss
+// allowed for, gets the file to all of them in a round or two, and no
+// more repair pieces go than the neediest station wants.
+void testHeavyLossFile()
+{
+    Air air;
+    Station& a = air.add("AG7EW", 1);
+    std::vector<Station*> listeners;
+    const char* calls[] = {"KC2G", "W1AW", "G4XYZ", "VK3ABC", "K7RA"};
+    double losses[] = {0.6, 0.6, 0.1, 0.1, 0.1};
+    for (int i = 0; i < 5; i++)
+    {
+        Station& st = air.add(calls[i], (uint32_t)(10 + i));
+        st.lose = loseShare("AG7EW", losses[i], (uint32_t)(100 + i));
+        st.files.setAutoReceive(freshFolder(std::string("heavy-") + calls[i]).string());
+        listeners.push_back(&st);
+    }
+    air.run(2000);
+    std::string error;
+    std::string path = makeFile("heavy.bin", 6000, 9);
+    CHECK(a.files.send(path, "qpsk-r1/3", now, error) != 0);
+    air.run(60 * 60 * 1000, 500);
+    std::vector<uint8_t> want = readAll(path);
+    for (Station* st : listeners)
+    {
+        BroadcastFile f = fileFrom(*st, "AG7EW");
+        CHECK(f.id != 0 && f.state == FileState::Saved);
+        if (f.state == FileState::Saved) CHECK(readAll(f.path) == want);
+    }
+    BroadcastFile ours;
+    for (const BroadcastFile& f : a.files.files(now)) ours = f;
+    size_t repairs = 0;
+    for (const Aired& on : air.aired)
+    {
+        const protocol::FilePiece* p = on.record.as<protocol::FilePiece>();
+        if (p != nullptr && p->index >= ours.pieces) repairs++;
+    }
+    // Every repair piece is parity, and few rounds bring them.
+    CHECK(repairs > 0);
+    CHECK_EQ(repairs, a.seals.paritySent());
+    CHECK(a.seals.rounds() <= 4);
+}
+
+// Sealed chat on the same path: three stations each lose half of the
+// lines, different halves. Parity over the lines fills every gap, with
+// the lines rebuilt from it shown as if heard.
+void testHeavyLossChat()
+{
+    Air air;
+    Station& a = air.add("AG7EW", 1);
+    std::vector<Station*> listeners;
+    const char* calls[] = {"KC2G", "W1AW", "G4XYZ"};
+    for (int i = 0; i < 3; i++)
+    {
+        Station& st = air.add(calls[i], (uint32_t)(20 + i));
+        auto rng = std::make_shared<std::mt19937>(200 + i);
+        // Lines and their parity are lost; seals and the rest get through.
+        st.lose = [rng](protocol::Record& r) {
+            bool line = r.as<protocol::Text>() != nullptr || r.as<protocol::ItemParity>() != nullptr;
+            return r.header.callsign == "AG7EW" && line && std::bernoulli_distribution(0.5)(*rng);
+        };
+        listeners.push_back(&st);
+    }
+    air.run(2000);
+    for (int i = 0; i < 12; i++) a.chat.send("line " + std::to_string(i), "", now);
+    air.run(Seals::QUIET_MS + 40 * 60 * 1000, 500);
+    size_t rebuilt = 0;
+    for (Station* st : listeners)
+    {
+        CHECK_EQ(st->textsFrom("AG7EW"), (size_t)12);
+        rebuilt += st->seals.itemsRebuilt();
+        for (const protocol::Record& r : st->rebuilt) CHECK(r.as<protocol::Text>() != nullptr);
+    }
+    CHECK(rebuilt > 0);
+    size_t parity = 0;
+    for (const Aired& on : air.aired) parity += on.record.as<protocol::ItemParity>() != nullptr ? 1 : 0;
+    CHECK(parity > 0);
+    CHECK(a.seals.rounds() <= 6);
+}
+
+// ItemParity heard before its seal waits for it; one whose lines don't
+// match the seal rebuilds nothing.
+void testItemParityBeforeSeal()
+{
+    Air air;
+    Station& a = air.add("AG7EW", 1);
+    Station& b = air.add("KC2G", 2);
+    // B misses "two" and the first seal; then hears everything.
+    uint64_t start = now;
+    b.lose = [start](protocol::Record& r) {
+        const protocol::Text* t = r.as<protocol::Text>();
+        if (t != nullptr && t->text == "two" && now < start + 100000) return true;
+        return r.as<protocol::Seal>() != nullptr && now < start + 100000;
+    };
+    air.run(2000);
+    a.chat.send("one", "", now);
+    a.chat.send("two", "", now);
+    a.chat.send("three", "", now);
+    air.run(Seals::QUIET_MS + 10000);
+    CHECK_EQ(b.textsFrom("AG7EW"), (size_t)2);
+    // Parity over the three lines, by hand, as A would send it: heard
+    // before the seal, it waits.
+    std::vector<std::vector<uint8_t>> lines;
+    for (const Aired& r : air.aired)
+    {
+        if (r.record.as<protocol::Text>() != nullptr && r.record.header.callsign == "AG7EW")
+            lines.push_back(protocol::encodeRecord(r.record));
+    }
+    CHECK_EQ(lines.size(), (size_t)3);
+    if (lines.size() != 3) return;
+    size_t length = 0;
+    for (const auto& l : lines) length = std::max(length, l.size());
+    length = files::parity::symbolLength(length);
+    std::vector<files::parity::Symbol> data;
+    for (size_t i = 0; i < 3; i++) data.push_back({(uint16_t)i, &lines[i]});
+    protocol::ItemParity p;
+    p.seal = 1;
+    p.items = {true, true, true};
+    p.index = 0;
+    p.bytes = files::parity::parityOf(protocol::ITEM_PARITY_BASE, data, length);
+    protocol::Header h;
+    h.callsign = "AG7EW";
+    h.seq = 3;
+    h.time = (uint32_t)(now / 1000);
+    protocol::Record record;
+    record.header = h;
+    record.body = std::move(p);
+    // A copy with a byte changed rebuilds nothing.
+    protocol::Record bad = record;
+    std::get<protocol::ItemParity>(bad.body).bytes[3] ^= 0x40;
+    std::get<protocol::ItemParity>(bad.body).index = 1;
+    b.seals.onRecord(bad, now);
+    b.seals.onRecord(record, now);
+    CHECK(b.seals.takeRebuilt().empty());
+    // The next seal names the one missed, B asks for it, and once it
+    // comes "two" is rebuilt from the good parity, without asking for it.
+    a.chat.send("four", "", now);
+    air.run(Seals::QUIET_MS + 120000);
+    CHECK_EQ(b.textsFrom("AG7EW"), (size_t)4);
+    CHECK_EQ(b.seals.itemsRebuilt(), (size_t)1);
+    size_t twos = 0;
+    for (const Aired& on : air.aired)
+    {
+        const protocol::Text* t = on.record.as<protocol::Text>();
+        if (t != nullptr && t->text == "two") twos++;
+    }
+    CHECK_EQ(twos, (size_t)1);
 }
 
 // What can't go.
@@ -1444,10 +1621,15 @@ void testSlowCap(double capSeconds, bool oneRound)
     b.hearsAt["AG7EW"] = -5.0;
     std::filesystem::path dir = freshFolder(oneRound ? "slow-one" : "slow-many");
     b.files.setAutoReceive(dir.string());
+    // The whole first pass is lost; the repairs come.
     std::set<uint16_t> lost;
-    b.lose = [&lost](protocol::Record& r) {
+    bool sealed = false;
+    b.lose = [&lost, &sealed](protocol::Record& r) {
+        if (r.as<protocol::Seal>() != nullptr) sealed = true;
         const protocol::FilePiece* p = r.as<protocol::FilePiece>();
-        return p != nullptr && lost.insert(p->index).second;
+        if (p == nullptr || sealed) return false;
+        lost.insert(p->index);
+        return true;
     };
     air.run(2000);
     std::string error;
@@ -1461,13 +1643,17 @@ void testSlowCap(double capSeconds, bool oneRound)
         CHECK_EQ(a.seals.rounds(), (size_t)1);
     else
         CHECK(a.seals.rounds() >= 3);
-    // Every piece went again in the slow gear.
-    size_t slow = 0;
+    // Its repairs, parity pieces, went in the slow gear: at least as many
+    // as were lost.
+    size_t slow = 0, fast = 0;
     for (const Aired& on : air.aired)
     {
-        if (on.record.as<protocol::FilePiece>() != nullptr && on.mode == "fsk16r25-r1/3") slow++;
+        const protocol::FilePiece* p = on.record.as<protocol::FilePiece>();
+        if (p == nullptr || p->index < lost.size()) continue;
+        (on.mode == "fsk16r25-r1/3" ? slow : fast)++;
     }
-    CHECK_EQ(slow, lost.size());
+    CHECK(slow >= lost.size());
+    CHECK_EQ(fast, (size_t)0);
 }
 
 // A file the sender cancelled and closed: a request for the rest is
@@ -1590,6 +1776,9 @@ int main()
     testSlowCap(20, false);
     testRefusedCancelled();
     testRefusedAfterRestart();
+    testHeavyLossFile();
+    testHeavyLossChat();
+    testItemParityBeforeSeal();
     std::filesystem::remove_all(scratch());
     return ragtime_test::finish();
 }

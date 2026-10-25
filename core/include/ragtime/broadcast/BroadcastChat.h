@@ -188,6 +188,8 @@ public:
     // Returns the records heard in a frame (for the station list, and the
     // broadcast files to come), every one of them, ours to answer or not.
     std::vector<protocol::Record> onEvent(const link::HostLink::Event& event, uint64_t nowMs);
+    // A record rebuilt from parity (Seals::takeRebuilt), taken as if heard.
+    void onRebuilt(const protocol::Record& record, uint64_t nowMs);
 
     const std::deque<Message>& messages() const { return messages_; }
     const Message* find(uint64_t id) const;

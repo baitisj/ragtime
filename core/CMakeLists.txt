@@ -12,6 +12,8 @@ add_library(ragtime_core STATIC
     # Package G: the Files tab's rows and log, session files in a session.
     src/files/FileRows.cpp
     src/files/FileTraffic.cpp
+    # Parity repairs: Cauchy Reed-Solomon over GF(2^16).
+    src/files/Parity.cpp
     src/files/Sha256.cpp
     src/link/Data2GLink.cpp
     src/link/HostLink.cpp
