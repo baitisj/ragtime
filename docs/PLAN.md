@@ -195,7 +195,7 @@ A quiet link is still a session: only Leave, a lost link, or the far end leaving
 
 **Busy stations** (your question, 2026-10-20). Someone calling may hear only one side of a session, so the busy station itself has to say so on the air; its transmissions are the ones a caller can hear.
 
-1. **A busy answer to a CONNECT.** While in a session, my data2g-host answers a CONNECT once with "busy, in a session" instead of staying silent. The caller sees "AG7EW is in a session" at once, rather than "no answer" after five tries, and my partner is spared five CONNECT bursts on top of our QSO. Needs Andrew.
+1. **A busy answer to a CONNECT.** While in a session, my data2g-host answers a CONNECT once with "busy, in a session" instead of staying silent. The caller sees "AG7EW is in a session" at once, rather than "no answer" after five tries, and my partner is spared five CONNECT bursts on top of our QSO. Data2G already does this (`docs/DATA2G.md`, "Sessions"), but the caller's client hears only `DISCONNECTED`, with no reason.
 2. **Presence in broadcast mode.** Entering a session, the client sends one short signed broadcast message, `AG7EW QRL with KC2G`; on Leave, `AG7EW QRV`. The QRL may lag, since broadcast bursts go only while the session is idle; the QRV is exact. If data2g-host can also report overheard session bursts, stations that missed the QRL learn it from my side of the QSO.
 3. **The caller's screen:** the station list (below), and a question when you press Call on a busy station: **Tell me when free** (waits for the QRV and offers to call then), **Send a broadcast message instead**, or **Call anyway**.
 
@@ -790,11 +790,11 @@ Each has my recommendation. Type your answer in the last column, or comment on t
 
 **Asks for Andrew** (Data2G's author, not you):
 
-- What does an idle session cost on the air (keep-alives, how often), and how long does data2g-host retry before it reports `DISCONNECTED`? That decides how long "Link quiet" can honestly say the host is still trying.
-- Can data2g-host answer a CONNECT with "busy, in a session" while it is in one, and report that to the caller's client?
+- What does an idle session cost on the air (keep-alives, how often), and how long does data2g-host retry before it reports `DISCONNECTED`? That decides how long "Link quiet" can honestly say the host is still trying. **Read from the source (2026-10-25):** the caller polls every 15 to 30 s, the session is lost after 90 s with nothing heard, and the host hangs up a session with no data for 5 minutes (`docs/DATA2G.md`, "Sessions").
+- Can data2g-host answer a CONNECT with "busy, in a session" while it is in one, and report that to the caller's client? **Read from the source (2026-10-25):** it refuses at once and the caller stops dialing, but the caller's host says only `DISCONNECTED`.
 - Can it report overheard session bursts ("heard AG7EW in a session", and the partner's call if the bursts carry it)?
 - Can it report an SNR for broadcast bursts over KISS, for the station list? **Answered (2026-10-23):** Data2G PR #98 ends `BCAST HEARD` and `MISSED` with one, and adds `SN` for sessions.
-- Can it take 200 Hz and 1.2 kHz width caps, beside `BW500` and `BW2300`? (The gearshift's width no longer sends a cap, so this is only for a narrower switch.)
+- Can it take 200 Hz and 1.2 kHz width caps, beside `BW500` and `BW2300`? (The gearshift's width no longer sends a cap, so this is only for a narrower switch.) **Read from the source (2026-10-25):** `BW1200` exists; 200 Hz doesn't.
 - Can it take a TX level command, so the client's Auto ALC can hold drive just under ALC?
 - Could data2g-host offer a show-of-hands primitive for the D2G net: send a Hand burst (spec under The D2G net) in a given channel, starting a set delay after the last burst heard and shifted to match that burst's frequency offset, and decode every Hand in a list of channels in that window, reporting each with its SNR and offset?
 - **Answered (2026-10-22):** Andrew will build the Hand into data2g-host, in both the net and stranger forms. His provisional response is folded into the show-of-hands spec above: 3 s lead time, Data2G's CRC-aided polar code with 63 payload bits and a CRC-16, no Hand-25, a near-far-aware channel map, and a second round for missed stations. The `HAND SEND` / `HAND LISTEN` primitive is under "Who builds it".
@@ -809,7 +809,7 @@ Steps 1 to 7 are Stage 1, parity with Glissando.
 
 1. **Core library.** Bring the socket-free engines (command port and KISS, session files, SHA-256) into the new repo as one library with their unit tests, adapted to the new records. CI on Linux, with the GCC 16 check.
 2. **Connection and broadcast mode.** Main window, connection bar, Broadcast tab, station list, speeds. Usable on the air between client stations.
-3. **Two-host bench.** Two real `data2g-host`s on PulseAudio null sinks, the client on each, run by you on Hamlet (Data2G needs PyTorch). Checks the timers against real bursts.
+3. **Two-host bench.** Two real `data2g-host`s on PulseAudio null sinks, the client on each, run by you on Hamlet. (Data2G no longer needs PyTorch, and two hosts can share fifos instead of a sound card: `docs/DATA2G.md`.) Checks the timers against real bursts.
 4. **Deliberate sessions.** Call, the session tab and its status strip, Link quiet, Leave and Leave now, incoming sessions, Accept sessions.
 5. **Session files.** Offer cards, the send queue, the new progress row with Stalled, partial files on disk across restarts, Transfers history.
 6. **Broadcast files.** Seal-driven repair behind the new cards and rows (seals list digests from the start; signing them comes with step 9).

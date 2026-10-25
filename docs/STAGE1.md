@@ -110,7 +110,10 @@ burst S/N, which come with package E.
   `mode_thresholds.json` or the Submode Map's JSON, with widths and
   speeds from `MODES`: `GEARBOX.md`, "Where Ragtime gets the figures".
 - Width caps today are only `BW500` and `BW2300`; 200 Hz and 1.2 kHz are
-  greyed with "needs data2g-host support" until Andrew adds them.
+  greyed with "needs data2g-host support". The host has taken `BW1200`
+  for a while (`docs/DATA2G.md`), so 1.2 kHz can be lit; there is still
+  no 200 Hz cap. Caps limit sessions only; broadcast width is the host's
+  `--kiss-bw`.
 
 ## E. App shell and the Broadcast tab
 
@@ -745,9 +748,13 @@ Details in `docs/FLIGHT_RECORDER.md`.
 
 ## Waiting on Andrew (via Jeff)
 
-- 200 Hz and 1.2 kHz width caps; a TX level command for Auto ALC;
-  thresholds in `MODES`; whether the polar modes carry data and can be
-  picked with `BCAST MODE`.
+- Read from Data2G's source on 2026-10-25 (`docs/DATA2G.md`): `BW1200`
+  exists, the polar modes carry data and `BCAST MODE` takes them, and a
+  station in a session refuses a CONNECT at once (busy). Still open: a
+  200 Hz cap, a TX level command for Auto ALC, thresholds in `MODES`, the
+  mode on `BCAST HEARD`, the reason on `DISCONNECTED`, keeping a quiet
+  session up past the host's 5 minute idle hang-up, and lengths that
+  survive a lost codeword (DATA2G.md, "Loss").
 - SNR reports: answered by Data2G PR #98 (merged 2026-10-23), used as
   below.
 - The Hand primitive (`HAND SEND`, `HAND LISTEN`), which he will build;

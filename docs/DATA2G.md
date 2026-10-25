@@ -1,0 +1,181 @@
+# Data2G as Ragtime meets it
+
+What `data2g-host` does at the edges Ragtime touches, read from
+Data2G's own docs and code at
+[arodland/Data2G@13807c6](https://github.com/arodland/Data2G/tree/13807c6c4e51f57a29f034fd5bd38c8cccbfcb51)
+(2026-10-25), so we stop guessing. It is a summary in our words, never
+copied code (CLAUDE.md, "Data2G"). When Data2G moves on, read it again
+and update this page, with the new commit.
+
+## Where to look in Data2G
+
+- `README.md`, then `docs/ARCHITECTURE.md`: the map, Python beside C++.
+- `docs/broadcast.md`: broadcast groups, the burst format and every
+  `BCAST` command and status. The spec for our D2G traffic.
+- `docs/arq.md`: connected sessions, the gear shifter, `CLEANTXBUFFER`.
+- `data2g/host.py`'s module docstring: the command reference.
+  `native/core/host/host.cpp` mirrors it.
+- `data2g/kisslink.py`: how frames become bursts and come back out, and
+  channel access (`data2g/arq/engine.py`, `_kiss_burst`).
+
+Python (`data2g/`) is the normative reference. The programs operators
+download are the C++/Qt port (`native/`): `data2g-host` (headless) and
+`data2g-gui`, for Windows, macOS and Linux. Neither needs PyTorch. The
+Python host needs only numpy and scipy; torch is for training.
+
+## What the operator runs
+
+- **Ports.** Commands on 8300 (CR-terminated lines, VARA style), the
+  session's bytes on 8301, KISS on 8100. All are always on.
+- **Rig.** The native host links Hamlib in. Its default rig is model 2,
+  a client of rigctld at localhost:4532, so Ragtime's dial reads (`f`)
+  share that rigctld. An operator who gives the host a serial rig
+  directly has no rigctld for Ragtime to read. The host can poll the
+  dial (`--rig-poll-interval`) but doesn't tell clients.
+- **Transmit level** is `--output-volume` (dB) at start. No command
+  changes it, so Auto ALC still waits.
+- **Broadcast width** is fixed when the host starts: `--kiss-bw 2400` (the
+  default) or `500`. `MODES` lists only the modes inside it, and
+  `BCAST MODE` refuses the rest.
+- **No sound card needed for a bench.** `--audio-io pipe:IN,OUT` reads
+  and writes raw 8 kHz audio on files or fifos, so two hosts
+  cross-connect through two `mkfifo` pipes.
+
+## Commands Ragtime uses
+
+| Command | Reply | What it does |
+| --- | --- | --- |
+| `MYCALL call` | `OK`, then `REGISTERED call` | |
+| `LISTEN ON` / `OFF` | `OK` | Take calls or not |
+| `BW500`, `BW1200`, `BW2300`, `BW2750` | `OK` | The **session** width cap only: 500, 1200 or 2400 Hz (`BW2750` is 2400). Broadcast width is `--kiss-bw`. There is no 200 Hz cap; the 200 Hz modes sit inside 500 Hz |
+| `CHAT ON` | `OK` | Sessions favour latency over throughput (`docs/arq.md`, "CHAT ON") |
+| `DATA2G ON` | `OK` | `BUFFER` counts plainly, `CLEANTXBUFFER` reports host byte offsets, bytes written before `CONNECTED` are dropped. Off again when the client goes |
+| `CONNECT from to`, `DISCONNECT`, `ABORT` | `OK` / `WRONG` | |
+| `CLEANTXBUFFER [n]` | `CLEANTXBUFFER OK a b c` / `LATE` / `BUFFEREMPTY` / `FAILED` | Then `CLEANTXBUFFER SETTLED a b c [UNKNOWN]` (PROTOCOL.md, "Cuts") |
+| `SN` | `SN snr` | The session partner's last burst, pilot S/N in 2500 Hz. `WRONG` before one |
+| `VERSION` | `VERSION Data2G x.y.z` | |
+| `BCAST OPEN D2G FROM call` | `BCAST PORT n` | A KISS port for the group, each burst naming the sender |
+| `BCAST MODE n mode` | `OK` / `WRONG` | The port's transmit mode (below) |
+| `MODES` | `MODE ...` lines, then `OK` | `MODE name width-Hz bytes-per-codeword max-codewords seconds-at-1 seconds-at-max`, narrowest first |
+
+Reports: `CONNECTED src dst bw`, `DISCONNECTED`, `PTT ON|OFF`,
+`BUSY ON|OFF`, `BUFFER n` (again every 30 s while not 0), `MODE submode`
+(the session's), `IAMALIVE` (every 60 s).
+
+Broadcast statuses reach a client only once it has sent a `BCAST`
+command:
+
+- `BCAST n HEARD [call] snr`: a burst for our port, at its end. The call
+  is there when the control decoded (we open with `FROM`). The S/N is
+  always the last word. The burst's mode isn't given.
+- `BCAST n LOST k`: frames of that burst lost. "At least": see Loss.
+- `BCAST * MISSED submode n_cw [snr]`: a header with nothing else
+  decoded. It may be another group's, and only outside a session.
+- `BCAST n DROPPED k`: frames of ours thrown out unsent (port closed,
+  or a frame too big for the mode). They get no ACKMODE ack.
+
+When our command connection closes, the host closes our ports, puts
+port 0 back to its defaults, ends a session gracefully and stops
+listening.
+
+## Modes
+
+At 13807c6 `MODES` lists 50 modes at `--kiss-bw 2400` (22 at 500): 200 Hz
+`n4-*`, 500 Hz `n10-*` and the FSK modes `fsk16r25-*` and `fsk8r50-*`,
+1200 Hz OFDM and the polar modes, `fsk32r62-*` at 2300 Hz, and 2400 Hz
+`w48-*`. The polar modes (`polar-k96-f4`, `polar-k96-f8`,
+`polar-k192-f8`, 10 and 22 bytes a codeword) are data modes that
+`BCAST MODE` takes. The `ack-*` modes carry 4 bytes a codeword and are
+for session acknowledgements. `MODES` carries no S/N thresholds; those
+are in `data2g/codes_data/mode_thresholds.json` (GEARBOX.md).
+
+## A broadcast burst
+
+- One queue for every port. The next burst takes the first queued
+  frame's port and mode, then every later frame of that port that fits.
+- **The mode is read when the burst is built.** `BCAST MODE` changes the
+  mode of frames still queued in the host, not only later ones. HostLink
+  is safe: it changes the mode only when the host holds none of our
+  frames.
+- **Size.** The host aims at 12 s or less, but a burst grows to carry its
+  first frame. Receivers take a burst up to 16 s, or longer only as far
+  as one 256-byte frame needs (`KISS_FRAME_BYTES`, AX.25's PACLEN), with
+  `MODES`' max-codewords as the limit. So 256 bytes is the frame size
+  every data mode carries. A longer frame goes out in some modes, but a
+  receiver only decodes headers announcing as many codewords as it takes,
+  so a longer burst is lost to it.
+  Ragtime's 255-byte frames fit every mode.
+- **Layout.** Control codewords (a 1-byte header, the group and our call
+  in 18 bytes), then the data: `[length, 2 bytes][frame]` back to back,
+  zero padded. The receiver checks the control, then the data, under the
+  group's key.
+
+## Loss
+
+- The codeword is what's lost. A frame is lost if any codeword it touches
+  fails.
+- **A lost length ends the burst.** The receiver walks the lengths. If
+  the codeword holding a frame's length fails, it can't find the next
+  frame, so every later frame in that burst is lost too, and `LOST`
+  counts them as one. Ragtime's file pieces fill whole codewords
+  (`Airtime`, `pieceFrameBytes`), so each frame's length opens a
+  codeword, and losing that codeword loses the rest of the burst. At
+  heavy loss, the first frames in a burst get through far more often than
+  the last.
+- **Control lost.** The receiver tries the first data codeword under each
+  open port's key and, if it passes, delivers the burst with no call on
+  `HEARD`.
+- No resends at this layer. `docs/broadcast.md` lists incremental
+  redundancy across broadcast bursts as not done: our parity (PROTOCOL.md,
+  "Parity") is the repair.
+
+## Channel access
+
+- A burst queued while the channel is free goes at once.
+- One queued while a burst is being received waits. After that it takes
+  each slot with probability (P + 1)/256: P is 63 by default (25%), the
+  slot at least 1 s. A client may set P (KISS command 2) and lengthen the
+  slot (KISS command 3, in 10 ms units). P is the host's, for every
+  client. Ragtime 0.1 sets neither; PR #64 sends P = 191 (75% a slot).
+- The hold follows a burst being received, from its preamble on. The
+  `BUSY` the host reports is that, held only while the burst's pilots
+  check out or energy is 3 dB over the noise floor.
+- After 60 s of unbroken busy (`--kiss-busy-limit`) a burst goes anyway.
+- Broadcast bursts go only while no session is under way.
+
+## Sessions
+
+- A station already in a session, or not listening, refuses a `CONNECT`
+  at once with a NAK (busy, not listening, wrong version, refused), and
+  the caller stops dialing. The caller's host then says only
+  `DISCONNECTED`. The reason is in the host's log, not on the command
+  port.
+- A caller who dials again while its old session is still up replaces
+  that session.
+- The answering side takes the smaller of the two width caps.
+- **An idle session is hung up.** With no data either way for 5 minutes
+  (`IDLE_CLOSE_S`), the host disconnects on its own. Ragtime shows that
+  as "Link lost", and a quiet ragchew ends without a Leave. While idle,
+  the caller polls every 15 to 30 s (`KEEPALIVE_S`). With nothing heard
+  from the partner for 90 s (`LINK_LOST_S`) the session is lost.
+
+## Not in Data2G yet (asks)
+
+- A way to keep a quiet session up past 5 minutes, so it ends only on
+  Leave.
+- A transmit level command (Auto ALC).
+- S/N thresholds in `MODES`.
+- The mode on `BCAST HEARD` (the path log's mode column).
+- The refusal reason on `DISCONNECTED`, so "AG7EW is in a session" can
+  show as such.
+- A dial report from the host's own rig control.
+- A 200 Hz session cap.
+- The Hand (`HAND SEND`, `HAND LISTEN`, Stage 2).
+- Lengths that survive a lost codeword (below).
+
+**Lengths that survive a lost codeword.** If a burst could say "every
+frame starts on a codeword", the receiver could pick up at the next
+codeword after a bad one, and only the frames that touch it would be
+lost. That is a change to the frame layout, so it's Andrew's call. Until
+then the sender can only put fewer frames in a burst when the path is
+poor.
