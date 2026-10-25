@@ -996,8 +996,13 @@ void testGiveUpAndAskAgain()
         return f;
     };
 
+    // Until it gives up: repair bursts leave room to answer between them
+    // (HostLink::YIELD_GAP_MS), so the rounds take a while.
+    auto untilIncomplete = [&](const std::string& name) {
+        for (int i = 0; i < 30 * 60 && fileNamed(name).state != FileState::Incomplete; i++) air.run(1000, 500);
+    };
     std::string path = share("giveup.bin", 12);
-    air.run(5 * 60 * 1000, 500);
+    untilIncomplete("giveup.bin");
     BroadcastFile f = fileNamed("giveup.bin");
     CHECK(f.id != 0 && f.state == FileState::Incomplete && !f.stopped);
     CHECK(f.sealed && !f.sealAged && f.held == 3);
@@ -1020,10 +1025,12 @@ void testGiveUpAndAskAgain()
     // under, and nothing goes.
     deaf = true;
     share("aged.bin", 13);
-    air.run(5 * 60 * 1000, 500);
+    untilIncomplete("aged.bin");
     f = fileNamed("aged.bin");
     CHECK(f.state == FileState::Incomplete && f.sealed);
-    air.run(broadcast::MAX_OPEN_MS, 5000);
+    // Two hours after the last of its seals went (it goes again a time or
+    // two after the last round).
+    air.run(broadcast::MAX_OPEN_MS + 10 * 60 * 1000, 5000);
     f = fileNamed("aged.bin");
     CHECK(f.state == FileState::Incomplete && !f.sealed && f.sealAged);
     asked = b.seals.requestsSent();

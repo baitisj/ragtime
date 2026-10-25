@@ -932,8 +932,10 @@ void Seals::resend(uint64_t nowMs)
     for (size_t i = 0; i < bursts.size(); i++)
     {
         const auto& burst = bursts[i];
+        // Each yields (HostLink::YIELD_GAP_MS after our last burst, and
+        // during an ack hold), so a station can answer between them.
         uint64_t id = link_.broadcast(burst.second, burst.first, nowMs,
-                                      seals.empty() ? "repairs refused" : "repairs");
+                                      seals.empty() ? "repairs refused" : "repairs", true);
         if (id == 0) continue;
         resendBursts_.insert(id);
         resendLast_ = id;
@@ -1056,7 +1058,7 @@ void Seals::flush(uint64_t nowMs)
     lastRoundMode_ = mode;
     for (const auto& burst : packBursts(frames, modeInfo(mode)))
     {
-        uint64_t id = link_.broadcast(burst, mode, nowMs, "seal again");
+        uint64_t id = link_.broadcast(burst, mode, nowMs, "seal again", true);
         if (id == 0) continue;
         resendBursts_.insert(id);
         resendLast_ = id;
