@@ -94,6 +94,8 @@ HostLink opened(uint64_t nowMs, bool narrow = false)
     answers += "OK\r";
     say(link, answers, nowMs);
     link.takeEvents();
+    // KISS P went as the ports came up.
+    CHECK(link.takeKissOutput() == std::vector<uint8_t>({0xC0, KISS_PERSIST, HostLink::KISS_P, 0xC0}));
     return link;
 }
 
