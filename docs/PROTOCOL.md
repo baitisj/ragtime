@@ -31,10 +31,8 @@ never `GLISS`.
 
 ## Where records travel
 
-data2g-host has three TCP ports (Glissando's old
-[`docs/DATA2G.md`](https://github.com/baitisj/glissando/blob/75273a5/docs/DATA2G.md),
-the last copy before Glissando dropped Data2G, describes the command
-lines):
+data2g-host has three TCP ports ([`DATA2G.md`](DATA2G.md) sums up its
+commands and reports, read from Data2G's source):
 
 | Port | Default | Carries |
 | --- | --- | --- |
@@ -43,9 +41,10 @@ lines):
 | Session data | 8301 (commands + 1) | A session's byte stream, both ways, once `CONNECTED` |
 
 **A broadcast frame** is the byte `0xA0` followed by whole records, as
-many as fit. In version 0 a frame is at most 255 bytes, the size
-Glissando's Data2G frames were on the air; larger frames wait on a word
-from Andrew about the host's limits. Frames aren't padded: Data2G carries
+many as fit. In version 0 a frame is at most 255 bytes. Data2G sizes
+every data mode's receiver for one 256-byte KISS frame; a longer one
+fits only some modes (`docs/DATA2G.md`, "A broadcast burst"). Frames
+aren't padded: Data2G carries
 each frame's length, so the frame ends at its last byte. A record never
 spans two frames.
 

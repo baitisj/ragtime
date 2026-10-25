@@ -29,7 +29,8 @@ and open questions. `docs/STAGE1.md` is the work now under way.
 `docs/PROTOCOL.md` is what goes on the air (records, frames, sessions,
 text coding).
 `docs/GEARBOX.md` and `docs/MOCKUPS.md` cover the gearshift and the
-screens. `docs/FLIGHT_RECORDER.md` is the host-link recorder, the report
+screens. `docs/DATA2G.md` is what data2g-host does at the edges Ragtime
+touches. `docs/FLIGHT_RECORDER.md` is the host-link recorder, the report
 and `--replay`. `docs/HOW_SEALS_WORK.md` is the plain-words primer on seals and
 repair (its figures are SVGs in `docs/images/how-seals-work/`); change it
 with the code when the seal rules change.
@@ -150,10 +151,15 @@ with the code when the seal rules change.
 - Never pull Data2G code in: no vendoring, submodule, linking or copied
   snippets. Ragtime talks to a separately running `data2g-host` over TCP:
   KISS on 8100, commands on 8300, and the session byte stream on the
-  command port + 1 (8301). Glissando's old `docs/DATA2G.md` (last copy at
-  https://github.com/baitisj/glissando/blob/75273a5/docs/DATA2G.md,
-  before Glissando dropped Data2G) describes the
-  command lines and reports as Glissando uses them.
+  command port + 1 (8301). `docs/DATA2G.md` sums up the host as Ragtime
+  meets it, read from Data2G's source at a pinned commit.
+- Don't guess how Data2G behaves: read it (Andrew's advice, 2026-10-25).
+  `git clone https://github.com/arodland/Data2G` works in a cloud
+  session; start with its `docs/broadcast.md`, `docs/arq.md`,
+  `data2g/host.py`'s docstring and `data2g/kisslink.py`. Reading is fine,
+  copying code is not. When something you need isn't in
+  `docs/DATA2G.md`, or Data2G has moved past its commit, read the source
+  and update that page in the same PR.
 - Never start `data2g-host`; the operator runs it. Ragtime never touches
   the sound card or PTT for data.
 - Glissando dropped its own Data2G mode on 2026-10-22 (glissando PR
@@ -345,7 +351,10 @@ without his OK. The system `rigctld` (localhost:4532, shared with fldigi)
 is his: never kill or restart it, and send only read-only queries. Tests
 never use the radio's USB audio codec. Read `RADIO_SETUP.md` in his
 Glissando checkout first. The two-host bench (two `data2g-host`s on
-PulseAudio null sinks) is Jeff's to run there, since Data2G needs PyTorch.
+PulseAudio null sinks) is Jeff's to run there. Data2G no longer needs
+PyTorch: its releases are the native `data2g-host` and `data2g-gui`, and
+`--audio-io pipe:IN,OUT` joins two hosts with fifos, no sound card
+(`docs/DATA2G.md`).
 
 ## Cloud sandbox quirks
 
