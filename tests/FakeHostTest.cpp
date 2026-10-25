@@ -341,6 +341,51 @@ void testTwoStations()
     fs::remove_all(dir, ec);
 }
 
+// Hosts since Data2G PR #118: DATA2G ON, and CLEANTXBUFFER drops what a
+// session's host holds, in host byte offsets.
+void testACut()
+{
+    FakeAir air;
+    FakeHost hostA(air), hostB(air);
+    hostA.setSessionRate(100);
+    Station a("AG7EW", hostA), b("W1AW", hostB);
+    CHECK(run(air, a, b, [&] { return a.link.groupOpen() && b.link.groupOpen(); }));
+    CHECK(a.link.data2g() && !a.link.canCut());
+    CHECK(a.link.call("W1AW", now));
+    CHECK(run(air, a, b, [&] { return a.link.canCut() && b.link.canCut(); }));
+
+    protocol::Text text;
+    text.text = std::string(1500, 'x');
+    a.write(protocol::encodeRecord(a.numbering.record(text, (uint32_t)(now / 1000))));
+    CHECK(run(air, a, b, [&] { return hostA.sessionWaiting() > 1000; }));
+    uint64_t written = a.written;
+    CHECK(a.link.cleanTxBuffer(written, now));
+    link::CommandEvent::Clean clean;
+    CHECK(run(air, a, b, [&] {
+        for (const auto& e : a.events)
+        {
+            if (e.type == Type::Clean) clean = e.clean;
+        }
+        return !clean.offsets.empty();
+    }));
+    CHECK(clean.result == link::CommandEvent::Clean::Result::Ok && clean.offsets.size() == 4);
+    if (clean.offsets.size() == 4)
+    {
+        CHECK(clean.offsets[0] < written && clean.offsets[1] == written);
+        CHECK(clean.offsets[2] == clean.offsets[0] && clean.offsets[3] == clean.offsets[0]);
+        CHECK_EQ(hostA.cutBytes(), (size_t)(written - clean.offsets[0]));
+    }
+    CHECK_EQ(hostA.sessionWaiting(), (size_t)0);
+
+    // A host from before it: no cuts.
+    FakeAir oldAir;
+    FakeHost oldA(oldAir), oldB(oldAir);
+    oldA.setCuts(false);
+    Station c("AG7EW", oldA), d("W1AW", oldB);
+    CHECK(run(oldAir, c, d, [&] { return c.link.groupOpen() && !c.link.modes().empty(); }));
+    CHECK(!c.link.data2g() && !c.heard(Type::Refused));
+}
+
 // Hosts since Data2G PR #98: an SNR on HEARD, and SN in a session.
 void testSnrs()
 {
@@ -438,6 +483,7 @@ void testTheHostSaysNo()
 int main()
 {
     testTwoStations();
+    testACut();
     testSnrs();
     testTheHostSaysNo();
     return ragtime_test::finish();

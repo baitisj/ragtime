@@ -440,6 +440,7 @@ void SessionFiles::keepSent(Entry& entry)
     FileTransfer& t = entry.transfer;
     bool unfinished = t.state == State::Cancelled || t.state == State::CancelledThere || t.state == State::Failed;
     if (!unfinished || entry.written == 0) return;
+    if (t.state != State::Failed && entry.written > t.done) cutsWanted_++;
     auto older = findSent(entry);
     if (older != kept_.end()) dropKept(older, false);
     Kept& k = kept_.emplace_back();
@@ -812,7 +813,7 @@ bool SessionFiles::takePiece(const std::string& peer, protocol::Numbering& numbe
 
         std::vector<uint8_t> record = protocol::encodeRecord(numbering.record(std::move(data), time, entry.offer));
         out.insert(out.end(), record.begin(), record.end());
-        entry.pieces.push_back({streamOffset + record.size() - length, entry.written, length});
+        entry.pieces.push_back({streamOffset, streamOffset + record.size() - length, entry.written, length});
         entry.written += length;
         return true;
     }
@@ -857,6 +858,43 @@ void SessionFiles::acknowledged(const std::string& peer, uint64_t streamAcked)
             k.handed = k.bytes;
             changed();
         }
+    }
+}
+
+void SessionFiles::cut(const std::string& peer, uint64_t streamFrom)
+{
+    auto gone = [&](std::deque<Piece>& pieces) {
+        auto first = std::find_if(pieces.begin(), pieces.end(),
+                                  [&](const Piece& p) { return p.recordStart >= streamFrom; });
+        if (first == pieces.end()) return false;
+        pieces.erase(first, pieces.end());
+        return true;
+    };
+    for (Entry& entry : entries_)
+    {
+        FileTransfer& t = entry.transfer;
+        if (!t.outgoing || t.peer != peer || t.state != FileTransfer::State::Sending) continue;
+        uint64_t from = entry.written;
+        for (const Piece& p : entry.pieces)
+        {
+            if (p.recordStart >= streamFrom)
+            {
+                from = p.fileStart;
+                break;
+            }
+        }
+        if (!gone(entry.pieces)) continue;
+        // The file goes again from there.
+        entry.written = from;
+        entry.in.clear();
+        entry.in.seekg((std::streamoff)from);
+        changed();
+    }
+    for (Kept& k : kept_)
+    {
+        if (!k.outgoing || k.peer != peer || !gone(k.pieces)) continue;
+        k.handed = k.pieces.empty() ? k.bytes : std::max(k.bytes, k.pieces.back().fileStart + k.pieces.back().length);
+        changed();
     }
 }
 

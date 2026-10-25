@@ -220,6 +220,16 @@ public:
     // The far end's modem has acknowledged the session's bytes up to here.
     void acknowledged(const std::string& peer, uint64_t streamAcked);
 
+    // A cut (CLEANTXBUFFER): the session's stream from streamFrom on never
+    // went. FileData records that began there are gone, so a file still
+    // going carries on from the first of them, and a part sent counts only
+    // what went before.
+    void cut(const std::string& peer, uint64_t streamFrom);
+    // Goes up each time a file of ours stops (cancelled here or there)
+    // with bytes handed to the host the far end hasn't acknowledged: worth
+    // a cut, where the host can make one.
+    uint64_t cutsWanted() const { return cutsWanted_; }
+
     // Of a FileData still coming in from the station, these bytes of the
     // file, from offset, have arrived (see
     // protocol::StreamReader::partialFileData). If the transfer ends
@@ -276,7 +286,8 @@ private:
     // A FileData of ours in the session's stream.
     struct Piece
     {
-        uint64_t streamStart;   // where in the session's stream its file bytes start
+        uint64_t recordStart;   // where in the session's stream its record starts
+        uint64_t streamStart;   // and its file bytes
         uint64_t fileStart;     // and where in the file
         uint64_t length;
     };
@@ -356,6 +367,7 @@ private:
     std::map<std::string, std::vector<protocol::Body>> pending_;   // records waiting for each station's session
     uint64_t nextId_ = 1;
     uint64_t changes_ = 0;
+    uint64_t cutsWanted_ = 0;
     std::string autoFolder_;
     std::set<std::string> autoCalls_;
     bool inhibited_ = false;

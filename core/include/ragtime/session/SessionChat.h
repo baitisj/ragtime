@@ -43,6 +43,7 @@
 #include "ragtime/link/HostLink.h"
 #include "ragtime/protocol/Records.h"
 #include "ragtime/protocol/Stream.h"
+#include "ragtime/session/StreamLog.h"
 
 namespace ragtime
 {
@@ -75,6 +76,10 @@ public:
     void wrote(size_t bytes, uint64_t nowMs);
     // The host's BUFFER report.
     void buffer(int count, uint64_t nowMs);
+    // A cut: the host dropped these bytes, from at in our stream, and
+    // they never go; of what we wrote, the last unread it had yet to read.
+    // Counts that follow leave the dropped ones out.
+    void dropped(uint64_t at, uint64_t bytes, uint64_t unread, uint64_t nowMs);
     void reset();
 
     uint64_t written() const { return written_; }
@@ -160,6 +165,22 @@ public:
     // We are leaving: the last records to write before the farewell.
     virtual void leaving(const std::string& peer, protocol::Numbering& numbering, uint64_t nowMs,
                          std::vector<uint8_t>& out) = 0;
+    // When the host can cut (DATA2G ON), asked before each write: true
+    // once for each time what the host holds of ours should be dropped
+    // (a file stopped with its bytes still going out).
+    virtual bool wantsCut(const std::string& peer)
+    {
+        (void)peer;
+        return false;
+    }
+    // A cut was made: our stream from streamFrom on never went, though
+    // the record it fell in is finished all the same. The FileData records
+    // that began there are gone; what they carried may go again.
+    virtual void cut(const std::string& peer, uint64_t streamFrom)
+    {
+        (void)peer;
+        (void)streamFrom;
+    }
     virtual void ended(const std::string& peer, uint64_t nowMs) = 0;
     // Something is still moving with the peer: Leave asks first.
     virtual bool busy(const std::string& peer) const = 0;
@@ -233,6 +254,16 @@ public:
     static constexpr size_t MAX_MESSAGES = 2000;
     // The longest message taken at once, in bytes.
     static constexpr size_t MAX_TYPED = 2000;
+    // A cut (CLEANTXBUFFER, docs/PROTOCOL.md "Cuts") is asked for once
+    // nothing has gone to the data port for this long, so the host has
+    // read all of it.
+    static constexpr uint64_t CUT_QUIET_MS = 500;
+    // A message cuts in ahead of file bytes when more than this waits at
+    // the host.
+    static constexpr int CUT_FOR_CHAT_BYTES = 1024;
+    // A cut the host hasn't answered in this long is taken as made of
+    // nothing.
+    static constexpr uint64_t CUT_ANSWER_MS = 10 * 1000;
 
     explicit SessionChat(link::HostLink& link);
 
@@ -315,9 +346,15 @@ public:
     // The far end's stream isn't Ragtime's.
     bool foreign() const { return reader_.foreign(); }
     bool greeted() const { return reader_.greeted(); }
+    const protocol::StreamReader& reader() const { return reader_; }
     const protocol::Hello& theirHello() const { return reader_.hello(); }
     // Something rides in the session (files): Leave should ask first.
     bool trafficBusy() const;
+    // A cut is under way: nothing is written until it is mended.
+    bool cutting() const { return cutting_ != Cutting::None; }
+    // Cuts made this session, and bytes they kept off the air.
+    int cuts() const { return cuts_; }
+    uint64_t cutBytes() const { return cutBytes_; }
 
     const StreamAccount& stream() const { return account_; }
     const protocol::Numbering& numbering() const { return numbering_; }
@@ -343,8 +380,16 @@ public:
 private:
     void begin(const std::string& peer, bool incoming, int bandwidth, uint64_t nowMs);
     void finish(Ending ending, uint64_t nowMs);
-    void write(const std::vector<uint8_t>& bytes, uint64_t nowMs);
+    void write(const std::vector<uint8_t>& bytes, uint64_t nowMs, uint64_t message = 0);
     void writeQueued(uint64_t nowMs);
+    void writeFarewell(uint64_t nowMs);
+    bool canCut() const;
+    void startCut(uint64_t nowMs);
+    void stepCut(uint64_t nowMs);
+    void onClean(const link::CommandEvent::Clean& clean, uint64_t nowMs);
+    void dropCut(uint64_t from, uint64_t to, uint64_t unread, uint64_t nowMs);
+    void mend(uint64_t nowMs);
+    void endCut();
     void onRecord(const protocol::Record& record, uint64_t nowMs);
     void settle();
     void checkFarewell(uint64_t nowMs);
@@ -392,6 +437,31 @@ private:
     std::vector<protocol::Record> early_;   // the far end's, read before the session was up
     StreamAccount account_;
     std::vector<uint8_t> out_;
+    std::vector<std::pair<size_t, uint64_t>> outMessages_;   // where in out_ a message's record starts
+
+    // Cuts. Host offsets count every byte the data port took this
+    // session, cut ones too; stream offsets, the far end's, leave cut ones
+    // out.
+    enum class Cutting
+    {
+        None,
+        Quiet,      // waiting for the host to have read all we wrote
+        Asked,      // CLEANTXBUFFER sent
+        Settling,   // bytes on air when it was cut: waiting for SETTLED
+    };
+    StreamLog sent_;                // our stream, from the first record not yet acknowledged
+    Cutting cutting_ = Cutting::None;
+    uint64_t hostWritten_ = 0;
+    uint64_t hostDropped_ = 0;      // host offset less stream offset, past the last cut
+    uint64_t cutBase_ = 0;          // hostDropped_ when this cut began
+    std::vector<std::pair<uint64_t, uint64_t>> cutRanges_;    // host offsets cut this time
+    bool limbo_ = false;
+    int cutTries_ = 0;
+    uint64_t cutAskedMs_ = 0;
+    uint64_t lastWriteMs_ = 0;
+    bool leaveAfterCut_ = false;
+    int cuts_ = 0;
+    uint64_t cutBytes_ = 0;
     std::deque<std::pair<uint64_t, std::vector<uint8_t>>> queued_;  // messages paused, by id, coded
 
     std::deque<Message> messages_;

@@ -713,6 +713,7 @@ void MainFrame::onHostEvents(const std::vector<Event>& events)
     }
     // File pacing follows the mode the session is in.
     fileTraffic_.setMode(broadcast::findMode(link_.modes(), session_.mode()));
+    fileTraffic_.setCuts(link_.data2g());
     onBroadcastFiles();
     onSessionEvents();
     onFileEvents();
@@ -734,6 +735,7 @@ void MainFrame::onClock()
     onBroadcastFiles();
     session_.tick(now);
     fileTraffic_.setMode(broadcast::findMode(link_.modes(), session_.mode()));
+    fileTraffic_.setCuts(link_.data2g());
     fileTraffic_.tick(now);
     onSessionEvents();
     onFileEvents();

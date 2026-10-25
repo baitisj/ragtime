@@ -93,12 +93,21 @@ uint64_t FileTraffic::burstBytes(const link::ModeInfo& mode)
 
 uint64_t FileTraffic::window() const
 {
+    if (cuts_) return MAX_WINDOW;
     uint64_t burst = burstBytes(mode_);
     if (burst > 0) return std::max(MIN_WINDOW, std::min(MAX_WINDOW, WINDOW_BURSTS * burst));
     double rate = session_.rate();
     if (!(rate > 0)) return START_WINDOW;
     uint64_t w = (uint64_t)std::llround(rate * (double)WINDOW_MS / 1000.0);
     return std::max(MIN_WINDOW, std::min(MAX_WINDOW, w));
+}
+
+size_t FileTraffic::pieceBytes() const
+{
+    if (!cuts_) return std::max(MIN_PIECE, std::min(SessionFiles::PIECE_BYTES, (size_t)(window() / 2)));
+    uint64_t burst = burstBytes(mode_);
+    if (burst == 0) return CUT_PIECE;
+    return std::max(MIN_PIECE, std::min(SessionFiles::PIECE_BYTES, (size_t)(burst / 2)));
 }
 
 void FileTraffic::write(const std::string& peer, protocol::Numbering& numbering, uint64_t streamOffset,
@@ -119,7 +128,7 @@ void FileTraffic::write(const std::string& peer, protocol::Numbering& numbering,
 
     // File bytes, up to the window.
     uint64_t w = window();
-    size_t piece = std::max(MIN_PIECE, std::min(SessionFiles::PIECE_BYTES, (size_t)(w / 2)));
+    size_t piece = pieceBytes();
     for (;;)
     {
         uint64_t at = streamOffset + out.size();
@@ -156,6 +165,7 @@ void FileTraffic::leaving(const std::string& peer, protocol::Numbering& numberin
 void FileTraffic::ended(const std::string& peer, uint64_t nowMs)
 {
     files_.sessionEnded(peer, nowMs);
+    seenCuts_ = files_.cutsWanted();
     if (peer == peer_)
     {
         up_ = greeted_ = takes_ = false;
@@ -163,6 +173,18 @@ void FileTraffic::ended(const std::string& peer, uint64_t nowMs)
         session_.reset();
     }
     collect(nowMs);
+}
+
+bool FileTraffic::wantsCut(const std::string& peer)
+{
+    if (peer != peer_ || files_.cutsWanted() == seenCuts_) return false;
+    seenCuts_ = files_.cutsWanted();
+    return true;
+}
+
+void FileTraffic::cut(const std::string& peer, uint64_t streamFrom)
+{
+    files_.cut(peer, streamFrom);
 }
 
 bool FileTraffic::busy(const std::string& peer) const

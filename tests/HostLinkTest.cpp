@@ -85,7 +85,7 @@ HostLink opened(uint64_t nowMs, bool narrow = false)
     HostLink link({"ag7ew", true, narrow});
     link.commandUp(nowMs);
     link.takeCommandOutput();
-    std::string answers = "OK\rOK\rOK\rOK\rBCAST PORT 2\r";
+    std::string answers = "OK\rOK\rWRONG\rOK\rOK\rBCAST PORT 2\r";
     for (const ModeInfo& m : knownModes())
     {
         answers += "MODE " + m.name + " " + std::to_string(m.bandwidthHz) + " " + std::to_string(m.bytesPerCodeword) +
@@ -103,12 +103,12 @@ void testTheOpening()
     CHECK(!link.commandConnected());
     link.commandUp(1000);
     std::vector<std::string> lines = linesOf(link.takeCommandOutput());
-    const std::vector<std::string> expected = {"MYCALL AG7EW", "CHAT ON", "LISTEN ON", "BW2300",
+    const std::vector<std::string> expected = {"MYCALL AG7EW", "CHAT ON", "DATA2G ON", "LISTEN ON", "BW2300",
                                                "BCAST OPEN D2G FROM AG7EW", "MODES"};
     CHECK(lines == expected);
     CHECK(!link.groupOpen());
 
-    say(link, "OK\rOK\rOK\rOK\rBCAST PORT 2\rMODE fsk16r25-r1/3 500 38 9 4.98 89.22\r", 1100);
+    say(link, "OK\rOK\rWRONG\rOK\rOK\rBCAST PORT 2\rMODE fsk16r25-r1/3 500 38 9 4.98 89.22\r", 1100);
     CHECK(link.groupOpen());
     CHECK_EQ(link.groupPort(), 2);
     // The list counts once its OK comes.
@@ -123,7 +123,7 @@ void testTheOpening()
     HostLink narrow({"W1AW", false, true});
     narrow.commandUp(0);
     lines = linesOf(narrow.takeCommandOutput());
-    CHECK(lines.size() == 6 && lines[2] == "LISTEN OFF" && lines[3] == "BW500");
+    CHECK(lines.size() == 7 && lines[3] == "LISTEN OFF" && lines[4] == "BW500");
 
     // Changed later: the host is told, and the modes asked for again.
     link.setNarrow(true, 2000);
@@ -270,7 +270,7 @@ void testTheModeWaitsForEarlierAnswers()
     HostLink link({"AG7EW", true, false});
     link.commandUp(0);
     link.takeCommandOutput();
-    say(link, "OK\rOK\rOK\rOK\rBCAST PORT 2\r", 10);
+    say(link, "OK\rOK\rWRONG\rOK\rOK\rBCAST PORT 2\r", 10);
     uint64_t id = link.broadcast({{0xA0, 1}}, "qpsk-r1/3", 20);
     CHECK(link.takeCommandOutput().empty());
     say(link, "MODE qpsk-r1/3 1200 76 64 1.78 74.36\rOK\r", 30);
@@ -353,7 +353,7 @@ void testDroppedAndPortLost()
     // Back again, it goes.
     link.commandUp(50);
     link.takeCommandOutput();
-    say(link, "OK\rOK\rOK\rOK\rBCAST PORT 3\rOK\r", 60);
+    say(link, "OK\rOK\rWRONG\rOK\rOK\rBCAST PORT 3\rOK\r", 60);
     CHECK_EQ(tagsWritten(link, 3).size(), (size_t)1);
     CHECK(link.burstState(third) == BurstState::Sending);
 }
@@ -439,6 +439,63 @@ void testCallingAndLeaving()
     CHECK(!lines.empty() && lines.back() == "ABORT");
 }
 
+void testCuts()
+{
+    // A host from before Data2G PR #118 answers DATA2G ON with WRONG: not
+    // refused, and no cuts.
+    HostLink old = opened(0);
+    CHECK(!old.data2g());
+    CHECK(!hasEvent(old.takeEvents(), Type::Refused));
+
+    HostLink link({"ag7ew", true, false});
+    link.commandUp(0);
+    link.takeCommandOutput();
+    say(link, "OK\rOK\rOK\rOK\rOK\rBCAST PORT 2\rOK\r", 10);
+    CHECK(link.data2g());
+    CHECK(!link.canCut());
+    CHECK(!link.cleanTxBuffer(100, 20)); // no session
+    CHECK(link.call("W1AW", 30));
+    say(link, "OK\rCONNECTED AG7EW W1AW 2300\r", 40);
+    link.takeCommandOutput();
+    link.takeEvents();
+    CHECK(link.canCut());
+    CHECK(link.cleanTxBuffer(4096, 50));
+    CHECK(linesOf(link.takeCommandOutput()) == std::vector<std::string>({"CLEANTXBUFFER 4096"}));
+    say(link, "CLEANTXBUFFER OK 1200 4096 980 1200\rCLEANTXBUFFER SETTLED 980 1100 1200\r", 60);
+    std::vector<HostLink::Event> events = link.takeEvents();
+    CHECK_EQ(events.size(), (size_t)2);
+    if (events.size() == 2)
+    {
+        CHECK(events[0].type == Type::Clean && events[0].clean.result == CommandEvent::Clean::Result::Ok
+              && events[0].clean.offsets.size() == 4);
+        CHECK(events[1].type == Type::Clean && events[1].clean.result == CommandEvent::Clean::Result::Settled);
+    }
+    // The answer was awaited: an OK after it answers the next command.
+    link.setNarrow(true, 70);
+    link.takeCommandOutput();
+    say(link, "WRONG\rOK\r", 80);
+    CHECK(hasEvent(link.takeEvents(), Type::Refused));
+
+    // A host that answers WRONG can't cut after all.
+    CHECK(link.cleanTxBuffer(5000, 90));
+    say(link, "WRONG\r", 100);
+    events = link.takeEvents();
+    CHECK(events.size() == 1 && events[0].type == Type::Clean
+          && events[0].clean.result == CommandEvent::Clean::Result::Failed);
+    CHECK(!link.data2g() && !link.canCut());
+}
+
+void testTheLastModeReported()
+{
+    // MODE comes only when the mode changes, so the last one is kept.
+    HostLink link = opened(0);
+    CHECK(link.lastMode().empty());
+    say(link, "PTT ON\rMODE qpsk-r1/3\rPTT OFF\r", 10);
+    CHECK_EQ(link.lastMode(), std::string("qpsk-r1/3"));
+    link.commandDown(20);
+    CHECK(link.lastMode().empty());
+}
+
 void testAnUnansweredCommandIsNotWaitedOnForEver()
 {
     // A host that never answers BW2300, say: the burst's BCAST MODE still
@@ -446,7 +503,7 @@ void testAnUnansweredCommandIsNotWaitedOnForEver()
     HostLink link({"AG7EW", true, false});
     link.commandUp(0);
     link.takeCommandOutput();
-    say(link, "OK\rOK\rOK\rBCAST PORT 2\r", 10); // one OK short, and no MODES answer
+    say(link, "OK\rOK\rWRONG\rOK\rBCAST PORT 2\r", 10); // one OK short, and no MODES answer
     uint64_t id = link.broadcast({{0xA0, 1}}, "qpsk-r1/3", 20);
     CHECK(link.takeCommandOutput().empty());
     link.tick(HostLink::ANSWER_MS + 20);
@@ -534,6 +591,8 @@ int main()
     testDroppedAndPortLost();
     testPauseSending();
     testCallingAndLeaving();
+    testCuts();
+    testTheLastModeReported();
     testAnUnansweredCommandIsNotWaitedOnForEver();
     testNothingWithoutTheHost();
     testWhatIsGoingOut();

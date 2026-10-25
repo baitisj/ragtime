@@ -370,8 +370,9 @@ One file goes to a station at a time; the next waits for it.
 6. Either side can **FileCancel** at any time. A FileSaved that crosses
    the sender's cancel still counts as delivered. The session's stream
    is one queue, so a sender's cancel goes out behind the file bytes the
-   host already has, and the receiver takes those until the cancel
-   comes. A receiver that cancels drops what comes after.
+   host already has (unless the host can cut them, below), and the
+   receiver takes those until the cancel comes. A receiver that cancels
+   drops what comes after.
 7. A transfer cancelled, or a session ending under it, leaves the
    receiver with a part file: every byte that arrived, including those
    of a FileData still coming in (the stream is in order, and the digest
@@ -387,7 +388,8 @@ One file goes to a station at a time; the next waits for it.
 A sender offers nothing until the far end's Hello has come and says it
 takes session files. It keeps no more file bytes waiting at the host than
 two of the session mode's longest bursts (between 1 and 8 KB), so a Text
-typed during a transfer goes out behind at most that much; how much is the
+typed during a transfer goes out behind at most that much; with a host
+that can cut, 8 KB, and a Text cuts in ahead of them. How much is the
 sender's own business and not part of the protocol.
 
 The receiver saves under a safe form of the offered name: its last path
@@ -395,6 +397,42 @@ part only, without control or direction characters, path separators,
 Windows' forbidden characters, leading or trailing dots and spaces, or a
 Windows device name, cut to 200 bytes at a character boundary. Auto-accept
 never overwrites a file; it numbers the name instead.
+
+### Cuts
+
+Since Data2G PR #118 a host can drop session bytes it holds and hasn't
+sent. Ragtime asks for `DATA2G ON` when the command port opens; a host
+that answers WRONG is older, and its sessions go without cuts. With it
+on, offsets are host byte offsets: the bytes the data port has taken
+this session, counted from `CONNECTED` (Ragtime writes nothing before
+it, and the host drops what comes earlier).
+
+A sender cuts when a file of its stops either end with bytes still at
+the host, when Leave finds file bytes there, and when a Text is typed
+with more than 1 KB waiting there behind file bytes. Nothing changes for
+the far end: its stream stays whole, and no record says a cut was made.
+
+1. The sender stops writing, and once nothing has gone to the data port
+   for half a second (so the host has read all of it) sends
+   `CLEANTXBUFFER n`, n being every byte written.
+2. `CLEANTXBUFFER OK drop_from drop_to limbo_from limbo_to`: the host
+   dropped `[drop_from, drop_to)`; `[limbo_from, limbo_to)` was on air,
+   not yet acknowledged. A drop_to short of n means bytes were still on
+   their way to the host; those were kept, so the sender cuts again.
+3. With a limbo, it waits for `CLEANTXBUFFER SETTLED from split to`:
+   delivered before split, dropped from it.
+4. The far end now has the sender's stream up to the first byte cut. The
+   host cuts at its own record boundaries, not Ragtime's, so that byte
+   may fall inside one of our records: the sender writes the rest of that
+   record again, from its copy of what it wrote, then the Texts waiting,
+   then every record that began after the cut except FileData, then the
+   rest. A file still going carries on from the first FileData cut; one
+   that stopped counts as sent only what went before it.
+5. `LATE`, `BUFFEREMPTY`, `FAILED`, WRONG, or no answer in 10 s: nothing
+   was cut, and writing goes on. A session that ends first (`SETTLED ...
+   UNKNOWN`) takes the cut with it. Cuts that leave a hole in the middle
+   of the stream (bytes after the cut went on air) can't be mended, and
+   the sender leaves at once (Leave now).
 
 ## Broadcast
 

@@ -311,6 +311,20 @@ Choices made there, for Jeff to keep or change:
   the plan is a flat 8 KB, cut back on a cancel or to slip a message
   in (Andrew). Until then a message typed mid-file goes out behind at
   most the window, not behind the whole file.
+- **Cuts** (for 0.1.2, Data2G PR #118). Ragtime asks for `DATA2G ON`;
+  a host that takes it can cut what it holds of a session
+  (`CLEANTXBUFFER`). There the window is a flat 8 KB, a FileData carries
+  at most half a burst of the mode (512 B while it isn't known, so a cut
+  costs little), and Ragtime cuts when a file stops either end with
+  bytes still at the host, when Leave finds file bytes there, and when a
+  message is typed with more than 1 KB waiting behind file bytes. It
+  mends the far end's stream from its own copy of what it wrote
+  (`session::StreamLog`): the tail of the record the cut fell in, then
+  the messages, then what else was cut except file bytes, which go again
+  from the file (docs/PROTOCOL.md, "Cuts"). The bench's fake hosts cut
+  too; `--no-cut` plays a host from before #118. A session also starts
+  in the mode the host last reported, since the host repeats MODE only
+  when it changes.
 - **Offers wait for the far end's Hello,** and go only if it takes
   session files; a file queued for a station that doesn't ends Not taken.
 - **Leave** cancels what is under way, so the far end hears why and keeps

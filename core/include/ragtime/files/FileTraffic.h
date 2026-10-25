@@ -10,7 +10,9 @@
 //   yet a message typed during a transfer isn't stuck behind the whole
 //   file, and a cancel isn't either: data2g-host can't take back what it
 //   has been handed. Until the mode is known, 10 s of the session's
-//   acknowledged rate (WINDOW_MS).
+//   acknowledged rate (WINDOW_MS). A host that can cut (DATA2G ON, Data2G
+//   PR #118) takes back what it hasn't sent, so there the window is
+//   MAX_WINDOW from the start, and a file stopped either end is cut.
 // - Leave cancels what is under way in the session, so the far end hears
 //   it, and keeps the files still queued for the next session with the
 //   station. A part received is kept, to carry on next time.
@@ -59,6 +61,11 @@ public:
     // START_WINDOW until the rate is known.
     static constexpr uint64_t WINDOW_MS = 10 * 1000;
     static constexpr uint64_t START_WINDOW = MIN_WINDOW;
+    // Where the host can cut, a cut falls inside one FileData and that
+    // record's tail still goes: a FileData carries at most half a burst of
+    // the mode, between MIN_PIECE and SessionFiles::PIECE_BYTES, or
+    // CUT_PIECE while the mode isn't known.
+    static constexpr size_t CUT_PIECE = 512;
     // A FileData carries at most half the window, and at least this much.
     static constexpr size_t MIN_PIECE = 256;
     // Moving, but nothing for this long: Stalled.
@@ -98,6 +105,8 @@ public:
     void leaving(const std::string& peer, protocol::Numbering& numbering, uint64_t nowMs,
                  std::vector<uint8_t>& out) override;
     void ended(const std::string& peer, uint64_t nowMs) override;
+    bool wantsCut(const std::string& peer) override;
+    void cut(const std::string& peer, uint64_t streamFrom) override;
     // A file is offered, being answered or moving with the peer.
     bool busy(const std::string& peer) const override;
 
@@ -113,8 +122,13 @@ public:
     // The session's mode, as data2g-host last reported it (invalid when
     // not known).
     void setMode(const link::ModeInfo& mode) { mode_ = mode; }
-    // How many bytes may wait at the host now.
+    // The host can cut what it holds (it took DATA2G ON).
+    void setCuts(bool cuts) { cuts_ = cuts; }
+    bool cuts() const { return cuts_; }
+    // How many bytes may wait at the host now, and the most of the file
+    // one FileData carries.
     uint64_t window() const;
+    size_t pieceBytes() const;
     // The most one burst in this mode carries in a session (0 for an
     // invalid mode).
     static uint64_t burstBytes(const link::ModeInfo& mode);
@@ -140,6 +154,8 @@ private:
     uint64_t acked_ = 0;        // our stream, acknowledged
     RateMeter session_;         // the session's acknowledged rate
     link::ModeInfo mode_;       // the session's mode, if known
+    bool cuts_ = false;
+    uint64_t seenCuts_ = 0;     // files_.cutsWanted() last seen
     std::map<uint64_t, RateMeter> meters_;  // live transfers', by id
     struct Start
     {

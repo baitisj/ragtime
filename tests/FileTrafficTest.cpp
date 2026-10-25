@@ -92,19 +92,41 @@ struct Station
         chat.setTraffic(&traffic);
     }
 
-    void open(uint64_t now)
+    // data2g: a host since Data2G PR #118, which takes DATA2G ON and cuts.
+    void open(uint64_t now, bool data2g = false)
     {
         link.commandUp(now);
-        say("OK\rOK\rOK\rOK\rBCAST PORT 2\rOK\r", now);
+        say(data2g ? "OK\rOK\rOK\rOK\rOK\rBCAST PORT 2\rOK\r" : "OK\rOK\rWRONG\rOK\rOK\rBCAST PORT 2\rOK\r", now);
         link.takeCommandOutput();
+        commands.clear();
         chat.dataPort(true, now);
+        traffic.setCuts(link.data2g());
     }
 
     void say(const std::string& lines, uint64_t now)
     {
         link.commandBytes(lines.data(), lines.size(), now);
         for (const HostLink::Event& e : link.takeEvents()) chat.onEvent(e, now);
-        link.takeCommandOutput();
+        commands += link.takeCommandOutput();
+    }
+
+    // The CLEANTXBUFFER lines written since the last call, by their offsets.
+    std::vector<uint64_t> cleans()
+    {
+        commands += link.takeCommandOutput();
+        std::vector<uint64_t> out;
+        size_t at = 0;
+        while (at < commands.size())
+        {
+            size_t cr = commands.find('\r', at);
+            if (cr == std::string::npos) break;
+            std::string line = commands.substr(at, cr - at);
+            at = cr + 1;
+            lines.push_back(line);
+            if (line.compare(0, 14, "CLEANTXBUFFER ") == 0) out.push_back(std::stoull(line.substr(14)));
+        }
+        commands.erase(0, at);
+        return out;
     }
 
     std::vector<FileTraffic::Event> events(FileTraffic::Event::Type type)
@@ -132,16 +154,107 @@ struct Station
     FileTraffic traffic;
     std::vector<uint8_t> inFlight;  // read by the host, not yet carried
     size_t mostWaiting = 0;         // the most file and chat bytes ever waiting at the host
+    std::string commands;           // the link's lines to the host, not yet looked at
+    std::vector<std::string> lines; // and those looked at
+
+    // A host that cuts (Pair::cuts): its bytes on air, not yet arrived.
+    uint64_t hostRead = 0;          // host offsets: every byte read this session
+    std::vector<uint8_t> onAir;
+    uint64_t onAirFrom = 0;
+    bool limbo = false;             // cut while on air: it settles as it arrives
+    size_t carriedSinceCut = 0;     // bytes to cross since the last cut asked
+    size_t lagBytes = 0;            // the next cut leaves this many, as if not yet read
+    std::vector<uint8_t> socket;    // and here they are, read the step after
 };
 
 // Two stations and the air between them: each step, what each writes is
 // read by its host at once, and up to perStep bytes of it cross.
 struct Pair
 {
-    Pair() : a("AG7EW"), b("W1AW")
+    // cuts: both hosts are Data2G's since PR #118. Their bursts then take
+    // a step on air before they arrive, so a cut can catch one there.
+    explicit Pair(bool cutting = false) : a("AG7EW"), b("W1AW"), cuts(cutting)
     {
-        a.open(now);
-        b.open(now);
+        a.open(now, cutting);
+        b.open(now, cutting);
+    }
+
+    // What becomes of a burst on air when a cut catches it.
+    enum class Limbo
+    {
+        Arrives,
+        Lost,
+        Half,
+    };
+
+    void buffer(Station& s)
+    {
+        s.say("BUFFER " + std::to_string(s.inFlight.size() + s.onAir.size()) + "\r", now);
+    }
+
+    void carryCutting(Station& from, Station& to)
+    {
+        from.inFlight.insert(from.inFlight.end(), from.socket.begin(), from.socket.end());
+        from.hostRead += from.socket.size();
+        from.socket.clear();
+        std::vector<uint8_t> out = from.chat.takeDataOutput(now);
+        if (!out.empty())
+        {
+            from.inFlight.insert(from.inFlight.end(), out.begin(), out.end());
+            from.hostRead += out.size();
+            from.mostWaiting = std::max(from.mostWaiting, from.inFlight.size() + from.onAir.size());
+            buffer(from);
+        }
+        for (uint64_t n : from.cleans())
+        {
+            (void)n;
+            if (from.inFlight.empty() && from.onAir.empty())
+            {
+                from.say("CLEANTXBUFFER BUFFEREMPTY\r", now);
+                continue;
+            }
+            uint64_t dropFrom = from.hostRead - from.inFlight.size();
+            // Bytes still on their way to the host are kept, and follow
+            // the cut (lagBytes: once, so many).
+            size_t keep = from.lagBytes < from.inFlight.size() ? from.lagBytes : 0;
+            from.lagBytes = 0;
+            from.socket.assign(from.inFlight.end() - (long)keep, from.inFlight.end());
+            from.inFlight.clear();
+            from.hostRead -= keep;
+            uint64_t limboTo = from.onAirFrom + from.onAir.size();
+            from.limbo = !from.onAir.empty();
+            uint64_t limboFrom = from.limbo ? from.onAirFrom : dropFrom;
+            if (!from.limbo) limboTo = dropFrom;
+            from.say("CLEANTXBUFFER OK " + std::to_string(dropFrom) + " " + std::to_string(from.hostRead) + " "
+                         + std::to_string(limboFrom) + " " + std::to_string(limboTo) + "\r",
+                     now);
+            buffer(from);
+        }
+        if (fading) return;
+        // The burst on air arrives, all of it or, cut while on air, what
+        // the cut leaves.
+        if (!from.onAir.empty())
+        {
+            size_t arrives = from.onAir.size();
+            if (from.limbo) arrives = limbo == Limbo::Arrives ? arrives : limbo == Limbo::Lost ? 0 : arrives / 2;
+            to.chat.dataBytes(from.onAir.data(), arrives, now);
+            from.carriedSinceCut += arrives;
+            if (from.limbo)
+            {
+                from.limbo = false;
+                from.say("CLEANTXBUFFER SETTLED " + std::to_string(from.onAirFrom) + " "
+                             + std::to_string(from.onAirFrom + arrives) + " "
+                             + std::to_string(from.onAirFrom + from.onAir.size()) + "\r",
+                         now);
+            }
+            from.onAir.clear();
+        }
+        // The next goes on air.
+        size_t n = std::min(perStep, from.inFlight.size());
+        from.onAirFrom = from.hostRead - from.inFlight.size();
+        from.onAir.assign(from.inFlight.begin(), from.inFlight.begin() + (long)n);
+        from.inFlight.erase(from.inFlight.begin(), from.inFlight.begin() + (long)n);
+        buffer(from);
     }
 
     void connect()
@@ -154,6 +267,11 @@ struct Pair
 
     void carry(Station& from, Station& to)
     {
+        if (cuts)
+        {
+            carryCutting(from, to);
+            return;
+        }
         std::vector<uint8_t> out = from.chat.takeDataOutput(now);
         if (!out.empty())
         {
@@ -201,12 +319,16 @@ struct Pair
         b.say("DISCONNECTED\r", now);
         a.inFlight.clear();
         b.inFlight.clear();
+        a.onAir.clear();
+        b.onAir.clear();
         step(0);
     }
 
     uint64_t now = T0;
     Station a;
     Station b;
+    bool cuts = false;
+    Limbo limbo = Limbo::Half;
     size_t perStep = 100000;
     bool fading = false;
 };
@@ -369,6 +491,160 @@ void testAFastModeKeepsTheHostFull()
     CHECK_EQ(p.a.traffic.window(), FileTraffic::MAX_WINDOW);
     CHECK(p.until([&]() { return p.a.transfer(true)->state == State::Delivered; }));
     CHECK_EQ(readFile(scratch.path("got.bin")), readFile(sent));
+}
+
+void testACancelIsCut()
+{
+    // A host that cuts: a cancel drops the file bytes it holds, so the far
+    // end hears it after one burst, not the whole window, and both ends
+    // count the same part.
+    for (Pair::Limbo limbo : {Pair::Limbo::Arrives, Pair::Limbo::Lost, Pair::Limbo::Half})
+    {
+        Scratch scratch("cut");
+        Pair p(true);
+        p.limbo = limbo;
+        p.perStep = 300;
+        // Once, some bytes reach the host after the cut: cut again.
+        if (limbo == Pair::Limbo::Half) p.a.lagBytes = 700;
+        CHECK(p.a.link.data2g() && p.a.traffic.cuts());
+        std::string sent = scratch.write("CUT.BIN", 40000, 7);
+        std::string error;
+        uint64_t id = p.a.files.offer("W1AW", sent, p.now, error);
+        p.connect();
+        p.steps(3);
+        const FileTransfer* theirs = p.b.transfer(false);
+        CHECK(theirs != nullptr && p.b.files.accept(theirs->id, scratch.path("got.bin"), error));
+        p.steps(12);
+        // The whole window is with the host from the start.
+        CHECK(p.a.mostWaiting > FileTraffic::MAX_WINDOW - 1024);
+        CHECK(p.a.transfer(true)->state == State::Sending);
+
+        CHECK(p.a.files.cancel(id));
+        int steps = 0;
+        CHECK(p.until([&]() { steps++; return p.b.transfer(false)->state == State::CancelledThere; }, 40));
+        CHECK(steps <= 8);  // not 8 KB at 300 bytes a step
+        CHECK_EQ(p.a.chat.cuts(), 1);
+        CHECK(p.a.chat.cutBytes() > 4000);
+        CHECK(!p.b.chat.foreign() && !p.a.chat.cutting());
+
+        // The stream is whole: a message still goes through.
+        p.a.chat.send("still here?", p.now);
+        size_t heard = 0;
+        for (int i = 0; i < 20 && heard == 0; i++)
+        {
+            p.step();
+            for (const SessionChat::Event& e : p.b.chat.takeEvents()) heard += e.type == SessionChat::Event::Type::Heard;
+        }
+        CHECK_EQ(heard, (size_t)1);
+        CHECK(!p.b.chat.foreign() && p.b.chat.reader().malformed() == 0);
+
+        // Both ends hold the same part once the last of it is acknowledged.
+        p.steps(5);
+        std::vector<FileRow> ours = p.a.traffic.rows(p.now);
+        std::vector<FileRow> theirsRows = p.b.traffic.rows(p.now);
+        CHECK(ours.size() == 1 && theirsRows.size() == 1);
+        if (ours.size() == 1 && theirsRows.size() == 1)
+        {
+            CHECK_EQ(ours[0].state, std::string("Part sent, cancelled"));
+            CHECK_EQ(ours[0].done, theirsRows[0].done);
+            CHECK_EQ(ours[0].handed, ours[0].done);
+            CHECK(theirsRows[0].done > 0 && theirsRows[0].done < 40000);
+        }
+    }
+}
+
+void testAMessageCutsIn()
+{
+    // A message typed under a file goes ahead of the file bytes the host
+    // holds, and the file carries on behind it, whole.
+    for (Pair::Limbo limbo : {Pair::Limbo::Arrives, Pair::Limbo::Lost, Pair::Limbo::Half})
+    {
+        Scratch scratch("cutin");
+        Pair p(true);
+        p.limbo = limbo;
+        p.perStep = 300;
+        std::string sent = scratch.write("BIG.BIN", 30000, 11);
+        std::string error;
+        p.a.files.offer("W1AW", sent, p.now, error);
+        p.connect();
+        p.steps(3);
+        const FileTransfer* theirs = p.b.transfer(false);
+        CHECK(theirs != nullptr && p.b.files.accept(theirs->id, scratch.path("got.bin"), error));
+        p.steps(10);
+        for (int m = 0; m < 3; m++)
+        {
+            uint64_t id = p.a.chat.send("over the file " + std::to_string(m), p.now);
+            CHECK(id != 0);
+            size_t heard = 0;
+            int steps = 0;
+            for (; steps < 30 && heard == 0; steps++)
+            {
+                p.step();
+                for (const SessionChat::Event& e : p.b.chat.takeEvents())
+                    heard += e.type == SessionChat::Event::Type::Heard;
+            }
+            CHECK_EQ(heard, (size_t)1);
+            CHECK(steps <= 6);
+            p.steps(4);
+            const session::Message* mine = p.a.chat.find(id);
+            CHECK(mine != nullptr && mine->state == session::Message::State::Delivered);
+            p.steps(6);
+        }
+        CHECK(p.a.chat.cuts() >= 3);
+        CHECK(p.until([&]() { return p.b.transfer(false)->state == State::Saved; }));
+        CHECK_EQ(readFile(scratch.path("got.bin")), readFile(sent));
+        CHECK(p.until([&]() { return p.a.transfer(true)->state == State::Delivered; }, 20));
+        CHECK(!p.b.chat.foreign() && p.b.chat.reader().malformed() == 0);
+    }
+}
+
+void testLeavingCutsFirst()
+{
+    // Leave under a file: the bytes the host holds are cut, and the
+    // farewell goes after one burst.
+    Scratch scratch("cutleave");
+    Pair p(true);
+    p.perStep = 300;
+    std::string error;
+    p.a.files.offer("W1AW", scratch.write("BIG.BIN", 30000, 13), p.now, error);
+    p.connect();
+    p.steps(3);
+    const FileTransfer* theirs = p.b.transfer(false);
+    CHECK(theirs != nullptr && p.b.files.accept(theirs->id, scratch.path("got.bin"), error));
+    p.steps(10);
+    CHECK(p.a.chat.leave(p.now));
+    // DISCONNECT once the host has read the farewell, the file bytes cut.
+    auto disconnected = [&]() {
+        p.a.cleans();
+        return std::find(p.a.lines.begin(), p.a.lines.end(), "DISCONNECT") != p.a.lines.end();
+    };
+    CHECK(p.until(disconnected, 10));
+    CHECK_EQ(p.a.chat.cuts(), 1);
+    CHECK(p.until([&]() { return p.a.inFlight.empty() && p.a.onAir.empty(); }, 10));
+    CHECK(p.b.transfer(false)->state == State::CancelledThere);
+    p.disconnect();
+    CHECK(p.b.chat.ending() == SessionChat::Ending::LeftThere);
+}
+
+void testAnOlderHostIsNotCut()
+{
+    // A host from before Data2G PR #118: no cuts, and the window as before.
+    Scratch scratch("nocut");
+    Pair p;
+    p.perStep = 300;
+    std::string error;
+    uint64_t id = p.a.files.offer("W1AW", scratch.write("BIG.BIN", 30000, 17), p.now, error);
+    p.connect();
+    p.steps(3);
+    const FileTransfer* theirs = p.b.transfer(false);
+    CHECK(theirs != nullptr && p.b.files.accept(theirs->id, scratch.path("got.bin"), error));
+    p.steps(5);
+    CHECK(!p.a.traffic.cuts() && p.a.traffic.window() < FileTraffic::MAX_WINDOW);
+    p.a.files.cancel(id);
+    p.a.chat.send("hello", p.now);
+    p.steps(5);
+    CHECK_EQ(p.a.chat.cuts(), 0);
+    CHECK(p.a.cleans().empty());
 }
 
 void testStalledWhileTheLinkFades()
@@ -834,6 +1110,10 @@ int main()
     testFileBytesArePaced();
     testTheWindowFollowsTheMode();
     testAFastModeKeepsTheHostFull();
+    testACancelIsCut();
+    testAMessageCutsIn();
+    testLeavingCutsFirst();
+    testAnOlderHostIsNotCut();
     testStalledWhileTheLinkFades();
     testAStationThatTakesNoFiles();
     testOffersWaitForTheHello();

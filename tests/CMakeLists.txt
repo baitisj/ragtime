@@ -39,6 +39,7 @@ ragtime_test(ragtime_broadcast_test BroadcastTest.cpp)
 ragtime_test(ragtime_broadcast_log_test BroadcastLogTest.cpp)
 
 ragtime_test(ragtime_session_test SessionTest.cpp)
+ragtime_test(ragtime_stream_log_test StreamLogTest.cpp)
 ragtime_test(ragtime_session_log_test SessionLogTest.cpp)
 
 ragtime_test(ragtime_globus_test GlobusTest.cpp)

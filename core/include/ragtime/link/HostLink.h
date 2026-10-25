@@ -5,8 +5,11 @@
 // protocol::StreamReader.
 //
 // What it does:
-// - Opening: MYCALL, CHAT ON, LISTEN, BW500 or BW2300, BCAST OPEN D2G FROM
-//   <call>, then MODES.
+// - Opening: MYCALL, CHAT ON, DATA2G ON, LISTEN, BW500 or BW2300, BCAST
+//   OPEN D2G FROM <call>, then MODES. DATA2G ON (Data2G PR #118) asks for
+//   host byte offsets in CLEANTXBUFFER's answers; a host from before it
+//   answers WRONG, which is not refused, and sessions there go without
+//   cuts.
 // - The host's reports: PTT, BUSY, MODE, the MODES list, BCAST HEARD,
 //   LOST, DROPPED and MISSED, CONNECTED, DISCONNECTED, BUFFER. HEARD and
 //   MISSED carry an SNR from hosts since Data2G PR #98.
@@ -21,7 +24,10 @@
 //   without it going while no session is up (a session holds the group;
 //   docs/PLAN.md, "Broadcast mode").
 // - Sessions: Call (CONNECT), Leave (DISCONNECT) and Leave now (ABORT).
-//   Nothing else opens or closes one.
+//   Nothing else opens or closes one. With DATA2G ON, CLEANTXBUFFER n
+//   drops what the host holds of our session bytes before offset n and
+//   hasn't sent (a cut), and its answers and SETTLED reports come back as
+//   Clean events.
 //
 // The time is always passed in, so tests run it on a simulated clock.
 #ifndef RAGTIME_LINK_HOST_LINK_H
@@ -99,6 +105,7 @@ public:
             Buffer,             // count: our session bytes not yet acknowledged
             SessionSnr,         // peer, snr: the partner's last burst as the host heard it
             Refused,            // text: a command the host answered WRONG
+            Clean,              // clean: CLEANTXBUFFER's answer (Failed for WRONG), or SETTLED
         } type = Type::GroupOpen;
 
         int number = 0;
@@ -112,6 +119,7 @@ public:
         SessionEnd sessionEnd = SessionEnd::Ended;
         std::vector<uint8_t> frame;
         std::optional<double> snr;  // dB, average power in 2500 Hz
+        CommandEvent::Clean clean;
     };
 
     // A broadcast written to the host but not sent is given up after this
@@ -210,6 +218,14 @@ public:
     // Session bytes have arrived from the partner, so a burst of its has
     // decoded: SN is asked (now, or once SN_GAP_MS has passed).
     void sessionHeard(uint64_t nowMs);
+    // The host took DATA2G ON, so CLEANTXBUFFER answers in host byte
+    // offsets and a session's bytes can be cut.
+    bool data2g() const { return data2g_; }
+    bool canCut() const { return data2g_ && commandUp_ && session_ == SessionState::Connected; }
+    // CLEANTXBUFFER upto: the host drops what it holds of our session
+    // bytes before host offset upto that it hasn't sent. The answer comes
+    // as a Clean event. False if no cut can be made.
+    bool cleanTxBuffer(uint64_t upto, uint64_t nowMs);
 
     //---------------------------------------------------------------------
     // What the host has said
@@ -223,6 +239,10 @@ public:
     const std::vector<ModeInfo>& modes() const { return modes_; }
     bool ptt() const { return ptt_; }
     bool busy() const { return busy_; }
+    // The mode of the host's last MODE report, ours or not. The host
+    // reports a mode only when it changes, so a session in the mode of the
+    // burst before it never hears one.
+    const std::string& lastMode() const { return lastMode_; }
 
 private:
     struct Burst
@@ -274,6 +294,8 @@ private:
     std::vector<ModeInfo> modes_;
     bool ptt_ = false;
     bool busy_ = false;
+    bool data2g_ = false;
+    std::string lastMode_;
 
     std::deque<Burst> bursts_;          // the first may be with the host; the rest wait
     std::vector<std::pair<uint64_t, BurstState>> finished_;   // the latest outcomes, for burstState()

@@ -18,6 +18,8 @@ const char* const OK = "OK";
 const char* const BCAST_PORT = "BCAST PORT";
 const char* const MODES = "MODES";
 const char* const SN = "SN";
+const char* const DATA2G = "DATA2G";
+const char* const CLEAN = "CLEANTXBUFFER";
 
 } // namespace
 
@@ -45,6 +47,7 @@ void HostLink::commandUp(uint64_t nowMs)
     std::string call = commandCallsign(settings_.callsign);
     sendLine("MYCALL " + call, OK, nowMs);
     sendLine("CHAT ON", OK, nowMs);
+    sendLine("DATA2G ON", DATA2G, nowMs);
     sendLine(settings_.acceptSessions ? "LISTEN ON" : "LISTEN OFF", OK, nowMs);
     sendLine(settings_.narrow ? "BW500" : "BW2300", OK, nowMs);
     sendLine(std::string("BCAST OPEN ") + GROUP + " FROM " + call, BCAST_PORT, nowMs);
@@ -72,6 +75,8 @@ void HostLink::commandDown(uint64_t nowMs)
     groupMode_.clear();
     ptt_ = false;
     busy_ = false;
+    data2g_ = false;
+    lastMode_.clear();
 
     // A burst the host had may or may not have gone: it isn't Sent.
     Burst* burst = current();
@@ -231,6 +236,21 @@ void HostLink::onLine(const std::string& line, uint64_t nowMs)
             Awaiting a = popAwaiting();
             // No SNR yet, or a host from before Data2G PR #98: nothing refused.
             if (a.answer == SN) break;
+            // A host from before Data2G PR #118: no cuts, nothing refused.
+            if (a.answer == DATA2G)
+            {
+                data2g_ = ok;
+                break;
+            }
+            if (a.answer == CLEAN)
+            {
+                data2g_ = data2g_ && ok;
+                Event e;
+                e.type = Event::Type::Clean;
+                e.clean.result = CommandEvent::Clean::Result::Failed;
+                emit(e);
+                break;
+            }
             if (a.answer == MODES && ok)
             {
                 modes_ = modesComing_;
@@ -283,6 +303,7 @@ void HostLink::onLine(const std::string& line, uint64_t nowMs)
         }
         case Type::Mode:
         {
+            lastMode_ = c.text;
             Event e;
             e.type = Event::Type::ModeUsed;
             e.text = c.text;
@@ -379,10 +400,29 @@ void HostLink::onLine(const std::string& line, uint64_t nowMs)
             emit(e);
             break;
         }
+        case Type::Clean:
+        {
+            // SETTLED comes by itself; the rest answer CLEANTXBUFFER.
+            if (c.clean.result != CommandEvent::Clean::Result::Settled && !awaiting_.empty()
+                && awaiting_.front().answer == CLEAN)
+                popAwaiting();
+            Event e;
+            e.type = Event::Type::Clean;
+            e.clean = c.clean;
+            emit(e);
+            break;
+        }
         case Type::Cqframe:
         case Type::Other:
             break;
     }
+}
+
+bool HostLink::cleanTxBuffer(uint64_t upto, uint64_t nowMs)
+{
+    if (!canCut()) return false;
+    sendLine("CLEANTXBUFFER " + std::to_string(upto), CLEAN, nowMs);
+    return true;
 }
 
 //-------------------------------------------------------------------------
