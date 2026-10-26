@@ -433,7 +433,7 @@ What this asks for:
 - **The guard.** 250 Hz covers dial error of tens of Hz, filter skirts and drift. It doesn't cover splatter from an overdriven transmit chain, which 97.307(b) also forbids, so drive matters more here than usual.
 - **Licence.** On 80, 40, 20 and 15 m the phone side right at the line is Extra only, so a General station gets text there but not pictures or voice. 17, 12 and 10 m work for Generals.
 
-These are the dials in the README's quick reference. Text works at them on any SSB rig today, since the text bursts sit wholly below the line. The table's figures are arithmetic on the segment lines from the table above; the lines themselves are checked against 97.305(c).
+These "straddle" dials are for future experiments. Text would work at them on any SSB rig, since the text bursts sit wholly below the line, but the README's Frequencies section lists the everyday ranges. The table's figures are arithmetic on the segment lines from the table above; the lines themselves are checked against 97.305(c).
 
 ## Checked against Part 97
 
