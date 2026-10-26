@@ -151,8 +151,11 @@ with the code when the seal rules change.
   picked; Settings is now two tabs, Station and Rig. While the host
   transmits, the rig's ALC, SWR and RF power are read, through Hamlib or
   rigctld (`radio::TxMeters`, burst by burst) for the Auto ALC meter and the
-  flight recorder; Auto ALC itself still waits for a host TX level
-  command, but each burst works out what it would do. The SWR bar sits
+  flight recorder. With Data2G PR #122's `TXPOWER` (2026-10-26) the
+  host's TX level is set in Settings > Station, and Auto ALC
+  (`radio::AutoAlc`, off by default) turns it down burst by burst, never
+  above the level it found, and puts that back when unticked or on
+  quit; the host's level is the truth, never kept in Ragtime's settings. The SWR bar sits
   under the ALC meter (`app/src/SwrBar`), and the SWR trip (Settings >
   Rig, off by default, `radio::SwrTrip`) sends the host ABORT and holds
   sending until the operator clears it; with Hamlib it also unkeys the
@@ -333,8 +336,9 @@ each bot at its own strength; `--no-snr` plays a host from before Data2G
 PR #98. `--rig PORT` plays a rigctld for the dial (14.105 MHz, or
 `--dial HZ`; `--dial-hop` moves it outside the data segments one minute
 in three; `--rig-vfo` plays a rigctld started with `--vfo`; it answers
-the meters too, its SWR 1.3 or `--rig-swr X`, and the S-meter, -40 dB
-over S9 or `--rig-noise DB`) and prints anything it is
+the meters too, its SWR 1.3 or `--rig-swr X`, an ALC that follows host
+A's `TXPOWER` for Auto ALC, and the S-meter, -40 dB over S9 or
+`--rig-noise DB`) and prints anything it is
 sent but `\chk_vfo`, `f` and the meters. For Hamlib with no
 radio, pick maker Hamlib, model Dummy in Settings > Rig: a pretend rig
 at 145 MHz, which "Key the rig" keys at the fake hosts' PTT. Headless:

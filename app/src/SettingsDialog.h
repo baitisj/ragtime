@@ -3,6 +3,7 @@
 
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -22,6 +23,7 @@ class wxDirPickerCtrl;
 class wxNotebook;
 class wxRadioButton;
 class wxSpinCtrl;
+class wxSpinCtrlDouble;
 class wxStaticText;
 class wxTextCtrl;
 
@@ -54,16 +56,23 @@ public:
     // what to call it), for the slowest repair gear. openRig: how the rig
     // Ragtime has open is doing, if it is open with these settings (its
     // port is taken, so Test reports it instead); empty otherwise.
+    // txLevel: data2g-host's transmit level now (TXPOWER), none if the
+    // host isn't connected or has no TXPOWER.
     SettingsDialog(wxWindow* parent, const StationPrefs& prefs,
                    const std::vector<std::pair<std::string, std::string>>& gears,
-                   std::function<std::string(const ragtime::radio::RigSettings&)> openRig, Page page);
+                   std::function<std::string(const ragtime::radio::RigSettings&)> openRig, Page page,
+                   std::optional<double> txLevel = std::nullopt);
     ~SettingsDialog() override;
 
     StationPrefs prefs() const;
+    // The transmit level to set on data2g-host, if the operator changed it.
+    // It is the host's, never kept in Ragtime's settings.
+    std::optional<double> txLevel() const;
 
 private:
     wxWindow* stationPage(wxNotebook* book, const StationPrefs& prefs,
-                          const std::vector<std::pair<std::string, std::string>>& gears);
+                          const std::vector<std::pair<std::string, std::string>>& gears,
+                          std::optional<double> txLevel);
     wxWindow* rigPage(wxNotebook* book, const StationPrefs& prefs);
     ragtime::radio::RigSettings rig() const;
     // The model picked, if Hamlib knows it.
@@ -84,6 +93,8 @@ private:
     wxSpinCtrl* kissPort_ = nullptr;
     wxSpinCtrl* commandPort_ = nullptr;
     wxStaticText* dataPort_ = nullptr;
+    wxSpinCtrlDouble* txLevel_ = nullptr;
+    std::optional<double> hostTxLevel_;     // the host's, as the dialog opened
     wxDirPickerCtrl* received_ = nullptr;
     wxTextCtrl* autoAccept_ = nullptr;
     wxCheckBox* sealChat_ = nullptr;

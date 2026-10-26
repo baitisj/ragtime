@@ -163,9 +163,9 @@ bench"). Choices made there, for Jeff to keep or change:
   burst the host already has still goes.
 - The **Broadcast tab label** counts messages heard while it is out of
   sight, "Broadcast (3)".
-- **Auto ALC** is there, greyed, with a tooltip saying why. Its meter
-  shows the rig's ALC when Ragtime opens the rig with Hamlib (below,
-  "Rig control").
+- **Auto ALC** turns data2g-host's TX level down to keep the rig's ALC
+  under its target, greyed until the host takes `TXPOWER` and the rig
+  reports its ALC. Its meter shows the rig's ALC (below, "Rig control").
   **SNR** is a column (below, "SNR from data2g-host").
 - The **status bar**: channel clear or busy, or what of ours is going
   out (Jeff, 2026-10-23: "indicate if we're sending a seal ... just a
@@ -228,8 +228,8 @@ The brief:
   remembered; Globus off gives the messages the full width.
 - Connection bar: my callsign, group `D2G`, the 500 Hz
   switch, Accept sessions, Pause sending, TX light from `PTT`, and
-  an **Auto ALC** checkbox (disabled until the host takes a TX level
-  command) with a level meter (the rig's ALC, through Hamlib).
+  an **Auto ALC** checkbox (disabled until the host takes `TXPOWER` and
+  the rig reports its ALC) with a level meter (the rig's ALC).
 - Station list: columns Call, Status, Heard, Locator, Distance, Bearing,
   Key, Services, chosen from a Columns menu and sortable. With Globus on,
   the narrow list shows locator and distance under the last-heard time.
@@ -921,14 +921,38 @@ red over the target or with the SWR over 3; its tooltip has the rest.
 Each burst puts a line in the flight recorder: `note rig TX 12 s: ALC
 peak 61%, mean 44%; SWR 1.3; 38 W`.
 
-Auto ALC itself still waits for data2g-host to take a transmit level
-command (its level is `--output-volume` at start, docs/DATA2G.md). But
-each burst already works out what it would do, by Glissando's Drive
-knob rule: two ALC readings in a row over the target (0.5) turn the
-drive down 0.5 dB, one over 0.8 turns it down 2 dB. The tooltip and the
-flight recorder line say "Auto ALC would turn the drive down 2.5 dB",
-which until then is advice for `--output-volume`; when the command
-comes, it is what to send.
+**Auto ALC and the TX level** (Data2G PR #122's `TXPOWER`, 2026-10-26).
+data2g-host's transmit level is its own: `--output-volume` at start,
+and since PR #122 `TXPOWER dB` (-60 to +20) changes it, and the host
+keeps it after Ragtime goes. Ragtime treats the host's level as the
+truth, as it does the radio's dial: it reads it on connecting and after
+every change, and keeps no copy in its settings.
+
+- **TX level**, Settings > Station, in the data2g-host box: the host's
+  level as it answered when Settings opened, set there with OK. Greyed
+  with no host or one without `TXPOWER`.
+- **Auto ALC**, on the connection bar, off by default (the tick is
+  kept, `/Connection/AutoAlc`). Each burst works out by Glissando's Drive
+  knob rule what to take off: two ALC readings in a row over the target
+  (0.5) turn the level down 0.5 dB, one over 0.8 turns it down 2 dB.
+  With Auto ALC ticked that goes to the host as the burst ends
+  (`radio::AutoAlc`). It only turns the level down: never above the
+  level it found (a level Ragtime didn't send, the operator's own or a
+  restarted host's, becomes the new one), never more than 20 dB under
+  it, and never under -60. Unticking it, or closing Ragtime, puts back
+  the level it found, so a trim never outlives Ragtime. It needs the
+  rig's ALC (rigctld or Hamlib) and a host with `TXPOWER`; greyed
+  otherwise, and the burst's line then says what it would have done.
+- The flight recorder notes each change and why: `note TX level -2.0
+  dB: Auto ALC`, `... set in Settings`, `... Auto ALC off`, `...
+  Ragtime closed`; the burst's line ends `Auto ALC turns the TX level
+  down 2.0 dB`.
+- The SWR trip doesn't touch the TX level: a level turned to -60 would
+  outlive Ragtime and quietly mute the next session (ABORT and the hold
+  already stop sending).
+- The bench's fake rigctld has an ALC that follows host A's `TXPOWER`
+  (48% to 96% at 0 dB, under half from about -4 dB), so Auto ALC can be
+  watched settling.
 
 **The SWR bar** (Jeff, 2026-10-26) sits under the ALC meter: the rig's
 SWR while transmitting, with small marks at 1, 1.5, 2 and 3, green
@@ -1105,9 +1129,10 @@ real sound card; never point them at the radio's USB codec.
 - Data2G PR #122 (open, read at 843987e on 2026-10-26) answers three:
   the reason on `DISCONNECTED`, `TIMEOUT` (keeping a quiet session up)
   and `TXPOWER` (a TX level command, for Auto ALC). Ragtime reads all
-  three; the TX level control is the rig thread's to build on
-  `HostLink::setTxPower`. Asked back: reset `TXPOWER` when the client
-  goes, as `TIMEOUT` is.
+  three, and sets the TX level from Settings and Auto ALC (above, "Auto
+  ALC and the TX level"). Asked back: reset `TXPOWER` when the client
+  goes, as `TIMEOUT` is; until then Ragtime puts back what Auto ALC took
+  off as it closes.
 - SNR reports: answered by Data2G PR #98 (merged 2026-10-23), used as
   below.
 - The Hand primitive (`HAND SEND`, `HAND LISTEN`), which he will build;
