@@ -4,7 +4,9 @@
 #include <chrono>
 #include <cctype>
 #include <cmath>
+#include <optional>
 #include <utility>
+#include <vector>
 
 #include <hamlib/rig.h>
 
@@ -199,6 +201,45 @@ RIG* openRig(const radio::RigSettings& settings, std::string& why)
     return rig;
 }
 
+// A transmit meter the rig reports, and where its reading goes.
+struct Meter
+{
+    setting_t level = 0;
+    std::optional<double> radio::MeterReading::*field = nullptr;
+    uint64_t HamlibRig::Status::*count = nullptr;
+    int failures = 0;
+};
+
+// The meters this rig says it reports: ALC, SWR, and RF power in watts
+// where the backend knows them, or else as a share of full power.
+std::vector<Meter> metersOf(RIG* rig)
+{
+    std::vector<Meter> meters;
+    using Status = HamlibRig::Status;
+    auto add = [&](setting_t level, std::optional<double> radio::MeterReading::*field, uint64_t Status::*count) {
+        if (rig_has_get_level(rig, level) != 0) meters.push_back(Meter{level, field, count, 0});
+    };
+    add(RIG_LEVEL_ALC, &radio::MeterReading::alc, &Status::alcReadings);
+    add(RIG_LEVEL_SWR, &radio::MeterReading::swr, &Status::swrReadings);
+    if (rig_has_get_level(rig, RIG_LEVEL_RFPOWER_METER_WATTS) != 0)
+        add(RIG_LEVEL_RFPOWER_METER_WATTS, &radio::MeterReading::watts, &Status::powerReadings);
+    else
+        add(RIG_LEVEL_RFPOWER_METER, &radio::MeterReading::power, &Status::powerReadings);
+    return meters;
+}
+
+// Which meters the status says it reads.
+void showMeters(HamlibRig::Status& s, const std::vector<Meter>& meters)
+{
+    s.readsAlc = s.readsSwr = s.readsPower = false;
+    for (const Meter& m : meters)
+    {
+        s.readsAlc = s.readsAlc || m.level == RIG_LEVEL_ALC;
+        s.readsSwr = s.readsSwr || m.level == RIG_LEVEL_SWR;
+        s.readsPower = s.readsPower || m.level == RIG_LEVEL_RFPOWER_METER_WATTS || m.level == RIG_LEVEL_RFPOWER_METER;
+    }
+}
+
 void closeRig(RIG*& rig)
 {
     if (rig == nullptr) return;
@@ -280,6 +321,7 @@ struct HamlibRig::Shared
     radio::RigSettings settings;
     bool stopping = false;
     bool wantPtt = false;
+    bool transmitting = false;
     int pollSeconds = 1;
     Status status;
     uint64_t retryAtMs = 0;     // when the next try to open is, while one waits
@@ -342,6 +384,17 @@ void HamlibRig::setPtt(bool on)
     shared_->wake.notify_all();
 }
 
+void HamlibRig::setTransmitting(bool on)
+{
+    if (!shared_) return;
+    {
+        std::lock_guard<std::mutex> lock(shared_->mutex);
+        if (shared_->transmitting == on) return;
+        shared_->transmitting = on;
+    }
+    shared_->wake.notify_all();
+}
+
 HamlibRig::Status HamlibRig::status() const
 {
     if (!shared_) return Status();
@@ -365,6 +418,10 @@ void HamlibRig::run()
     bool keyed = false;
     int readFailures = 0;
     uint64_t nextPoll = 0;
+    std::vector<Meter> meters;
+    size_t nextMeter = 0;
+    uint64_t nextMeterMs = 0;
+    bool wasTx = false;
     const radio::RigSettings settings = shared->settings;
 
     // Closes the rig after a failure; tries again later.
@@ -380,6 +437,7 @@ void HamlibRig::run()
         shared->status.open = false;
         shared->status.keyed = false;
         shared->status.hz.reset();
+        shared->status.meters = radio::MeterReading();
         shared->status.problem = why;
         if (wasKeyed) shared->status.pttFailures++;
         shared->status.version++;
@@ -387,15 +445,25 @@ void HamlibRig::run()
 
     for (;;)
     {
-        bool want;
+        bool want, tx;
         int poll;
         {
             std::unique_lock<std::mutex> lock(shared->mutex);
             if (shared->stopping) break;
             want = shared->wantPtt;
+            tx = shared->transmitting || keyed;
             poll = shared->pollSeconds;
         }
         uint64_t now = nowMs();
+        if (tx != wasTx)
+        {
+            // A new burst reads its meters from the first; between bursts
+            // there are none.
+            wasTx = tx;
+            nextMeter = 0;
+            nextMeterMs = now;
+            if (!tx) shared->update([](Status& s) { s.meters = radio::MeterReading(); });
+        }
 
         if (rig == nullptr)
         {
@@ -413,11 +481,14 @@ void HamlibRig::run()
                     again.connected();
                     readFailures = 0;
                     nextPoll = 0;
+                    meters = metersOf(rig);
+                    nextMeter = 0;
                     std::string name = std::string(rig->caps->mfg_name) + " " + rig->caps->model_name;
                     shared->update([&](Status& s) {
                         s.open = true;
                         s.rig = name;
                         s.problem.clear();
+                        showMeters(s, meters);
                     });
                     std::lock_guard<std::mutex> lock(shared->mutex);
                     shared->retryAtMs = 0;
@@ -452,7 +523,33 @@ void HamlibRig::run()
             }
             continue;
         }
-        else if (!keyed && now >= nextPoll)
+        else if (tx && !meters.empty() && now >= nextMeterMs)
+        {
+            // One meter at a time, so a PTT change never waits on more
+            // than one reading.
+            size_t i = nextMeter++ % meters.size();
+            Meter& meter = meters[i];
+            nextMeterMs = now + METER_MS;
+            value_t value;
+            value.f = 0;
+            int r = rig_get_level(rig, RIG_VFO_CURR, meter.level, &value);
+            if (r == RIG_OK)
+            {
+                meter.failures = 0;
+                std::lock_guard<std::mutex> lock(shared->mutex);
+                shared->status.meters.*meter.field = (double)value.f;
+                shared->status.*meter.count += 1;
+                shared->status.meterReadings++;
+            }
+            else if (++meter.failures >= 2)
+            {
+                // A meter the backend lists but the rig won't read: left
+                // alone until the rig is opened again.
+                meters.erase(meters.begin() + (long)i);
+                shared->update([&](Status& s) { showMeters(s, meters); });
+            }
+        }
+        else if (!tx && now >= nextPoll)
         {
             freq_t freq = 0;
             int r = rig_get_freq(rig, RIG_VFO_CURR, &freq);
@@ -482,10 +579,11 @@ void HamlibRig::run()
         }
 
         // Sleep until the next reading or try, or until woken.
-        uint64_t until = rig != nullptr ? (keyed ? now + 1000 : nextPoll) : now + 250;
+        uint64_t until = rig == nullptr ? now + 250 : !tx ? nextPoll : meters.empty() ? now + 1000 : nextMeterMs;
         std::unique_lock<std::mutex> lock(shared->mutex);
         shared->wake.wait_for(lock, std::chrono::milliseconds(until > now ? until - now : 1), [&]() {
-            return shared->stopping || (rig != nullptr && shared->wantPtt != keyed);
+            return shared->stopping || (rig != nullptr && shared->wantPtt != keyed)
+                   || (shared->transmitting || keyed) != tx;
         });
     }
 
@@ -496,6 +594,7 @@ void HamlibRig::run()
         s.open = false;
         s.keyed = false;
         s.hz.reset();
+        s.meters = radio::MeterReading();
     });
 }
 

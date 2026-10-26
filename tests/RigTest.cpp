@@ -1,6 +1,7 @@
 // Rig control without a rig: the settings as Hamlib's configuration words,
 // the words kept in the settings file, and the PTT follower's keying and
-// its safety unkeys.
+// its safety unkeys, and the transmit meters burst by burst.
+#include <cmath>
 #include <cstdint>
 #include <string>
 #include <utility>
@@ -9,6 +10,7 @@
 #include "Check.h"
 #include "ragtime/radio/PttFollower.h"
 #include "ragtime/radio/RigSettings.h"
+#include "ragtime/radio/TxMeters.h"
 
 using namespace ragtime::radio;
 
@@ -232,6 +234,79 @@ void safety()
     CHECK(f.keyed());
 }
 
+MeterReading alcOnly(double alc)
+{
+    MeterReading r;
+    r.alc = alc;
+    return r;
+}
+
+void meters()
+{
+    TxMeters m;
+    // Nothing counts between bursts.
+    m.reading(alcOnly(0.9), 100);
+    CHECK(!m.transmitting() && !m.latest().any() && !m.last());
+
+    m.transmitting(true, 1000);
+    MeterReading r;
+    r.alc = 0.3;
+    r.swr = 1.2;
+    r.watts = 40;
+    m.reading(r, 1250);
+    CHECK_EQ(readingText(m.latest()), std::string("ALC 30% \xc2\xb7 SWR 1.2 \xc2\xb7 40 W"));
+    // A reading with only some meters keeps the others.
+    m.reading(alcOnly(0.6), 1500);
+    CHECK_EQ(readingText(m.latest()), std::string("ALC 60% \xc2\xb7 SWR 1.2 \xc2\xb7 40 W"));
+    MeterReading w;
+    w.swr = 1.5;
+    w.watts = 36;
+    m.reading(w, 1750);
+    // One over the target: no step yet. A second in a row: 0.5 dB.
+    CHECK_EQ(m.current().turnDownDb, 0.0);
+    m.reading(alcOnly(0.55), 2000);
+    CHECK_EQ(m.current().turnDownDb, TxMeters::STEP_DB);
+    // Counting starts afresh after a step, and under the target.
+    m.reading(alcOnly(0.6), 2250);
+    m.reading(alcOnly(0.4), 2500);
+    m.reading(alcOnly(0.6), 2750);
+    CHECK_EQ(m.current().turnDownDb, TxMeters::STEP_DB);
+    // Far over: 2 dB at once.
+    m.reading(alcOnly(0.85), 3000);
+    CHECK_EQ(m.current().turnDownDb, TxMeters::STEP_DB + TxMeters::BIG_STEP_DB);
+    m.transmitting(false, 13000);
+    CHECK(!m.latest().any());
+    CHECK_EQ(m.bursts(), (uint64_t)1);
+    const TxMeters::Burst& b = *m.last();
+    CHECK_EQ(b.readings, 8);
+    CHECK(b.alcPeak && *b.alcPeak == 0.85);
+    CHECK(b.alcMean && std::fabs(*b.alcMean - (0.3 + 0.6 + 0.55 + 0.6 + 0.4 + 0.6 + 0.85) / 7) < 1e-9);
+    CHECK(b.swrPeak && *b.swrPeak == 1.5 && !b.swrHigh());
+    CHECK(b.wattsMean && *b.wattsMean == 38);
+    CHECK(b.overTarget());
+    CHECK_EQ(burstText(b), std::string("12 s: ALC peak 85%, mean 56% \xc2\xb7 SWR 1.5 \xc2\xb7 38 W"));
+
+    // A burst with no readings (a rig that reports nothing) keeps the last.
+    m.transmitting(true, 20000);
+    m.transmitting(false, 21000);
+    CHECK_EQ(m.bursts(), (uint64_t)1);
+    CHECK_EQ(m.last()->startMs, (uint64_t)1000);
+
+    // Power as a share when the backend has no watts; a short burst in
+    // tenths; a high SWR.
+    m.transmitting(true, 30000);
+    MeterReading p;
+    p.power = 0.31;
+    p.swr = 3.4;
+    m.reading(p, 30500);
+    CHECK_EQ(readingText(m.latest()), std::string("SWR 3.4 \xc2\xb7 31% power"));
+    m.transmitting(false, 32500);
+    CHECK(m.last()->swrHigh() && !m.last()->overTarget());
+    CHECK_EQ(burstText(*m.last()), std::string("2.5 s: SWR 3.4 \xc2\xb7 31% power"));
+    CHECK_EQ(burstText(*m.last(), "; "), std::string("2.5 s: SWR 3.4; 31% power"));
+    CHECK_EQ(m.last()->turnDownDb, 0.0);
+}
+
 } // namespace
 
 int main()
@@ -242,5 +317,6 @@ int main()
     sameRigs();
     follows();
     safety();
+    meters();
     return ragtime_test::finish();
 }

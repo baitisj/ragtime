@@ -4,8 +4,10 @@
 //
 // It opens the rig with the settings' configuration words
 // (radio::hamlibConf), reads the dial every pollSeconds, and sets PTT when
-// told to, putting a PTT change ahead of any reading and never reading
-// while keyed. A rig that fails to open, or stops answering, is closed and
+// told to, putting a PTT change ahead of any reading. While the rig
+// transmits (data2g-host's PTT ON, whoever keys it) it reads the transmit
+// meters the rig reports, ALC, SWR and RF power, one every METER_MS, in
+// place of the dial. A rig that fails to open, or stops answering, is closed and
 // tried again 2, 4, 8, 15 and then every 30 s (link::Reconnect). Stopping
 // unkeys the rig, if keyed, before closing it.
 //
@@ -28,6 +30,7 @@
 #include <vector>
 
 #include "ragtime/radio/RigSettings.h"
+#include "ragtime/radio/TxMeters.h"
 
 namespace ragtime
 {
@@ -85,8 +88,23 @@ public:
         // Goes up each time setting PTT fails, or the rig closes while
         // keyed: the follower unkeys.
         uint64_t pttFailures = 0;
-        uint64_t version = 0;           // goes up with any change
+        uint64_t version = 0;           // goes up with any change but a meter
+
+        // The transmit meters this rig reports, once open.
+        bool readsAlc = false;
+        bool readsSwr = false;
+        bool readsPower = false;
+        // The newest of each, while transmitting; empty between bursts.
+        radio::MeterReading meters;
+        // Each goes up as its meter is read.
+        uint64_t alcReadings = 0;
+        uint64_t swrReadings = 0;
+        uint64_t powerReadings = 0;
+        uint64_t meterReadings = 0;     // any of them
     };
+
+    // One meter is read this often while transmitting.
+    static constexpr int METER_MS = 200;
 
     HamlibRig();
     ~HamlibRig();
@@ -103,6 +121,9 @@ public:
 
     // Keys or unkeys the rig, as soon as the thread gets to it.
     void setPtt(bool on);
+    // The rig is transmitting, keyed by us or not: read its meters, not
+    // its dial.
+    void setTransmitting(bool on);
 
     Status status() const;
 
