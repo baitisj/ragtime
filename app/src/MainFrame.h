@@ -157,6 +157,10 @@ private:
     void applyRadioPrefs();
     void onDial();
     void showDial();
+    // The rig's transmit meters (Hamlib only) on the Auto ALC meter, and
+    // a line in the flight recorder for each burst.
+    void onMeters();
+    void showMeters();
     // Why sending is held (receive only), or "" when it isn't.
     std::string sendRefusal() const;
     void applySendGuard();
@@ -251,6 +255,7 @@ private:
     uint64_t stripVersion_ = ~0ull;
     uint64_t stripMs_ = 0;
     uint64_t trimmedMs_ = 0;    // the path log's memory last cut back
+    uint64_t notedBursts_ = 0;  // transmit bursts written to the flight recorder
     ragtime::radio::WorkOrder recentOrder_ = ragtime::radio::WorkOrder::LikelyNow;
     uint64_t recentVersion_ = ~0ull;    // the path log's version Recent work was drawn from
     uint64_t recentMs_ = 0;

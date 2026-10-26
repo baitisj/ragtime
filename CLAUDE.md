@@ -137,7 +137,11 @@ with the code when the seal rules change.
   `rig::HamlibRig` in `rig/`, on its own thread), with "Key the rig when
   data2g-host keys" (`radio::PttFollower`, off by default) following
   the host's PTT ON/OFF. `app/src/RigControl` holds whichever is
-  picked; Settings is now two tabs, Station and Rig.
+  picked; Settings is now two tabs, Station and Rig. While the host
+  transmits, a Hamlib rig's ALC, SWR and RF power are read
+  (`radio::TxMeters`, burst by burst) for the Auto ALC meter and the
+  flight recorder; Auto ALC itself still waits for a host TX level
+  command, but each burst works out what it would do.
 - The flight recorder (2026-10-25, idea 2 of "Ideas before
   signatures"): `link::FlightRecorder` keeps every command line, KISS
   frame and session byte count to and from the host, with millisecond

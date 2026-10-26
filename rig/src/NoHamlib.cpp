@@ -68,6 +68,8 @@ void HamlibRig::setPollSeconds(int) {}
 
 void HamlibRig::setPtt(bool) {}
 
+void HamlibRig::setTransmitting(bool) {}
+
 HamlibRig::Status HamlibRig::status() const
 {
     return shared_ ? shared_->status : Status();

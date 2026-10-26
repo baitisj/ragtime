@@ -163,7 +163,9 @@ bench"). Choices made there, for Jeff to keep or change:
   burst the host already has still goes.
 - The **Broadcast tab label** counts messages heard while it is out of
   sight, "Broadcast (3)".
-- **Auto ALC** and its meter are there, greyed, with a tooltip saying why.
+- **Auto ALC** is there, greyed, with a tooltip saying why. Its meter
+  shows the rig's ALC when Ragtime opens the rig with Hamlib (below,
+  "Rig control").
   **SNR** is a column (below, "SNR from data2g-host").
 - The **status bar**: channel clear or busy, or what of ours is going
   out (Jeff, 2026-10-23: "indicate if we're sending a seal ... just a
@@ -226,8 +228,8 @@ The brief:
   remembered; Globus off gives the messages the full width.
 - Connection bar: my callsign, group `D2G`, the 500 Hz
   switch, Accept sessions, Pause sending, TX light from `PTT`, and
-  an **Auto ALC** checkbox with a level meter (disabled until the host
-  takes a TX level command).
+  an **Auto ALC** checkbox (disabled until the host takes a TX level
+  command) with a level meter (the rig's ALC, through Hamlib).
 - Station list: columns Call, Status, Heard, Locator, Distance, Bearing,
   Key, Services, chosen from a Columns menu and sortable. With Globus on,
   the narrow list shows locator and distance under the last-heard time.
@@ -799,7 +801,7 @@ set with `rig_set_conf` before `rig_open`; serial words only for a rig
 on a serial port, which is what Hamlib accepts. `rig::HamlibRig` (the
 `rig/` library, kept out of core, which has no ports) runs the rig on a
 thread of its own: it opens it, reads the dial every poll, never while
-keyed, puts a PTT change ahead of any reading, and closes and tries
+transmitting, puts a PTT change ahead of any reading, and closes and tries
 again 2, 4, 8, 15 and every 30 s when the rig fails to open or stops
 answering (three failed readings in a row). Errors are in plain words
 ("the rig didn't answer (is it on, and at that speed?)"): Hamlib's own
@@ -833,6 +835,36 @@ This is the one exception to "Ragtime never touches the sound card or
 PTT for data": PTT, when the operator ticks the box. The sound card
 stays data2g-host's.
 
+**The ALC meter** (Jeff, 2026-10-26: "partially plumb the Auto ALC by
+at least polling ALC information"). With the rig open through Hamlib,
+the rig's thread reads its transmit meters while data2g-host has PTT
+on, whoever keys the rig: ALC, SWR, and RF power in watts where the
+backend knows them (`RFPOWER_METER_WATTS`) or else as a share of full
+power (`RFPOWER_METER`), whichever the rig says it reports
+(`rig_has_get_level`). It reads one meter every 200 ms in turn, so a
+PTT change never waits behind more than one reading; a meter that fails
+twice in a row is left alone until the rig is opened again, and a
+failed meter never closes the rig. The dial isn't read while
+transmitting. An IC-7100 reports all three; Hamlib's ALC there is the
+meter's ALC zone, raw 0 to 120 as 0 to 1.
+
+`radio::TxMeters` gathers them burst by burst: the newest of each, and
+for the burst its ALC peak and mean, SWR peak and mean power. The
+connection bar's meter beside Auto ALC shows the ALC live while
+transmitting and the last burst's peak between bursts, the number in
+red over the target or with the SWR over 3; its tooltip has the rest.
+Each burst puts a line in the flight recorder: `note rig TX 12 s: ALC
+peak 61%, mean 44%; SWR 1.3; 38 W`.
+
+Auto ALC itself still waits for data2g-host to take a transmit level
+command (its level is `--output-volume` at start, docs/DATA2G.md). But
+each burst already works out what it would do, by Glissando's Drive
+knob rule: two ALC readings in a row over the target (0.5) turn the
+drive down 0.5 dB, one over 0.8 turns it down 2 dB. The tooltip and the
+flight recorder line say "Auto ALC would turn the drive down 2.5 dB",
+which until then is advice for `--output-volume`; when the command
+comes, it is what to send.
+
 **Building.** Hamlib is LGPL and linked as a library: `libhamlib-dev`
 on Linux (pkg-config `hamlib`), and on Windows a static Hamlib 4.5.5
 cloned and built with autotools for MinGW-w64
@@ -841,8 +873,9 @@ cloned and built with autotools for MinGW-w64
 Rig page then greys its Hamlib choice. The AppImage carries the
 system's `libhamlib.so.4` and what it needs. `ragtime_hamlib_test`
 opens Hamlib's dummy rig (model 1, no port, no radio), reads its dial,
-keys and unkeys it, and checks the reasons a rig can't be opened;
-`ragtime_rig_test` covers the settings and the follower.
+keys and unkeys it, reads its meters while transmitting, and checks the reasons a rig
+can't be opened; `ragtime_rig_test` covers the settings, the follower
+and `TxMeters`.
 
 Settings keys: `/Radio/Source` (`none`, `rigctld`, `hamlib`; a file
 from before has only `/Radio/ReadDial`, which still reads, and is still

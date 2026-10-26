@@ -1,7 +1,8 @@
 // The rig library against Hamlib itself: the rig list, a backend's own
 // settings, and HamlibRig opening Hamlib's dummy rig (model 1, no port, no
-// radio) on its thread, reading the dial, keying and unkeying, and saying
-// why when a rig can't be opened.
+// radio) on its thread, reading the dial, keying and unkeying, reading
+// the transmit meters while transmitting, and saying why when a rig can't
+// be opened.
 #include <chrono>
 #include <functional>
 #include <string>
@@ -86,6 +87,30 @@ void dummyRig()
     r.setPtt(false);
     CHECK(waitFor(r, [](const HamlibRig::Status& st) { return !st.keyed; }));
     CHECK_EQ(r.status().pttFailures, (uint64_t)0);
+
+    // The dummy rig reports ALC, SWR and power in watts. Transmitting
+    // (data2g-host's PTT ON, keyed by whoever) reads them, and none
+    // between bursts.
+    s = r.status();
+    CHECK(s.readsAlc && s.readsSwr && s.readsPower);
+    CHECK(!s.meters.any());
+    r.setTransmitting(true);
+    CHECK(waitFor(r, [](const HamlibRig::Status& st) {
+        return st.meters.alc && st.meters.swr && st.meters.watts && st.meterReadings >= 3;
+    }));
+    CHECK(!r.status().keyed && !r.status().meters.power);
+    // A PTT change still goes first.
+    r.setPtt(true);
+    CHECK(waitFor(r, [](const HamlibRig::Status& st) { return st.keyed; }));
+    r.setTransmitting(false);
+    // Still keyed by us: still transmitting.
+    uint64_t before = r.status().meterReadings;
+    CHECK(waitFor(r, [&](const HamlibRig::Status& st) { return st.meterReadings > before; }));
+    r.setPtt(false);
+    CHECK(waitFor(r, [](const HamlibRig::Status& st) { return !st.keyed && !st.meters.any(); }));
+    before = r.status().meterReadings;
+    std::this_thread::sleep_for(std::chrono::milliseconds(3 * HamlibRig::METER_MS));
+    CHECK_EQ(r.status().meterReadings, before);
 
     // Keyed when stopped: unkeyed, and closed.
     r.setPtt(true);

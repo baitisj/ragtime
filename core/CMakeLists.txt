@@ -52,6 +52,7 @@ add_library(ragtime_core STATIC
     # Rig control: the Rig page's settings, and keying at data2g-host's PTT.
     src/radio/PttFollower.cpp
     src/radio/RigSettings.cpp
+    src/radio/TxMeters.cpp
     # The flight recorder: the host link on disk, for reports and --replay.
     src/link/FlightRecorder.cpp
 )

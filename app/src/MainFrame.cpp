@@ -1,6 +1,7 @@
 #include "MainFrame.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <ctime>
 #include <optional>
@@ -257,7 +258,7 @@ MainFrame::MainFrame()
         refreshSession();
     };
     host_->setDataSide(std::move(data));
-    rig_ = std::make_unique<RigControl>([this]() { onDial(); });
+    rig_ = std::make_unique<RigControl>([this]() { onDial(); }, [this]() { onMeters(); });
 
     // Every broadcast item of ours is sealed once it has gone.
     chat_.onItems([this](const std::vector<protocol::Record>& items, uint64_t burst, const std::string& mode,
@@ -2464,6 +2465,78 @@ void MainFrame::onDial()
 {
     applySendGuard();
     showDial();
+    showMeters();
+}
+
+void MainFrame::onMeters()
+{
+    const radio::TxMeters& meters = rig_->meters();
+    if (meters.bursts() != notedBursts_ && meters.last())
+    {
+        notedBursts_ = meters.bursts();
+        const radio::TxMeters::Burst& burst = *meters.last();
+        std::string line = "rig TX " + radio::burstText(burst, "; ");
+        if (burst.turnDownDb > 0)
+            line += "; Auto ALC would turn the drive down " + wxString::Format("%.1f", burst.turnDownDb).ToStdString()
+                    + " dB";
+        host_->recorder().note(line, HostConnection::nowMs());
+    }
+    showMeters();
+}
+
+void MainFrame::showMeters()
+{
+    const wxString none = wxString::FromUTF8("\xe2\x80\x94");
+    const std::string waits = "Auto ALC waits for data2g-host to take a transmit level command, since Ragtime never "
+                              "touches the sound card.";
+    if (!rig_->readsMeters())
+    {
+        std::string tip = prefs_.rig.source == radio::RigSource::Hamlib
+                              ? "The rig's ALC while transmitting, once Ragtime has the rig open with Hamlib."
+                              : "The rig's ALC while transmitting, when Ragtime opens the rig with Hamlib "
+                                "(Settings > Rig).";
+        bar_->setAlc(false, 0, none, utf8(tip + "\n\n" + waits), false);
+        return;
+    }
+    const radio::TxMeters& meters = rig_->meters();
+    const std::optional<radio::TxMeters::Burst>& last = meters.last();
+    std::string tip = rig_->readsAlc() ? "The rig's ALC, read through Hamlib while data2g-host transmits, as a "
+                                         "share of the rig's ALC scale."
+                                       : "This rig doesn't report its ALC through Hamlib; its other transmit "
+                                         "meters are read while data2g-host transmits.";
+    int percent = 0;
+    wxString text = none;
+    bool warn = false;
+    if (meters.transmitting())
+    {
+        const radio::MeterReading& now = meters.latest();
+        if (now.alc)
+        {
+            percent = (int)std::lround(*now.alc * 100);
+            text = wxString::Format("%d%%", percent);
+            warn = *now.alc > radio::TxMeters::ALC_TARGET;
+        }
+        if (now.any()) tip += "\n\nNow: " + radio::readingText(now);
+    }
+    else if (last && last->alcPeak)
+    {
+        text = wxString::Format("%d%%", (int)std::lround(*last->alcPeak * 100));
+        warn = last->overTarget() || last->swrHigh();
+    }
+    if (last)
+    {
+        tip += "\n\nLast burst, " + radio::burstText(*last) + ".";
+        if (!meters.transmitting() && last->alcPeak) tip += " The number beside the meter is its ALC peak.";
+        int target = (int)std::lround(radio::TxMeters::ALC_TARGET * 100);
+        if (last->turnDownDb > 0)
+            tip += "\nOver the " + std::to_string(target) + "% target: Auto ALC would have turned the drive down "
+                   + wxString::Format("%.1f", last->turnDownDb).ToStdString()
+                   + " dB. Until it can, turn data2g-host's --output-volume down.";
+        else if (last->overTarget())
+            tip += "\nIt peaked over the " + std::to_string(target) + "% target.";
+        if (last->swrHigh()) tip += "\nThe SWR went over 3: check the antenna and the tuner.";
+    }
+    bar_->setAlc(true, percent, text, utf8(tip + "\n\n" + waits), warn);
 }
 
 void MainFrame::showDial()

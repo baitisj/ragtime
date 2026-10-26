@@ -15,8 +15,9 @@ constexpr int TICK_MS = 100;
 
 } // namespace
 
-RigControl::RigControl(std::function<void()> changed)
+RigControl::RigControl(std::function<void()> changed, std::function<void()> meters)
     : changed_(std::move(changed))
+    , metersChanged_(std::move(meters))
     , rigctld_(std::make_unique<RigConnection>([this]() {
         if (changed_) changed_();
     }))
@@ -29,6 +30,7 @@ RigControl::~RigControl()
 {
     // The window is going: no more news for it.
     changed_ = nullptr;
+    metersChanged_ = nullptr;
     stop();
 }
 
@@ -43,6 +45,7 @@ void RigControl::apply(const radio::RigSettings& settings)
         rigctld_->stop();
         hamlib_.stop();
         seenFailures_ = 0;
+        seenAlc_ = seenSwr_ = seenPower_ = 0;
         if (settings.source == radio::RigSource::Rigctld)
             rigctld_->start(settings.rigctldHost, settings.rigctldPort);
         else if (settings.source == radio::RigSource::Hamlib)
@@ -63,6 +66,7 @@ void RigControl::apply(const radio::RigSettings& settings)
 void RigControl::stop()
 {
     timer_.Stop();
+    meters_.transmitting(false, HostConnection::nowMs());
     follower_.setEnabled(false);
     hamlib_.setPtt(false);
     hamlib_.stop();
@@ -72,7 +76,9 @@ void RigControl::stop()
 
 void RigControl::hostPtt(bool on)
 {
-    // rigctld isn't asked while we transmit; nor is the Hamlib rig.
+    // rigctld isn't asked the dial while we transmit; the Hamlib rig is
+    // asked its meters instead.
+    hostPtt_ = on;
     rigctld_->setKeyed(on);
     follower_.host(on, HostConnection::nowMs());
     sync();
@@ -80,6 +86,7 @@ void RigControl::hostPtt(bool on)
 
 void RigControl::hostLost()
 {
+    hostPtt_ = false;
     follower_.hostLost();
     sync();
 }
@@ -93,6 +100,20 @@ std::optional<uint64_t> RigControl::dialHz() const
     case radio::RigSource::None: break;
     }
     return std::nullopt;
+}
+
+bool RigControl::readsAlc() const
+{
+    if (settings_.source != radio::RigSource::Hamlib) return false;
+    rig::HamlibRig::Status s = hamlib_.status();
+    return s.open && s.readsAlc;
+}
+
+bool RigControl::readsMeters() const
+{
+    if (settings_.source != radio::RigSource::Hamlib) return false;
+    rig::HamlibRig::Status s = hamlib_.status();
+    return s.open && (s.readsAlc || s.readsSwr || s.readsPower);
 }
 
 std::string RigControl::describe() const
@@ -136,6 +157,29 @@ void RigControl::sync()
         follower_.rigFailed(s.problem);
     }
     hamlib_.setPtt(follower_.keyed());
+
+    // The meters, burst by burst, from a Hamlib rig that is open.
+    bool hamlib = settings_.source == radio::RigSource::Hamlib && started_;
+    bool tx = hamlib && s.open && (hostPtt_ || follower_.keyed());
+    hamlib_.setTransmitting(hamlib && hostPtt_);
+    uint64_t metersBefore = meters_.version();
+    uint64_t now = HostConnection::nowMs();
+    meters_.transmitting(tx, now);
+    // Only the meters read since last time, each reading counted once.
+    radio::MeterReading fresh;
+    if (s.alcReadings != seenAlc_) fresh.alc = s.meters.alc;
+    if (s.swrReadings != seenSwr_) fresh.swr = s.meters.swr;
+    if (s.powerReadings != seenPower_)
+    {
+        fresh.watts = s.meters.watts;
+        fresh.power = s.meters.power;
+    }
+    seenAlc_ = s.alcReadings;
+    seenSwr_ = s.swrReadings;
+    seenPower_ = s.powerReadings;
+    if (tx) meters_.reading(fresh, now);
+    if (meters_.version() != metersBefore && metersChanged_) metersChanged_();
+
     if (s.version != seenVersion_ || follower_.version() != seenFollower_)
     {
         seenVersion_ = s.version;
