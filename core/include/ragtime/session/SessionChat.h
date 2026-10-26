@@ -22,6 +22,11 @@
 //   "Session ended by AG7EW" rather than "Link lost"; once the host has
 //   read it, DISCONNECT, which waits for what is unacknowledged. Leave now
 //   is ABORT.
+// - Endings: a host since Data2G PR #122 says why a session ended (busy,
+//   not listening, refused, idle, the far end's host, link lost or
+//   failed), and the strip says so. With an older host the reason is
+//   guessed, as before: the far end's farewell, our own Leave, and how
+//   long the link was quiet.
 //
 // - History: with a SessionLog, a call or a session shows what was said
 //   with that station before, each earlier session closed by a rule, and
@@ -209,6 +214,12 @@ public:
         LinkLost,       // the host ended it, with no farewell from the far end
         HostLost,       // the command port closed
         DataLost,       // the session data port closed
+        // From the reasons hosts since Data2G PR #122 give:
+        Busy,           // the far end is in another session
+        NotListening,   // the far end isn't taking sessions
+        RefusedThere,   // the far end's host refused the call (another version, or its operator)
+        IdleClosed,     // our host closed it: no data either way for its idle timeout
+        ClosedThere,    // the far end's host closed it, with no farewell
     };
 
     struct Event
@@ -251,10 +262,12 @@ public:
     // turns "Link lost" into "Session ended by W1AW".
     static constexpr uint64_t AFTERGLOW_MS = 1000;
     // data2g-host hangs up a session with no data either way for 5 minutes
-    // (Data2G's IDLE_CLOSE_S, docs/DATA2G.md "Sessions"). A session that
-    // ends after about that long without data is taken as that, not as a
-    // lost link: from 5 s short of it (the far end's host may count from a
-    // little earlier) to 30 s past it (the hosts' goodbyes).
+    // (Data2G's IDLE_CLOSE_S, docs/DATA2G.md "Sessions"), or what TIMEOUT
+    // set. A host since Data2G PR #122 says so (IDLE); with an older one,
+    // or when the far end's host hangs up (PEER), a session that ends after
+    // about that long without data is taken as that, not as a lost link:
+    // from 5 s short of it (the far end's host may count from a little
+    // earlier) to 30 s past it (the hosts' goodbyes).
     static constexpr uint64_t HOST_IDLE_CLOSE_MS = 300 * 1000;
     static constexpr uint64_t HOST_IDLE_EARLY_MS = 5 * 1000;
     static constexpr uint64_t HOST_IDLE_LATE_MS = 30 * 1000;
@@ -428,6 +441,8 @@ private:
     int bandwidthHz_ = 0;
     std::string mode_;
     Ending ending_ = Ending::LinkLost;
+    link::CommandEvent::Disconnect why_;    // the host's reason for the ending, if it gave one
+    uint64_t idleCloseMs_ = HOST_IDLE_CLOSE_MS;     // our host's idle timeout as the session ended
     bool cancelling_ = false;       // we stopped the call
     bool gaveUp_ = false;           // CALL_GIVE_UP_MS ran out
     bool dataLost_ = false;

@@ -9,10 +9,13 @@
 //   OPEN D2G FROM <call>, then MODES. DATA2G ON (Data2G PR #118) asks for
 //   host byte offsets in CLEANTXBUFFER's answers; a host from before it
 //   answers WRONG, which is not refused, and sessions there go without
-//   cuts.
+//   cuts. Once the host takes it, TIMEOUT and TXPOWER (Data2G PR #122)
+//   are read, and TIMEOUT set when the settings ask; a host from before
+//   that PR answers WRONG, and is not refused for it either.
 // - The host's reports: PTT, BUSY, MODE, the MODES list, BCAST HEARD,
 //   LOST, DROPPED and MISSED, CONNECTED, DISCONNECTED, BUFFER. HEARD and
-//   MISSED carry an SNR from hosts since Data2G PR #98.
+//   MISSED carry an SNR from hosts since Data2G PR #98, and DISCONNECTED
+//   a reason from hosts since PR #122 (passed on with SessionEnded).
 // - The session partner's SNR: SN, asked when its bursts have likely
 //   arrived (BUFFER going down, session bytes in), at most every
 //   SN_GAP_MS. A host that answers WRONG (one before PR #98, or before the
@@ -56,6 +59,11 @@ public:
         std::string callsign;
         bool acceptSessions = true;     // LISTEN ON
         bool narrow = false;            // BW500 (the 500 Hz button), else BW2300
+        // The host's link idle timeout, set with TIMEOUT: a session with no
+        // data either way for this long is closed (IDLE). 0 leaves the
+        // host's own (Data2G's is 5 minutes). Each host keeps its own, so
+        // a longer one holds a quiet session only if both ends set it.
+        double idleTimeoutS = 0.0;
     };
 
     enum class BurstState
@@ -84,6 +92,16 @@ public:
         HostLost,   // the command port closed
     };
 
+    // Ragtime's TIMEOUT: a ragchew ends on Leave, never for being quiet
+    // (docs/PLAN.md), so the host is told not to hang up for a day. The
+    // link's keepalives still find a station that has gone (LINK_LOST, 90
+    // s), and a far end on another client still hangs up after its own.
+    static constexpr double RAGCHEW_IDLE_TIMEOUT_S = 24 * 3600.0;
+
+    // TXPOWER's range, dB: 0 puts a burst's peak at full scale.
+    static constexpr double TX_POWER_MIN_DB = -60.0;
+    static constexpr double TX_POWER_MAX_DB = 20.0;
+
     struct Event
     {
         enum class Type
@@ -101,11 +119,13 @@ public:
             Burst,              // id, burstState
             SessionCalling,     // peer
             SessionConnected,   // peer, incoming, number: bandwidth when given
-            SessionEnded,       // peer, sessionEnd
+            SessionEnded,       // peer, sessionEnd, disconnect: the host's reason, if it gave one
             Buffer,             // count: our session bytes not yet acknowledged
             SessionSnr,         // peer, snr: the partner's last burst as the host heard it
             Refused,            // text: a command the host answered WRONG
             Clean,              // clean: CLEANTXBUFFER's answer (Failed for WRONG), or SETTLED
+            TxPower,            // value: the host's output volume, dB
+            IdleTimeout,        // value: the host's link idle timeout, seconds
         } type = Type::GroupOpen;
 
         int number = 0;
@@ -119,7 +139,9 @@ public:
         SessionEnd sessionEnd = SessionEnd::Ended;
         std::vector<uint8_t> frame;
         std::optional<double> snr;  // dB, average power in 2500 Hz
+        double value = 0.0;
         CommandEvent::Clean clean;
+        CommandEvent::Disconnect disconnect;
     };
 
     // A broadcast written to the host but not sent is given up after this
@@ -179,7 +201,17 @@ public:
     void setCallsign(const std::string& callsign) { settings_.callsign = callsign; }
     void setAcceptSessions(bool accept, uint64_t nowMs);
     void setNarrow(bool narrow, uint64_t nowMs);
+    // TIMEOUT s now, if the host takes DATA2G ON, and on every connect; 0
+    // puts back the host's own, as first read.
+    void setIdleTimeout(double seconds, uint64_t nowMs);
     const Settings& settings() const { return settings_; }
+
+    // TXPOWER dB: the host's output volume, from its next audio block. It
+    // stays set on the host after Ragtime goes. False with no DATA2G ON
+    // (a host from before Data2G PR #122 has no TXPOWER) or out of range;
+    // the host's answer is read back as a TxPower event, or a WRONG comes
+    // as Refused.
+    bool setTxPower(double dB, uint64_t nowMs);
 
     //---------------------------------------------------------------------
     // Broadcasts
@@ -272,6 +304,10 @@ public:
     // reports a mode only when it changes, so a session in the mode of the
     // burst before it never hears one.
     const std::string& lastMode() const { return lastMode_; }
+    // The host's output volume (TXPOWER) and link idle timeout (TIMEOUT),
+    // as last read; none from a host before Data2G PR #122.
+    std::optional<double> txPower() const { return txPower_; }
+    std::optional<double> idleTimeout() const { return idleTimeout_; }
 
 private:
     struct Burst
@@ -294,7 +330,8 @@ private:
     bool mayGo(const Burst& burst, uint64_t nowMs) const;
     void writeBurst(Burst& burst);
     void setBurst(Burst& burst, BurstState state);
-    void finishSession(SessionEnd end);
+    void finishSession(SessionEnd end, const CommandEvent::Disconnect& why = CommandEvent::Disconnect());
+    void sendIdleTimeout(uint64_t nowMs);
     void heldChanged();
     void askSn(uint64_t nowMs);
     Burst* current();
@@ -327,6 +364,9 @@ private:
     bool busy_ = false;
     bool data2g_ = false;
     std::string lastMode_;
+    std::optional<double> txPower_;
+    std::optional<double> idleTimeout_;
+    std::optional<double> hostIdleTimeout_;     // the host's own, read before we set ours
 
     std::deque<Burst> bursts_;          // the first may be with the host; the rest wait
     std::vector<std::pair<uint64_t, BurstState>> finished_;   // the latest outcomes, for burstState()

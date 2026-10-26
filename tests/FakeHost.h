@@ -40,6 +40,17 @@
 //   Data2G PR #118. BUFFEREMPTY with nothing waiting, FAILED outside a
 //   session. With setCuts(false), a host from before it: DATA2G and
 //   CLEANTXBUFFER n are WRONG.
+// - With DATA2G ON, as data2g-host since Data2G PR #122: DISCONNECTED
+//   carries a reason (CLIENT and PEER for DISCONNECT, ABORT and LINK_LOST
+//   for ABORT, NO_ANSWER, the far host's BUSY or NOT_LISTENING at the
+//   first call it hears, IDLE and PEER for a quiet session), TIMEOUT and
+//   TXPOWER read and set the idle timeout (300 s until set, again when the
+//   client goes) and the output volume. With setReasons(false), a host
+//   from before it: a bare DISCONNECTED, and TIMEOUT and TXPOWER are
+//   WRONG.
+// - A session with no data either way for the shorter of the two hosts'
+//   idle timeouts is closed: IDLE on the host whose timer ran out, PEER on
+//   the other.
 #ifndef RAGTIME_TESTS_FAKE_HOST_H
 #define RAGTIME_TESTS_FAKE_HOST_H
 
@@ -96,6 +107,12 @@ public:
     // Report SNRs, as data2g-host since Data2G PR #98 (off: as before it).
     void setReportsSnr(bool on) { reportsSnr_ = on; }
     void setCuts(bool on) { cuts_ = on; }
+    // DISCONNECTED reasons, TIMEOUT and TXPOWER, as data2g-host since
+    // Data2G PR #122 (off: as before it).
+    void setReasons(bool on) { reasons_ = on; }
+    // The idle timeout and output volume as the client last set them.
+    double idleTimeoutS() const { return idleTimeoutS_; }
+    double txPowerDb() const { return txPowerDb_; }
     // Session bytes cuts have dropped.
     size_t cutBytes() const { return cutBytes_; }
     // How strong the other hosts hear this one's bursts, dB, each burst
@@ -146,7 +163,12 @@ private:
     void sendBurst();
     void finishBurst();
     void connected(FakeHost& caller, FakeHost& called);
-    void disconnected();
+    // The session ends: why here, and why at the far end.
+    void disconnected(const std::string& why, const std::string& whyThere);
+    // "DISCONNECTED why" with DATA2G ON on a host that gives reasons, else
+    // a bare DISCONNECTED.
+    std::string disconnectedLine(const std::string& why) const;
+    void stepIdle(long long nowMs);
     void stepCall(long long nowMs);
     void stepSession(long long nowMs);
     bool sessionIdle(long long nowMs) const;
@@ -214,6 +236,10 @@ private:
 
     bool cuts_ = true;
     bool data2g_ = false;       // DATA2G ON
+    bool reasons_ = true;
+    static constexpr double DEFAULT_IDLE_TIMEOUT_S = 300.0;
+    double idleTimeoutS_ = DEFAULT_IDLE_TIMEOUT_S;
+    double txPowerDb_ = 0.0;
     uint64_t sessionRead_ = 0;  // host offsets: session bytes read since CONNECTED
     size_t cutBytes_ = 0;
 

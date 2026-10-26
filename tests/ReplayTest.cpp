@@ -203,7 +203,8 @@ void testRecordAndReplay()
         Client b("KC2G", hostB.kissPort(), hostB.commandPort(), nullptr);
         CHECK(runAir(air, {&a, &b}, [&] { return a.link.groupOpen() && b.link.groupOpen() && !a.link.modes().empty(); }));
         b.link.broadcast({frame}, "", now);
-        CHECK(runAir(air, {&a, &b}, [&] { return a.first(Type::Heard) != nullptr; }));
+        // The frame (KISS) and HEARD (the command port) come apart: both.
+        CHECK(runAir(air, {&a, &b}, [&] { return a.first(Type::Heard) != nullptr && a.first(Type::HeardFrom) != nullptr; }));
         recorder.down("closed by Ragtime", now);
     }
 

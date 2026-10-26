@@ -309,6 +309,20 @@ CommandEvent parseCommandLine(const std::string& line)
     else if (verb == "DISCONNECTED")
     {
         event.type = CommandEvent::Type::Disconnected;
+        CommandEvent::Disconnect& d = event.disconnect;
+        size_t end = w.size();
+        if (end > 2 && upper(w[end - 1]) == "UNCONFIRMED")
+        {
+            d.unconfirmed = true;
+            end--;
+        }
+        if (end > 1) d.reason = arg1;
+        for (size_t i = 2; i < end; i++) d.detail += (d.detail.empty() ? "" : " ") + w[i];
+    }
+    else if ((verb == "TXPOWER" || verb == "TIMEOUT") && w.size() == 2 && toDouble(w[1], event.value)
+             && std::isfinite(event.value))
+    {
+        event.type = verb == "TXPOWER" ? CommandEvent::Type::TxPower : CommandEvent::Type::Timeout;
     }
     else if (verb == "BUFFER" && w.size() == 2 && toInt(w[1], event.count))
     {

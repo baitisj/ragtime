@@ -1,6 +1,8 @@
 #include "ragtime/link/HostLink.h"
 
 #include <algorithm>
+#include <cmath>
+#include <cstdlib>
 #include <string>
 #include <utility>
 
@@ -20,6 +22,18 @@ const char* const MODES = "MODES";
 const char* const SN = "SN";
 const char* const DATA2G = "DATA2G";
 const char* const CLEAN = "CLEANTXBUFFER";
+const char* const TXPOWER = "TXPOWER";
+const char* const TIMEOUT = "TIMEOUT";
+
+// A number with one decimal, the way the host writes them, whatever the
+// locale.
+std::string tenths(double value)
+{
+    long long t = std::llround(std::max(-1e12, std::min(value, 1e12)) * 10.0);
+    std::string out = t < 0 ? "-" : "";
+    t = std::llabs(t);
+    return out + std::to_string(t / 10) + "." + std::to_string(t % 10);
+}
 
 } // namespace
 
@@ -88,6 +102,9 @@ void HostLink::commandDown(uint64_t nowMs)
     busy_ = false;
     data2g_ = false;
     lastMode_.clear();
+    txPower_.reset();
+    idleTimeout_.reset();
+    hostIdleTimeout_.reset();
 
     // A burst the host had may or may not have gone: it isn't Sent.
     Burst* burst = current();
@@ -252,8 +269,17 @@ void HostLink::onLine(const std::string& line, uint64_t nowMs)
             if (a.answer == DATA2G)
             {
                 data2g_ = ok;
+                if (ok)
+                {
+                    // Its own idle timeout first, then ours, if any.
+                    sendLine(TIMEOUT, TIMEOUT, nowMs);
+                    sendIdleTimeout(nowMs);
+                    sendLine(TXPOWER, TXPOWER, nowMs);
+                }
                 break;
             }
+            // A host from before Data2G PR #122: no reading, nothing refused.
+            if (a.answer == TXPOWER || a.answer == TIMEOUT) break;
             if (a.answer == CLEAN)
             {
                 data2g_ = data2g_ && ok;
@@ -394,9 +420,9 @@ void HostLink::onLine(const std::string& line, uint64_t nowMs)
             break;
         }
         case Type::Disconnected:
-            if (session_ == SessionState::Calling) finishSession(SessionEnd::NoAnswer);
-            else if (session_ == SessionState::Leaving) finishSession(SessionEnd::Left);
-            else if (session_ == SessionState::Connected) finishSession(SessionEnd::Ended);
+            if (session_ == SessionState::Calling) finishSession(SessionEnd::NoAnswer, c.disconnect);
+            else if (session_ == SessionState::Leaving) finishSession(SessionEnd::Left, c.disconnect);
+            else if (session_ == SessionState::Connected) finishSession(SessionEnd::Ended, c.disconnect);
             break;
         case Type::Buffer:
         {
@@ -421,6 +447,22 @@ void HostLink::onLine(const std::string& line, uint64_t nowMs)
             Event e;
             e.type = Event::Type::Clean;
             e.clean = c.clean;
+            emit(e);
+            break;
+        }
+        case Type::TxPower:
+        case Type::Timeout:
+        {
+            bool power = c.type == Type::TxPower;
+            const char* answer = power ? TXPOWER : TIMEOUT;
+            if (!awaiting_.empty() && awaiting_.front().answer == answer) popAwaiting();
+            std::optional<double>& value = power ? txPower_ : idleTimeout_;
+            if (!power && !hostIdleTimeout_) hostIdleTimeout_ = c.value;
+            if (value == c.value) break;
+            value = c.value;
+            Event e;
+            e.type = power ? Event::Type::TxPower : Event::Type::IdleTimeout;
+            e.value = c.value;
             emit(e);
             break;
         }
@@ -455,6 +497,38 @@ void HostLink::setNarrow(bool narrow, uint64_t nowMs)
     // BW500 caps the sessions the host opens and narrows its MODES.
     sendLine(narrow ? "BW500" : "BW2300", OK, nowMs);
     sendLine("MODES", MODES, nowMs);
+}
+
+void HostLink::setIdleTimeout(double seconds, uint64_t nowMs)
+{
+    if (!std::isfinite(seconds) || seconds < 0.0) seconds = 0.0;
+    if (settings_.idleTimeoutS == seconds) return;
+    settings_.idleTimeoutS = seconds;
+    if (!data2g_) return;
+    // Back to the host's own: it goes back by itself only when we leave.
+    if (seconds == 0.0 && hostIdleTimeout_)
+    {
+        sendLine(std::string(TIMEOUT) + " " + tenths(*hostIdleTimeout_), OK, nowMs);
+        sendLine(TIMEOUT, TIMEOUT, nowMs);
+        return;
+    }
+    sendIdleTimeout(nowMs);
+}
+
+void HostLink::sendIdleTimeout(uint64_t nowMs)
+{
+    // The host takes any s > 0; it counts in tenths here.
+    if (settings_.idleTimeoutS < 0.1) return;
+    sendLine(std::string(TIMEOUT) + " " + tenths(settings_.idleTimeoutS), OK, nowMs);
+    sendLine(TIMEOUT, TIMEOUT, nowMs);
+}
+
+bool HostLink::setTxPower(double dB, uint64_t nowMs)
+{
+    if (!commandUp_ || !data2g_ || !std::isfinite(dB) || dB < TX_POWER_MIN_DB || dB > TX_POWER_MAX_DB) return false;
+    sendLine(std::string(TXPOWER) + " " + tenths(dB), OK, nowMs);
+    sendLine(TXPOWER, TXPOWER, nowMs);
+    return true;
 }
 
 //-------------------------------------------------------------------------
@@ -690,12 +764,13 @@ void HostLink::askSn(uint64_t nowMs)
     sendLine(SN, SN, nowMs);
 }
 
-void HostLink::finishSession(SessionEnd end)
+void HostLink::finishSession(SessionEnd end, const CommandEvent::Disconnect& why)
 {
     Event e;
     e.type = Event::Type::SessionEnded;
     e.peer = peer_;
     e.sessionEnd = end;
+    e.disconnect = why;
     session_ = SessionState::None;
     buffer_ = 0;
     abortMs_ = 0;

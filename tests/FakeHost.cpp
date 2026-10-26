@@ -4,10 +4,12 @@
 #include <algorithm>
 #include <cerrno>
 #include <chrono>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <random>
 #include <stdexcept>
+#include <string>
 
 #include <arpa/inet.h>
 #include <fcntl.h>
@@ -163,7 +165,7 @@ FakeHost::~FakeHost()
     if (partner_ != nullptr)
     {
         partner_->partner_ = nullptr;
-        partner_->reply("DISCONNECTED");
+        partner_->reply(partner_->disconnectedLine("LINK_LOST"));
     }
     air_.hosts_.erase(std::remove(air_.hosts_.begin(), air_.hosts_.end(), this), air_.hosts_.end());
     for (Port* port : {&kiss_, &command_, &data_})
@@ -228,7 +230,9 @@ void FakeHost::serviceCommand()
     if (had && command_.client < 0)
     {
         lineIn_.clear();
-        data2g_ = false; // the client that asked for it has gone
+        // The client that asked for these has gone.
+        data2g_ = false;
+        idleTimeoutS_ = DEFAULT_IDLE_TIMEOUT_S;
     }
     for (uint8_t b : command_.in)
     {
@@ -280,6 +284,23 @@ void FakeHost::onCommand(const std::string& line)
         data2g_ = w[1] == "ON";
         reply("OK");
     }
+    else if ((verb == "TIMEOUT" || verb == "TXPOWER") && w.size() <= 2 && data2g_ && reasons_)
+    {
+        double& value = verb == "TIMEOUT" ? idleTimeoutS_ : txPowerDb_;
+        if (w.size() == 1)
+        {
+            char text[48];
+            std::snprintf(text, sizeof text, "%s %.1f", verb.c_str(), value);
+            reply(text);
+            return;
+        }
+        char* end = nullptr;
+        double v = std::strtod(w[1].c_str(), &end);
+        bool ok = end != nullptr && *end == '\0' && std::isfinite(v)
+                  && (verb == "TIMEOUT" ? v > 0.0 : v >= -60.0 && v <= 20.0);
+        if (ok) value = v;
+        reply(ok ? "OK" : "WRONG");
+    }
     else if (verb == "CLEANTXBUFFER" && w.size() == 2 && data2g_)
     {
         uint64_t upto = std::strtoull(w[1].c_str(), nullptr, 10);
@@ -305,7 +326,7 @@ void FakeHost::onCommand(const std::string& line)
             lastCrossingMs_ = 0;
             reply("CLEANTXBUFFER OK " + from + " " + std::to_string(sessionRead_) + " " + from + " " + from);
             reply("BUFFER 0");
-            if (disconnectPending_) disconnected();
+            if (disconnectPending_) disconnected("CLIENT", "PEER");
         }
     }
     else if (verb == "BCAST" && w.size() >= 5 && w[1] == "OPEN" && w[3] == "FROM")
@@ -359,16 +380,21 @@ void FakeHost::onCommand(const std::string& line)
             calling_ = false;
             if (keyed_) reply("PTT OFF");
             keyed_ = false;
-            reply("DISCONNECTED");
+            reply(disconnectedLine(verb == "ABORT" ? "ABORT" : "CLIENT"));
         }
         else if (verb == "DISCONNECT" && waiting_ > 0)
         {
             // DISCONNECT waits for what is still to cross.
             disconnectPending_ = true;
         }
+        else if (verb == "ABORT")
+        {
+            // No DISC goes: the far end loses the link.
+            disconnected("ABORT", "LINK_LOST");
+        }
         else
         {
-            disconnected();
+            disconnected("CLIENT", "PEER");
         }
     }
     else
@@ -402,15 +428,28 @@ void FakeHost::stepCall(long long now)
         keyed_ = false;
         calls_++;
         FakeHost* called = reachable(target_);
+        // A host on the air that won't take it says so at the first call
+        // it hears.
+        FakeHost* there = nullptr;
+        for (FakeHost* h : air_.hosts_)
+        {
+            if (h != this && h->call_ == target_) there = h;
+        }
         if (called != nullptr && calls_ >= answerOn_)
         {
             calling_ = false;
             connected(*this, *called);
         }
+        else if (called == nullptr && there != nullptr && calls_ >= answerOn_)
+        {
+            calling_ = false;
+            bool busy = there->partner_ != nullptr || there->calling_;
+            reply(disconnectedLine(busy ? "BUSY" : "NOT_LISTENING"));
+        }
         else if (calls_ >= 5)
         {
             calling_ = false;
-            reply("DISCONNECTED");
+            reply(disconnectedLine("NO_ANSWER"));
         }
         else
         {
@@ -437,7 +476,7 @@ void FakeHost::connected(FakeHost& caller, FakeHost& called)
     called.reply(line);
 }
 
-void FakeHost::disconnected()
+void FakeHost::disconnected(const std::string& why, const std::string& whyThere)
 {
     if (partner_ == nullptr) return;
     FakeHost* other = partner_;
@@ -449,8 +488,23 @@ void FakeHost::disconnected()
         h->waiting_ = 0;
         h->disconnectPending_ = false;
     }
-    reply("DISCONNECTED");
-    other->reply("DISCONNECTED");
+    reply(disconnectedLine(why));
+    other->reply(other->disconnectedLine(whyThere));
+}
+
+std::string FakeHost::disconnectedLine(const std::string& why) const
+{
+    return data2g_ && reasons_ ? "DISCONNECTED " + why : std::string("DISCONNECTED");
+}
+
+void FakeHost::stepIdle(long long now)
+{
+    if (partner_ == nullptr || waiting_ > 0 || partner_->waiting_ > 0) return;
+    long long quietMs = now - std::max(lastSessionMs_, partner_->lastSessionMs_);
+    // The host whose timer runs out first hangs up.
+    FakeHost* first = idleTimeoutS_ <= partner_->idleTimeoutS_ ? this : partner_;
+    if (quietMs < (long long)(first->idleTimeoutS_ * 1000.0)) return;
+    first->disconnected("IDLE", "PEER");
 }
 
 void FakeHost::serviceKiss()
@@ -527,7 +581,7 @@ void FakeHost::stepSession(long long now)
     if (carried == 0) return;
     crossing_.erase(crossing_.begin(), crossing_.begin() + (long)carried);
     reply("BUFFER " + std::to_string(waiting_));
-    if (disconnectPending_ && waiting_ == 0) disconnected();
+    if (disconnectPending_ && waiting_ == 0) disconnected("CLIENT", "PEER");
 }
 
 double FakeHost::heardAtDb()
@@ -615,6 +669,7 @@ void FakeAir::step(int timeoutMs)
     {
         h->stepCall(nowMs());
         h->stepSession(nowMs());
+        h->stepIdle(nowMs());
     }
     // A session holds the group: its bursts wait for it to end, or to go
     // idle.

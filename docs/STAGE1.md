@@ -268,7 +268,21 @@ keep or change:
   A session that ends after about that long without data says "data2g-host
   closed the quiet session with W1AW at 14:32: it hangs up after 5
   minutes with nothing sent either way", not "Link lost" (Jeff's pick,
-  2026-10-25, with an ask to Andrew for a way to keep it up).
+  2026-10-25, with an ask to Andrew for a way to keep it up). Since
+  Data2G PR #122 Ragtime sets the host's idle timeout to a day
+  (`TIMEOUT`, `HostLink::RAGCHEW_IDLE_TIMEOUT_S`), so a ragchew between
+  two Ragtimes ends only on Leave; a far end on another client still
+  hangs up after its own 5 minutes ("W1AW's data2g-host closed the quiet
+  session").
+- **Why it ended (Data2G PR #122).** A host that gives the reason on
+  `DISCONNECTED` is believed: "K1ABC is in another session", "K1ABC
+  isn't taking sessions", "K1ABC's station refused the call", "data2g-host
+  closed the quiet session" (`IDLE`), "W1AW's end closed the session"
+  (`PEER` with no farewell; a farewell read in the afterglow still makes
+  it "Session ended by W1AW"), "Link lost" or "Link failed: data2g-host
+  gave up on it (no progress)". A Leave the far end never acknowledged
+  adds "W1AW didn't confirm it". An older host's bare `DISCONNECTED` is
+  read as before.
 - **The buttons follow the moment:** Cancel while calling, Leave in a
   session, Leave now once leaving (as PLAN.md describes it), and Call
   again once it has ended. All are on the Station menu too (Ctrl+K,
@@ -1086,10 +1100,14 @@ real sound card; never point them at the radio's USB codec.
 - Read from Data2G's source on 2026-10-25 (`docs/DATA2G.md`): `BW1200`
   exists, the polar modes carry data and `BCAST MODE` takes them, and a
   station in a session refuses a CONNECT at once (busy). Still open: a
-  200 Hz cap, a TX level command for Auto ALC, thresholds in `MODES`, the
-  mode on `BCAST HEARD`, the reason on `DISCONNECTED`, keeping a quiet
-  session up past the host's 5 minute idle hang-up, and lengths that
-  survive a lost codeword (DATA2G.md, "Loss").
+  200 Hz cap, thresholds in `MODES`, the mode on `BCAST HEARD`, and
+  lengths that survive a lost codeword (DATA2G.md, "Loss").
+- Data2G PR #122 (open, read at 843987e on 2026-10-26) answers three:
+  the reason on `DISCONNECTED`, `TIMEOUT` (keeping a quiet session up)
+  and `TXPOWER` (a TX level command, for Auto ALC). Ragtime reads all
+  three; the TX level control is the rig thread's to build on
+  `HostLink::setTxPower`. Asked back: reset `TXPOWER` when the client
+  goes, as `TIMEOUT` is.
 - SNR reports: answered by Data2G PR #98 (merged 2026-10-23), used as
   below.
 - The Hand primitive (`HAND SEND`, `HAND LISTEN`), which he will build;

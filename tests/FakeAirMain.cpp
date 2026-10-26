@@ -6,7 +6,7 @@
 // leave after you send 73.
 //
 //   ragtime_fake_air [--bots N] [--airtime MS] [--call CALL] [--fade] [--rate BPS]
-//                    [--loss PCT] [--files] [--no-snr] [--no-cut]
+//                    [--loss PCT] [--files] [--no-snr] [--no-cut] [--no-reasons]
 //                    [--rig PORT [--dial HZ] [--dial-hop] [--rig-vfo] [--rig-swr X] [--rig-noise DB]]
 //   ragtime_fake_air --replay FILE|FOLDER... [--from TIME] [--speed X]
 //
@@ -31,7 +31,11 @@
 // 2 dB a burst, and hosts A and B at +5 dB. --no-snr has them report none,
 // as hosts before it did. They take DATA2G ON and cut what a session holds
 // (CLEANTXBUFFER), as data2g-host does since Data2G PR #118; --no-cut plays
-// a host from before it.
+// a host from before it. They say why a session ended (DISCONNECTED
+// BUSY, IDLE, PEER...), and take TIMEOUT and TXPOWER, as data2g-host does
+// since Data2G PR #122, hanging up a session quiet for the shorter of its
+// two hosts' idle timeouts (the bots set Ragtime's day); --no-reasons
+// plays a host from before it.
 //
 // --rig PORT plays a rigctld on that port (pick another than 4532 where a
 // real one runs): it answers "\chk_vfo" with 0, "f" with the dial,
@@ -310,7 +314,7 @@ std::string writeBulletin(const Profile& p)
 struct Bot
 {
     Bot(FakeAir& air, const Profile& p, int airtimeMs, uint64_t startMs, std::mt19937& random)
-        : host(air), link({p.call, p.sessions, false}), chat(link), seals(link, chat), broadcasts(link, chat, seals),
+        : host(air), link({p.call, p.sessions, false, link::HostLink::RAGCHEW_IDLE_TIMEOUT_S}), chat(link), seals(link, chat), broadcasts(link, chat, seals),
           session(link), traffic(files, history), profile(p), random(random)
     {
         session.setTraffic(&traffic);
@@ -633,6 +637,7 @@ int main(int argc, char** argv)
     int rate = 400;
     bool snr = true;
     bool cuts = true;
+    bool reasons = true;
     int rigPort = 0;
     uint64_t dialHz = 14105000;
     bool dialHop = false;
@@ -661,6 +666,8 @@ int main(int argc, char** argv)
             snr = false;
         else if (std::strcmp(argv[i], "--no-cut") == 0)
             cuts = false;
+        else if (std::strcmp(argv[i], "--no-reasons") == 0)
+            reasons = false;
         else if (std::strcmp(argv[i], "--rig") == 0 && i + 1 < argc)
             rigPort = std::atoi(argv[++i]);
         else if (std::strcmp(argv[i], "--dial") == 0 && i + 1 < argc)
@@ -685,7 +692,7 @@ int main(int argc, char** argv)
         else
         {
             std::fprintf(stderr, "usage: ragtime_fake_air [--bots N] [--airtime MS] [--call CALL] [--fade] "
-                                 "[--rate BPS] [--loss PCT] [--files] [--no-snr] [--no-cut] "
+                                 "[--rate BPS] [--loss PCT] [--files] [--no-snr] [--no-cut] [--no-reasons] "
                                  "[--rig PORT [--dial HZ] [--dial-hop] [--rig-vfo] [--rig-swr X] [--rig-noise DB]]\n"
                                  "       ragtime_fake_air --replay FILE|FOLDER... [--from 2026-10-25T16:20] "
                                  "[--speed X]\n");
@@ -723,6 +730,7 @@ int main(int argc, char** argv)
         h->setLoss(std::min(100, std::max(0, lossPct)) / 100.0);
         h->setReportsSnr(snr);
         h->setCuts(cuts);
+        h->setReasons(reasons);
         h->setSignalDb(5.0, 2.0);
     }
 
@@ -739,6 +747,7 @@ int main(int argc, char** argv)
         static const double SIGNAL_DB[] = {12.0, -6.0, 3.0, -11.0, 8.0, -2.0, 15.0, -8.0};
         stations.back()->host.setReportsSnr(snr);
         stations.back()->host.setCuts(cuts);
+        stations.back()->host.setReasons(reasons);
         stations.back()->host.setSignalDb(SIGNAL_DB[(size_t)i % (sizeof(SIGNAL_DB) / sizeof(SIGNAL_DB[0]))], 2.0);
     }
     if (share && !stations.empty())

@@ -358,7 +358,8 @@ host giving up the link. Nothing else opens or closes one.
    into the session, its farewell, and sends `DISCONNECT` once the host
    has read it (or 10 s on). The far end, finding the farewell in the
    stream, says "Session ended by AG7EW"; a session that ends without one
-   is "Link lost". The farewell and the host's `DISCONNECTED` come on
+   is "Link lost" (or, from a host since Data2G PR #122, what its
+   `DISCONNECTED` reason says). The farewell and the host's `DISCONNECTED` come on
    different ports, in either order, so a station still reads the stream
    for a second after a session ends without one. Leave now (`ABORT`)
    writes no farewell.

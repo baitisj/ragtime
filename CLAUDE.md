@@ -117,6 +117,14 @@ with the code when the seal rules change.
   codewords less 3 bytes, and keeps its bursts long; shorter bursts on fading
   paths (ragtime #68's first version) were dropped for it
   (docs/DATA2G.md, "Loss").
+- Data2G PR #122 (open 2026-10-26) gives DISCONNECTED reasons, TIMEOUT
+  and TXPOWER. `HostLink` passes the reason on with `SessionEnded`,
+  reads both values after DATA2G ON and sets TIMEOUT to a day
+  (`RAGCHEW_IDLE_TIMEOUT_S`), and has `setTxPower` for the rig thread's
+  TX level control; `SessionChat` turns the reasons into endings (Busy,
+  NotListening, RefusedThere, IdleClosed, ClosedThere). The fake hosts
+  give reasons and hang up quiet sessions (`--no-reasons` for an older
+  one).
 - The dial, the path log and the watch list (2026-10-25,
   `docs/STAGE1.md`): `core/src/radio/` (`DialReader`, which only ever
   asks rigctld `\chk_vfo`, `f`, while transmitting the meters
