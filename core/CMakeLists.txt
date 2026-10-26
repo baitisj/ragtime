@@ -55,6 +55,11 @@ add_library(ragtime_core STATIC
     src/radio/TxMeters.cpp
     # The flight recorder: the host link on disk, for reports and --replay.
     src/link/FlightRecorder.cpp
+    # The Ear: the spectrum, and finding data2g-host's sound card in
+    # PipeWire's graph (the listening itself is in audio/).
+    src/ear/Graph.cpp
+    src/ear/ProcNet.cpp
+    src/ear/Spectrum.cpp
 )
 
 target_include_directories(ragtime_core PUBLIC

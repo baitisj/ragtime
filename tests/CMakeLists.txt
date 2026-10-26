@@ -62,3 +62,9 @@ if(RAGTIME_HAMLIB)
     target_link_libraries(ragtime_hamlib_test PRIVATE ragtime_rig)
 endif()
 ragtime_test(ragtime_flight_recorder_test FlightRecorderTest.cpp)
+ragtime_test(ragtime_ear_test EarTest.cpp)
+# The Ear without its window, for the bench and checking a station by hand
+# (it only records). Not a test: it needs a running PipeWire.
+add_executable(ragtime_ear_probe EarProbe.cpp)
+target_link_libraries(ragtime_ear_probe PRIVATE ragtime_audio)
+ragtime_warnings(ragtime_ear_probe)

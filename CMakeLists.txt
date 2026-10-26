@@ -6,7 +6,8 @@
 #
 # -DRAGTIME_APP=OFF builds only the core and rig libraries and their tests,
 # with no wxWidgets needed; -DRAGTIME_HAMLIB=OFF builds without Hamlib
-# (libhamlib-dev), and so without Settings > Rig's Hamlib choice. The Windows build cross-compiles with MinGW-w64: see
+# (libhamlib-dev), and so without Settings > Rig's Hamlib choice;
+# -DRAGTIME_PIPEWIRE=OFF builds without the Ear's listening (libpipewire-0.3-dev). The Windows build cross-compiles with MinGW-w64: see
 # cmake/Toolchain-mingw64.cmake and packaging/windows/make-zip.sh.
 cmake_minimum_required(VERSION 3.16)
 
@@ -26,6 +27,12 @@ option(RAGTIME_WERROR "Treat compiler warnings as errors." ON)
 option(RAGTIME_BUILD_WX "Fetch and build wxWidgets statically instead of using the system's (the Windows build)." OFF)
 option(RAGTIME_HAMLIB "Rig control with Hamlib (Settings > Rig); needs libhamlib-dev." ON)
 option(RAGTIME_BUILD_HAMLIB "Fetch and build Hamlib statically instead of using the system's (the Windows build)." OFF)
+if(WIN32 OR APPLE)
+    set(RAGTIME_PIPEWIRE_DEFAULT OFF)
+else()
+    set(RAGTIME_PIPEWIRE_DEFAULT ON)
+endif()
+option(RAGTIME_PIPEWIRE "The Ear listens through PipeWire (Linux); needs libpipewire-0.3-dev to build." ${RAGTIME_PIPEWIRE_DEFAULT})
 
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
 include(RagtimeWarnings)
@@ -54,6 +61,20 @@ if(RAGTIME_HAMLIB)
     endif()
 endif()
 add_subdirectory(rig)
+
+# PipeWire's headers, for the Ear (audio/). Only the headers: libpipewire
+# is loaded at run time.
+if(RAGTIME_PIPEWIRE)
+    find_package(PkgConfig)
+    if(PKG_CONFIG_FOUND)
+        pkg_check_modules(PIPEWIRE libpipewire-0.3)
+    endif()
+    if(NOT PIPEWIRE_FOUND)
+        message(FATAL_ERROR "PipeWire's headers not found: install libpipewire-0.3-dev (Ubuntu, Debian), or pass "
+                            "-DRAGTIME_PIPEWIRE=OFF to build without the Ear's listening.")
+    endif()
+endif()
+add_subdirectory(audio)
 
 if(RAGTIME_APP)
     add_subdirectory(app)

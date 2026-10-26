@@ -55,6 +55,8 @@ bool loadBool(const char* key, bool fallback);
 void saveBool(const char* key, bool value);
 int loadInt(const char* key, int fallback);
 void saveInt(const char* key, int value);
+std::string loadString(const char* key, const std::string& fallback);
+void saveString(const char* key, const std::string& value);
 
 // The broadcast numbering is kept across restarts, one for each callsign
 // (docs/PROTOCOL.md, "Sequence numbers").
@@ -132,6 +134,8 @@ constexpr const char* RECEIVED_FOLDER = "/Files/ReceivedFolder";
 constexpr const char* AUTO_ACCEPT = "/Files/AutoAccept";             // callsigns, comma separated
 constexpr const char* WATCH_LIST = "/Stations/Watch";                // callsigns, comma separated
 constexpr const char* AUTO_RECEIVE_BROADCAST = "/Files/AutoReceiveBroadcast";   // files on D2G, into the received folder
+constexpr const char* EAR_SOURCE = "/Ear/Source";                    // a PipeWire source's node.name; empty follows data2g-host
+constexpr const char* EAR_SPEED = "/Ear/RowsPerSecond";               // the waterfall's rows a second
 } // namespace keys
 
 #endif

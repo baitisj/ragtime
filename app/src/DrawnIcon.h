@@ -13,7 +13,7 @@ class wxWindow;
 // The small button icons Ragtime draws itself, in the theme's text colour
 // so they follow light and dark: the gearshift's speedometer and the file
 // buttons' floppy disk, the status bar's moon and sun, the green
-// check on Done, and a watched station's bell.
+// check on Done, a watched station's bell, and the Ear's ear.
 
 // Draws an icon in a square size wide at the context's origin.
 using IconDrawing = std::function<void(wxGraphicsContext& gc, double size)>;
@@ -44,5 +44,10 @@ wxBitmapBundle bellIcon(const wxColour& ink, int sizeDip = 14);
 // The bell as an <img> for a wxHTML list's row, drawn once for each ink
 // and size into wxHTML's memory files; "" if it couldn't be drawn.
 wxString bellHtml(const wxWindow* window, int sizeDip, const wxColour& ink);
+
+// An ear, on the connection bar's button that opens the Ear (what the
+// radio hears).
+void drawEarIcon(wxGraphicsContext& gc, double size, const wxColour& ink);
+wxBitmapBundle earIcon(const wxColour& ink, int sizeDip = 18);
 
 #endif

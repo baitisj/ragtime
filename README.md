@@ -45,7 +45,7 @@ thresholds...** in the gearshift. See [docs/GEARBOX.md](docs/GEARBOX.md).
 
 On Ubuntu 24.04:
 
-    sudo apt-get install build-essential cmake pkg-config libwxgtk3.2-dev libgtk-3-dev libhamlib-dev
+    sudo apt-get install build-essential cmake pkg-config libwxgtk3.2-dev libgtk-3-dev libhamlib-dev libpipewire-0.3-dev
     cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
     cmake --build build -j$(nproc)
     ctest --test-dir build --output-on-failure
@@ -87,7 +87,8 @@ the recording, at the spacing the tester saw (docs/FLIGHT_RECORDER.md).
   point to point ragchew on purpose and leave it on purpose.
 
 Ragtime is a front end for a separately running `data2g-host`, reached
-over TCP. It never starts the modem and never touches the sound card.
+over TCP. It never starts the modem and never plays to the sound card;
+its Ear only listens in, through PipeWire, to what data2g-host records.
 It reads the radio's dial from rigctld, or opens the rig itself with
 Hamlib (Settings > Rig), and can key it when data2g-host does, for rigs
 whose drivers can't be opened twice (off by default).

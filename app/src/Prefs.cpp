@@ -145,6 +145,16 @@ void saveBool(const char* key, bool value)
     config().Write(key, value);
 }
 
+std::string loadString(const char* key, const std::string& fallback)
+{
+    return config().Read(key, wxString::FromUTF8(fallback)).ToStdString(wxConvUTF8);
+}
+
+void saveString(const char* key, const std::string& value)
+{
+    config().Write(key, wxString::FromUTF8(value));
+}
+
 int loadInt(const char* key, int fallback)
 {
     return (int)config().ReadLong(key, fallback);

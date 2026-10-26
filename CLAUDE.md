@@ -157,6 +157,13 @@ with the code when the seal rules change.
   private key out of wxConfig names that rule misses, and out of the
   flight folder. `ragtime_fake_air --replay` plays it back
   (`tests/ReplayHost`).
+- The Ear (2026-10-26, Jeff's idea, `docs/STAGE1.md`): the ear button
+  (or View > Ear) floats a waterfall and spectrum of what the radio
+  hears (`app/src/EarFrame`, `EarScope`), with Data2G's passbands drawn
+  on it. It records alongside data2g-host from the same PipeWire source
+  (`ear::findHostCapture`, `audio::EarAudio` in `audio/`), passive and
+  only while open. Step 1 of 3: next, the rig's filter edges read only,
+  then dragging them (Hamlib only, opt-in, a Keep/Undo clock).
 - Data2G PR #98 (merged 2026-10-23) gives SNRs: on `BCAST HEARD` and
   `MISSED`, and `SN` for the session partner. Ragtime shows them in the
   station list's SNR column and feeds the gearshift's Auto the weakest
@@ -187,8 +194,10 @@ with the code when the seal rules change.
   copying code is not. When something you need isn't in
   `docs/DATA2G.md`, or Data2G has moved past its commit, read the source
   and update that page in the same PR.
-- Never start `data2g-host`; the operator runs it. Ragtime never touches
-  the sound card. It keys the rig only with "Key the rig when
+- Never start `data2g-host`; the operator runs it. Ragtime never plays
+  to the sound card or opens its ALSA devices. The Ear only records,
+  through PipeWire, alongside data2g-host, passive and with a long
+  latency so the host never notices (docs/STAGE1.md, "The Ear"). It keys the rig only with "Key the rig when
   data2g-host keys" ticked (Settings > Rig, Hamlib only, off by
   default), following the host's PTT ON/OFF and unkeying by itself on
   a dropped link, a rig failure, quitting and after 180 s (Andrew's
@@ -247,11 +256,12 @@ with the code when the seal rules change.
 
 | Path | What |
 | --- | --- |
-| `core/` | `ragtime_core`, the socket-free library: no wx, no sockets in the engines, all unit-tested. Headers in `core/include/ragtime/`, sources in `core/src/`, one subfolder per area: `protocol/`, `link/`, `text/`, `files/` (package B; G adds `FileRows`, `FileTraffic`), `globus/` (C), `gearbox/` (D), `broadcast/` (E, with `BroadcastLog`; H adds `Airtime`, `Seals`, `BroadcastFiles`), `session/` (F, and `SessionLog`; `StreamLog` for cuts), `radio/` (the dial from rigctld, the US data segments, the path log, Recent work, the rig settings and the PTT follower). Add sources to `core/CMakeLists.txt` |
+| `core/` | `ragtime_core`, the socket-free library: no wx, no sockets in the engines, all unit-tested. Headers in `core/include/ragtime/`, sources in `core/src/`, one subfolder per area: `protocol/`, `link/`, `text/`, `files/` (package B; G adds `FileRows`, `FileTraffic`), `globus/` (C), `gearbox/` (D), `broadcast/` (E, with `BroadcastLog`; H adds `Airtime`, `Seals`, `BroadcastFiles`), `session/` (F, and `SessionLog`; `StreamLog` for cuts), `radio/` (the dial from rigctld, the US data segments, the path log, Recent work, the rig settings and the PTT follower), `ear/` (the Ear's spectrum, finding data2g-host's sound card in PipeWire's graph, the host's process by its port, Data2G's passbands). Add sources to `core/CMakeLists.txt` |
+| `audio/` | `ragtime_audio`: `audio::EarAudio`, the Ear's listener, PipeWire loaded with `dlopen` (never linked) on its own thread; with `-DRAGTIME_PIPEWIRE=OFF` (and on Windows) a stand-in that says the Ear needs PipeWire |
 | `rig/` | `ragtime_rig`: `rig::HamlibRig`, the rig opened with Hamlib on a thread of its own, Hamlib's rig list and the serial ports. Kept out of core (no ports there); with `-DRAGTIME_HAMLIB=OFF` a stand-in that says Hamlib is missing |
 | `app/` | The wxWidgets app (`app/src/`). It draws and wires; logic goes in core. `MainFrame` is the one main window and owns the engines; `HostConnection` (data2g-host) and `RigConnection` (rigctld, read only) are the only code with sockets, and `RigControl` holds the rig as Settings > Rig has it; `Prefs` holds every wxConfig key, and `appDataDir()` is where Ragtime keeps its own files (never wx's `GetUserDataDir()`: on Linux that is `~/.Ragtime`, the settings file); `app/src/globus/` is the Globus pane (`GlobusPanel`, `GlobusView`, `GlobusToggle`) |
 | `tests/` | ctest unit tests for core, plain executables on `tests/Check.h` (`CHECK`, `CHECK_EQ`). Add one with `ragtime_test(<name> <source>)` in `tests/CMakeLists.txt`. `FakeHost.*` is a fake data2g-host on loopback sockets (POSIX, so its test and the bench build only `if(UNIX)`); `FakeAirMain.cpp` is the bench `ragtime_fake_air`, and `ReplayHost.*` its `--replay` |
-| `tools/` | Reference scripts: `icon/` (`make_leaf_svg.py` draws the icon, the Maple Leaf Rag's leaf going digital, as `app/res/ragtime.svg`; `make_icons.sh` renders its PNG and ICO), `globe/` (sunlit globe renderer, and the generators of the map tables in `core/src/globus/`: coasts and borders from Natural Earth, the big lakes from `ne_110m_lakes.geojson`, state and province lines from Natural Earth's 1:10m admin-1 lines, fetched for the run, for the countries in `gen_admin1_lines.py`), `gearbox/` (ladders), `ham_table/` (text table 0 generator and corpus: `gen_table.py --check`), `gcc16/check.py` (GCC 16 check) |
+| `tools/` | Reference scripts: `icon/` (`make_leaf_svg.py` draws the icon, the Maple Leaf Rag's leaf going digital, as `app/res/ragtime.svg`; `make_icons.sh` renders its PNG and ICO), `globe/` (sunlit globe renderer, and the generators of the map tables in `core/src/globus/`: coasts and borders from Natural Earth, the big lakes from `ne_110m_lakes.geojson`, state and province lines from Natural Earth's 1:10m admin-1 lines, fetched for the run, for the countries in `gen_admin1_lines.py`), `gearbox/` (ladders), `ear/` (`pretend_radio.sh`, a pretend radio and data2g-host recorder in PipeWire for the Ear, and `make_radio_noise.py`, its audio), `ham_table/` (text table 0 generator and corpus: `gen_table.py --check`), `gcc16/check.py` (GCC 16 check) |
 | `cmake/` | CMake helpers. `ragtime_warnings(<target>)` gives every target `-Wall -Wextra` and, with `RAGTIME_WERROR` (on by default), `-Werror`; `Toolchain-mingw64.cmake` (the Windows cross build), `BuildWxWidgets.cmake` (wxWidgets 3.2.9 cloned and built statically with `-DRAGTIME_BUILD_WX=ON`), `BuildHamlib.cmake` (Hamlib 4.5.5 cloned and built statically with autotools, `-DRAGTIME_BUILD_HAMLIB=ON`), `EmbedFile.cmake` (the window icon built in) |
 | `packaging/` | Release recipes: `linux/make-appimage.sh` (with `ragtime.desktop`), `windows/make-zip.sh` (with the zip's `README.txt`). Both write to `dist/`, named by `release-name.sh` |
 | `docs/` | The plan and specs. Change them in the same PR as the code they describe |
@@ -262,9 +272,11 @@ The version is `project(ragtime VERSION ...)` in the top-level
 ## Build and test
 
 Ubuntu 24.04 needs `build-essential cmake pkg-config libwxgtk3.2-dev
-libgtk-3-dev libhamlib-dev` (GTK for the ham phrase highlight in the
-entry lines, `PhraseHighlight`; Hamlib for Settings > Rig, or
-`-DRAGTIME_HAMLIB=OFF` to build without it).
+libgtk-3-dev libhamlib-dev libpipewire-0.3-dev` (GTK for the ham phrase
+highlight in the entry lines, `PhraseHighlight`; Hamlib for Settings >
+Rig, or `-DRAGTIME_HAMLIB=OFF` to build without it; PipeWire's headers
+for the Ear, or `-DRAGTIME_PIPEWIRE=OFF`. The Ear loads libpipewire when
+it opens, so the build doesn't link it).
 
     cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
     cmake --build build -j$(nproc)
@@ -319,6 +331,17 @@ at 145 MHz, which "Key the rig" keys at the fake hosts' PTT. Headless:
 `Xvfb :91 &`, `DISPLAY=:91 ragtime ...`, `xdotool` to click and type,
 `import -window root` for a screenshot. Never point the bench at Jeff's
 radio PC's real host ports while his data2g-host runs.
+
+For the Ear, `tools/ear/pretend_radio.sh up` (needs PipeWire with
+`pipewire-pulse`, `pactl`, `pw-play`, `pw-cat` and python3-numpy) makes
+a pretend radio source with Data2G-like bursts and a stand-in
+`data2g-host` recording from it; `... down` removes them.
+`build/tests/ragtime_ear_probe --seconds N` prints what the Ear finds
+and hears, with no window. In a headless cloud session, PipeWire needs
+an `XDG_RUNTIME_DIR` of its own, a session D-Bus there, then `pipewire`,
+`wireplumber` and `pipewire-pulse` started in the background; and
+`openbox` on the Xvfb display, or floating windows stack wrong. Never
+point either at the radio's USB codec.
 
 **Windows.** `packaging/windows/make-zip.sh` cross-compiles with Ubuntu's
 `g++-mingw-w64-x86-64-posix`, cloning wxWidgets and Hamlib into

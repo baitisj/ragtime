@@ -29,6 +29,8 @@ add_executable(ragtime WIN32
     src/FilesPage.cpp
     src/GearshiftDialog.cpp
     src/DrawnIcon.cpp
+    src/EarFrame.cpp
+    src/EarScope.cpp
     src/GearshiftIcon.cpp
     src/HostConnection.cpp
     src/PathStripView.cpp
@@ -81,7 +83,7 @@ else()
         target_compile_options(ragtime PRIVATE ${RAGTIME_WX_CXX_FLAGS})
     endif()
 endif()
-target_link_libraries(ragtime PRIVATE ragtime_core ragtime_rig ${RAGTIME_WX_LIBS})
+target_link_libraries(ragtime PRIVATE ragtime_core ragtime_rig ragtime_audio ${RAGTIME_WX_LIBS})
 ragtime_warnings(ragtime)
 
 if(RAGTIME_TESTS AND NOT WIN32)

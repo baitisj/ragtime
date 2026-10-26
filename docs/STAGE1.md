@@ -853,7 +853,7 @@ rig's thread and the rig. On the bench, with Hamlib's dummy rig and
 
 This is the one exception to "Ragtime never touches the sound card or
 PTT for data": PTT, when the operator ticks the box. The sound card
-stays data2g-host's.
+stays data2g-host's; the Ear (below) only listens in.
 
 **The ALC meter** (Jeff, 2026-10-26: "partially plumb the Auto ALC by
 at least polling ALC information"). With the rig open through Hamlib,
@@ -978,6 +978,93 @@ setting named like a secret; **Help > Open the flight recorder folder**
 shows it. `ragtime_fake_air --replay` plays a recording's host side back
 to a Ragtime (`tests/ReplayHost`). Session bytes are counted, not kept.
 Details in `docs/FLIGHT_RECORDER.md`.
+
+## The Ear
+
+Jeff's idea (2026-10-26): an ear button that opens a waterfall of what
+the radio hears, with a dropdown of audio sources, and later lets the
+operator drag the rig's filter edges. The proposal is a Claude Doc
+(https://claude.ai/artifact/EcLvi7KXVi4Bhz6kj7HFQH, private to Jeff),
+where Jeff answered its questions. It comes in three steps, one PR each:
+
+1. **The Ear** (this section): listening alongside data2g-host, the
+   waterfall and spectrum, and Data2G's passbands.
+2. **Filter edges, read only**: the rig's mode, width and passband tune
+   (`m`, `l PBT_IN`, `l PBT_OUT`, through rigctld or Hamlib; Jeff said
+   yes to those reads on his shared rigctld), drawn against the edges the
+   noise shows.
+3. **Drag to set**, Hamlib only and behind an opt-in box in Settings >
+   Rig: handles, presets along the top (a tap recalls; press and hold
+   stores, with a quick clock running down on the button), Keep and Undo
+   with a clock that runs down beside Undo and puts the filter back when
+   it runs out, "Put back as I found them", and Calibrate. Glissando
+   learned that a filter change needs an operator at the controls to see
+   it did what was meant; the clock is that check.
+
+![The Ear on the bench, following a pretend data2g-host](images/ear.png)
+
+**Opening it.** The ear button on the connection bar (beside the dial)
+or View > Ear (Ctrl+E). It floats over the main window, and the button
+stays lit while it is open. It listens only while open: closing it stops
+the recording.
+
+**What it listens to.** Jeff's call: assume PipeWire (or PulseAudio on
+PipeWire), find the sound card data2g-host records from, and listen to
+the same one. `ear::findHostCapture` reads PipeWire's graph: a
+`Stream/Input/Audio` node whose client (or the node itself) is
+`data2g-host` or `data2g-gui`, and the source linked into it (or, before
+the link is made, its `target.object`). With several hosts recording,
+the one Ragtime talks to is the process listening on its command port
+(`ear::processListeningOn`, from `/proc/net/tcp` and the sockets in
+`/proc/PID/fd`; only for a host on this machine). "Listen to" offers
+"Same as data2g-host · *card*" first, then every source; a source picked
+before that has gone stays on the list as "(not there)". If the host
+stops, the Ear stays on its last card.
+
+**Listening without being noticed** (`audio::EarAudio`, PipeWire's
+stream API through `dlopen`, so Ragtime and its AppImage still run where
+PipeWire isn't):
+
+- 100 ms latency (`node.latency` 4800/48000), so it never shortens the
+  graph's cycle, which the shortest any stream asks for sets;
+- the source's own rate, mono floats, so nothing resamples or switches
+  rate;
+- passive on data2g-host's card (`node.passive`), so it never keeps the
+  card running: when the host stops, the Ear goes quiet. A card the
+  operator picks that the host doesn't use is woken;
+- pinned to its source (`target.object`, `node.dont-reconnect`), so the
+  session manager never moves it; it moves itself when the host does.
+
+It never plays a sound and never opens ALSA's devices itself. Whether
+audio is coming is judged by when the last samples came, since a passive
+stream on a sleeping card stays paused without a word.
+
+**The picture** (`ear::Spectrum`, `EarScope`). Each row is an FFT with
+bins about 6 Hz wide (the next power of two above rate / 6 Hz) under a
+Hann window, scaled so a full-scale sine reads 0 dBFS, then averaged
+into 512 bins from 0 to 4000 Hz. Rows come 5, 10 or 20 a second
+(Speed: Slow, Normal, Fast). The top is the last second's spectrum,
+averaged as power, with dB and Hz axes; the waterfall below holds 600
+rows, newest at the top, coloured navy to blue to cyan to yellow from
+the noise floor up (the floor is a slow 30th percentile, and the range
+runs from 6 dB below it to 50 dB above). Rows heard while data2g-host
+transmits are greyed. Data2G's passbands are drawn in green, from its
+`FCENTER` of 1500 Hz: 350 to 2650 Hz for the wide modes and 1250 to
+1750 Hz for the 500 Hz ones (`ear/Passbands.h`); the one in use (the
+500 Hz switch) is darker. A hairline follows the mouse with its
+frequency.
+
+"Listen to" and Speed are kept (`/Ear/Source`, `/Ear/RowsPerSecond`).
+Windows has no Ear yet: a stand-in says it needs PipeWire.
+
+**On the bench.** `tools/ear/pretend_radio.sh up` makes a pretend radio
+in PipeWire: a null sink playing noise through an SSB filter with Data2G
+bursts and a drifting carrier (`tools/ear/make_radio_noise.py`), a source
+called Pretend-radio, and a stand-in recorder named `data2g-host`
+recording from it, so the Ear has a host to follow. `... down` takes it
+away. `build/tests/ragtime_ear_probe` prints what the Ear would find and
+the loudest frequency each second, without a window. Neither touches a
+real sound card; never point them at the radio's USB codec.
 
 ## Waiting on Andrew (via Jeff)
 

@@ -7,7 +7,7 @@
 // the top of its ALC zone); SWR is the ratio; power is in watts where the
 // backend knows them, or else a share of full power.
 //
-// It only reads; Ragtime never touches the sound card, and data2g-host
+// It only reads; Ragtime never plays to the sound card, and data2g-host
 // takes no transmit level command yet, so nothing turns the drive down.
 // But each burst works out what Auto ALC would have done, by Glissando's
 // rule (its Drive knob, docs/APP.md there): two ALC readings in a row over
