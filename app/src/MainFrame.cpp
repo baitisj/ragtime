@@ -64,6 +64,7 @@
 #include "ragtime/files/FileRows.h"
 #include "ragtime/globus/Sun.h"
 #include "ragtime/radio/Bands.h"
+#include "ragtime/radio/RigFilter.h"
 
 using namespace ragtime;
 using Event = link::HostLink::Event;
@@ -2424,12 +2425,22 @@ void MainFrame::setEar(bool open)
     {
         ear_ = new EarFrame(this, [this] {
             ear_ = nullptr;
+            rig_->setFilterWatch(false);
             bar_->setEarOpen(false);
             GetMenuBar()->Check(ID_EAR, false);
         });
         ear_->setHost(prefs_.host, prefs_.commandPort);
         ear_->setNarrow(gearshift_.narrowOnly());
         ear_->setTransmitting(bar_->tx->isOn());
+        // The rig's filter, read between bursts while the Ear is open.
+        rig_->setFilterWatch(true);
+        ear_->setRig([this] {
+            EarRig r;
+            if (prefs_.rig.source != radio::RigSource::None) r.via = rig_->meterPath();
+            r.filter = rig_->filter();
+            if (rig_->readsNoise()) r.noiseDb = rig_->noiseDb();
+            return r;
+        });
         ear_->CentreOnParent();
         ear_->Show();
     }
@@ -2526,6 +2537,20 @@ void MainFrame::applyRadioPrefs()
 
 void MainFrame::onDial()
 {
+    // The rig's filter, read while the Ear is open, for the flight recorder.
+    const std::optional<radio::RigFilter> filter = rig_->filter();
+    std::string said;
+    if (filter)
+    {
+        said = "rig filter " + filter->mode + " " + std::to_string(filter->widthHz) + " Hz";
+        if (filter->pbtIn) said += " PBT_IN " + radio::pbtText(*filter->pbtIn);
+        if (filter->pbtOut) said += " PBT_OUT " + radio::pbtText(*filter->pbtOut);
+    }
+    if (said != notedFilter_)
+    {
+        notedFilter_ = said;
+        if (!said.empty()) host_->recorder().note(said, HostConnection::nowMs());
+    }
     applySendGuard();
     showDial();
     showMeters();

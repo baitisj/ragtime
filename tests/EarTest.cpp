@@ -1,7 +1,9 @@
 // The Ear's core: the spectrum (a tone lands in its bin at 0 dB, noise
 // spreads, rows come at the speed asked), finding data2g-host's capture in
 // a PipeWire graph (by link, by target, by the port's process), and the
-// port's process from a pretend /proc.
+// port's process from a pretend /proc, and the filter's edges measured
+// from the band's noise (bursts, carriers and our own transmissions left
+// out).
 #include <algorithm>
 #include <cmath>
 #include <complex>
@@ -15,6 +17,7 @@
 #include <vector>
 
 #include "Check.h"
+#include "ragtime/ear/Edges.h"
 #include "ragtime/ear/Graph.h"
 #include "ragtime/ear/Passbands.h"
 #include "ragtime/ear/ProcNet.h"
@@ -285,6 +288,128 @@ void procNet()
 #endif
 }
 
+// A row of the band's noise through a filter whose -6 dB points are low
+// and high, skirts falling 0.4 dB a Hz to 60 dB down, each bin's power
+// drawn as noise is (exponentially). extra adds dB over a span.
+struct Lift
+{
+    double lowHz, highHz, db;
+};
+
+std::vector<float> noiseRow(std::mt19937& rng, double low, double high, std::vector<Lift> extra = {})
+{
+    std::exponential_distribution<double> draw(1.0);
+    std::vector<float> row(Spectrum::BINS);
+    for (int i = 0; i < Spectrum::BINS; i++)
+    {
+        const double hz = Spectrum::binHz(i);
+        double shape = std::min(-6.0 + (hz - low) * 0.4, -6.0 + (high - hz) * 0.4);
+        shape = std::max(-60.0, std::min(0.0, shape));
+        double db = -50.0 + shape;
+        for (const Lift& l : extra)
+            if (hz >= l.lowHz && hz <= l.highHz) db += l.db;
+        row[i] = (float)(10.0 * std::log10(std::pow(10.0, db / 10.0) * draw(rng)));
+    }
+    return row;
+}
+
+bool near(const std::optional<double>& hz, double want, double within)
+{
+    return hz && std::fabs(*hz - want) <= within;
+}
+
+void edgesFromNoise()
+{
+    std::mt19937 rng(7);
+
+    // An SSB filter, 300 to 2700 Hz, with Data2G bursts (20 dB up across
+    // 350 to 2650 Hz, half the time), a carrier, and our own bursts.
+    {
+        EdgeFinder f(10.0);
+        for (int i = 0; i < 25; i++) f.addRow(noiseRow(rng, 300, 2700), false);
+        CHECK(!f.edges());      // 2.5 s: not yet
+        for (int i = 0; i < 400; i++)
+        {
+            std::vector<Lift> lift = {{1075, 1085, 25.0}};
+            const bool burst = (i / 30) % 2 == 1;
+            if (burst) lift.push_back({350, 2650, 20.0});
+            const bool keyed = i % 100 >= 90;
+            f.addRow(noiseRow(rng, 300, 2700, keyed ? std::vector<Lift>{{0, 4000, 60.0}} : lift), keyed);
+        }
+        std::optional<Edges> e = f.edges();
+        CHECK(e.has_value());
+        if (e)
+        {
+            CHECK(near(e->lowHz, 300, 20));
+            CHECK(near(e->highHz, 2700, 20));
+            CHECK(std::fabs(e->passbandDb - -50.0) < 3.0);
+            CHECK(e->passbandDb - e->stopbandDb > 40.0);
+            CHECK(e->quietSeconds >= EdgeFinder::NEEDED_S);
+        }
+    }
+
+    // A 500 Hz filter, with narrow bursts in it 25 dB up half the time:
+    // left out, or they would set the level.
+    {
+        EdgeFinder f(10.0);
+        for (int i = 0; i < 400; i++)
+        {
+            const bool burst = (i / 20) % 2 == 1;
+            f.addRow(noiseRow(rng, 1250, 1750, burst ? std::vector<Lift>{{1400, 1600, 25.0}} : std::vector<Lift>{}),
+                     false);
+        }
+        std::optional<Edges> e = f.edges();
+        CHECK(e.has_value());
+        if (e)
+        {
+            CHECK(near(e->lowHz, 1250, 20));
+            CHECK(near(e->highHz, 1750, 20));
+        }
+    }
+
+    // Wider than the picture at the top: only the low edge.
+    {
+        EdgeFinder f(10.0);
+        for (int i = 0; i < 100; i++) f.addRow(noiseRow(rng, 200, 5000), false);
+        std::optional<Edges> e = f.edges();
+        CHECK(e.has_value());
+        if (e)
+        {
+            CHECK(near(e->lowHz, 200, 20));
+            CHECK(!e->highHz);
+        }
+    }
+
+    // Flat noise (the sound card's own, or no filter): no edges.
+    {
+        EdgeFinder f(10.0);
+        for (int i = 0; i < 100; i++) f.addRow(noiseRow(rng, -1000, 9000), false);
+        CHECK(!f.edges());
+    }
+
+    // Only ever transmitting: nothing.
+    {
+        EdgeFinder f(10.0);
+        for (int i = 0; i < 100; i++) f.addRow(noiseRow(rng, 300, 2700), true);
+        CHECK(!f.edges());
+        CHECK(f.quietSeconds() == 0.0);
+        CHECK(f.average().empty());
+    }
+
+    // A new speed starts afresh.
+    {
+        EdgeFinder f(10.0);
+        for (int i = 0; i < 100; i++) f.addRow(noiseRow(rng, 300, 2700), false);
+        CHECK(f.edges().has_value());
+        f.setRowsPerSecond(20.0);
+        CHECK(!f.edges());
+    }
+
+    CHECK(percentile({3, 1, 2}, 0.5) == 2.0f);
+    CHECK(percentile({3, 1, 2}, 1.0) == 3.0f);
+    CHECK(percentile({}, 0.5) == 0.0f);
+}
+
 } // namespace
 
 int main()
@@ -298,5 +423,6 @@ int main()
     linkBeatsTarget();
     twoHostsByPort();
     procNet();
+    edgesFromNoise();
     return ragtime_test::finish();
 }

@@ -66,6 +66,7 @@ void RigControl::apply(const radio::RigSettings& settings)
             rigctld_->start(settings.rigctldHost, settings.rigctldPort);
         else if (settings.source == radio::RigSource::Hamlib)
             hamlib_.start(settings);
+        hamlib_.setFilterWatch(filterWatch_);
     }
     else
     {
@@ -141,6 +142,24 @@ bool RigControl::readsSwr() const
     if (settings_.source != radio::RigSource::Hamlib) return false;
     rig::HamlibRig::Status s = hamlib_.status();
     return s.open && s.readsSwr;
+}
+
+void RigControl::setFilterWatch(bool on)
+{
+    filterWatch_ = on;
+    rigctld_->setFilterWatch(on);
+    hamlib_.setFilterWatch(on);
+}
+
+std::optional<radio::RigFilter> RigControl::filter() const
+{
+    switch (settings_.source)
+    {
+    case radio::RigSource::Rigctld: return rigctld_->filter();
+    case radio::RigSource::Hamlib: return hamlib_.status().filter;
+    case radio::RigSource::None: break;
+    }
+    return std::nullopt;
 }
 
 bool RigControl::readsNoise() const

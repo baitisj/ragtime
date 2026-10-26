@@ -70,6 +70,8 @@ void HamlibRig::setPtt(bool) {}
 
 void HamlibRig::setTransmitting(bool) {}
 
+void HamlibRig::setFilterWatch(bool) {}
+
 void HamlibRig::setSwrTrip(bool) {}
 
 void HamlibRig::clearSwrTrip() {}

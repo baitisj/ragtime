@@ -13,7 +13,10 @@
 // keys it no more until clearSwrTrip(). The power is never put back.
 // Between bursts it reads the S-meter (STRENGTH, dB over S9) every
 // radio::NoiseFloor::READ_MS, but not in the first SETTLE_MS after one, for
-// the band's noise. A rig that fails to open, or stops answering, is closed and
+// the band's noise. While the Ear is open (setFilterWatch) it also reads
+// the receive filter between bursts every FILTER_MS: the mode with its
+// passband width, and PBT_IN and PBT_OUT where the rig has them
+// (radio::RigFilter). A rig that fails to open, or stops answering, is closed and
 // tried again 2, 4, 8, 15 and then every 30 s (link::Reconnect). Stopping
 // unkeys the rig, if keyed, before closing it.
 //
@@ -36,6 +39,7 @@
 #include <thread>
 #include <vector>
 
+#include "ragtime/radio/RigFilter.h"
 #include "ragtime/radio/RigSettings.h"
 #include "ragtime/radio/TxMeters.h"
 
@@ -114,6 +118,9 @@ public:
         std::optional<double> strength;
         uint64_t strengthReadings = 0;  // goes up as it is read
 
+        // The receive filter, while the Ear watches it.
+        std::optional<radio::RigFilter> filter;
+
         // The SWR trip, from the trip until clearSwrTrip().
         bool swrTripped = false;
         // What was done: "SWR 3.6: Ragtime unkeyed the rig and set its
@@ -124,6 +131,8 @@ public:
 
     // One meter is read this often while transmitting.
     static constexpr int METER_MS = 200;
+    // While the Ear is open, the filter is read this often between bursts.
+    static constexpr int FILTER_MS = 2000;
 
     HamlibRig();
     ~HamlibRig();
@@ -143,6 +152,8 @@ public:
     // The rig is transmitting, keyed by us or not: read its meters, not
     // its dial.
     void setTransmitting(bool on);
+    // The Ear is open: read the filter between bursts. Off forgets it.
+    void setFilterWatch(bool on);
     // Settings > Rig's SWR trip, on or off, from now.
     void setSwrTrip(bool on);
     // The operator cleared a trip: the rig may be keyed again. Its power

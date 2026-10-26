@@ -52,12 +52,14 @@ add_library(ragtime_core STATIC
     src/radio/RecentWork.cpp
     # Rig control: the Rig page's settings, and keying at data2g-host's PTT.
     src/radio/PttFollower.cpp
+    src/radio/RigFilter.cpp
     src/radio/RigSettings.cpp
     src/radio/TxMeters.cpp
     # The flight recorder: the host link on disk, for reports and --replay.
     src/link/FlightRecorder.cpp
     # The Ear: the spectrum, and finding data2g-host's sound card in
     # PipeWire's graph (the listening itself is in audio/).
+    src/ear/Edges.cpp
     src/ear/Graph.cpp
     src/ear/ProcNet.cpp
     src/ear/Spectrum.cpp

@@ -1,6 +1,7 @@
 #include "EarFrame.h"
 
 #include <algorithm>
+#include <cmath>
 #include <utility>
 
 #include <wx/choice.h>
@@ -11,6 +12,7 @@
 #include "EarScope.h"
 #include "Prefs.h"
 #include "ragtime/ear/ProcNet.h"
+#include "ragtime/radio/Noise.h"
 
 using namespace ragtime;
 
@@ -59,11 +61,19 @@ EarFrame::EarFrame(wxWindow* parent, std::function<void()> onClosed)
     top->AddStretchSpacer();
     top->Add(format_, 0, wxALIGN_CENTER_VERTICAL | wxLEFT, FromDIP(12));
 
+    // What the rig says of its filter, and what the noise shows.
+    auto* filter = new wxBoxSizer(wxHORIZONTAL);
+    rigSays_ = new wxStaticText(panel, wxID_ANY, "", wxDefaultPosition, wxDefaultSize, wxST_ELLIPSIZE_END);
+    noiseShows_ = new wxStaticText(panel, wxID_ANY, "", wxDefaultPosition, wxDefaultSize, wxST_ELLIPSIZE_END);
+    filter->Add(rigSays_, 1, wxALIGN_CENTER_VERTICAL);
+    filter->Add(noiseShows_, 1, wxALIGN_CENTER_VERTICAL | wxLEFT, FromDIP(16));
+
     scope_ = new EarScope(panel);
     status_ = new wxStaticText(panel, wxID_ANY, "", wxDefaultPosition, wxDefaultSize, wxST_ELLIPSIZE_END);
 
     auto* outer = new wxBoxSizer(wxVERTICAL);
     outer->Add(top, 0, wxEXPAND | wxALL, FromDIP(10));
+    outer->Add(filter, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, FromDIP(10));
     outer->Add(scope_, 1, wxEXPAND | wxLEFT | wxRIGHT, FromDIP(4));
     outer->Add(status_, 0, wxEXPAND | wxALL, FromDIP(10));
     panel->SetSizer(outer);
@@ -79,6 +89,7 @@ EarFrame::EarFrame(wxWindow* parent, std::function<void()> onClosed)
     speed_->SetSelection(speed);
     spectrum_.setRowsPerSecond(SPEEDS[speed]);
     scope_->setRowsPerSecond(SPEEDS[speed]);
+    edges_.setRowsPerSecond(SPEEDS[speed]);
 
     source_->Bind(wxEVT_CHOICE, [this](wxCommandEvent&) { chooseSource(); });
     speed_->Bind(wxEVT_CHOICE, [this](wxCommandEvent&) {
@@ -89,6 +100,7 @@ EarFrame::EarFrame(wxWindow* parent, std::function<void()> onClosed)
             pending_.clear();
         }
         scope_->setRowsPerSecond(rps);
+        edges_.setRowsPerSecond(rps);
         saveInt(keys::EAR_SPEED, (int)rps);
     });
     Bind(wxEVT_TIMER, [this](wxTimerEvent&) { tick(); });
@@ -136,6 +148,12 @@ void EarFrame::setTransmitting(bool on)
     transmitting_ = on;
 }
 
+void EarFrame::setRig(std::function<EarRig()> rig)
+{
+    rig_ = std::move(rig);
+    changed_ = true;
+}
+
 void EarFrame::lookForHost()
 {
     if (commandPort_ > 0 && onThisMachine(host_))
@@ -151,7 +169,11 @@ void EarFrame::tick()
         std::lock_guard<std::mutex> lock(mutex_);
         rows.swap(pending_);
     }
-    if (!rows.empty()) scope_->addRows(rows, transmitting_);
+    if (!rows.empty())
+    {
+        scope_->addRows(rows, transmitting_);
+        for (const auto& row : rows) edges_.addRow(row, transmitting_);
+    }
 
     if (++ticks_ % HOST_LOOK_TICKS == 0)
     {
@@ -159,7 +181,12 @@ void EarFrame::tick()
         if (audio_->status().host.candidates > 1) lookForHost();
     }
     // Whether audio is coming changes without a word from PipeWire.
-    if (changed_.exchange(false) || ticks_ % 10 == 0) showStatus(audio_->status());
+    if (changed_.exchange(false) || ticks_ % 10 == 0)
+    {
+        const audio::EarStatus status = audio_->status();
+        showFilter(status);
+        showStatus(status);
+    }
 }
 
 void EarFrame::showStatus(const audio::EarStatus& s)
@@ -199,7 +226,8 @@ void EarFrame::showStatus(const audio::EarStatus& s)
     if (source_->GetSelection() != index) source_->SetSelection(index);
     source_->Enable(s.available);
 
-    const wxString format = s.streaming && s.rate > 0 ? wxString::Format("%g kHz", s.rate / 1000.0) : wxString();
+    wxString format = s.streaming && s.rate > 0 ? wxString::Format("%g kHz", s.rate / 1000.0) : wxString();
+    if (!noiseText_.empty()) format += (format.empty() ? wxString() : DOT) + noiseText_;
     if (format_->GetLabel() != format || !same)
     {
         format_->SetLabel(format);
@@ -240,6 +268,52 @@ void EarFrame::showStatus(const audio::EarStatus& s)
     status_->SetToolTip(line);
 }
 
+void EarFrame::showFilter(const audio::EarStatus& s)
+{
+    const wxString dash = wxString::FromUTF8("\xe2\x80\x93");
+    const EarRig rig = rig_ ? rig_() : EarRig();
+    wxString says;
+    if (rig.via.empty())
+        says = "The rig: none in Settings > Rig, so only the noise shows the filter";
+    else if (!rig.filter)
+        says = "The rig hasn't said its filter yet (" + utf8(rig.via) + ")";
+    else
+        says = "The rig says " + utf8(radio::describe(*rig.filter));
+    scope_->setRigWidth(rig.filter ? rig.filter->widthHz : 0);
+    noiseText_ = rig.noiseDb ? "QRN " + utf8(radio::sUnitText(*rig.noiseDb)) : wxString();
+
+    const std::optional<ear::Edges> e = s.streaming ? edges_.edges() : std::nullopt;
+    scope_->setEdges(e);
+    auto hz = [](double v) { return wxString::Format("%d", (int)std::lround(v / 10.0) * 10); };
+    wxString shows;
+    if (!s.streaming)
+        shows = "The noise: no audio";
+    else if (e && e->lowHz && e->highHz)
+        shows = "The noise shows " + hz(*e->lowHz) + dash + hz(*e->highHz) + " Hz, " +
+                // The edges' difference as shown, so the numbers add up.
+                wxString::Format("%d", (int)(std::lround(*e->highHz / 10.0) - std::lround(*e->lowHz / 10.0)) * 10) +
+                " Hz wide";
+    else if (e && e->lowHz)
+        shows = "The noise shows a low edge at " + hz(*e->lowHz) + " Hz; the top is past 4 kHz";
+    else if (e && e->highHz)
+        shows = "The noise shows a high edge at " + hz(*e->highHz) + " Hz";
+    else if (edges_.quietSeconds() < ear::EdgeFinder::NEEDED_S)
+        shows = "The noise: listening for a quiet moment";
+    else
+        shows = "The noise shows no clear filter edges";
+    if (rigSays_->GetLabel() != says)
+    {
+        rigSays_->SetLabel(says);
+        rigSays_->SetToolTip(says + (rig.filter ? ", read between bursts while the Ear is open" : ""));
+    }
+    if (noiseShows_->GetLabel() != shows)
+    {
+        noiseShows_->SetLabel(shows);
+        noiseShows_->SetToolTip("Where the band's noise falls 6 dB below the passband, from the quiet moments "
+                                "between signals: the filter's real edges, whatever the rig says.");
+    }
+}
+
 void EarFrame::chooseSource()
 {
     const int i = source_->GetSelection();
@@ -251,5 +325,6 @@ void EarFrame::chooseSource()
         pending_.clear();
     }
     scope_->clear();
+    edges_.clear();
     audio_->choose(chosen_);
 }

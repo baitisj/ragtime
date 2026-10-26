@@ -1,8 +1,9 @@
 // The rig library against Hamlib itself: the rig list, a backend's own
 // settings, and HamlibRig opening Hamlib's dummy rig (model 1, no port, no
 // radio) on its thread, reading the dial, keying and unkeying, reading
-// the transmit meters while transmitting and the S-meter between bursts, and saying why when a rig can't
-// be opened.
+// the transmit meters while transmitting and the S-meter between bursts,
+// the receive filter while the Ear watches it, and saying why when a rig
+// can't be opened.
 #include <chrono>
 #include <functional>
 #include <string>
@@ -157,6 +158,28 @@ void dummyRig()
     CHECK(waitFor(r, [](const HamlibRig::Status& st) { return !st.keyed; }));
 }
 
+// While the Ear is open: the mode, its width and the PBT, read only.
+void filterWatch()
+{
+    HamlibRig r;
+    r.start(dummy());
+    CHECK(waitFor(r, [](const HamlibRig::Status& st) { return st.open; }));
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    CHECK(!r.status().filter);
+    r.setFilterWatch(true);
+    CHECK(waitFor(r, [](const HamlibRig::Status& st) { return st.filter && !st.filter->mode.empty(); }));
+    HamlibRig::Status s = r.status();
+    CHECK(s.filter && s.filter->widthHz > 0);
+    CHECK(s.filter && s.filter->pbtIn && s.filter->pbtOut);
+    r.setDummyLevelForTest("PBT_IN", 0.75);
+    CHECK(waitFor(r, [](const HamlibRig::Status& st) {
+        return st.filter && st.filter->pbtIn && *st.filter->pbtIn > 0.74 && *st.filter->pbtIn < 0.76;
+    }));
+    r.setFilterWatch(false);
+    CHECK(waitFor(r, [](const HamlibRig::Status& st) { return !st.filter; }));
+    r.stop();
+}
+
 void cantOpen()
 {
     HamlibRig r;
@@ -195,6 +218,7 @@ int main()
 {
     list();
     dummyRig();
+    filterWatch();
     cantOpen();
     return ragtime_test::finish();
 }
