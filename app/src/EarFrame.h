@@ -12,7 +12,9 @@
 #include <wx/frame.h>
 #include <wx/timer.h>
 
+#include "EarFilterBar.h"
 #include "ragtime/audio/EarAudio.h"
+#include "ragtime/ear/AutoSpan.h"
 #include "ragtime/ear/Edges.h"
 #include "ragtime/ear/Spectrum.h"
 #include "ragtime/radio/RigFilter.h"
@@ -30,23 +32,20 @@ class wxStaticText;
 // Under the controls it says what the rig reports of its receive filter
 // (read between bursts while the Ear is open, through rigctld or Hamlib)
 // and the edges the band's noise shows (ear::EdgeFinder), and the scope
-// draws both: step 2 of docs/STAGE1.md's "The Ear", read only.
+// draws both: step 2 of docs/STAGE1.md's "The Ear". With "Let the Ear
+// change the rig's filters" ticked (Hamlib or rigctld), the filter bar
+// (EarFilterBar) and the scope's handles set it: step 3.
 //
 // "Listen to" and the speed are kept in wxConfig (keys::EAR_SOURCE,
 // keys::EAR_SPEED). The window tells the owner when it closes.
-// What the rig says of its filter, for the Ear.
-struct EarRig
-{
-    std::string via;    // "rigctld", "Hamlib"; empty with no rig chosen
-    std::optional<ragtime::radio::RigFilter> filter;
-    // The band's noise from the S-meter, in dB over S9 (the gearshift's QRN).
-    std::optional<double> noiseDb;
-};
 
 class EarFrame : public wxFrame
 {
 public:
-    EarFrame(wxWindow* parent, std::function<void()> onClosed);
+    // edit and write: the filter change in progress (kept by the owner, so
+    // that quitting can put the rig back) and how a setting reaches the rig.
+    EarFrame(wxWindow* parent, ragtime::ear::FilterEdit& edit, EarFilterBar::Write write,
+             std::function<void()> onClosed);
     ~EarFrame() override;
 
     // data2g-host's address and command port, to find its process when it
@@ -65,17 +64,21 @@ private:
     void chooseSource();
     void lookForHost();
     void showFilter(const ragtime::audio::EarStatus& status);
+    // The span to show, as Span says: fixed, or Auto's pick.
+    void fitSpan(const ragtime::audio::EarStatus& status);
 
     std::unique_ptr<ragtime::audio::EarAudio> audio_;
     std::function<void()> onClosed_;
 
     wxChoice* source_ = nullptr;
     wxChoice* speed_ = nullptr;
+    wxChoice* span_ = nullptr;
     wxStaticText* format_ = nullptr;
     EarScope* scope_ = nullptr;
     wxStaticText* status_ = nullptr;
     wxStaticText* rigSays_ = nullptr;
     wxStaticText* noiseShows_ = nullptr;
+    EarFilterBar* filterBar_ = nullptr;
     wxTimer timer_;
 
     // Filled on PipeWire's thread, drained by the timer.
@@ -84,6 +87,7 @@ private:
     std::vector<std::vector<float>> pending_;
     std::atomic<bool> changed_{true};
     ragtime::ear::EdgeFinder edges_;
+    ragtime::ear::AutoSpan autoSpan_;
     std::function<EarRig()> rig_;
     wxString noiseText_;    // " · QRN S3", beside the rate
 
@@ -92,6 +96,8 @@ private:
     std::string host_;
     int commandPort_ = 0;
     bool transmitting_ = false;
+    bool narrow_ = false;
+    EarRig rigNow_;         // asked every few ticks
     int ticks_ = 0;
 };
 

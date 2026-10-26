@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
+#include <locale>
+#include <sstream>
 #include <string>
 
 namespace ragtime
@@ -96,6 +98,9 @@ void DialReader::connected(uint64_t nowMs)
     modeDropped_ = false;
     modeFailures_ = 0;
     filter_.reset();
+    reading_.reset();
+    setLines_.clear();
+    setLine_.clear();
     version_++;
     // First: was rigctld started with --vfo? Asked even while keyed, as
     // it touches nothing but rigctld itself.
@@ -114,6 +119,7 @@ void DialReader::disconnected()
     out_.clear();
     hz_.reset();
     filter_.reset();
+    reading_.reset();
     inMode_ = false;
     for (int m = 0; m < METERS; m++) state_[m] = State::Unknown;
     version_++;
@@ -176,6 +182,8 @@ void DialReader::askNext(uint64_t nowMs)
             return;
         }
     }
+    // A filter setting from the Ear, never while keyed (above).
+    if (writeFilter(nowMs)) return;
     if (freqAsked_ && nowMs < freqAskedMs_ + ASK_MS)
     {
         // The band's noise, between dial readings, once the receiver has
@@ -190,7 +198,7 @@ void DialReader::askNext(uint64_t nowMs)
         askFilter(nowMs);
         return;
     }
-    // Frequency queries only: nothing here sets the radio.
+    // Frequency queries only.
     out_ += vfo_ == Vfo::Yes ? "f currVFO\n" : "f\n";
     asking_ = Ask::Freq;
     askedMs_ = freqAskedMs_ = nowMs;
@@ -225,12 +233,94 @@ bool DialReader::askFilter(uint64_t nowMs)
     return false;
 }
 
+bool DialReader::filterQuestionsLeft() const
+{
+    for (int step = filterStep_; step < 3; step++)
+        if (step == 0 ? !modeDropped_ : askable(step == 1 ? (int)Meter::PbtIn : (int)Meter::PbtOut)) return true;
+    return false;
+}
+
+void DialReader::publishFilter()
+{
+    if (reading_ && filter_ != reading_)
+    {
+        filter_ = reading_;
+        version_++;
+    }
+    reading_.reset();
+}
+
+void DialReader::setFilter(const RigFilter& filter, uint64_t nowMs)
+{
+    filterWrite_ = filter;
+    askNext(nowMs);
+}
+
+void DialReader::flushFilter()
+{
+    if (!connected_) return;
+    queueFilter();
+    // rigctld takes them in turn; the answers come after we have gone.
+    for (const std::string& line : setLines_) out_ += line + "\n";
+    setLines_.clear();
+}
+
+void DialReader::queueFilter()
+{
+    if (setLines_.empty() && filterWrite_)
+    {
+        // The commands, worked out when it goes: the mode and width only
+        // when they differ from what the rig said last.
+        const RigFilter& f = *filterWrite_;
+        const std::string vfo = vfo_ == Vfo::Yes ? "currVFO " : "";
+        auto number = [](double v) {
+            std::ostringstream out;
+            out.imbue(std::locale::classic());
+            out.setf(std::ios::fixed);
+            out.precision(4);
+            out << v;
+            return out.str();
+        };
+        if (!f.mode.empty() && f.widthHz > 0 &&
+            (!filter_ || filter_->mode != f.mode || filter_->widthHz != f.widthHz))
+            setLines_.push_back("M " + vfo + f.mode + " " + std::to_string(f.widthHz));
+        if (f.pbtIn) setLines_.push_back("L " + vfo + "PBT_IN " + number(*f.pbtIn));
+        if (f.pbtOut) setLines_.push_back("L " + vfo + "PBT_OUT " + number(*f.pbtOut));
+        filterWrite_.reset();
+        filterProblem_.clear();
+        // A reading begun before is of the old setting: start afresh after.
+        reading_.reset();
+        filterStep_ = 0;
+        if (!setLines_.empty()) filterWrites_++;
+        version_++;
+    }
+}
+
+bool DialReader::writeFilter(uint64_t nowMs)
+{
+    queueFilter();
+    if (setLines_.empty()) return false;
+    setLine_ = setLines_.front();
+    setLines_.erase(setLines_.begin());
+    out_ += setLine_ + "\n";
+    asking_ = Ask::Set;
+    askedMs_ = nowMs;
+    if (setLines_.empty())
+    {
+        // Read back at once, while the Ear watches.
+        filterStep_ = 0;
+        filterDueMs_ = nowMs;
+    }
+    return true;
+}
+
 void DialReader::setFilterWatch(bool on, uint64_t nowMs)
 {
     if (filterWatch_ == on) return;
     filterWatch_ = on;
     filterStep_ = 0;
     filterDueMs_ = nowMs;
+    reading_.reset();
     if (!on && filter_)
     {
         filter_.reset();
@@ -329,6 +419,11 @@ void DialReader::answered(uint64_t nowMs)
 {
     // The meters come METER_MS apart; the first of a burst at once.
     if (asking_ == Ask::Meter) meterDueMs_ = nowMs + METER_MS;
+    // The filter's last answer: the whole reading at once, never the mode
+    // of one with the knobs of the last.
+    const bool filterAnswer = asking_ == Ask::Mode || (asking_ == Ask::Meter && (askedMeter_ == (int)Meter::PbtIn ||
+                                                                                askedMeter_ == (int)Meter::PbtOut));
+    if (filterAnswer && !filterQuestionsLeft()) publishFilter();
     asking_ = Ask::None;
     askNext(nowMs);
 }
@@ -350,13 +445,8 @@ void DialReader::meterValue(int meter, double value)
     if (pbt)
     {
         if (!filterWatch_) return;
-        RigFilter f = filter_.value_or(RigFilter{});
-        (meter == (int)Meter::PbtIn ? f.pbtIn : f.pbtOut) = value;
-        if (filter_ != f)
-        {
-            filter_ = f;
-            version_++;
-        }
+        if (!reading_) reading_ = filter_.value_or(RigFilter{});
+        (meter == (int)Meter::PbtIn ? reading_->pbtIn : reading_->pbtOut) = value;
         return;
     }
     if (strength)
@@ -468,6 +558,23 @@ void DialReader::onLine(const std::string& line, uint64_t nowMs)
         return;
     }
 
+    // A filter setting's answer.
+    if (asking_ == Ask::Set && rprt(line, code))
+    {
+        if (code != 0)
+        {
+            // The rest would land on a setting half made: stop, and read
+            // what the rig has now.
+            filterProblem_ = "rigctld refused " + setLine_ + ": " + line;
+            setLines_.clear();
+            filterStep_ = 0;
+            filterDueMs_ = nowMs;
+            version_++;
+        }
+        answered(nowMs);
+        return;
+    }
+
     uint64_t hz = 0;
     if (frequencyLine(line, hz))
     {
@@ -480,7 +587,7 @@ void DialReader::onLine(const std::string& line, uint64_t nowMs)
     }
     if (rprt(line, code))
     {
-        // "RPRT 0" only follows a set command, which we never send.
+        // "RPRT 0" follows a set command; ours are taken above.
         if (code != 0 && problem_ != "rigctld answered " + line)
         {
             problem_ = "rigctld answered " + line;
@@ -529,14 +636,9 @@ void DialReader::modeLine(const std::string& line, uint64_t nowMs)
     if (ok && filterWatch_)
     {
         modeFailures_ = 0;
-        RigFilter f = filter_.value_or(RigFilter{});
-        f.mode = modeName_;
-        f.widthHz = std::max(0, modeWidth_);
-        if (filter_ != f)
-        {
-            filter_ = f;
-            version_++;
-        }
+        if (!reading_) reading_ = filter_.value_or(RigFilter{});
+        reading_->mode = modeName_;
+        reading_->widthHz = std::max(0, modeWidth_);
     }
     modeName_.clear();
     if (asking_ == Ask::Mode) answered(nowMs);

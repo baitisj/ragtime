@@ -62,9 +62,14 @@ public:
 
     explicit EdgeFinder(double rowsPerSecond = 10.0);
 
-    // A new speed starts afresh.
+    // A new speed or span (Spectrum's topHz) starts afresh.
     void setRowsPerSecond(double rowsPerSecond);
+    void setTopHz(double topHz);
+    double topHz() const { return topHz_; }
     void clear();
+    // The filter changed: the average starts afresh, but what it knows of
+    // how loud the quiet is stays.
+    void restart();
 
     // One of Spectrum's rows; rows heard while transmitting only count
     // toward nothing.
@@ -75,14 +80,25 @@ public:
     std::optional<Edges> edges() const;
     // The quiet rows' average, in dB, or empty.
     std::vector<float> average() const;
+    // The passband runs on past the top of the picture: the top bins are
+    // within DROP_DB of its level (FM's audio, wider than a 4 kHz span).
+    // Nothing until NEEDED_S of quiet.
+    bool reachesTop() const;
     // Seconds of quiet rows in the average (capped at what it remembers).
     double quietSeconds() const;
+    // Seconds since the last row with a signal in it, or heard while
+    // transmitting: how long the band has been quiet.
+    double quietRunSeconds() const { return quietRun_ / rowsPerSecond_; }
 
 private:
+    double binHz(int i) const;
+
     double rowsPerSecond_;
+    double topHz_;
     std::vector<double> power_;     // the average, as power
     double weight_ = 0;             // quiet rows in it, capped
     std::deque<float> levels_;      // recent rows' passband levels
+    double quietRun_ = 0;           // quiet rows in a row
 };
 
 // The pth percentile (0..1) of some values.

@@ -496,7 +496,9 @@ wxWindow* SettingsDialog::rigPage(wxNotebook* book, const StationPrefs& prefs)
     pttRow->Add(ptt_, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 12);
     pttRow->Add(pttPortText, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 6);
     pttRow->Add(pttPort_, 1, wxALIGN_CENTER_VERTICAL);
-    hamlib->Add(keyRig_, 0, wxLEFT | wxRIGHT | wxTOP, 6);
+    auto* checks = new wxBoxSizer(wxHORIZONTAL);
+    checks->Add(keyRig_, 0, wxALIGN_CENTER_VERTICAL);
+    hamlib->Add(checks, 0, wxLEFT | wxRIGHT | wxTOP, 6);
     hamlib->AddSpacer(4);
     hamlib->Add(pttRow, 0, wxEXPAND | wxLEFT | wxRIGHT, 30);
     hamlib->AddSpacer(4);
@@ -525,6 +527,21 @@ wxWindow* SettingsDialog::rigPage(wxNotebook* book, const StationPrefs& prefs)
                                 "while it doesn't know the dial. It still receives. A session already up keeps "
                                 "its link: data2g-host still acknowledges what it hears.");
 
+    // The Ear's filter handles, off by default, for rigctld and Hamlib
+    // alike (Jeff, 2026-10-26). Beside the segments box, so the page still
+    // fits a 1366x768 screen.
+    earFilters_ = new wxCheckBox(page, wxID_ANY, "Let the Ear change the rig's filters");
+    earFilters_->SetValue(r.earFilters);
+    earFilters_->SetToolTip("With this ticked, dragging the filter's edges in the Ear sets the rig's filter width and "
+                            "twin PBT, between bursts and never while data2g-host transmits, and puts it back after "
+                            "15 s unless you press Keep. Quitting puts the filter back as Ragtime found it. A width "
+                            "rewrites the rig's filter memory. Through rigctld this sends it set commands (M and L "
+                            "PBT_IN, PBT_OUT), which every program sharing it will see.");
+    auto* lastRow = new wxBoxSizer(wxHORIZONTAL);
+    lastRow->Add(usSegmentsOnly_, 0, wxALIGN_CENTER_VERTICAL);
+    lastRow->AddStretchSpacer();
+    lastRow->Add(earFilters_, 0, wxALIGN_CENTER_VERTICAL | wxLEFT, 24);
+
     auto* sizer = new wxBoxSizer(wxVERTICAL);
     sizer->Add(noRig_, 0, wxLEFT | wxRIGHT | wxTOP, 12);
     sizer->Add(rigctldRow, 0, wxEXPAND | wxLEFT | wxRIGHT | wxTOP, 12);
@@ -532,7 +549,7 @@ wxWindow* SettingsDialog::rigPage(wxNotebook* book, const StationPrefs& prefs)
     sizer->Add(useHamlib_, 0, wxLEFT | wxRIGHT | wxTOP, 12);
     sizer->Add(hamlib, 0, wxEXPAND | wxLEFT | wxRIGHT | wxTOP, 12);
     sizer->Add(swrTrip_, 0, wxLEFT | wxRIGHT | wxTOP, 12);
-    sizer->Add(usSegmentsOnly_, 0, wxALL, 12);
+    sizer->Add(lastRow, 0, wxEXPAND | wxALL, 12);
     page->SetSizer(sizer);
     return page;
 }
@@ -616,6 +633,7 @@ radio::RigSettings SettingsDialog::rig() const
     r.pollSeconds = poll_->GetValue();
     r.keyRig = keyRig_->GetValue();
     r.swrTrip = swrTrip_->GetValue();
+    r.earFilters = earFilters_->GetValue();
     r.ptt = valueAt(PTTS, ptt_);
     r.pttPort = typed(pttPort_);
     return r;
@@ -804,6 +822,7 @@ void SettingsDialog::check()
     poll_->Enable(hamlib);
     testButton_->Enable(hamlib && !testRig_);
     keyRig_->Enable(hamlib);
+    earFilters_->Enable(hamlib || rigctld);
     swrTrip_->Enable(hamlib || rigctld);
     bool keying = hamlib && keyRig_->GetValue();
     for (wxWindow* w : keying_) w->Enable(keying);

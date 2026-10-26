@@ -72,6 +72,8 @@ void HamlibRig::setTransmitting(bool) {}
 
 void HamlibRig::setFilterWatch(bool) {}
 
+void HamlibRig::setFilter(const radio::RigFilter&) {}
+
 void HamlibRig::setSwrTrip(bool) {}
 
 void HamlibRig::clearSwrTrip() {}

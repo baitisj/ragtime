@@ -47,8 +47,9 @@
 // or --rig-noise DB, a few dB more now and then, and a station at -10 dB
 // one reading in six. For the Ear it answers "+m" with USB and a
 // 2400 Hz filter, and "+l PBT_IN" and "+l PBT_OUT" with the knob in the
-// middle (0.5). It prints anything else it is sent (Ragtime should only
-// ever ask those).
+// middle (0.5), and takes the Ear's settings, "M USB 1800" and
+// "L PBT_IN 0.6510", printing each and answering with them after. It
+// prints anything else it is sent (Ragtime should only ever ask those).
 // --rig-vfo plays one started with --vfo: \chk_vfo is 1, and it answers
 // "f currVFO" and "+l currVFO ALC", but not a bare "f".
 // --dial-hop moves the dial to 14.250 MHz, outside the US data segments,
@@ -77,8 +78,10 @@
 #include <filesystem>
 #include <fstream>
 #include <functional>
+#include <locale>
 #include <memory>
 #include <random>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -156,7 +159,8 @@ void readSome(int fd, std::vector<uint8_t>& out)
 }
 
 // A rigctld that knows the questions Ragtime asks: "\chk_vfo", "f", the
-// dial frequency ("f currVFO" when it plays --vfo), the levels and "+m".
+// dial frequency ("f currVFO" when it plays --vfo), the levels and "+m";
+// and takes the Ear's filter settings, "M" and "L PBT_IN", "L PBT_OUT".
 class FakeRig
 {
 public:
@@ -222,7 +226,7 @@ public:
                     else if (level == "RFPOWER_METER_WATTS")
                         std::snprintf(value, sizeof value, "%.6f\n", 38.0);
                     else if (level == "PBT_IN" || level == "PBT_OUT")
-                        std::snprintf(value, sizeof value, "%.6f\n", 0.5);
+                        std::snprintf(value, sizeof value, "%.6f\n", level == "PBT_IN" ? pbtIn_ : pbtOut_);
                     else if (level == "STRENGTH")
                         std::snprintf(value, sizeof value, "%d\n",
                                       ++strengths_ % 6 == 0 ? -10 : noise_ + (int)(nowMs / 5000 % 4));
@@ -230,7 +234,14 @@ public:
                 }
                 else if (line == (vfo_ ? "+m currVFO" : "+m"))
                 {
-                    answer = "get_mode:" + std::string(vfo_ ? " currVFO" : "") + "\nMode: USB\nPassband: 2400\nRPRT 0\n";
+                    answer = "get_mode:" + std::string(vfo_ ? " currVFO" : "") + "\nMode: " + mode_ +
+                             "\nPassband: " + std::to_string(width_) + "\nRPRT 0\n";
+                }
+                else if (filterSetting(line))
+                {
+                    std::printf("fake rigctld set: %s\n", line.c_str());
+                    std::fflush(stdout);
+                    answer = "RPRT 0\n";
                 }
                 else if (line == (vfo_ ? "f currVFO" : "f"))
                 {
@@ -258,6 +269,37 @@ private:
         int fd;
         std::string partial;
     };
+
+    // "M USB 1800", "L PBT_IN 0.6510" (with currVFO for --vfo): taken.
+    bool filterSetting(const std::string& line)
+    {
+        std::istringstream in(line);
+        in.imbue(std::locale::classic());
+        std::string command, vfo;
+        in >> command;
+        if (vfo_ && !(in >> vfo && vfo == "currVFO")) return false;
+        if (command == "M")
+        {
+            std::string mode;
+            int width = 0;
+            if (!(in >> mode >> width) || width <= 0) return false;
+            mode_ = mode;
+            width_ = width;
+            return true;
+        }
+        std::string level;
+        double v = 0;
+        if (command != "L" || !(in >> level >> v) || v < 0 || v > 1) return false;
+        if (level == "PBT_IN") pbtIn_ = v;
+        else if (level == "PBT_OUT") pbtOut_ = v;
+        else return false;
+        return true;
+    }
+
+    std::string mode_ = "USB";
+    int width_ = 2400;
+    double pbtIn_ = 0.5;
+    double pbtOut_ = 0.5;
     int listener_ = -1;
     uint64_t dialHz_;
     bool hop_;

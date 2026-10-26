@@ -78,7 +78,7 @@ struct RigSettings
 {
     RigSource source = RigSource::None;
 
-    // rigctld, read only.
+    // rigctld: read only, but for the Ear's filter settings (earFilters).
     std::string rigctldHost = "127.0.0.1";
     int rigctldPort = 4532;
 
@@ -103,6 +103,10 @@ struct RigSettings
     // Over 3:1 SWR, stop data2g-host, and with Hamlib turn the rig's power
     // to 0 and unkey (radio::SwrTrip). Off by default.
     bool swrTrip = false;
+
+    // The Ear may set the rig's receive filter (its width and twin PBT),
+    // through Hamlib or rigctld, off by default (docs/STAGE1.md, "The Ear").
+    bool earFilters = false;
 };
 
 constexpr int POLL_MIN_SECONDS = 1;

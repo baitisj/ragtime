@@ -29,8 +29,15 @@
 // While the Ear is open (setFilterWatch), between bursts it also reads the
 // rig's receive filter every FILTER_MS: "+m" (the mode and its passband
 // width), then "+l PBT_IN" and "+l PBT_OUT" (radio::RigFilter). Jeff
-// agreed to these reads on his shared rigctld (2026-10-26); they set
-// nothing either.
+// agreed to these reads on his shared rigctld (2026-10-26).
+//
+// The one thing it ever sets: the receive filter, when the Ear asks
+// (setFilter) with "Let the Ear change the rig's filters" ticked (Jeff,
+// 2026-10-26, for his rig held by a shared rigctld). Never while keyed:
+// "M USB 2400" when the mode or width differs from the last reading, then
+// "L PBT_IN 0.6510" and "L PBT_OUT ..." (with currVFO for a --vfo
+// rigctld), one at a time, each answered by an RPRT; then the filter is
+// read again at once. A refusal is kept for the Ear to show.
 //
 // While our transmitter is keyed (the host's PTT report) it asks no dial,
 // and the last reading stands; it asks the meters instead, one every
@@ -112,6 +119,17 @@ public:
     const std::optional<RigFilter>& filter() const { return filter_; }
     // rigctld can't say the mode (it answered "+m" with an error).
     bool modeDropped() const { return modeDropped_; }
+    // Set the receive filter, between bursts (the Ear, with its box
+    // ticked: the caller's check). A newer setting replaces one not yet
+    // sent.
+    void setFilter(const RigFilter& filter, uint64_t nowMs);
+    // Why the last setting was refused ("rigctld refused L PBT_IN 0.6510:
+    // RPRT -11"), or empty; settings sent.
+    const std::string& filterProblem() const { return filterProblem_; }
+    // Closing (Ragtime quitting, the filter put back as found): every
+    // filter command not yet sent goes now, without waiting for answers.
+    void flushFilter();
+    uint64_t filterWrites() const { return filterWrites_; }
 
     // The dial in Hz; none until rigctld has answered, or once a reading
     // has gone stale.
@@ -149,6 +167,7 @@ private:
         Freq,
         Meter,
         Mode,
+        Set,        // a filter setting, answered by an RPRT
     };
     enum class State
     {
@@ -162,6 +181,10 @@ private:
     bool askable(int meter) const;
     bool transmitMeter(int meter) const { return meter < (int)Meter::Strength && askable(meter); }
     bool askFilter(uint64_t nowMs);
+    void queueFilter();
+    bool writeFilter(uint64_t nowMs);
+    bool filterQuestionsLeft() const;
+    void publishFilter();
     void modeLine(const std::string& line, uint64_t nowMs);
     int pickMeter();
     void answered(uint64_t nowMs);
@@ -201,6 +224,12 @@ private:
     int modeFailures_ = 0;
     std::string modeName_;          // the answer coming in
     std::optional<RigFilter> filter_;
+    std::optional<RigFilter> reading_;      // the one coming in
+    std::optional<RigFilter> filterWrite_;  // to send
+    std::vector<std::string> setLines_;     // its commands still to send
+    std::string setLine_;                   // the one out
+    std::string filterProblem_;
+    uint64_t filterWrites_ = 0;
     std::string partial_;
     std::string out_;
     std::string problem_;

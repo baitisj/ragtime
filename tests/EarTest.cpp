@@ -3,7 +3,9 @@
 // a PipeWire graph (by link, by target, by the port's process), and the
 // port's process from a pretend /proc, and the filter's edges measured
 // from the band's noise (bursts, carriers and our own transmissions left
-// out).
+// out), and setting the filter: the twin PBT model, Keep and Undo on
+// their clock, and Calibrate against a pretend rig whose noise follows
+// its knobs.
 #include <algorithm>
 #include <cmath>
 #include <complex>
@@ -17,7 +19,9 @@
 #include <vector>
 
 #include "Check.h"
+#include "ragtime/ear/AutoSpan.h"
 #include "ragtime/ear/Edges.h"
+#include "ragtime/ear/FilterControl.h"
 #include "ragtime/ear/Graph.h"
 #include "ragtime/ear/Passbands.h"
 #include "ragtime/ear/ProcNet.h"
@@ -296,13 +300,14 @@ struct Lift
     double lowHz, highHz, db;
 };
 
-std::vector<float> noiseRow(std::mt19937& rng, double low, double high, std::vector<Lift> extra = {})
+std::vector<float> noiseRow(std::mt19937& rng, double low, double high, std::vector<Lift> extra = {},
+                            double topHz = Spectrum::DEFAULT_TOP_HZ)
 {
     std::exponential_distribution<double> draw(1.0);
     std::vector<float> row(Spectrum::BINS);
     for (int i = 0; i < Spectrum::BINS; i++)
     {
-        const double hz = Spectrum::binHz(i);
+        const double hz = Spectrum::binHz(i, topHz);
         double shape = std::min(-6.0 + (hz - low) * 0.4, -6.0 + (high - hz) * 0.4);
         shape = std::max(-60.0, std::min(0.0, shape));
         double db = -50.0 + shape;
@@ -410,6 +415,392 @@ void edgesFromNoise()
     CHECK(percentile({}, 0.5) == 0.0f);
 }
 
+// A pretend IC-7100: its filter's passband follows its width and knobs,
+// by the model, with its own centre, Hz per knob, real width and a cut in
+// the audio that hides what lies under it.
+struct PretendRig
+{
+    KnobModel truth;
+    RigFilter filter;
+
+    // The edges the noise shows after this many quiet seconds.
+    std::optional<Edges> listen(std::mt19937& rng, double seconds = 4.0)
+    {
+        EdgeFinder f(10.0);
+        const Span s = visible(spanOf(filter, truth), truth);
+        for (int i = 0; i < (int)(seconds * 10); i++) f.addRow(noiseRow(rng, s.lowHz, s.highHz), false);
+        return f.edges();
+    }
+};
+
+KnobModel knobs(double k, double centre, double width = 0, double nominal = 0, double floor = 0)
+{
+    KnobModel m;
+    m.hzPerKnob = k;
+    m.centreHz = centre;
+    m.widthHz = width;
+    m.nominalHz = nominal;
+    m.floorHz = floor;
+    return m;
+}
+
+Span spanFrom(const Edges& e)
+{
+    Span s;
+    s.lowHz = e.lowHz.value_or(0);
+    s.highHz = e.highHz.value_or(Spectrum::DEFAULT_TOP_HZ);
+    return s;
+}
+
+RigFilter usb(int width, double in = 0.5, double out = 0.5)
+{
+    RigFilter f;
+    f.mode = "USB";
+    f.widthHz = width;
+    f.pbtIn = in;
+    f.pbtOut = out;
+    return f;
+}
+
+void twinPbtModel()
+{
+    // Centred: centre +- width / 2.
+    Span s = spanOf(usb(2400), 1500, 2000);
+    CHECK(std::fabs(s.lowHz - 300) < 1e-9 && std::fabs(s.highHz - 2700) < 1e-9);
+    // One knob up: the low edge rises; the other down: the high edge falls.
+    s = spanOf(usb(2400, 0.6, 0.5), 1500, 2000);
+    CHECK(std::fabs(s.lowHz - 500) < 1e-9 && std::fabs(s.highHz - 2700) < 1e-9);
+    s = spanOf(usb(2400, 0.5, 0.4), 1500, 2000);
+    CHECK(std::fabs(s.lowHz - 300) < 1e-9 && std::fabs(s.highHz - 2500) < 1e-9);
+    // Both: a shift.
+    s = spanOf(usb(2400, 0.6, 0.6), 1500, 2000);
+    CHECK(std::fabs(s.lowHz - 500) < 1e-9 && std::fabs(s.highHz - 2900) < 1e-9);
+    CHECK(std::fabs(centreOf(s, usb(2400, 0.6, 0.6), 2000) - 1500) < 1e-9);
+
+    // Widths the rig takes.
+    CHECK_EQ(roundWidth(2449, false), 2400);
+    CHECK_EQ(roundWidth(2401, true), 2500);
+    CHECK_EQ(roundWidth(430, false), 450);
+    CHECK_EQ(roundWidth(10, true), 50);
+    CHECK_EQ(roundWidth(2400, true), 2400);
+
+    // The high edge down to 2450: the out knob, the width kept.
+    Span want{300, 2450};
+    RigFilter f = settingFor(want, usb(2400), 1500, 2000);
+    CHECK_EQ(f.widthHz, 2400);
+    s = spanOf(f, 1500, 2000);
+    CHECK(std::fabs(s.lowHz - 300) < 5 && std::fabs(s.highHz - 2450) < 5);
+    // Wider than the filter: a wider width.
+    f = settingFor(Span{250, 2900}, usb(2400), 1500, 2000);
+    CHECK_EQ(f.widthHz, 2700);
+    s = spanOf(f, 1500, 2000);
+    CHECK(std::fabs(s.lowHz - 250) < 5 && std::fabs(s.highHz - 2900) < 5);
+    // Narrower than the knobs reach: a narrower width too.
+    f = settingFor(Span{1250, 1750}, usb(3600), 1500, 1000);
+    CHECK(f.widthHz < 3600);
+    s = spanOf(f, 1500, 1000);
+    CHECK(std::fabs(s.lowHz - 1250) < 5 && std::fabs(s.highHz - 1750) < 5);
+    // A knob that runs the other way.
+    f = settingFor(want, usb(2400), 1500, -2000);
+    s = spanOf(f, 1500, -2000);
+    CHECK(std::fabs(s.highHz - 2450) < 5);
+    // Not calibrated: the width alone, about the centre.
+    f = settingFor(Span{500, 2500}, usb(2400, 0.5, 0.5), 1500, 0);
+    CHECK_EQ(f.widthHz, 2000);
+    CHECK(f.pbtIn && *f.pbtIn == 0.5);
+
+    // The model as Calibrate learns it on Jeff's IC-7100: a 3000 Hz filter
+    // that passes 3140 Hz, its low edge under a cut at 70 Hz.
+    const KnobModel ic7100 = knobs(3000, 1499, 3140, 3000, 70);
+    s = spanOf(usb(3000), ic7100);
+    CHECK(std::fabs(s.lowHz + 71) < 1e-9 && std::fabs(s.highHz - 3069) < 1e-9);
+    s = visible(s, ic7100);
+    CHECK(std::fabs(s.lowHz - 70) < 1e-9 && std::fabs(s.highHz - 3069) < 1e-9);
+    // Another width keeps the extra 140 Hz.
+    s = spanOf(usb(2400), ic7100);
+    CHECK(std::fabs(s.width() - 2540) < 1e-9);
+    // The high edge dragged from what the noise shows: the hidden low edge
+    // stays where it is, and the low knob centred.
+    const Span shown{66, 3052};
+    Span target = dragTarget(shown, Span{66, 2452}, usb(3000), ic7100);
+    CHECK(std::fabs(target.lowHz + 71) < 1e-9 && std::fabs(target.highHz - 2469) < 1e-9);
+    f = settingFor(target, usb(3000), ic7100);
+    CHECK_EQ(f.widthHz, 3000);
+    CHECK(f.pbtIn && std::fabs(*f.pbtIn - 0.5) <= 1.0 / 255);
+    CHECK(f.pbtOut && *f.pbtOut < 0.5);
+    // Kept in the settings file as text, in any locale.
+    std::optional<KnobModel> back = KnobModel::fromText(ic7100.text());
+    CHECK(back && back->hzPerKnob == 3000 && back->centreHz == 1499 && back->widthHz == 3140 &&
+          back->nominalHz == 3000 && back->floorHz == 70 && back->ceilingHz == 0);
+    CHECK_EQ(ic7100.text(), std::string("3000.0 1499.0 3140.0 3000.0 70.0 0.0"));
+    CHECK(!KnobModel::fromText("2890"));
+    CHECK(!KnobModel::fromText(""));
+    CHECK(!KnobModel::fromText("0 1500 2400 2400 0 0"));
+
+    // Cutting Data2G.
+    CHECK(!cutsData2G(Span{300, 2700}, false));
+    CHECK(cutsData2G(Span{300, 2450}, false));
+    CHECK(!cutsData2G(Span{1100, 1900}, true));
+    CHECK(cutsData2G(Span{1300, 1900}, true));
+
+    CHECK_EQ(changeText(Span{300, 2700}, Span{300, 2450}), std::string("High edge 2700 \xe2\x86\x92 2450 Hz"));
+    CHECK_EQ(changeText(Span{300, 2700}, Span{450, 2850}), std::string("Shifted 150 Hz up"));
+    CHECK_EQ(changeText(Span{300, 2700}, Span{600, 2400}), std::string("Width 2400 \xe2\x86\x92 1800 Hz"));
+    CHECK_EQ(changeText(Span{300, 2700}, Span{300, 2700}), std::string("No change"));
+}
+
+void keepAndUndo()
+{
+    const uint64_t t = 1000000;
+    FilterEdit e;
+    CHECK(!e.due(t, true));
+    e.seen(usb(2400));
+    CHECK(e.found().has_value());
+
+    // A change waits for quiet, then is on trial.
+    e.change(usb(2400, 0.5, 0.4), t);
+    CHECK(e.state() == FilterEdit::State::Waiting);
+    CHECK(!e.due(t + 100, false));
+    std::optional<RigFilter> w = e.due(t + 200, true);
+    CHECK(w && *w == usb(2400, 0.5, 0.4));
+    CHECK(e.state() == FilterEdit::State::Trial);
+    CHECK(std::fabs(e.secondsLeft(t + 200 + 5000) - 10.0) < 1e-9);
+    e.seen(usb(2400, 0.5, 0.4));
+
+    // A second drag on trial: Undo still goes back to before the first.
+    e.change(usb(2400, 0.6, 0.4), t + 3000);
+    w = e.due(t + 3100, true);
+    CHECK(w && *w == usb(2400, 0.6, 0.4));
+    CHECK(e.before() && *e.before() == usb(2400));
+
+    // The clock runs out: back, once quiet, and no trial after it.
+    CHECK(!e.due(t + 3100 + FilterEdit::KEEP_MS, false));
+    CHECK(e.reverting());
+    w = e.due(t + 3100 + FilterEdit::KEEP_MS + 500, true);
+    CHECK(w && *w == usb(2400));
+    CHECK(e.state() == FilterEdit::State::Idle);
+
+    // Kept: it stays, and Undo has nothing to undo.
+    e.change(usb(1800), t + 30000);
+    w = e.due(t + 30000, true);
+    CHECK(w && w->widthHz == 1800);
+    e.keep();
+    CHECK(e.state() == FilterEdit::State::Idle);
+    CHECK(!e.due(t + 60000, true));
+    e.undo();
+    CHECK(!e.due(t + 60000, true));
+
+    // Undo before anything was written: just dropped.
+    e.change(usb(1500), t + 70000);
+    e.undo();
+    CHECK(e.state() == FilterEdit::State::Idle);
+    CHECK(!e.due(t + 70000, true));
+
+    // Undo on trial.
+    e.seen(usb(1800));
+    e.change(usb(2000), t + 80000);
+    e.due(t + 80000, true);
+    e.undo();
+    w = e.due(t + 80100, true);
+    CHECK(w && w->widthHz == 1800);
+
+    // Closing on trial goes back; quitting leaves it as found.
+    e.change(usb(2100), t + 90000);
+    e.due(t + 90000, true);
+    w = e.close();
+    CHECK(w && w->widthHz == 1800);
+    CHECK(e.state() == FilterEdit::State::Idle);
+    CHECK(e.quit() && *e.quit() == usb(2400));
+    // Put back.
+    e.putBack();
+    w = e.due(t + 100000, true);
+    CHECK(w && *w == usb(2400));
+    CHECK(e.state() == FilterEdit::State::Idle);
+
+    // The operator turns the mode knob mid-trial: the trial and what the
+    // rig had are dropped, never written back in the old mode.
+    FilterEdit moved;
+    moved.seen(usb(2400));
+    moved.change(usb(2400, 0.6, 0.5), t);
+    CHECK(moved.due(t, true).has_value());
+    RigFilter lsb = usb(2400);
+    lsb.mode = "LSB";
+    moved.seen(lsb);
+    CHECK(moved.state() == FilterEdit::State::Idle);
+    CHECK(!moved.due(t + FilterEdit::KEEP_MS + 1, true));
+    CHECK(!moved.close());
+    CHECK(!moved.quit());
+    CHECK(moved.found() && moved.found()->mode == "LSB");
+
+    // Never changed: nothing to put back on quitting.
+    FilterEdit untouched;
+    untouched.seen(usb(2400));
+    CHECK(!untouched.quit());
+    CHECK(!untouched.close());
+}
+
+void calibrate()
+{
+    std::mt19937 rng(11);
+    // Calibrate a pretend IC-7100, as measured on Jeff's (2026-10-26): a
+    // full turn moves an edge 3000 Hz, its 3000 Hz filter passes 3140 Hz
+    // about 1499 Hz, and the audio cuts at 70 Hz, hiding the low edge with
+    // the knobs centred. Started with the out knob a little down.
+    PretendRig rig{knobs(3000, 1499, 3140, 3000, 70), usb(3000, 0.5, 0.45)};
+    Calibration c;
+    RigFilter noKnobs;
+    noKnobs.mode = "USB";
+    noKnobs.widthHz = 3000;
+    CHECK(!c.start(noKnobs));
+    CHECK(c.start(rig.filter));
+    int steps = 0;
+    while (c.running() && steps++ < 10)
+    {
+        CHECK(!c.stepText().empty());
+        std::optional<RigFilter> f = c.setting();
+        CHECK(f.has_value());
+        if (!f) break;
+        rig.filter = *f;
+        std::optional<Edges> e = rig.listen(rng);
+        CHECK(e.has_value());
+        c.measured(e ? spanFrom(*e) : Span{});
+    }
+    CHECK_EQ(steps, Calibration::MEASURES + 1);
+    CHECK(rig.filter == usb(3000, 0.5, 0.45));     // put back
+    CHECK(c.result().has_value());
+    const KnobModel m = c.result().value_or(KnobModel{});
+    CHECK(std::fabs(m.hzPerKnob - 3000) < 3000 * 0.08);
+    CHECK(std::fabs(m.centreHz - 1499) < 40);
+    CHECK(std::fabs(m.widthHz - 3140) < 80);
+    CHECK_EQ(m.nominalHz, 3000.0);
+    CHECK(m.floorHz > 40 && m.floorHz < 110);
+    CHECK_EQ(m.ceilingHz, 0.0);
+
+    // Then a drag of the high edge lands where it was meant to, the low
+    // edge still hidden.
+    rig.filter = usb(3000);
+    std::optional<Edges> now = rig.listen(rng);
+    CHECK(now.has_value());
+    if (now)
+    {
+        const Span from = spanFrom(*now);
+        rig.filter = settingFor(dragTarget(from, Span{from.lowHz, 2450}, rig.filter, m), rig.filter, m);
+        std::optional<Edges> after = rig.listen(rng);
+        CHECK(after && near(after->lowHz, from.lowHz, 30) && near(after->highHz, 2450, 40));
+        // The middle 300 Hz up: the low edge comes into sight.
+        if (after)
+        {
+            const Span a = spanFrom(*after);
+            rig.filter =
+                settingFor(dragTarget(a, Span{a.lowHz + 300, a.highHz + 300}, rig.filter, m), rig.filter, m);
+            std::optional<Edges> shifted = rig.listen(rng);
+            CHECK(shifted && near(shifted->lowHz, 229, 40) && near(shifted->highHz, 2750, 40));
+        }
+    }
+
+    // A rig whose knobs do nothing: no measure, and says why.
+    PretendRig deaf{knobs(0, 1500, 2400, 2400), usb(2400)};
+    Calibration d;
+    d.start(deaf.filter);
+    while (d.running())
+    {
+        deaf.filter = *d.setting();
+        std::optional<Edges> e = deaf.listen(rng);
+        d.measured(e ? spanFrom(*e) : Span{});
+    }
+    CHECK(!d.result());
+    CHECK(d.problem().find("hardly moved") != std::string::npos);
+}
+
+Edges edgesAt(double lowHz, std::optional<double> highHz)
+{
+    Edges e;
+    e.lowHz = lowHz;
+    e.highHz = highHz;
+    return e;
+}
+
+void spans()
+{
+    // A tone at 9 kHz, on a 12 kHz picture.
+    Spectrum s(48000, 10.0);
+    s.setTopHz(12000);
+    CHECK_EQ(s.topHz(), 12000.0);
+    std::vector<float> x = tone(48000, 9000.0, 1.0, 1.0);
+    auto rows = s.push(x.data(), x.size());
+    CHECK(!rows.empty());
+    if (!rows.empty())
+    {
+        CHECK_EQ(peakBin(rows.back()), Spectrum::binOf(9000.0, 12000.0));
+        CHECK(rows.back()[Spectrum::binOf(9000.0, 12000.0)] > -6.0f);
+    }
+    // A narrow span: steps finer than the FFT's bins still read.
+    s.setTopHz(2500);
+    x = tone(48000, 1000.0, 1.0, 1.0);
+    rows = s.push(x.data(), x.size());
+    CHECK(!rows.empty() && std::abs(peakBin(rows.back()) - Spectrum::binOf(1000.0, 2500.0)) <= 1);
+    s.setTopHz(100000);
+    CHECK_EQ(s.topHz(), Spectrum::MAX_TOP_HZ);
+
+    // FM audio, 300 to 6000 Hz, on an 8 kHz picture.
+    std::mt19937 rng(5);
+    EdgeFinder f(10.0);
+    f.setTopHz(8000);
+    for (int i = 0; i < 40; i++) f.addRow(noiseRow(rng, 300, 6000, {}, 8000), false);
+    std::optional<Edges> e = f.edges();
+    CHECK(e && near(e->lowHz, 300, 40) && near(e->highHz, 6000, 40));
+    // And on a 4 kHz one its top runs off the picture.
+    EdgeFinder g(10.0);
+    for (int i = 0; i < 40; i++) g.addRow(noiseRow(rng, 300, 6000), false);
+    e = g.edges();
+    CHECK(!e || !e->highHz);
+
+    // Auto's fit: past the edge by 400 Hz, rounded up to 500 Hz.
+    CHECK_EQ(AutoSpan::fit(3050), 3500.0);
+    CHECK_EQ(AutoSpan::fit(3100), 3500.0);
+    CHECK_EQ(AutoSpan::fit(3101), 4000.0);
+    CHECK_EQ(AutoSpan::fit(100), Spectrum::MIN_TOP_HZ);
+    CHECK_EQ(AutoSpan::fit(20000), Spectrum::MAX_TOP_HZ);
+    CHECK(fmMode("PKTFM") && fmMode("FMN") && !fmMode("PKTUSB"));
+    CHECK(wideAudioMode("AM") && !wideAudioMode("USB"));
+
+    const uint64_t t = 1000000;
+    AutoSpan a;
+    // No rig: 4 kHz until the edges say.
+    CHECK_EQ(a.update(t, 0, std::nullopt, std::nullopt, false, 24000), 4000.0);
+    // The rig on PKTUSB, edges at 70 and 3050 Hz: narrows to 3.5 kHz, but
+    // only once that has held for 10 s.
+    CHECK_EQ(a.update(t, 0, std::string("PKTUSB"), std::nullopt, false, 24000), 4000.0);
+    CHECK_EQ(a.update(t + 100, 0, std::string("PKTUSB"), edgesAt(70, 3050), false, 24000), 4000.0);
+    CHECK_EQ(a.update(t + 5000, 0, std::string("PKTUSB"), edgesAt(70, 3050), false, 24000), 4000.0);
+    CHECK_EQ(a.update(t + 10100, 0, std::string("PKTUSB"), edgesAt(70, 3050), false, 24000), 3500.0);
+    // The edges start afresh with the span: it holds meanwhile.
+    CHECK_EQ(a.update(t + 10600, 0, std::string("PKTUSB"), std::nullopt, false, 24000), 3500.0);
+    // A wider filter: wider at once.
+    CHECK_EQ(a.update(t + 11000, 0, std::string("PKTUSB"), edgesAt(70, 3700), false, 24000), 4500.0);
+    // Its top off the picture: the next step at once.
+    CHECK_EQ(a.update(t + 12000, 0, std::string("PKTUSB"), edgesAt(70, std::nullopt), false, 24000), 8000.0);
+    // A narrowing that doesn't hold doesn't happen.
+    CHECK_EQ(a.update(t + 13000, 0, std::string("PKTUSB"), edgesAt(70, 2700), false, 24000), 8000.0);
+    CHECK_EQ(a.update(t + 20000, 0, std::string("PKTUSB"), edgesAt(70, 3900), false, 24000), 8000.0);
+    CHECK_EQ(a.update(t + 24000, 0, std::string("PKTUSB"), edgesAt(70, 2700), false, 24000), 8000.0);
+    // FM: 8 kHz at once.
+    CHECK_EQ(a.update(t + 30000, 0, std::string("USB"), std::nullopt, false, 24000), 4000.0);
+    CHECK_EQ(a.update(t + 31000, 0, std::string("FM"), std::nullopt, false, 24000), 8000.0);
+    // FM's audio reaching the top: wider; on SSB that is more likely the
+    // sound card's own noise, and it stays.
+    CHECK_EQ(a.update(t + 31500, 0, std::string("FM"), std::nullopt, true, 24000), 12000.0);
+    AutoSpan b;
+    CHECK_EQ(b.update(t, 0, std::string("USB"), std::nullopt, true, 24000), 4000.0);
+    CHECK_EQ(b.update(t + 100, 0, std::string("USB"), std::nullopt, true, 24000), 4000.0);
+    CHECK(f.reachesTop() == false);
+    CHECK(g.reachesTop());
+    // Fixed choices, and never past half the sound card's rate.
+    CHECK_EQ(a.update(t + 32000, 12000, std::string("FM"), std::nullopt, false, 24000), 12000.0);
+    CHECK_EQ(a.update(t + 33000, 12000, std::string("FM"), std::nullopt, false, 4000), 4000.0);
+    CHECK_EQ(a.update(t + 34000, 0, std::string("FM"), std::nullopt, false, 4000), 4000.0);
+}
+
 } // namespace
 
 int main()
@@ -424,5 +815,9 @@ int main()
     twoHostsByPort();
     procNet();
     edgesFromNoise();
+    twinPbtModel();
+    keepAndUndo();
+    calibrate();
+    spans();
     return ragtime_test::finish();
 }

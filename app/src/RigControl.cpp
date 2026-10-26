@@ -162,6 +162,49 @@ std::optional<radio::RigFilter> RigControl::filter() const
     return std::nullopt;
 }
 
+bool RigControl::canSetFilter() const
+{
+    if (!settings_.earFilters) return false;
+    switch (settings_.source)
+    {
+    case radio::RigSource::Hamlib: return hamlib_.status().open;
+    case radio::RigSource::Rigctld: return rigctld_->up();
+    case radio::RigSource::None: break;
+    }
+    return false;
+}
+
+void RigControl::setFilter(const radio::RigFilter& filter)
+{
+    // Only with "Let the Ear change the rig's filters" ticked; through a
+    // shared rigctld too, as Jeff allowed (2026-10-26).
+    if (!settings_.earFilters) return;
+    if (settings_.source == radio::RigSource::Hamlib) hamlib_.setFilter(filter);
+    if (settings_.source == radio::RigSource::Rigctld) rigctld_->setFilter(filter);
+}
+
+std::string RigControl::filterProblem() const
+{
+    switch (settings_.source)
+    {
+    case radio::RigSource::Hamlib: return hamlib_.status().filterProblem;
+    case radio::RigSource::Rigctld: return rigctld_->filterProblem();
+    case radio::RigSource::None: break;
+    }
+    return std::string();
+}
+
+std::string RigControl::rigKey() const
+{
+    switch (settings_.source)
+    {
+    case radio::RigSource::Hamlib: return "hamlib-" + std::to_string(settings_.model);
+    case radio::RigSource::Rigctld: return "rigctld";
+    case radio::RigSource::None: break;
+    }
+    return std::string();
+}
+
 bool RigControl::readsNoise() const
 {
     if (settings_.source == radio::RigSource::Rigctld) return rigctld_->readsStrength();

@@ -72,9 +72,17 @@ void Spectrum::setRowsPerSecond(double rowsPerSecond)
     restart();
 }
 
-int Spectrum::binOf(double hz)
+void Spectrum::setTopHz(double topHz)
 {
-    int i = (int)std::floor(hz / TOP_HZ * BINS);
+    topHz = std::max(MIN_TOP_HZ, std::min(MAX_TOP_HZ, topHz));
+    if (topHz == topHz_) return;
+    topHz_ = topHz;
+    restart();
+}
+
+int Spectrum::binOf(double hz, double topHz)
+{
+    int i = (int)std::floor(hz / topHz * BINS);
     return std::max(0, std::min(BINS - 1, i));
 }
 
@@ -128,7 +136,7 @@ std::vector<float> Spectrum::row()
     std::vector<float> out(BINS);
     for (int b = 0; b < BINS; b++)
     {
-        const double lo = b * TOP_HZ / BINS, hi = (b + 1) * TOP_HZ / BINS;
+        const double lo = b * topHz_ / BINS, hi = (b + 1) * topHz_ / BINS;
         std::size_t first = (std::size_t)std::ceil(lo / binHz);
         std::size_t last = (std::size_t)std::ceil(hi / binHz);
         last = std::min(last, n_ / 2);

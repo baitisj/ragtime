@@ -2,12 +2,15 @@
 #define RAGTIME_PREFS_H
 
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <vector>
 
 #include "ragtime/broadcast/Seals.h"
 #include "ragtime/broadcast/Stations.h"
+#include "ragtime/ear/FilterControl.h"
 #include "ragtime/gearbox/Gearbox.h"
+#include "ragtime/radio/RigFilter.h"
 #include "ragtime/radio/RigSettings.h"
 
 // What Ragtime remembers between runs, in wxConfig (~/.Ragtime on Linux,
@@ -57,6 +60,18 @@ int loadInt(const char* key, int fallback);
 void saveInt(const char* key, int value);
 std::string loadString(const char* key, const std::string& fallback);
 void saveString(const char* key, const std::string& value);
+
+// The Ear's presets (1 to EAR_PRESETS) and its calibrations of the twin
+// PBT, by rig (RigControl::rigKey) and mode, and for calibrations the
+// width: under /Ear/Presets and /Ear/Calibration.
+constexpr int EAR_PRESETS = 4;
+std::optional<ragtime::radio::RigFilter> loadEarPreset(const std::string& rig, const std::string& mode, int n);
+void saveEarPreset(const std::string& rig, int n, const ragtime::radio::RigFilter& filter);
+// What Calibrate learned, if it has run for this rig, mode and width.
+std::optional<ragtime::ear::KnobModel> loadEarCalibration(const std::string& rig, const std::string& mode,
+                                                          int widthHz);
+void saveEarCalibration(const std::string& rig, const std::string& mode, int widthHz,
+                        const ragtime::ear::KnobModel& model);
 
 // The broadcast numbering is kept across restarts, one for each callsign
 // (docs/PROTOCOL.md, "Sequence numbers").
@@ -137,6 +152,7 @@ constexpr const char* WATCH_LIST = "/Stations/Watch";                // callsign
 constexpr const char* AUTO_RECEIVE_BROADCAST = "/Files/AutoReceiveBroadcast";   // files on D2G, into the received folder
 constexpr const char* EAR_SOURCE = "/Ear/Source";                    // a PipeWire source's node.name; empty follows data2g-host
 constexpr const char* EAR_SPEED = "/Ear/RowsPerSecond";               // the waterfall's rows a second
+constexpr const char* EAR_SPAN = "/Ear/SpanHz";                       // how high the picture goes; 0 is Auto
 } // namespace keys
 
 #endif

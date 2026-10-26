@@ -2,6 +2,7 @@
 // reader (it only ever asks "f", stops asking while keyed, and lets a
 // reading go stale), and the path log (its lines, the file read back from
 // the end, and the 24-hour strip and its words).
+#include <cmath>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -606,8 +607,108 @@ void filter()
     CHECK_EQ(describe(f), std::string("USB \xc2\xb7 2400 Hz filter \xc2\xb7 PBT centred"));
 }
 
+// The Ear setting the filter (its box ticked: the caller's check): the
+// knobs alone when the width stands, the mode line first when it changes,
+// never while keyed, and a refusal stops the rest.
+void filterSet()
+{
+    uint64_t t = T0;
+    DialReader dial;
+    dial.connected(t);
+    dial.takeOutput();
+    say(dial, "0\n", t);
+    CHECK_EQ(probe(dial, t), std::string("f\n"));
+    say(dial, "14105000\n", t);
+    dial.setFilterWatch(true, t);
+    CHECK_EQ(dial.takeOutput(), std::string("+m\n"));
+    say(dial, "get_mode:\nMode: USB\nPassband: 2400\nRPRT 0\n", t);
+    CHECK_EQ(dial.takeOutput(), std::string("+l PBT_IN\n"));
+    say(dial, "get_level: PBT_IN\n0.501961\nRPRT 0\n", t);
+    CHECK_EQ(dial.takeOutput(), std::string("+l PBT_OUT\n"));
+    say(dial, "get_level: PBT_OUT\n0.501961\nRPRT 0\n", t);
+    CHECK(dial.filter().has_value());
+    CHECK_EQ(dial.takeOutput(), std::string(""));
+
+    RigFilter f;
+    f.mode = "USB";
+    f.widthHz = 2400;
+    f.pbtIn = 0.65098;
+    f.pbtOut = 0.5;
+    t += 100;
+    dial.setFilter(f, t);
+    CHECK_EQ(dial.takeOutput(), std::string("L PBT_IN 0.6510\n"));
+    say(dial, "RPRT 0\n", t);
+    CHECK_EQ(dial.takeOutput(), std::string("L PBT_OUT 0.5000\n"));
+    say(dial, "RPRT 0\n", t);
+    // Read back at once.
+    CHECK_EQ(dial.takeOutput(), std::string("+m\n"));
+    say(dial, "get_mode:\nMode: USB\nPassband: 2400\nRPRT 0\n", t);
+    CHECK_EQ(dial.takeOutput(), std::string("+l PBT_IN\n"));
+    say(dial, "get_level: PBT_IN\n0.650980\nRPRT 0\n", t);
+    // Whole readings only: not the new in knob with the old out one.
+    CHECK(dial.filter() && dial.filter()->pbtIn && *dial.filter()->pbtIn < 0.6);
+    CHECK_EQ(dial.takeOutput(), std::string("+l PBT_OUT\n"));
+    say(dial, "get_level: PBT_OUT\n0.501961\nRPRT 0\n", t);
+    CHECK(dial.filter() && dial.filter()->pbtIn && std::fabs(*dial.filter()->pbtIn - 0.65098) < 1e-4);
+    CHECK_EQ(dial.filterWrites(), (uint64_t)1);
+    CHECK(dial.filterProblem().empty());
+
+    // Keyed: held until the burst ends, then the width first.
+    t += 100;
+    dial.setKeyed(true, t);
+    dial.takeOutput();
+    f.widthHz = 1800;
+    dial.setFilter(f, t);
+    std::string all;
+    for (uint64_t ms = t; ms < t + 6000; ms += 100)
+    {
+        dial.tick(ms);
+        all += dial.takeOutput();
+    }
+    CHECK(all.find("M ") == std::string::npos);
+    CHECK(all.find("L ") == std::string::npos);
+    t += 6000;
+    dial.setKeyed(false, t);
+    CHECK_EQ(dial.takeOutput(), std::string("M USB 1800\n"));
+    // Refused: the knobs aren't sent, and the rig is read again.
+    say(dial, "RPRT -11\n", t);
+    CHECK_EQ(dial.filterProblem(), std::string("rigctld refused M USB 1800: RPRT -11"));
+    all = dial.takeOutput();
+    CHECK(all.find("L ") == std::string::npos);
+    CHECK_EQ(dial.filterWrites(), (uint64_t)2);
+
+    // A --vfo rigctld names the VFO.
+    DialReader vfo;
+    vfo.connected(T0);
+    vfo.takeOutput();
+    say(vfo, "1\n", T0);
+    CHECK_EQ(probe(vfo, T0), std::string("f currVFO\n"));
+    say(vfo, "7074000\n", T0);
+    f.mode = "PKTUSB";
+    f.pbtOut.reset();
+    vfo.setFilter(f, T0);
+    CHECK_EQ(vfo.takeOutput(), std::string("M currVFO PKTUSB 1800\n"));
+    say(vfo, "RPRT 0\n", T0);
+    CHECK_EQ(vfo.takeOutput(), std::string("L currVFO PBT_IN 0.6510\n"));
+    say(vfo, "RPRT 0\n", T0);
+    CHECK(vfo.filterProblem().empty());
+
+    // Quitting: the put back goes at once, every line, keyed or not.
+    vfo.takeOutput();
+    vfo.setKeyed(true, T0 + 10);
+    vfo.takeOutput();
+    f.widthHz = 3000;
+    f.pbtOut = 0.5;
+    vfo.setFilter(f, T0 + 20);
+    CHECK_EQ(vfo.takeOutput(), std::string(""));
+    vfo.flushFilter();
+    CHECK_EQ(vfo.takeOutput(),
+             std::string("M currVFO PKTUSB 3000\nL currVFO PBT_IN 0.6510\nL currVFO PBT_OUT 0.5000\n"));
+}
+
 // Every line Ragtime could ever write to rigctld is a question: whether
-// rigctld wants VFOs named, the frequency, and the meters.
+// rigctld wants VFOs named, the frequency, and the meters. (The Ear's
+// filter settings, above, go only when it asks.)
 void onlyAsks()
 {
     const std::vector<std::string> allowed = {"\\chk_vfo", "f", "+l ALC", "+l SWR", "+l RFPOWER_METER_WATTS",
@@ -820,6 +921,7 @@ int main()
     meters();
     strength();
     filter();
+    filterSet();
     onlyAsks();
     lines();
     strip();

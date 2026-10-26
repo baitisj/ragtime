@@ -300,6 +300,10 @@ MainFrame::MainFrame()
         // What is under way ends here; a part received is kept, and the
         // log keeps it for next time.
         sessionFiles_.stopAll("Ragtime was closed");
+        // The Ear's change goes back, and a filter Ragtime changed is put
+        // back as it was found, before the rig closes.
+        if (ear_) ear_->Close(true);
+        if (auto f = filterEdit_.quit()) setRigFilter(*f, "put back as found: Ragtime closed");
         // data2g-host keeps its TX level after we go: what Auto ALC took
         // off goes back.
         if (std::optional<double> back = autoAlc_.restore()) sendTxLevel(*back, "Ragtime closed");
@@ -2439,9 +2443,14 @@ void MainFrame::setEar(bool open)
 {
     if (open && ear_ == nullptr)
     {
-        ear_ = new EarFrame(this, [this] {
+        // The filter, set from the Ear: only with the box ticked (RigControl
+        // checks), noted in the flight recorder.
+        auto write = [this](const radio::RigFilter& f, const std::string& why) { setRigFilter(f, why); };
+        ear_ = new EarFrame(this, filterEdit_, write, [this] {
             ear_ = nullptr;
-            rig_->setFilterWatch(false);
+            // Still read while Ragtime has changed the filter, so a new
+            // mode on the rig drops what it would put back on quitting.
+            rig_->setFilterWatch(filterEdit_.changed());
             bar_->setEarOpen(false);
             GetMenuBar()->Check(ID_EAR, false);
         });
@@ -2455,6 +2464,10 @@ void MainFrame::setEar(bool open)
             if (prefs_.rig.source != radio::RigSource::None) r.via = rig_->meterPath();
             r.filter = rig_->filter();
             if (rig_->readsNoise()) r.noiseDb = rig_->noiseDb();
+            r.allowed = prefs_.rig.source != radio::RigSource::None && prefs_.rig.earFilters;
+            r.canSet = rig_->canSetFilter();
+            r.problem = rig_->filterProblem();
+            r.key = rig_->rigKey();
             return r;
         });
         ear_->CentreOnParent();
@@ -2551,6 +2564,15 @@ void MainFrame::applyRadioPrefs()
     showDial();
 }
 
+void MainFrame::setRigFilter(const radio::RigFilter& f, const std::string& why)
+{
+    std::string said = "rig filter set " + f.mode + " " + std::to_string(f.widthHz) + " Hz";
+    if (f.pbtIn) said += " PBT_IN " + radio::pbtText(*f.pbtIn);
+    if (f.pbtOut) said += " PBT_OUT " + radio::pbtText(*f.pbtOut);
+    host_->recorder().note(said + " (" + why + ")", HostConnection::nowMs());
+    rig_->setFilter(f);
+}
+
 void MainFrame::onDial()
 {
     // The rig's filter, read while the Ear is open, for the flight recorder.
@@ -2561,6 +2583,7 @@ void MainFrame::onDial()
         said = "rig filter " + filter->mode + " " + std::to_string(filter->widthHz) + " Hz";
         if (filter->pbtIn) said += " PBT_IN " + radio::pbtText(*filter->pbtIn);
         if (filter->pbtOut) said += " PBT_OUT " + radio::pbtText(*filter->pbtOut);
+        filterEdit_.seen(*filter);
     }
     if (said != notedFilter_)
     {

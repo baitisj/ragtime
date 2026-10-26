@@ -22,7 +22,7 @@ What the client is:
 
 What it is not:
 
-- Not a modem. It never starts `data2g-host` and never plays to the sound card (the Ear only listens in, through PipeWire: docs/STAGE1.md, "The Ear"). It keys the rig only when the operator asks it to follow data2g-host's PTT (Settings > Rig, off by default: docs/STAGE1.md, "Rig control").
+- Not a modem. It never starts `data2g-host` and never plays to the sound card (the Ear only listens in, through PipeWire: docs/STAGE1.md, "The Ear"). It keys the rig only when the operator asks it to follow data2g-host's PTT (Settings > Rig, off by default: docs/STAGE1.md, "Rig control"), and sets the rig's receive filter only from the Ear, through Hamlib or rigctld, with its own box ticked (off by default: docs/STAGE1.md, "The Ear").
 - Not a Glissando fork. The chirp modem, tempos, chords and the console stay in Glissando.
 
 Jeff said go for Stage 1 on 2026-10-22. The decisions only he can make are collected under **Questions for Jeff** near the end, with his answers where he has given them.
