@@ -19,18 +19,24 @@ constexpr double PI = 3.14159265358979323846;
 void drawClock(wxGraphicsContext* gc, double x, double y, double r, double left, const wxColour& colour,
                const wxColour& face)
 {
+    // Cairo shifts a 1 px stroke half a pixel down and right but not a fill,
+    // which left the face off centre in its ring: no shift for either.
+    const bool offset = gc->OffsetEnabled();
+    gc->DisableOffset();
     gc->SetPen(wxPen(colour, 1));
     gc->SetBrush(wxBrush(face));
     gc->DrawEllipse(x - r, y - r, 2 * r, 2 * r);
     left = std::max(0.0, std::min(1.0, left));
-    if (left <= 0) return;
-    wxGraphicsPath wedge = gc->CreatePath();
-    wedge.MoveToPoint(x, y);
-    wedge.AddArc(x, y, r - 1.5, -PI / 2, -PI / 2 + left * 2 * PI, true);
-    wedge.CloseSubpath();
-    gc->SetPen(*wxTRANSPARENT_PEN);
-    gc->SetBrush(wxBrush(colour));
-    gc->FillPath(wedge);
+    if (left > 0) {
+        wxGraphicsPath wedge = gc->CreatePath();
+        wedge.MoveToPoint(x, y);
+        wedge.AddArc(x, y, r - 1.5, -PI / 2, -PI / 2 + left * 2 * PI, true);
+        wedge.CloseSubpath();
+        gc->SetPen(*wxTRANSPARENT_PEN);
+        gc->SetBrush(wxBrush(colour));
+        gc->FillPath(wedge);
+    }
+    if (offset) gc->EnableOffset();
 }
 
 } // namespace

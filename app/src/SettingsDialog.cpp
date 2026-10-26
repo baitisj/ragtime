@@ -112,14 +112,28 @@ SettingsDialog::SettingsDialog(wxWindow* parent, const StationPrefs& prefs,
     problem_ = new wxStaticText(this, wxID_ANY, "");
     problem_->SetForegroundColour(badText());
 
+    // The problem line sits beside OK and Cancel, so the dialog stays short
+    // enough for a 1366x768 screen.
+    auto* buttons = new wxBoxSizer(wxHORIZONTAL);
+    buttons->Add(problem_, 1, wxALIGN_CENTER_VERTICAL | wxRIGHT, 12);
+    buttons->Add(CreateStdDialogButtonSizer(wxOK | wxCANCEL), 0, wxALIGN_CENTER_VERTICAL);
     auto* sizer = new wxBoxSizer(wxVERTICAL);
     sizer->Add(book, 1, wxEXPAND | wxLEFT | wxRIGHT | wxTOP, 12);
-    sizer->Add(problem_, 0, wxEXPAND | wxLEFT | wxRIGHT | wxTOP, 12);
-    sizer->Add(CreateStdDialogButtonSizer(wxOK | wxCANCEL), 0, wxEXPAND | wxALL, 12);
+    sizer->Add(buttons, 0, wxEXPAND | wxALL, 12);
     SetSizer(sizer);
     // Room for the longest problem line, so the dialog never jumps.
     problem_->SetMinSize(wxSize(FromDIP(380), problem_->GetCharHeight()));
     Fit();
+    // GTK's notebook can give its pages a little less height than they ask
+    // for, which hid the Rig page's last line: once shown, grow by that.
+    CallAfter([this, book] {
+        const wxWindow* shown = book->GetCurrentPage();
+        if (!shown || shown->GetSize().y < 100) return;
+        int shortBy = 0;
+        for (std::size_t i = 0; i < book->GetPageCount(); ++i)
+            shortBy = std::max(shortBy, book->GetPage(i)->GetBestSize().y - shown->GetSize().y);
+        if (shortBy > 0) SetSize(GetSize() + wxSize(0, shortBy));
+    });
 
     auto changed = [this](wxCommandEvent&) { check(); };
     callsign_->Bind(wxEVT_TEXT, changed);
@@ -427,7 +441,8 @@ wxWindow* SettingsDialog::rigPage(wxNotebook* book, const StationPrefs& prefs)
     testButton_->SetToolTip("Opens the rig with these settings and reads its dial. It never keys the rig.");
     testResult_ = new wxStaticText(box, wxID_ANY, "", wxDefaultPosition, wxDefaultSize, wxST_ELLIPSIZE_END);
 
-    auto* grid = new wxFlexGridSizer(2, 6, 10);
+    // Rows 6 apart, not 10, so the page fits a 1366x768 screen.
+    auto* grid = new wxFlexGridSizer(2, 6, 6);
     grid->AddGrowableCol(1);
     auto* rigRow = new wxBoxSizer(wxHORIZONTAL);
     rigRow->Add(maker_, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 6);
@@ -528,8 +543,7 @@ wxWindow* SettingsDialog::rigPage(wxNotebook* book, const StationPrefs& prefs)
                                 "its link: data2g-host still acknowledges what it hears.");
 
     // The Ear's filter handles, off by default, for rigctld and Hamlib
-    // alike (Jeff, 2026-10-26). Beside the segments box, so the page still
-    // fits a 1366x768 screen.
+    // alike (Jeff, 2026-10-26), on a line of its own.
     earFilters_ = new wxCheckBox(page, wxID_ANY, "Let the Ear change the rig's filters");
     earFilters_->SetValue(r.earFilters);
     earFilters_->SetToolTip("With this ticked, dragging the filter's edges in the Ear sets the rig's filter width and "
@@ -537,10 +551,6 @@ wxWindow* SettingsDialog::rigPage(wxNotebook* book, const StationPrefs& prefs)
                             "15 s unless you press Keep. Quitting puts the filter back as Ragtime found it. A width "
                             "rewrites the rig's filter memory. Through rigctld this sends it set commands (M and L "
                             "PBT_IN, PBT_OUT), which every program sharing it will see.");
-    auto* lastRow = new wxBoxSizer(wxHORIZONTAL);
-    lastRow->Add(usSegmentsOnly_, 0, wxALIGN_CENTER_VERTICAL);
-    lastRow->AddStretchSpacer();
-    lastRow->Add(earFilters_, 0, wxALIGN_CENTER_VERTICAL | wxLEFT, 24);
 
     auto* sizer = new wxBoxSizer(wxVERTICAL);
     sizer->Add(noRig_, 0, wxLEFT | wxRIGHT | wxTOP, 12);
@@ -548,8 +558,12 @@ wxWindow* SettingsDialog::rigPage(wxNotebook* book, const StationPrefs& prefs)
     sizer->Add(rigctldResultRow, 0, wxEXPAND | wxLEFT | wxRIGHT, 12);
     sizer->Add(useHamlib_, 0, wxLEFT | wxRIGHT | wxTOP, 12);
     sizer->Add(hamlib, 0, wxEXPAND | wxLEFT | wxRIGHT | wxTOP, 12);
+    // The three boxes sit closer than the rest, for the same screen.
     sizer->Add(swrTrip_, 0, wxLEFT | wxRIGHT | wxTOP, 12);
-    sizer->Add(lastRow, 0, wxEXPAND | wxALL, 12);
+    sizer->AddSpacer(6);
+    sizer->Add(usSegmentsOnly_, 0, wxLEFT | wxRIGHT, 12);
+    sizer->AddSpacer(6);
+    sizer->Add(earFilters_, 0, wxLEFT | wxRIGHT | wxBOTTOM, 12);
     page->SetSizer(sizer);
     return page;
 }

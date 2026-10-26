@@ -537,6 +537,23 @@ void twinPbtModel()
     CHECK(!KnobModel::fromText(""));
     CHECK(!KnobModel::fromText("0 1500 2400 2400 0 0"));
 
+    // A shift before Calibrate: both knobs turned alike by the guess (the
+    // width per full turn), the width kept; stopped where a knob runs out.
+    CHECK_EQ(guessHzPerKnob(usb(3000)), 3000.0);
+    f = shiftedBy(usb(3000, 0.5, 0.5), 300, guessHzPerKnob(usb(3000)));
+    CHECK_EQ(f.widthHz, 3000);
+    CHECK(f.pbtIn && f.pbtOut && *f.pbtIn == *f.pbtOut && std::fabs(*f.pbtIn - 0.6) <= 1.0 / 255);
+    s = spanOf(f, ic7100);
+    CHECK(std::fabs(s.lowHz - spanOf(usb(3000), ic7100).lowHz - 300) < 12);
+    f = shiftedBy(usb(3000, 0.4, 0.8), 3000, 3000);
+    CHECK(f.pbtOut && *f.pbtOut == 1.0 && f.pbtIn && std::fabs(*f.pbtIn - 0.6) <= 1.0 / 255);
+    f = shiftedBy(usb(3000, 0.1, 0.5), -3000, 3000);
+    CHECK(f.pbtIn && *f.pbtIn == 0.0 && f.pbtOut && std::fabs(*f.pbtOut - 0.4) <= 1.0 / 255);
+    RigFilter noKnobs = usb(3000);
+    noKnobs.pbtIn.reset();
+    noKnobs.pbtOut.reset();
+    CHECK(shiftedBy(noKnobs, 300, 3000) == noKnobs);
+
     // Cutting Data2G.
     CHECK(!cutsData2G(Span{300, 2700}, false));
     CHECK(cutsData2G(Span{300, 2450}, false));
@@ -545,6 +562,8 @@ void twinPbtModel()
 
     CHECK_EQ(changeText(Span{300, 2700}, Span{300, 2450}), std::string("High edge 2700 \xe2\x86\x92 2450 Hz"));
     CHECK_EQ(changeText(Span{300, 2700}, Span{450, 2850}), std::string("Shifted 150 Hz up"));
+    // Measured edges that round apart still read as a shift.
+    CHECK_EQ(changeText(Span{294, 2716}, Span{714, 3136}), std::string("Shifted 420 Hz up"));
     CHECK_EQ(changeText(Span{300, 2700}, Span{600, 2400}), std::string("Width 2400 \xe2\x86\x92 1800 Hz"));
     CHECK_EQ(changeText(Span{300, 2700}, Span{300, 2700}), std::string("No change"));
 }

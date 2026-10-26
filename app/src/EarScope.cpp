@@ -131,9 +131,14 @@ void EarScope::setRigWidth(int widthHz)
     Refresh();
 }
 
-void EarScope::setHandles(const std::optional<ragtime::ear::Span>& at, bool together)
+void EarScope::setHandles(const std::optional<ragtime::ear::Span>& at, bool together, bool shift)
 {
     together_ = together;
+    if (shift != shift_)
+    {
+        shift_ = shift;
+        Refresh();
+    }
     if (grip_ != Grip::None) return;     // not under the operator's hand
     handles_ = at;
     Refresh();
@@ -157,8 +162,8 @@ EarScope::Grip EarScope::gripAt(int x, int y) const
     const int near = FromDIP(6);
     if (std::abs(x - (int)xOf(handles_->lowHz)) <= near) return Grip::Low;
     if (std::abs(x - (int)xOf(handles_->highHz)) <= near) return Grip::High;
-    // Until Calibrate has measured the knobs only the width can change.
-    if (!together_ && x > xOf(handles_->lowHz) && x < xOf(handles_->highHz) && y <= plot_.y + FromDIP(30))
+    // The middle, while the rig has both PBT knobs.
+    if (shift_ && x > xOf(handles_->lowHz) && x < xOf(handles_->highHz) && y <= plot_.y + FromDIP(30))
         return Grip::Shift;
     return Grip::None;
 }
@@ -460,8 +465,27 @@ void EarScope::paint()
             p.CloseSubpath();
             gc->FillPath(p);
         }
-        gc->SetBrush(wxBrush(wxColour(orange.Red(), orange.Green(), orange.Blue(), 40)));
-        gc->DrawRectangle(xOf(handles_->lowHz), plot_.y, xOf(handles_->highHz) - xOf(handles_->lowHz), FromDIP(30));
+        if (shift_)
+        {
+            // The shift band, with a grip in its middle.
+            const double l = xOf(handles_->lowHz), h = xOf(handles_->highHz), mid = (l + h) / 2;
+            gc->SetBrush(wxBrush(wxColour(orange.Red(), orange.Green(), orange.Blue(), 40)));
+            gc->DrawRectangle(l, plot_.y, h - l, FromDIP(30));
+            // An orange pill with an arrow each way.
+            const double g = FromDIP(4), y = plot_.y + FromDIP(15), pw = FromDIP(30), ph = FromDIP(16);
+            gc->SetBrush(wxBrush(orange));
+            gc->DrawRoundedRectangle(mid - pw / 2, y - ph / 2, pw, ph, ph / 2);
+            gc->SetBrush(*wxWHITE_BRUSH);
+            for (double side : {-1.0, 1.0})
+            {
+                wxGraphicsPath p = gc->CreatePath();
+                p.MoveToPoint(mid + side * 2, y - g);
+                p.AddLineToPoint(mid + side * (2 * g + 2), y);
+                p.AddLineToPoint(mid + side * 2, y + g);
+                p.CloseSubpath();
+                gc->FillPath(p);
+            }
+        }
     }
 
     // The frequency axis between the two.
