@@ -57,17 +57,21 @@ public:
     // Ragtime has open is doing, if it is open with these settings (its
     // port is taken, so Test reports it instead); empty otherwise.
     // txLevel: data2g-host's transmit level now (TXPOWER), none if the
-    // host isn't connected or has no TXPOWER.
+    // host isn't connected or has no TXPOWER. setTxLevel sends a level to
+    // the host: called as the operator turns the TX level, a few times a
+    // second at most, so the ALC can be watched on the fly.
     SettingsDialog(wxWindow* parent, const StationPrefs& prefs,
                    const std::vector<std::pair<std::string, std::string>>& gears,
                    std::function<std::string(const ragtime::radio::RigSettings&)> openRig, Page page,
-                   std::optional<double> txLevel = std::nullopt);
+                   std::optional<double> txLevel = std::nullopt,
+                   std::function<void(double)> setTxLevel = nullptr);
     ~SettingsDialog() override;
 
     StationPrefs prefs() const;
-    // The transmit level to set on data2g-host, if the operator changed it.
-    // It is the host's, never kept in Ragtime's settings.
-    std::optional<double> txLevel() const;
+    // Once the dialog has closed: with OK, sends the TX level if the last
+    // turn hasn't gone yet; with Cancel, puts back the level it opened
+    // with. It is the host's, never kept in Ragtime's settings.
+    void finishTxLevel(bool ok);
 
 private:
     wxWindow* stationPage(wxNotebook* book, const StationPrefs& prefs,
@@ -95,6 +99,10 @@ private:
     wxStaticText* dataPort_ = nullptr;
     wxSpinCtrlDouble* txLevel_ = nullptr;
     std::optional<double> hostTxLevel_;     // the host's, as the dialog opened
+    std::optional<double> sentTxLevel_;     // the last sent as the knob turned
+    std::function<void(double)> setTxLevel_;
+    wxTimer txLevelTimer_;                  // paces sends while the knob turns
+    void sendTxLevel();
     wxDirPickerCtrl* received_ = nullptr;
     wxTextCtrl* autoAccept_ = nullptr;
     wxCheckBox* sealChat_ = nullptr;

@@ -158,10 +158,10 @@ with the code when the seal rules change.
   transmits, the rig's ALC, SWR and RF power are read, through Hamlib or
   rigctld (`radio::TxMeters`, burst by burst) for the Auto ALC meter and the
   flight recorder. With Data2G PR #122's `TXPOWER` (2026-10-26) the
-  host's TX level is set in Settings > Station, and Auto ALC
-  (`radio::AutoAlc`, off by default) turns it down burst by burst, never
-  above the level it found, and puts that back when unticked or on
-  quit; the host's level is the truth, never kept in Ragtime's settings. The SWR bar sits
+  host's TX level is set in Settings > Station, live as the knob turns,
+  and Auto ALC (`radio::AutoAlc`, off by default) moves it burst by
+  burst to keep the ALC near 55% (Jeff, 2026-10-26), never above the
+  level set there, and puts that back when unticked or on quit; the host's level is the truth, never kept in Ragtime's settings. The SWR bar sits
   under the ALC meter (`app/src/SwrBar`), and the SWR trip (Settings >
   Rig, off by default, `radio::SwrTrip`) sends the host ABORT and holds
   sending until the operator clears it; with Hamlib it also unkeys the

@@ -163,8 +163,8 @@ bench"). Choices made there, for Jeff to keep or change:
   burst the host already has still goes.
 - The **Broadcast tab label** counts messages heard while it is out of
   sight, "Broadcast (3)".
-- **Auto ALC** turns data2g-host's TX level down to keep the rig's ALC
-  under its target, greyed until the host takes `TXPOWER` and the rig
+- **Auto ALC** moves data2g-host's TX level to keep the rig's ALC
+  near 55%, greyed until the host takes `TXPOWER` and the rig
   reports its ALC. Its meter shows the rig's ALC (below, "Rig control").
   **SNR** is a column (below, "SNR from data2g-host").
 - The **status bar**: channel clear or busy, or what of ours is going
@@ -916,12 +916,12 @@ answers `-40`, or `--rig-noise DB`, a few dB more now and then and a
 station at -10 one reading in six; Hamlib's dummy rig jiggles its own.
 
 `radio::TxMeters` gathers them burst by burst: the newest of each, and
-for the burst its ALC peak and mean, SWR peak and mean power. The
+for the burst its ALC peak, mean and median, SWR peak and mean power. The
 connection bar's meter beside Auto ALC shows the ALC live while
 transmitting and the last burst's peak between bursts, the number in
-red over the target or with the SWR over 3; its tooltip has the rest.
+red over 65% or with the SWR over 3; its tooltip has the rest.
 Each burst puts a line in the flight recorder: `note rig TX 12 s: ALC
-peak 61%, mean 44%; SWR 1.3; 38 W`.
+peak 61%, mean 44%, median 47%; SWR 1.3; 38 W`.
 
 **Auto ALC and the TX level** (Data2G PR #122's `TXPOWER`, 2026-10-26).
 data2g-host's transmit level is its own: `--output-volume` at start,
@@ -931,30 +931,44 @@ truth, as it does the radio's dial: it reads it on connecting and after
 every change, and keeps no copy in its settings.
 
 - **TX level**, Settings > Station, in the data2g-host box: the host's
-  level as it answered when Settings opened, set there with OK. Greyed
-  with no host or one without `TXPOWER`.
+  level as it answered when Settings opened. It goes to the host as the
+  knob turns, a few times a second at most, so the ALC meter can be
+  watched on the fly (Jeff, 2026-10-26: "It allows tweaking and
+  watching on-the-fly"); Cancel puts back the level it opened with.
+  Auto ALC holds still while Settings is open. Greyed with no host or
+  one without `TXPOWER`.
 - **Auto ALC**, on the connection bar, off by default (the tick is
-  kept, `/Connection/AutoAlc`). Each burst works out by Glissando's Drive
-  knob rule what to take off: two ALC readings in a row over the target
-  (0.5) turn the level down 0.5 dB, one over 0.8 turns it down 2 dB.
-  With Auto ALC ticked that goes to the host as the burst ends
-  (`radio::AutoAlc`). It only turns the level down: never above the
-  level it found (a level Ragtime didn't send, the operator's own or a
-  restarted host's, becomes the new one), never more than 20 dB under
-  it, and never under -60. Unticking it, or closing Ragtime, puts back
-  the level it found, so a trim never outlives Ragtime. It needs the
+  kept, `/Connection/AutoAlc`), aims at an ALC of 55% (Jeff,
+  2026-10-26: "That's where it should work the best"). Each burst works
+  out a step from the median of its ALC readings, so a reading at
+  keying or unkeying doesn't sway it (one reading will do: the meters
+  are read in turn, so a short burst may have only one):
+  over 80% down 2 dB, over 65% down 0.5 dB, under 45% up 0.5 dB, under
+  25% up 1 dB, and between 45% and 65% nothing. With Auto ALC ticked
+  that goes to the host as the burst ends (`radio::AutoAlc`). It never
+  goes above the ceiling, the TX level set in Settings (or in
+  data2g-host's own window, or a restarted host's, or the level it
+  found when ticked), never more than 20 dB under it, and never under
+  -60. To let it reach 55% from a cold rig, set the ceiling higher.
+  A burst begun before a level was set by hand moves nothing (it was
+  sent at the old level), and a step starts from the newest level sent,
+  not the host's last answer. Unticking it, or closing Ragtime, puts
+  back the ceiling, so a trim never outlives Ragtime. It needs the
   rig's ALC (rigctld or Hamlib) and a host with `TXPOWER`; greyed
   otherwise, and the burst's line then says what it would have done.
+  On the IC-7100, Hamlib's ALC is 100% at the top of the radio's ALC
+  zone.
 - The flight recorder notes each change and why: `note TX level -2.0
   dB: Auto ALC`, `... set in Settings`, `... Auto ALC off`, `...
   Ragtime closed`; the burst's line ends `Auto ALC turns the TX level
-  down 2.0 dB`.
+  down 2.0 dB to -2.0`, or `Auto ALC is at the TX level set in
+  Settings` when it would go up but can't.
 - The SWR trip doesn't touch the TX level: a level turned to -60 would
   outlive Ragtime and quietly mute the next session (ABORT and the hold
   already stop sending).
 - The bench's fake rigctld has an ALC that follows host A's `TXPOWER`
-  (48% to 96% at 0 dB, under half from about -4 dB), so Auto ALC can be
-  watched settling.
+  (48% to 96% at 0 dB, a median of 72%; in the band from about -1 dB),
+  so Auto ALC can be watched settling.
 
 **The SWR bar** (Jeff, 2026-10-26) sits under the ALC meter: the rig's
 SWR while transmitting, with small marks at 1, 1.5, 2 and 3, green
