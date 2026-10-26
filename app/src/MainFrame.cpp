@@ -788,14 +788,21 @@ void MainFrame::showSettings(SettingsDialog::Page page)
         bool same = prefs_.rig.source == radio::RigSource::Hamlib && radio::sameRig(rig, prefs_.rig);
         return same ? rig_->describe() : std::string();
     };
-    SettingsDialog dialog(this, prefs_, gears, openRig, page, link_.txPower());
-    if (dialog.ShowModal() != wxID_OK) return;
-    // The host's TX level is the host's: set there, never kept here.
-    if (std::optional<double> level = dialog.txLevel())
-    {
-        autoAlc_.operatorSet(*level);
-        sendTxLevel(*level, "set in Settings");
-    }
+    // The host's TX level is the host's: set there as the knob turns,
+    // never kept here. Auto ALC holds still while the operator has it.
+    auto setTxLevel = [this](double dB) {
+        autoAlc_.operatorSet(dB, HostConnection::nowMs());
+        sendTxLevel(dB, "set in Settings");
+    };
+    SettingsDialog dialog(this, prefs_, gears, openRig, page, link_.txPower(), setTxLevel);
+    std::optional<double> ceiling = autoAlc_.ceiling();
+    autoAlc_.hold(true);
+    bool ok = dialog.ShowModal() == wxID_OK;
+    dialog.finishTxLevel(ok);
+    // Cancel puts back the level, and the ceiling Auto ALC had.
+    if (!ok && ceiling) autoAlc_.operatorSet(*ceiling, HostConnection::nowMs());
+    autoAlc_.hold(false);
+    if (!ok) return;
     StationPrefs next = dialog.prefs();
     bool reconnect = next.callsign != prefs_.callsign || next.host != prefs_.host || next.kissPort != prefs_.kissPort
                      || next.commandPort != prefs_.commandPort || host_->state() == HostConnection::State::Off;
@@ -872,7 +879,7 @@ void MainFrame::onHostEvents(const std::vector<Event>& events)
                 note_ = "data2g-host refused \"" + e.text + "\"";
                 break;
             case Event::Type::TxPower:
-                autoAlc_.hostLevel(e.value);
+                autoAlc_.hostLevel(e.value, now);
                 showMeters();
                 break;
             default:
@@ -2603,14 +2610,18 @@ void MainFrame::onMeters()
         notedBursts_ = meters.bursts();
         const radio::TxMeters::Burst& burst = *meters.last();
         std::string line = "rig TX " + radio::burstText(burst, "; ");
-        std::optional<double> before = autoAlc_.level();
         std::optional<double> next = autoAlc_.burstEnded(burst);
-        if (next && before)
-            line += "; Auto ALC turns the TX level down " + wxString::Format("%.1f", *before - *next).ToStdString()
-                    + " dB";
-        else if (burst.turnDownDb > 0 && !autoAlc_.enabled())
-            line += "; Auto ALC would turn the TX level down "
-                    + wxString::Format("%.1f", burst.turnDownDb).ToStdString() + " dB";
+        auto move = [](double dB) {
+            return std::string(dB < 0 ? "down " : "up ") + wxString::Format("%.1f", std::fabs(dB)).ToStdString()
+                   + " dB";
+        };
+        if (next && autoAlc_.level())
+            line += "; Auto ALC turns the TX level " + move(*next - *autoAlc_.level()) + " to "
+                    + wxString::Format("%.1f", *next).ToStdString();
+        else if (burst.alcStepDb != 0 && !autoAlc_.enabled())
+            line += "; Auto ALC would turn the TX level " + move(burst.alcStepDb);
+        else if (burst.alcStepDb > 0 && autoAlc_.atCeiling())
+            line += "; Auto ALC is at the TX level set in Settings";
         host_->recorder().note(line, HostConnection::nowMs());
         if (next) sendTxLevel(*next, "Auto ALC");
     }
@@ -2629,6 +2640,7 @@ void MainFrame::sendTxLevel(double dB, const std::string& why)
 {
     uint64_t now = HostConnection::nowMs();
     if (!link_.setTxPower(dB, now)) return;
+    autoAlc_.sent(dB);
     host_->recorder().note("TX level " + wxString::Format("%.1f", dB).ToStdString() + " dB: " + why, now);
     host_->flush();
 }
@@ -2636,16 +2648,16 @@ void MainFrame::sendTxLevel(double dB, const std::string& why)
 void MainFrame::showAutoAlc()
 {
     // The host's level goes with its link.
-    if (!link_.txPower() && autoAlc_.level()) autoAlc_.hostLevel(std::nullopt);
+    if (!link_.txPower() && autoAlc_.level()) autoAlc_.hostLevel(std::nullopt, HostConnection::nowMs());
     bool host = link_.txPower().has_value();
     bool alc = rig_->readsAlc();
-    int target = (int)std::lround(radio::TxMeters::ALC_TARGET * 100);
-    std::string tip = "Keeps data2g-host's TX level (TXPOWER) just under the rig's ALC: after a burst whose ALC went "
-                      "over " + std::to_string(target) + "% twice in a row it turns the level down 0.5 dB, and 2 dB "
-                      "after one over 80%. It only turns it down, never more than "
+    std::string tip = "Keeps the rig's ALC near 55% by moving data2g-host's TX level (TXPOWER) after each burst, "
+                      "from the middle of its ALC readings: over 80% down 2 dB, over 65% down 0.5 dB, under 45% "
+                      "up 0.5 dB, under 25% up 1 dB, and between 45% and 65% it leaves it. It never goes above "
+                      "the TX level set in Settings (or the level it found when ticked), never more than "
                       + std::to_string((int)radio::AutoAlc::MAX_TRIM_DB)
-                      + " dB under the level it found, and puts that level back when you untick it or close "
-                        "Ragtime (data2g-host keeps a level after Ragtime goes). Set the level itself in Settings.";
+                      + " dB under it, and puts that level back when you untick it or close Ragtime "
+                        "(data2g-host keeps a level after Ragtime goes).";
     if (!host)
         tip += "\n\nIt needs data2g-host connected, and one that takes TXPOWER (Data2G PR #122).";
     else if (!alc)
@@ -2660,6 +2672,9 @@ void MainFrame::showAutoAlc()
         tip += ".";
         if (autoAlc_.enabled() && autoAlc_.atFloor())
             tip += " Auto ALC has gone as far down as it will: check the rig's drive and ALC.";
+        else if (autoAlc_.enabled() && autoAlc_.atCeiling())
+            tip += " The ALC wants more than the TX level set in Settings: raise it there to let Auto ALC "
+                   "reach 55%.";
     }
     bar_->autoAlc->Enable(host && alc);
     if (bar_->autoAlc->GetToolTipText() != utf8(tip)) bar_->autoAlc->SetToolTip(utf8(tip));
@@ -2670,9 +2685,9 @@ void MainFrame::showMeters()
     const wxString none = wxString::FromUTF8("\xe2\x80\x94");
     showAutoAlc();
     const std::string waits = link_.txPower()
-                                  ? "Auto ALC keeps data2g-host's TX level just under the " +
+                                  ? "Auto ALC moves data2g-host's TX level to keep the ALC near " +
                                         std::to_string((int)std::lround(radio::TxMeters::ALC_TARGET * 100)) +
-                                        "% target: see its own tooltip."
+                                        "%: see its own tooltip."
                                   : "Auto ALC needs a data2g-host that takes TXPOWER (Data2G PR #122), since "
                                     "data2g-host alone sets the transmit audio.";
     if (!rig_->readsMeters() && !rig_->swrTripped())
@@ -2705,7 +2720,7 @@ void MainFrame::showMeters()
         {
             percent = (int)std::lround(*now.alc * 100);
             text = wxString::Format("%d%%", percent);
-            warn = *now.alc > radio::TxMeters::ALC_TARGET;
+            warn = *now.alc > radio::TxMeters::ALC_BAND_HIGH;
         }
         if (now.any()) tip += "\n\nNow: " + radio::readingText(now);
     }
@@ -2718,16 +2733,24 @@ void MainFrame::showMeters()
     {
         tip += "\n\nLast burst, " + radio::burstText(*last) + ".";
         if (!meters.transmitting() && last->alcPeak) tip += " The number beside the meter is its ALC peak.";
-        int target = (int)std::lround(radio::TxMeters::ALC_TARGET * 100);
-        if (last->turnDownDb > 0)
-            tip += "\nOver the " + std::to_string(target) + "% target: "
+        int low = (int)std::lround(radio::TxMeters::ALC_BAND_LOW * 100);
+        int high = (int)std::lround(radio::TxMeters::ALC_BAND_HIGH * 100);
+        if (last->alcStepDb != 0)
+        {
+            std::string way = last->alcStepDb < 0 ? "down" : "up";
+            tip += "\n" + std::string(last->alcStepDb < 0 ? "Over " : "Under ")
+                   + std::to_string(last->alcStepDb < 0 ? high : low) + "%: "
                    + (autoAlc_.enabled() && link_.txPower()
-                          ? std::string("Auto ALC turned data2g-host's TX level down.")
-                          : "Auto ALC would have turned the TX level down "
-                                + wxString::Format("%.1f", last->turnDownDb).ToStdString()
-                                + " dB; tick it, or turn the level down in Settings.");
-        else if (last->overTarget())
-            tip += "\nIt peaked over the " + std::to_string(target) + "% target.";
+                          ? "Auto ALC turns data2g-host's TX level " + way
+                                + (last->alcStepDb > 0 && autoAlc_.atCeiling()
+                                       ? ", but it is at the level set in Settings."
+                                       : ".")
+                          : "Auto ALC would turn the TX level " + way + " "
+                                + wxString::Format("%.1f", std::fabs(last->alcStepDb)).ToStdString()
+                                + " dB; tick it, or set the level in Settings.");
+        }
+        else if (last->alcMedian)
+            tip += "\nBetween " + std::to_string(low) + "% and " + std::to_string(high) + "%: just right.";
     }
     bar_->setAlc(rig_->readsMeters(), percent, text, utf8(tip + "\n\n" + waits), warn);
 

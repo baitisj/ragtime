@@ -48,11 +48,19 @@ void TxMeters::transmitting(bool on, uint64_t nowMs)
         current_.startMs = nowMs;
         alcSum_ = wattsSum_ = powerSum_ = 0;
         alcCount_ = wattsCount_ = powerCount_ = 0;
-        overInARow_ = 0;
+        alcReadings_.clear();
     }
     else
     {
         current_.endMs = nowMs;
+        if (!alcReadings_.empty())
+        {
+            std::vector<double>& r = alcReadings_;
+            std::sort(r.begin(), r.end());
+            size_t n = r.size();
+            current_.alcMedian = n % 2 ? r[n / 2] : (r[n / 2 - 1] + r[n / 2]) / 2;
+            if (current_.alcReadings >= STEP_READINGS) current_.alcStepDb = alcStepDb(*current_.alcMedian);
+        }
         if (current_.readings > 0)
         {
             last_ = current_;
@@ -75,22 +83,8 @@ void TxMeters::reading(const MeterReading& reading, uint64_t nowMs)
         current_.alcPeak = std::max(alc, current_.alcPeak.value_or(alc));
         alcSum_ += alc;
         current_.alcMean = alcSum_ / ++alcCount_;
-        // Glissando's Drive knob: one reading far over, or two in a row
-        // over, and down it goes; then it counts afresh.
-        if (alc > ALC_HIGH)
-        {
-            current_.turnDownDb += BIG_STEP_DB;
-            overInARow_ = 0;
-        }
-        else if (alc > ALC_TARGET && ++overInARow_ >= 2)
-        {
-            current_.turnDownDb += STEP_DB;
-            overInARow_ = 0;
-        }
-        else if (alc <= ALC_TARGET)
-        {
-            overInARow_ = 0;
-        }
+        current_.alcReadings = alcCount_;
+        alcReadings_.push_back(alc);
     }
     if (reading.swr)
     {
@@ -110,6 +104,15 @@ void TxMeters::reading(const MeterReading& reading, uint64_t nowMs)
         current_.powerMean = powerSum_ / ++powerCount_;
     }
     version_++;
+}
+
+double alcStepDb(double median)
+{
+    if (median > TxMeters::ALC_HIGH) return -TxMeters::BIG_STEP_DB;
+    if (median > TxMeters::ALC_BAND_HIGH) return -TxMeters::STEP_DB;
+    if (median < TxMeters::ALC_LOW) return TxMeters::BIG_UP_DB;
+    if (median < TxMeters::ALC_BAND_LOW) return TxMeters::STEP_DB;
+    return 0;
 }
 
 double swrScale(double swr)
@@ -177,7 +180,9 @@ std::string burstText(const TxMeters::Burst& burst, const std::string& between)
     uint64_t ms = burst.endMs > burst.startMs ? burst.endMs - burst.startMs : 0;
     std::string text;
     if (burst.alcPeak)
-        join(text, "ALC peak " + percent(*burst.alcPeak) + ", mean " + percent(*burst.alcMean), between);
+        join(text, "ALC peak " + percent(*burst.alcPeak) + ", mean " + percent(*burst.alcMean)
+                       + (burst.alcMedian ? ", median " + percent(*burst.alcMedian) : std::string()),
+             between);
     if (burst.swrPeak) join(text, "SWR " + fixed(*burst.swrPeak, 1), between);
     if (burst.wattsMean)
         join(text, watts(*burst.wattsMean), between);

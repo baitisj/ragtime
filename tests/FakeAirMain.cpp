@@ -41,8 +41,9 @@
 // real one runs): it answers "\chk_vfo" with 0, "f" with the dial,
 // 14.105 MHz or --dial HZ, and the meters "+l ALC", "+l SWR" and
 // "+l RFPOWER_METER_WATTS" (SWR 1.3 or --rig-swr X, 38 W, and an ALC that
-// follows host A's TXPOWER: 48% to 96% at 0 dB, the host's own start,
-// under half from about -4 dB, for Auto ALC to settle),
+// follows host A's TXPOWER: 48% to 96% at 0 dB, the host's own start, a
+// median of 72%, in Auto ALC's 45% to 65% from about -1 dB, for it to
+// settle),
 // and the S-meter "+l STRENGTH": the band's noise, -40 dB over S9 (S2/S3)
 // or --rig-noise DB, a few dB more now and then, and a station at -10 dB
 // one reading in six. For the Ear it answers "+m" with USB and a

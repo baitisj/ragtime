@@ -3,6 +3,7 @@
 // its safety unkeys, the transmit meters burst by burst, and Auto ALC.
 #include <cmath>
 #include <cstdint>
+#include <initializer_list>
 #include <string>
 #include <utility>
 #include <vector>
@@ -263,18 +264,13 @@ void meters()
     w.swr = 1.5;
     w.watts = 36;
     m.reading(w, 1750);
-    // One over the target: no step yet. A second in a row: 0.5 dB.
-    CHECK_EQ(m.current().turnDownDb, 0.0);
     m.reading(alcOnly(0.55), 2000);
-    CHECK_EQ(m.current().turnDownDb, TxMeters::STEP_DB);
-    // Counting starts afresh after a step, and under the target.
     m.reading(alcOnly(0.6), 2250);
     m.reading(alcOnly(0.4), 2500);
     m.reading(alcOnly(0.6), 2750);
-    CHECK_EQ(m.current().turnDownDb, TxMeters::STEP_DB);
-    // Far over: 2 dB at once.
+    // A reading far over at the end doesn't sway the median.
     m.reading(alcOnly(0.85), 3000);
-    CHECK_EQ(m.current().turnDownDb, TxMeters::STEP_DB + TxMeters::BIG_STEP_DB);
+    CHECK_EQ(m.current().alcStepDb, 0.0);
     m.transmitting(false, 13000);
     CHECK(!m.latest().any());
     CHECK_EQ(m.bursts(), (uint64_t)1);
@@ -284,8 +280,11 @@ void meters()
     CHECK(b.alcMean && std::fabs(*b.alcMean - (0.3 + 0.6 + 0.55 + 0.6 + 0.4 + 0.6 + 0.85) / 7) < 1e-9);
     CHECK(b.swrPeak && *b.swrPeak == 1.5 && !b.swrHigh());
     CHECK(b.wattsMean && *b.wattsMean == 38);
-    CHECK(b.overTarget());
-    CHECK_EQ(burstText(b), std::string("12 s: ALC peak 85%, mean 56% \xc2\xb7 SWR 1.5 \xc2\xb7 38 W"));
+    // Readings 0.3 0.4 0.55 0.6 0.6 0.6 0.85: the median 60%, in the band.
+    CHECK(b.alcReadings == 7 && b.alcMedian && *b.alcMedian == 0.6);
+    CHECK_EQ(b.alcStepDb, 0.0);
+    CHECK(!b.overTarget());
+    CHECK_EQ(burstText(b), std::string("12 s: ALC peak 85%, mean 56%, median 60% \xc2\xb7 SWR 1.5 \xc2\xb7 38 W"));
 
     // A burst with no readings (a rig that reports nothing) keeps the last.
     m.transmitting(true, 20000);
@@ -305,7 +304,28 @@ void meters()
     CHECK(m.last()->swrHigh() && !m.last()->overTarget());
     CHECK_EQ(burstText(*m.last()), std::string("2.5 s: SWR 3.4 \xc2\xb7 31% power"));
     CHECK_EQ(burstText(*m.last(), "; "), std::string("2.5 s: SWR 3.4; 31% power"));
-    CHECK_EQ(m.last()->turnDownDb, 0.0);
+    CHECK_EQ(m.last()->alcStepDb, 0.0);
+
+    // The steps, from the median: to 55%, holding between 45% and 65%.
+    CHECK_EQ(alcStepDb(0.9), -TxMeters::BIG_STEP_DB);
+    CHECK_EQ(alcStepDb(0.7), -TxMeters::STEP_DB);
+    CHECK_EQ(alcStepDb(0.65), 0.0);
+    CHECK_EQ(alcStepDb(0.55), 0.0);
+    CHECK_EQ(alcStepDb(0.45), 0.0);
+    CHECK_EQ(alcStepDb(0.4), TxMeters::STEP_DB);
+    CHECK_EQ(alcStepDb(0.1), TxMeters::BIG_UP_DB);
+    auto burstOf = [&](std::initializer_list<double> alcs) {
+        m.transmitting(true, 40000);
+        uint64_t t = 40000;
+        for (double a : alcs) m.reading(alcOnly(a), t += 250);
+        m.transmitting(false, t + 100);
+        return *m.last();
+    };
+    CHECK_EQ(burstOf({0.0, 0.9, 0.95, 0.9, 0.2}).alcStepDb, -TxMeters::BIG_STEP_DB);
+    CHECK(burstOf({0.0, 0.9, 0.95, 0.9, 0.2}).overTarget());
+    CHECK_EQ(burstOf({0.3, 0.35, 0.4, 0.38}).alcStepDb, TxMeters::STEP_DB);
+    // One reading will do: a short burst may have no more.
+    CHECK_EQ(burstOf({0.9}).alcStepDb, -TxMeters::BIG_STEP_DB);
 }
 
 void swr()
@@ -382,12 +402,13 @@ void swr()
 
 } // namespace
 
-TxMeters::Burst burstDown(double dB)
+TxMeters::Burst burstStep(double dB, uint64_t startMs = 100000)
 {
     TxMeters::Burst burst;
+    burst.startMs = startMs;
     burst.readings = 10;
     burst.alcPeak = 0.9;
-    burst.turnDownDb = dB;
+    burst.alcStepDb = dB;
     return burst;
 }
 
@@ -396,71 +417,105 @@ bool near(const std::optional<double>& value, double want)
     return value && std::fabs(*value - want) < 0.001;
 }
 
-// Auto ALC: down only, never above the level it found, at most 20 dB
-// down, and that level put back when it is turned off.
+// Sends what Auto ALC asks for and has the host answer it.
+void apply(AutoAlc& alc, std::optional<double> next)
+{
+    if (!next) return;
+    alc.sent(*next);
+    alc.hostLevel(*next, 1);
+}
+
+// Auto ALC: to 55% both ways, never above the ceiling (the level set or
+// found), at most 20 dB under it, and the ceiling put back when off.
 void autoAlc()
 {
     AutoAlc alc;
     // Off, it sends nothing.
-    alc.hostLevel(-3.0);
-    CHECK(!alc.burstEnded(burstDown(2.0)));
+    alc.hostLevel(-3.0, 0);
+    CHECK(!alc.burstEnded(burstStep(-2.0)));
 
     CHECK(!alc.setEnabled(true));
     CHECK(near(alc.ceiling(), -3.0));
-    // A burst over the target: down by what the burst says, to a tenth.
-    CHECK(near(alc.burstEnded(burstDown(2.0)), -5.0));
+    // A burst too hot: down by what the burst says, to a tenth.
+    CHECK(near(alc.burstEnded(burstStep(-2.0)), -5.0));
     // The host's answer to our own TXPOWER keeps the ceiling.
-    alc.hostLevel(-5.0);
+    alc.sent(-5.0);
+    alc.hostLevel(-5.0, 0);
     CHECK(near(alc.ceiling(), -3.0));
     CHECK(near(alc.level(), -5.0));
     CHECK(alc.trimmedDb() > 1.99 && alc.trimmedDb() < 2.01);
-    // A burst under the target: nothing.
-    CHECK(!alc.burstEnded(burstDown(0.0)));
+    // In the band: nothing.
+    CHECK(!alc.burstEnded(burstStep(0.0)));
+    // Too cold: up, but never above the ceiling.
+    CHECK(near(alc.burstEnded(burstStep(1.0)), -4.0));
+    apply(alc, -4.0);
+    apply(alc, alc.burstEnded(burstStep(1.0)));
+    CHECK(near(alc.level(), -3.0));
+    CHECK(!alc.atCeiling());
+    CHECK(!alc.burstEnded(burstStep(0.5)));
+    CHECK(alc.atCeiling());
+    CHECK(near(alc.level(), -3.0));
 
     // No further than MAX_TRIM_DB under the ceiling.
-    for (int i = 0; i < 20; i++)
-    {
-        std::optional<double> next = alc.burstEnded(burstDown(2.0));
-        if (!next) break;
-        alc.hostLevel(*next);
-    }
+    for (int i = 0; i < 20; i++) apply(alc, alc.burstEnded(burstStep(-2.0)));
     CHECK(near(alc.level(), -3.0 - AutoAlc::MAX_TRIM_DB));
-    CHECK(alc.atFloor());
-    CHECK(!alc.burstEnded(burstDown(2.0)));
+    CHECK(alc.atFloor() && !alc.atCeiling());
+    CHECK(!alc.burstEnded(burstStep(-2.0)));
 
-    // Turned off: the level it found goes back.
+    // Turned off: the ceiling goes back.
     CHECK(near(alc.setEnabled(false), -3.0));
-    alc.hostLevel(-3.0);
+    apply(alc, -3.0);
     CHECK(near(alc.ceiling(), -3.0));
     CHECK(!alc.restore());
 
     // A level Ragtime didn't send (the operator's, in data2g-host's own
     // window) is the new ceiling.
     alc.setEnabled(true);
-    CHECK(near(alc.burstEnded(burstDown(0.5)), -3.5));
-    alc.hostLevel(-3.5);
-    alc.hostLevel(-10.0);
+    apply(alc, alc.burstEnded(burstStep(-0.5)));
+    CHECK(near(alc.level(), -3.5));
+    alc.hostLevel(-10.0, 200000);
     CHECK(near(alc.ceiling(), -10.0));
     CHECK(!alc.restore());
-    // So is one the operator sets in Ragtime.
-    alc.operatorSet(-8.04);
-    alc.hostLevel(-8.0);
-    CHECK(near(alc.ceiling(), -8.0));
-    CHECK(near(alc.burstEnded(burstDown(0.5)), -8.5));
-    alc.hostLevel(-8.5);
-    // Quitting puts it back.
-    CHECK(near(alc.restore(), -8.0));
+    // A burst begun before it was sent at the old level: no step.
+    CHECK(!alc.burstEnded(burstStep(-2.0, 190000)));
+    CHECK(near(alc.burstEnded(burstStep(-2.0, 210000)), -12.0));
+    apply(alc, -12.0);
+
+    // So is one the operator sets in Ragtime, and a burst sent before it,
+    // ending as the host answers, moves nothing: this is the -18 to -21
+    // then -20.5 Jeff saw (2026-10-26).
+    AutoAlc knob;
+    knob.setEnabled(true);
+    knob.hostLevel(-18.0, 0);
+    knob.operatorSet(-21.04, 300000);
+    knob.sent(-21.0);
+    CHECK(near(knob.ceiling(), -21.0));
+    CHECK(!knob.burstEnded(burstStep(-2.5, 290000)));
+    // A burst after it steps from the level sent, not the host's last
+    // answer, even before the host has answered.
+    CHECK(near(knob.burstEnded(burstStep(-0.5, 310000)), -21.5));
+    knob.sent(-21.5);
+    knob.hostLevel(-21.0, 311000);
+    knob.hostLevel(-21.5, 311000);
+    CHECK(near(knob.ceiling(), -21.0));
+    CHECK(near(knob.level(), -21.5));
+    // Held while the operator turns the knob in Settings.
+    knob.hold(true);
+    CHECK(!knob.burstEnded(burstStep(-2.0, 320000)));
+    knob.hold(false);
+    // Quitting puts back the ceiling.
+    CHECK(near(knob.restore(), -21.0));
 
     // No host level (a host without TXPOWER, or none): nothing.
-    alc.hostLevel(std::nullopt);
-    CHECK(!alc.burstEnded(burstDown(2.0)));
-    CHECK(!alc.restore());
+    knob.hostLevel(std::nullopt, 0);
+    CHECK(!knob.burstEnded(burstStep(-2.0, 400000)));
+    CHECK(!knob.restore());
 
     // Never under TXPOWER's floor.
     AutoAlc low;
-    low.hostLevel(-59.0);
+    low.hostLevel(-59.0, 0);
     low.setEnabled(true);
-    CHECK(near(low.burstEnded(burstDown(2.0)), AutoAlc::LEVEL_MIN_DB));
+    CHECK(near(low.burstEnded(burstStep(-2.0)), AutoAlc::LEVEL_MIN_DB));
 }
 
 int main()
