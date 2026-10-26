@@ -884,6 +884,23 @@ void notch()
         CHECK(!f.dip(2000, 2500));
     }
 
+    // The waterfall's floor from the passband: at a 12 kHz span three
+    // quarters of a row is the roll-off past a 3 kHz filter, 40 dB down.
+    {
+        std::vector<float> row(Spectrum::BINS);
+        for (int i = 0; i < Spectrum::BINS; i++)
+        {
+            const double hz = Spectrum::binHz(i, 12000);
+            row[i] = hz > 70 && hz < 3050 ? -60.0f - (float)(i % 3) : -100.0f;
+        }
+        const float whole = Spectrum::quietLevel(row, 12000, 0, 12000);
+        const float pass = Spectrum::quietLevel(row, 12000, 350, 2650);
+        CHECK(whole < -95.0f);
+        CHECK(pass <= -60.0f && pass >= -62.0f);
+        // Too few bins: the whole row.
+        CHECK_EQ(Spectrum::quietLevel(row, 12000, 1000, 1001), whole);
+    }
+
     // After a write the noise is left out for the hold.
     {
         EdgeFinder f(10.0);
