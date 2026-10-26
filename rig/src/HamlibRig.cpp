@@ -325,6 +325,7 @@ struct HamlibRig::Shared
     bool wantPtt = false;
     bool transmitting = false;
     bool swrTrip = false;
+    bool filterWatch = false;
     bool clearTrip = false;
     std::vector<std::pair<std::string, double>> pokes;   // tests on the dummy rig
     int pollSeconds = 1;
@@ -401,6 +402,17 @@ void HamlibRig::setTransmitting(bool on)
     shared_->wake.notify_all();
 }
 
+void HamlibRig::setFilterWatch(bool on)
+{
+    if (!shared_) return;
+    {
+        std::lock_guard<std::mutex> lock(shared_->mutex);
+        if (shared_->filterWatch == on) return;
+        shared_->filterWatch = on;
+    }
+    shared_->wake.notify_all();
+}
+
 void HamlibRig::setSwrTrip(bool on)
 {
     if (!shared_) return;
@@ -459,6 +471,12 @@ void HamlibRig::run()
     int strengthFailures = 0;
     uint64_t nextStrength = 0;
     uint64_t unkeyedMs = 0;
+    bool filterWatch = false;
+    bool readsMode = false;
+    bool readsPbtIn = false;
+    bool readsPbtOut = false;
+    int modeFailures = 0;
+    uint64_t nextFilter = 0;
     radio::SwrTrip trip;
     bool swrTurn = true;
 
@@ -526,6 +544,7 @@ void HamlibRig::run()
         shared->status.hz.reset();
         shared->status.meters = radio::MeterReading();
         shared->status.strength.reset();
+        shared->status.filter.reset();
         shared->status.problem = why;
         if (wasKeyed) shared->status.pttFailures++;
         shared->status.version++;
@@ -533,7 +552,7 @@ void HamlibRig::run()
 
     for (;;)
     {
-        bool want, tx, clear;
+        bool want, tx, clear, watch;
         int poll;
         std::vector<std::pair<std::string, double>> pokes;
         {
@@ -546,9 +565,17 @@ void HamlibRig::run()
             if (shared->swrTrip != trip.enabled()) trip.setEnabled(shared->swrTrip);
             clear = shared->clearTrip;
             shared->clearTrip = false;
+            watch = shared->filterWatch;
             pokes.swap(shared->pokes);
         }
         uint64_t now = nowMs();
+        if (watch != filterWatch)
+        {
+            // Watched from now; forgotten when the Ear closes.
+            filterWatch = watch;
+            nextFilter = now;
+            if (!watch) shared->update([](Status& s) { s.filter.reset(); });
+        }
         if (clear && trip.tripped())
         {
             trip.clear();
@@ -608,6 +635,12 @@ void HamlibRig::run()
                     readsStrength = rig_has_get_level(rig, RIG_LEVEL_STRENGTH) != 0;
                     strengthFailures = 0;
                     nextStrength = 0;
+                    // Read only: the mode and the PBT are asked, never set.
+                    readsMode = rig->caps->get_mode != nullptr;
+                    readsPbtIn = rig_has_get_level(rig, RIG_LEVEL_PBT_IN) != 0;
+                    readsPbtOut = rig_has_get_level(rig, RIG_LEVEL_PBT_OUT) != 0;
+                    modeFailures = 0;
+                    nextFilter = 0;
                     std::string name = std::string(rig->caps->mfg_name) + " " + rig->caps->model_name;
                     shared->update([&](Status& s) {
                         s.open = true;
@@ -730,14 +763,60 @@ void HamlibRig::run()
             }
         }
 
+        else if (!tx && filterWatch && (readsMode || readsPbtIn || readsPbtOut) && now >= nextFilter)
+        {
+            // The receive filter, for the Ear.
+            nextFilter = now + FILTER_MS;
+            radio::RigFilter filter;
+            if (readsMode)
+            {
+                rmode_t mode = RIG_MODE_NONE;
+                pbwidth_t width = 0;
+                int r = rig_get_mode(rig, RIG_VFO_CURR, &mode, &width);
+                if (r == RIG_OK)
+                {
+                    modeFailures = 0;
+                    filter.mode = rig_strrmode(mode);
+                    filter.widthHz = width > 0 ? (int)width : 0;
+                }
+                else if (r == -RIG_ENIMPL || r == -RIG_ENAVAIL || ++modeFailures >= 3)
+                {
+                    readsMode = false;
+                }
+            }
+            auto pbt = [&](setting_t level, bool& reads) -> std::optional<double> {
+                if (!reads) return std::nullopt;
+                value_t value;
+                value.f = 0;
+                int r = rig_get_level(rig, RIG_VFO_CURR, level, &value);
+                if (r == RIG_OK) return (double)value.f;
+                reads = false;
+                return std::nullopt;
+            };
+            filter.pbtIn = pbt(RIG_LEVEL_PBT_IN, readsPbtIn);
+            filter.pbtOut = pbt(RIG_LEVEL_PBT_OUT, readsPbtOut);
+            std::lock_guard<std::mutex> lock(shared->mutex);
+            std::optional<radio::RigFilter> got = filter.mode.empty() && !filter.pbtIn && !filter.pbtOut
+                                                      ? std::nullopt
+                                                      : std::optional<radio::RigFilter>(filter);
+            if (shared->status.filter != got)
+            {
+                shared->status.filter = got;
+                shared->status.version++;
+            }
+        }
+
         // Sleep until the next reading or try, or until woken.
         uint64_t until = rig == nullptr ? now + 250 : !tx ? nextPoll : meters.empty() ? now + 1000 : nextMeterMs;
         if (rig != nullptr && !tx && readsStrength)
             until = std::min(until, std::max(nextStrength, unkeyedMs + radio::NoiseFloor::SETTLE_MS));
+        if (rig != nullptr && !tx && filterWatch && (readsMode || readsPbtIn || readsPbtOut))
+            until = std::min(until, nextFilter);
         std::unique_lock<std::mutex> lock(shared->mutex);
         shared->wake.wait_for(lock, std::chrono::milliseconds(until > now ? until - now : 1), [&]() {
             return shared->stopping || (rig != nullptr && (shared->wantPtt && !trip.tripped()) != keyed)
-                   || (shared->transmitting || keyed) != tx || shared->clearTrip || !shared->pokes.empty();
+                   || (shared->transmitting || keyed) != tx || shared->clearTrip || !shared->pokes.empty()
+                   || shared->filterWatch != filterWatch;
         });
     }
 
@@ -750,6 +829,7 @@ void HamlibRig::run()
         s.hz.reset();
         s.meters = radio::MeterReading();
         s.strength.reset();
+        s.filter.reset();
     });
 }
 

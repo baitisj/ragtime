@@ -87,6 +87,19 @@ void EarScope::setNarrow(bool narrow)
     Refresh();
 }
 
+void EarScope::setEdges(const std::optional<ragtime::ear::Edges>& edges)
+{
+    edges_ = edges;
+    Refresh();
+}
+
+void EarScope::setRigWidth(int widthHz)
+{
+    if (widthHz == rigWidth_) return;
+    rigWidth_ = widthHz;
+    Refresh();
+}
+
 void EarScope::addRows(const std::vector<std::vector<float>>& rows, bool transmitting)
 {
     if (rows.empty()) return;
@@ -221,6 +234,55 @@ void EarScope::paint()
         gc->StrokePath(line);
     }
 
+    // The edges the noise shows: orange, with the -6 dB line between.
+    const wxColour orange = dark ? wxColour(255, 160, 70) : wxColour(214, 100, 20);
+    if (edges_)
+    {
+        gc->SetPen(wxPen(orange, FromDIP(2)));
+        const double y = yOf(edges_->passbandDb - ragtime::ear::EdgeFinder::DROP_DB);
+        for (const std::optional<double>& hz : {edges_->lowHz, edges_->highHz})
+            if (hz) gc->StrokeLine(xOf(*hz), plot_.y, xOf(*hz), plot_.GetBottom());
+        const double from = edges_->lowHz ? xOf(*edges_->lowHz) : plot_.x;
+        const double to = edges_->highHz ? xOf(*edges_->highHz) : plot_.GetRight();
+        wxPen dotted(orange, 1, wxPENSTYLE_SHORT_DASH);
+        gc->SetPen(dotted);
+        gc->StrokeLine(from, y, to, y);
+        wxString label = wxString::FromUTF8("\xe2\x88\x92" "6 dB");
+        if (edges_->lowHz && edges_->highHz)
+            label += wxString::FromUTF8(" \xc2\xb7 ") +
+                     // The width of the edges as the Ear's words give them, to 10 Hz.
+                     wxString::Format("%d Hz", (int)(std::lround(*edges_->highHz / 10.0) -
+                                                     std::lround(*edges_->lowHz / 10.0)) * 10);
+        gc->SetFont(small, orange);
+        double w, h;
+        gc->GetTextExtent(label, &w, &h);
+        gc->DrawText(label, std::max((double)plot_.x, (from + to - w) / 2), std::min(y + 2, plot_.GetBottom() - h));
+        gc->SetFont(small, text);
+    }
+    // The rig's width, a dashed bracket over the top.
+    if (rigWidth_ > 0)
+    {
+        const wxColour purple = dark ? wxColour(190, 150, 255) : wxColour(120, 70, 190);
+        double centre = ragtime::ear::DATA2G_CENTRE_HZ;
+        if (edges_ && edges_->lowHz && edges_->highHz) centre = (*edges_->lowHz + *edges_->highHz) / 2;
+        const double x0 = xOf(centre - rigWidth_ / 2.0), x1 = xOf(centre + rigWidth_ / 2.0);
+        const double y = plot_.y + FromDIP(18);
+        gc->SetPen(wxPen(purple, FromDIP(2), wxPENSTYLE_SHORT_DASH));
+        wxGraphicsPath bracket = gc->CreatePath();
+        bracket.MoveToPoint(x0, y + FromDIP(6));
+        bracket.AddLineToPoint(x0, y);
+        bracket.AddLineToPoint(x1, y);
+        bracket.AddLineToPoint(x1, y + FromDIP(6));
+        gc->StrokePath(bracket);
+        wxString label = wxString::Format("rig %d Hz", rigWidth_);
+        gc->SetFont(small, purple);
+        double w, h;
+        gc->GetTextExtent(label, &w, &h);
+        // Above the bracket's right end, clear of the edges' lines.
+        gc->DrawText(label, std::max((double)plot_.x, std::min(x1, (double)plot_.GetRight()) - w), y - h - 1);
+        gc->SetFont(small, text);
+    }
+
     // The frequency axis between the two.
     for (int hz = 0; hz <= (int)Spectrum::TOP_HZ; hz += 500)
     {
@@ -247,10 +309,17 @@ void EarScope::paint()
         gc->GetTextExtent(label, &w, &h);
         gc->DrawText(label, fall_.x - w - FromDIP(4), std::min(y, (double)fall_.GetBottom() - h));
     }
-    // The passband's edges, faintly down the waterfall.
+    // The passband's edges, faintly down the waterfall, and the edges the
+    // noise shows.
     gc->SetPen(wxPen(wxColour(255, 255, 255, 70)));
     const ragtime::ear::Passband in = narrow_ ? narrow : wide;
     for (double hz : {in.lowHz, in.highHz}) gc->StrokeLine(xOf(hz), fall_.y, xOf(hz), fall_.GetBottom());
+    if (edges_)
+    {
+        gc->SetPen(wxPen(wxColour(orange.Red(), orange.Green(), orange.Blue(), 150), 1, wxPENSTYLE_SHORT_DASH));
+        for (const std::optional<double>& hz : {edges_->lowHz, edges_->highHz})
+            if (hz) gc->StrokeLine(xOf(*hz), fall_.y, xOf(*hz), fall_.GetBottom());
+    }
 
     // The frequency under the mouse.
     if (mouseX_ >= plot_.x && mouseX_ <= plot_.GetRight())

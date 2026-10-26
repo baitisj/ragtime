@@ -45,7 +45,10 @@
 // under half from about -4 dB, for Auto ALC to settle),
 // and the S-meter "+l STRENGTH": the band's noise, -40 dB over S9 (S2/S3)
 // or --rig-noise DB, a few dB more now and then, and a station at -10 dB
-// one reading in six. It prints anything else it is sent (Ragtime should only ever ask those).
+// one reading in six. For the Ear it answers "+m" with USB and a
+// 2400 Hz filter, and "+l PBT_IN" and "+l PBT_OUT" with the knob in the
+// middle (0.5). It prints anything else it is sent (Ragtime should only
+// ever ask those).
 // --rig-vfo plays one started with --vfo: \chk_vfo is 1, and it answers
 // "f currVFO" and "+l currVFO ALC", but not a bare "f".
 // --dial-hop moves the dial to 14.250 MHz, outside the US data segments,
@@ -152,8 +155,8 @@ void readSome(int fd, std::vector<uint8_t>& out)
     }
 }
 
-// A rigctld that knows two commands: "\chk_vfo", and "f", the dial
-// frequency ("f currVFO" when it plays --vfo).
+// A rigctld that knows the questions Ragtime asks: "\chk_vfo", "f", the
+// dial frequency ("f currVFO" when it plays --vfo), the levels and "+m".
 class FakeRig
 {
 public:
@@ -218,10 +221,16 @@ public:
                         std::snprintf(value, sizeof value, "%.6f\n", swr_);
                     else if (level == "RFPOWER_METER_WATTS")
                         std::snprintf(value, sizeof value, "%.6f\n", 38.0);
+                    else if (level == "PBT_IN" || level == "PBT_OUT")
+                        std::snprintf(value, sizeof value, "%.6f\n", 0.5);
                     else if (level == "STRENGTH")
                         std::snprintf(value, sizeof value, "%d\n",
                                       ++strengths_ % 6 == 0 ? -10 : noise_ + (int)(nowMs / 5000 % 4));
                     answer = head + (value[0] != 0 ? std::string(value) + "RPRT 0\n" : std::string("RPRT -11\n"));
+                }
+                else if (line == (vfo_ ? "+m currVFO" : "+m"))
+                {
+                    answer = "get_mode:" + std::string(vfo_ ? " currVFO" : "") + "\nMode: USB\nPassband: 2400\nRPRT 0\n";
                 }
                 else if (line == (vfo_ ? "f currVFO" : "f"))
                 {
@@ -232,7 +241,7 @@ public:
                 else
                 {
                     std::printf("fake rigctld was sent \"%s\": Ragtime should only ask \"\\chk_vfo\", \"%s\" and "
-                                "the meters\n",
+                                "the levels and +m\n",
                                 line.c_str(), vfo_ ? "f currVFO" : "f");
                     std::fflush(stdout);
                     // A --vfo rigctld waits for the VFO a bare "f" lacks.

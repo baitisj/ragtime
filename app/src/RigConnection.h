@@ -73,6 +73,12 @@ public:
     std::vector<double> takeStrength() { return reader_.takeStrength(); }
     // The SWR trip is on: the SWR every other question while keyed.
     void setSwrWatch(bool on) { reader_.setSwrWatch(on); }
+    // The Ear is open: the filter between bursts ("+m", PBT), read only.
+    void setFilterWatch(bool on);
+    std::optional<ragtime::radio::RigFilter> filter() const
+    {
+        return up_ ? reader_.filter() : std::optional<ragtime::radio::RigFilter>();
+    }
 
 private:
     void resolve();

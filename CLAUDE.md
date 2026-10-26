@@ -130,7 +130,9 @@ with the code when the seal rules change.
   asks rigctld `\chk_vfo`, `f`, while transmitting the meters
   `+l ALC`, `+l SWR` and `+l RFPOWER_METER_WATTS`, and between bursts
   the S-meter `+l STRENGTH` for the band's noise (`radio::NoiseFloor`,
-  the gearshift's QRN line), naming `currVFO` for a `--vfo` one; `Bands`, the US data segments; `PathLog`, a line a
+  the gearshift's QRN line), and while the Ear is open the filter
+  (`+m`, `+l PBT_IN`, `+l PBT_OUT`, Jeff's OK 2026-10-26), naming
+  `currVFO` for a `--vfo` one; `Bands`, the US data segments; `PathLog`, a line a
   burst heard, appended, and each station's 24-hour strip by band),
   `broadcast::WatchList` (bells, and Tell me when free), and in the app
   `RigConnection`, `PathStripView`, `PathsDialog` and `WatchDialog`.
@@ -174,8 +176,11 @@ with the code when the seal rules change.
   hears (`app/src/EarFrame`, `EarScope`), with Data2G's passbands drawn
   on it. It records alongside data2g-host from the same PipeWire source
   (`ear::findHostCapture`, `audio::EarAudio` in `audio/`), passive and
-  only while open. Step 1 of 3: next, the rig's filter edges read only,
-  then dragging them (Hamlib only, opt-in, a Keep/Undo clock).
+  only while open. Step 2: it reads the rig's filter while open (mode,
+  width, PBT; `radio::RigFilter`, through rigctld or Hamlib) and
+  measures the real edges from the band's noise (`ear::EdgeFinder`),
+  drawing both. Next, step 3: dragging them (Hamlib only, opt-in, a
+  Keep/Undo clock).
 - Data2G PR #98 (merged 2026-10-23) gives SNRs: on `BCAST HEARD` and
   `MISSED`, and `SN` for the session partner. Ragtime shows them in the
   station list's SNR column and feeds the gearshift's Auto the weakest
@@ -257,7 +262,7 @@ with the code when the seal rules change.
   copy, never defined terms in the spec.
 - The radio is the source of truth for frequency: retune only when the
   operator asks. Ragtime reads the dial and the transmit meters from
-  rigctld (`\chk_vfo`, `f` and `+l` levels only, never a set command:
+  rigctld (`\chk_vfo`, `f`, `+m` and `+l` levels only, never a set command:
   the operator's rigctld is shared), or from the rig it
   opens with Hamlib, where PTT is the only thing it sets, and the SWR
   trip (off by default) the only thing that sets the power, to 0. It
@@ -339,7 +344,8 @@ in three; `--rig-vfo` plays a rigctld started with `--vfo`; it answers
 the meters too, its SWR 1.3 or `--rig-swr X`, an ALC that follows host
 A's `TXPOWER` for Auto ALC, and the S-meter, -40 dB over S9 or
 `--rig-noise DB`) and prints anything it is
-sent but `\chk_vfo`, `f` and the meters. For Hamlib with no
+sent but `\chk_vfo`, `f`, the levels and `+m` (it says USB, a 2400 Hz
+filter and PBT centred, whatever the pretend radio's filter is). For Hamlib with no
 radio, pick maker Hamlib, model Dummy in Settings > Rig: a pretend rig
 at 145 MHz, which "Key the rig" keys at the fake hosts' PTT. Headless:
 `Xvfb :91 &`, `DISPLAY=:91 ragtime ...`, `xdotool` to click and type,
