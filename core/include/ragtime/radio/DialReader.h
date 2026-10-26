@@ -229,6 +229,7 @@ private:
     std::optional<RigFilter> filter_;
     std::optional<RigFilter> reading_;      // the one coming in
     std::optional<RigFilter> filterWrite_;  // to send
+    std::optional<RigFilter> sent_;         // written since the last whole reading
     std::vector<std::string> setLines_;     // its commands still to send
     std::string setLine_;                   // the one out
     std::string filterProblem_;

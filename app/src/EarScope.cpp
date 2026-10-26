@@ -132,9 +132,14 @@ void EarScope::setRigWidth(int widthHz)
     Refresh();
 }
 
-void EarScope::setHandles(const std::optional<ragtime::ear::Span>& at, bool together, bool shift)
+void EarScope::setHandles(const std::optional<ragtime::ear::Span>& at, bool together, bool shift, bool movable)
 {
     together_ = together;
+    if (movable != movable_)
+    {
+        movable_ = movable;
+        Refresh();
+    }
     if (shift != shift_)
     {
         shift_ = shift;
@@ -191,7 +196,7 @@ EarScope::Grip EarScope::gripAt(int x, int y) const
     const bool notch = notch_ && notch_->movable;
     if (notch && !notch_->on && bay_.Contains(x, y)) return Grip::Notch;
     if (notch && notch_->on && notchKnob(xOf(notch_->hz)).Contains(x, y)) return Grip::Notch;
-    if (!handles_)
+    if (!handles_ || !movable_)
         return notch && notch_->on && std::abs(x - (int)xOf(notch_->hz)) <= near ? Grip::Notch : Grip::None;
     if (std::abs(x - (int)xOf(handles_->lowHz)) <= near) return Grip::Low;
     if (std::abs(x - (int)xOf(handles_->highHz)) <= near) return Grip::High;
@@ -514,8 +519,10 @@ void EarScope::paint()
     // The handles: a tab on each edge, and the shift band between them.
     if (handles_ && !drag_)
     {
+        // Grey while they're held still.
+        const wxColour tabs = movable_ ? orange : wxColour(150, 150, 150);
         gc->SetPen(*wxTRANSPARENT_PEN);
-        gc->SetBrush(wxBrush(orange));
+        gc->SetBrush(wxBrush(tabs));
         const double tab = FromDIP(7);
         for (double hz : {handles_->lowHz, handles_->highHz})
         {
@@ -530,11 +537,11 @@ void EarScope::paint()
         {
             // The shift band, with a grip in its middle.
             const double l = xOf(handles_->lowHz), h = xOf(handles_->highHz), mid = (l + h) / 2;
-            gc->SetBrush(wxBrush(wxColour(orange.Red(), orange.Green(), orange.Blue(), 40)));
+            gc->SetBrush(wxBrush(wxColour(tabs.Red(), tabs.Green(), tabs.Blue(), 40)));
             gc->DrawRectangle(l, plot_.y, h - l, FromDIP(30));
             // An orange pill with an arrow each way.
             const double g = FromDIP(4), y = plot_.y + FromDIP(15), pw = FromDIP(30), ph = FromDIP(16);
-            gc->SetBrush(wxBrush(orange));
+            gc->SetBrush(wxBrush(tabs));
             gc->DrawRoundedRectangle(mid - pw / 2, y - ph / 2, pw, ph, ph / 2);
             gc->SetBrush(*wxWHITE_BRUSH);
             for (double side : {-1.0, 1.0})

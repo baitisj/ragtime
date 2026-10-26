@@ -2486,6 +2486,10 @@ void MainFrame::setEar(bool open)
         ear_->setHost(prefs_.host, prefs_.commandPort);
         ear_->setNarrow(gearshift_.narrowOnly());
         ear_->setTransmitting(bar_->tx->isOn());
+        ear_->setHostBusy([this]() -> std::optional<bool> {
+            if (!link_.commandConnected()) return std::nullopt;
+            return link_.busy();
+        });
         // The rig's filter, read between bursts while the Ear is open.
         rig_->setFilterWatch(true);
         ear_->setRig([this] {

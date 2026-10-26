@@ -616,6 +616,9 @@ void FakeHost::sendBurst()
     }
     reply("PTT ON");
     reply("MODE " + mode_);
+    // The other hosts hear it coming in: BUSY while it lasts.
+    for (FakeHost* h : air_.hosts_)
+        if (h != this && h->groupOpen_) h->reply("BUSY ON");
     onAir_ = std::move(burst);
     onAirUntilMs_ = nowMs() + airtimeMs_;
     if (airtimeMs_ <= 0) finishBurst();
@@ -629,6 +632,7 @@ void FakeHost::finishBurst()
     for (FakeHost* h : air_.hosts_)
     {
         if (h == this || !h->groupOpen_) continue;
+        h->reply("BUSY OFF");
         std::vector<const Tagged*> heard;
         for (const Tagged& t : burst)
         {

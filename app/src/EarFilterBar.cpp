@@ -153,7 +153,8 @@ EarFilterBar::EarFilterBar(wxWindow* parent, EarScope* scope, FilterEdit& edit, 
     });
     undo_->Bind(wxEVT_BUTTON, [this](wxCommandEvent&) {
         edit_.undo();
-        wanted_.reset();
+        // Where it goes back to, shown at once.
+        wanted_ = edit_.reverting() ? from_ : std::nullopt;
         miss_.clear();
         if (edges_) show(nowMs_, *edges_);
     });
@@ -237,6 +238,7 @@ std::optional<Span> EarFilterBar::spanNow() const
 void EarFilterBar::tick(uint64_t nowMs, bool quiet, ear::EdgeFinder& edges, const EarRig& rig, bool narrow)
 {
     nowMs_ = nowMs;
+    quiet_ = quiet;
     edges_ = &edges;
     narrow_ = narrow;
     rig_ = rig;
@@ -329,7 +331,7 @@ void EarFilterBar::tick(uint64_t nowMs, bool quiet, ear::EdgeFinder& edges, cons
     const bool canDrag = settable() && setting() && !calibration_.running() && !restore_ &&
                          edit_.state() != FilterEdit::State::Waiting;
     const std::optional<RigFilter> f = setting();
-    scope_->setHandles(canDrag ? spanNow() : std::nullopt, !calibrated(), f && f->pbtIn && f->pbtOut);
+    scope_->setHandles(canDrag ? spanNow() : std::nullopt, !calibrated(), f && f->pbtIn && f->pbtOut, quiet_);
     if (edit_.state() == FilterEdit::State::Idle) wanted_.reset();
     scope_->setWanted(wanted_);
 
@@ -430,7 +432,7 @@ void EarFilterBar::showNotch(ear::EdgeFinder& edges)
     n.on = *f->notchOn && f->notchRaw;
     if (n.on) n.hz = notchModel_.hzOf(*f->notchRaw);
     if (on && n.on && rig->notchRaw == f->notchRaw) n.dipHz = dipHz_;
-    n.movable = settable() && !calibration_.running() && !restore_ && edit_.state() != FilterEdit::State::Waiting;
+    n.movable = adjustable() && !calibration_.running() && !restore_ && edit_.state() != FilterEdit::State::Waiting;
     scope_->setNotch(n);
 }
 
@@ -603,7 +605,7 @@ void EarFilterBar::write(const RigFilter& f, const std::string& why, ear::EdgeFi
 
 void EarFilterBar::showPresets()
 {
-    const bool on = settable() && rig_.filter && !calibration_.running();
+    const bool on = adjustable() && rig_.filter && !calibration_.running();
     for (PresetButton* p : presets_) p->Enable(on);
     disable_->Enable(on);
     // Pushed in: what the rig has now, or was last given.
@@ -643,8 +645,8 @@ void EarFilterBar::show(uint64_t nowMs, const ear::EdgeFinder&)
 
     calibrate_->SetLabel(calibrating ? "Stop" : "Calibrate");
     calibrate_->Enable(calibrating ||
-                       (settable() && f && f->pbtIn && f->pbtOut && idle && !restore_ && !edit_.reverting()));
-    putBack_->Enable(settable() && idle && !calibrating && !restore_ && edit_.found() && edit_.current() &&
+                       (adjustable() && f && f->pbtIn && f->pbtOut && idle && !restore_ && !edit_.reverting()));
+    putBack_->Enable(adjustable() && idle && !calibrating && !restore_ && edit_.found() && edit_.current() &&
                      *edit_.found() != *edit_.current());
 
     wxString text;
@@ -662,7 +664,7 @@ void EarFilterBar::show(uint64_t nowMs, const ear::EdgeFinder&)
     }
     else if (edit_.reverting())
     {
-        text = "Putting it back" + DOT + "waiting for a quiet moment";
+        text = "Putting it back" + DOT + "waiting for the burst to end";
     }
     else if (state == FilterEdit::State::Waiting || trial)
     {
@@ -678,9 +680,9 @@ void EarFilterBar::show(uint64_t nowMs, const ear::EdgeFinder&)
         else
             text = "Changing the filter";
         if (edit_.keptAhead())
-            text += DOT + "kept: written at the next quiet moment";
+            text += DOT + "kept: written when the burst ends";
         else if (state == FilterEdit::State::Waiting)
-            text += DOT + "waiting for a quiet moment";
+            text += DOT + "waiting for the burst to end";
         else if (!miss_.empty())
             text += DOT + utf8(miss_);
         if (cutsData2G())
@@ -723,6 +725,10 @@ void EarFilterBar::show(uint64_t nowMs, const ear::EdgeFinder&)
     {
         text = "Waiting for the rig to say its filter";
     }
+    else if (!quiet_)
+    {
+        text = "On the air: the filter holds still until the burst ends";
+    }
     else if (!calibrated())
     {
         text = f->pbtIn && f->pbtOut ? "Drag the middle to shift, or an edge for the width. Calibrate frees each "
@@ -761,6 +767,8 @@ void EarFilterBar::show(uint64_t nowMs, const ear::EdgeFinder&)
         // While waiting too: kept as it is written (Jeff, 2026-10-26).
         keep_->Enable(trial || (state == FilterEdit::State::Waiting && !edit_.keptAhead()));
         keep_->SetLabel(keepArmed_ ? "Keep anyway" : "Keep");
+        // Going back writes: not while on the air. Keep writes nothing.
+        undo_->Enable(quiet_);
         undo_->SetToolTip(trial ? "Put the filter back as it was before the change"
                                 : "Forget the change before it is written");
     }

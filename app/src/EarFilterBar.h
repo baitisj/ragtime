@@ -94,6 +94,9 @@ private:
     bool onFm() const;
     // The Ear may set the filter now.
     bool settable() const { return rig_.canSet && !onFm(); }
+    // Settable now: not while keyed or a burst comes in, when everything
+    // is greyed rather than held back (Jeff, 2026-10-26).
+    bool adjustable() const { return settable() && quiet_; }
     std::optional<ragtime::ear::Span> spanOfFilter(const ragtime::radio::RigFilter& f) const;
     std::optional<ragtime::ear::Span> measured(const ragtime::ear::EdgeFinder& edges) const;
     std::optional<ragtime::radio::RigFilter> setting() const;
@@ -126,6 +129,7 @@ private:
     std::optional<ragtime::ear::Span> wanted_;  // what the change was for
     std::optional<ragtime::ear::Span> landing_; // just written: shown until the noise shows it
     bool keepArmed_ = false;                // a cut into Data2G: Keep again
+    bool quiet_ = true;                     // not keyed, no burst coming in
     std::string miss_;                      // where the edges really went
     uint64_t writtenMs_ = 0;
     std::optional<ragtime::radio::RigFilter> restore_;  // to write once quiet

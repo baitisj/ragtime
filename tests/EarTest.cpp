@@ -889,10 +889,13 @@ void notch()
         EdgeFinder f(10.0);
         for (int i = 0; i < 60; i++) f.addRow(noiseRow(rng, 300, 2700), false);
         CHECK(f.edges().has_value());
+        CHECK(!f.settling());
         f.restart(7.0);
+        CHECK(f.settling());
         for (int i = 0; i < 70; i++) f.addRow(noiseRow(rng, 300, 2700, {{0, 4000, 10.0}}), false);
         CHECK(f.quietSeconds() == 0.0);
         CHECK(f.quietRunSeconds() == 0.0);
+        CHECK(!f.settling());
         CHECK(!f.edges());
         for (int i = 0; i < 30; i++) f.addRow(noiseRow(rng, 300, 2700), false);
         CHECK(f.edges().has_value());

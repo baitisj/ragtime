@@ -115,6 +115,9 @@ public:
     // Seconds since the last row with a signal in it, or heard while
     // transmitting: how long the band has been quiet.
     double quietRunSeconds() const { return quietRun_ / rowsPerSecond_; }
+    // Holding off after restart(): the rig's AGC is settling, so whether
+    // the band is quiet can't be told.
+    bool settling() const { return holdRows_ > 0; }
 
 private:
     double binHz(int i) const;
