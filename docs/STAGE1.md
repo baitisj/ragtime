@@ -1119,8 +1119,13 @@ into 512 bins from 0 to 4000 Hz. Rows come 5, 10 or 20 a second
 (Speed: Slow, Normal, Fast). The top is the last second's spectrum,
 averaged as power, with dB and Hz axes; the waterfall below holds 600
 rows, newest at the top, coloured navy to blue to cyan to yellow from
-the noise floor up (the floor is a slow 30th percentile, and the range
-runs from 6 dB below it to 50 dB above). Rows heard while data2g-host
+the noise floor up (the floor is a slow 30th percentile of the
+passband's bins, between the edges the noise shows or in Data2G's
+passband until it shows them, and the range runs from 6 dB below it to
+50 dB above; the spectrum's scale hangs from it too). Not the whole
+row's: at 12 kHz three quarters of it is the roll-off past the rig's
+filter, which sank the floor and lifted the band's noise to yellow
+(Jeff, 2026-10-26, `Spectrum::quietLevel`). Rows heard while data2g-host
 transmits are greyed. Data2G's passbands are drawn in green, from its
 `FCENTER` of 1500 Hz: 350 to 2650 Hz for the wide modes and 1250 to
 1750 Hz for the 500 Hz ones (`ear/Passbands.h`); the one in use (the

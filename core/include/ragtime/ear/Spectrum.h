@@ -54,6 +54,12 @@ public:
     static double binHz(int i, double topHz = DEFAULT_TOP_HZ) { return (i + 0.5) * topHz / BINS; }
     // The bin a frequency falls in, clamped to the row.
     static int binOf(double hz, double topHz = DEFAULT_TOP_HZ);
+    // The quieter part of a row's noise, for the waterfall's colours: the
+    // 30th percentile of the bins from lowHz to highHz (the passband), or
+    // of the whole row when that holds fewer than 4 bins. Not the whole
+    // row: at a wide span most of it is past the rig's filter, far below
+    // the band's noise.
+    static float quietLevel(const std::vector<float>& row, double topHz, double lowHz, double highHz);
 
 private:
     void restart();
