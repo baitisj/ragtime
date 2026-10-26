@@ -2090,7 +2090,9 @@ void testRepairsShown()
                   == theirs.repairHeld);
             for (const files::FileRow& r : b.files.rows(now))
             {
-                if (r.id == theirs.id) coveredShown = coveredShown || r.handed > r.done;
+                // Its pieces' bytes, and as many again for each repair piece.
+                uint64_t pb = (uint64_t)broadcast::pieceBytesFor(broadcast::findMode({}, "qpsk-r1/3"), "AG7EW");
+                if (r.id == theirs.id) coveredShown = coveredShown || r.done > (uint64_t)theirs.held * pb;
             }
         }
         // The round goes on to its end, though the file is whole.

@@ -1522,10 +1522,11 @@ std::vector<files::FileRow> BroadcastFiles::rows(uint64_t nowMs) const
         if (!in.announced || !in.file.live()) continue;
         BroadcastFile f = view(in, nowMs);
         files::FileRow row = base(f);
-        row.done = std::min<uint64_t>(f.size, in.bytes);
         // Repair pieces held count toward the whole: they make up the
-        // missing pieces once there are enough of them.
-        row.handed = std::min<uint64_t>(f.size, in.bytes + (uint64_t)f.repairHeld * in.announce.pieceBytes);
+        // missing pieces once there are enough of them (KC2G, 2026-10-26:
+        // "my completion doesn't go up at all").
+        row.done = std::min<uint64_t>(f.size, in.bytes + (uint64_t)f.repairHeld * in.announce.pieceBytes);
+        row.handed = row.done;
         size_t have = in.pieces.size() + in.parity.size();
         size_t missing = have < f.pieces ? (size_t)f.pieces - have : 0;
         if (f.state == State::Heard)
