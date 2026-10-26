@@ -15,16 +15,16 @@ constexpr int MIN_PIECE_BYTES = 16;
 
 int codewordsFor(const std::vector<int>& frameBytes, const link::ModeInfo& mode)
 {
-    int bytes = 0;
-    for (int length : frameBytes) bytes += link::framedBytes(length);
+    int bytes = link::burstDataBytes(frameBytes, mode.bytesPerCodeword);
     return 1 + (bytes + mode.bytesPerCodeword - 1) / mode.bytesPerCodeword;
 }
 
-// The longest frame that, framed, fits `bytes`.
+// The longest frame that, framed and with the zero before it that a frame
+// starting a codeword gets, fits `bytes`.
 int longestFrameIn(int bytes)
 {
-    int n = bytes - 2;
-    while (n > 1 && link::framedBytes(n) > bytes) n--;
+    int n = bytes - 3;
+    while (n > 1 && 1 + link::framedBytes(n) > bytes) n--;
     return std::max(1, n);
 }
 
@@ -62,10 +62,10 @@ int pieceFrameBytes(const link::ModeInfo& mode)
 {
     const int limit = (int)protocol::MAX_BROADCAST_FRAME;
     int pb = mode.bytesPerCodeword;
-    if (!mode.valid() || link::framedBytes(limit) <= pb) return limit;
+    if (!mode.valid() || 1 + link::framedBytes(limit) <= pb) return limit;
     // Every codeword but the burst's control one may carry data.
     int most = std::max(1, mode.maxCodewords - 1);
-    int k = isCpmMode(mode) ? 3 : link::framedBytes(limit) / pb;
+    int k = isCpmMode(mode) ? 3 : (1 + link::framedBytes(limit)) / pb;
     k = std::min(std::max(k, 1), most);
     while (k > 1 && longestFrameIn(k * pb) > limit) k--;
     return std::min(longestFrameIn(k * pb), limit);

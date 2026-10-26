@@ -109,14 +109,18 @@ are in `data2g/codes_data/mode_thresholds.json` (GEARBOX.md).
   in 18 bytes), then the data: `[length, 2 bytes][frame]` back to back,
   zero padded. The receiver checks the control, then the data, under the
   group's key.
-- **Broadcast v3** (Data2G PR #121, open at d7d2b80, not merged).
+- **Broadcast v3** (Data2G PR #121, open at 68dbaea, not merged).
   Header version 3, and a v2 burst is skipped as another kind: v2 and v3
   hosts don't hear each other's broadcasts. Three changes:
   - Each frame is COBS-encoded (no zero byte left in it) and ended by a
     zero byte, back to back, zero padded. It takes at most
     `framed_len(n) = n + 2 + n // 254` bytes: n + 2 up to 253, as the
-    length did, 258 for our 255-byte frames. Ragtime counts it so
-    (`link::framedBytes`) for v2 and v3 alike.
+    length did, 258 for our 255-byte frames. A frame that would start a
+    codeword, the data's first included, gets a zero byte before it, one
+    byte more. A frame that fills k codewords is k × bytes-per-codeword
+    − 3 bytes long (up to 253). Ragtime counts both
+    (`link::framedBytes`, `link::burstDataBytes`); on a v2 host that is a
+    byte a frame over.
   - `BCAST MODE n [AUTO] DUP mode` sends each control codeword twice,
     RV 0 then RV 1, and a receiver combines the pair when the first copy
     fails alone (about 3 dB on the control). Off by default; Ragtime
@@ -137,19 +141,18 @@ are in `data2g/codes_data/mode_thresholds.json` (GEARBOX.md).
 - **v3 (PR #121): a lost codeword loses the frames it touches.** A zero
   byte in a good codeword always ends a frame, so the receiver picks up
   at the next zero after a bad codeword. `LOST k` counts each run of
-  frames between good zeros as one, so at least k frames were lost
-  (broadcast.md words it the other way round). A frame's start is known
-  only from the zero before it, so a frame that starts a codeword is lost
-  with the codeword before it, all of it arrived or not. Ragtime's
-  pieces start codewords, so a piece of k codewords arrives with
-  probability (1 − q)^(k+1), not (1 − q)^k, every burst's first piece
-  aside. Run on #121's `unpack_frames`: four one-codeword frames, the
-  first codeword lost, and frames 2 and 3 arrive with `LOST 1`. A zero
-  written first in such a codeword (an empty frame, which the receiver
-  skips) would mend it; that is our ask (below).
+  frames between good zeros as one, so at least k frames were lost; with
+  frames filling whole codewords, as our pieces do, k is exact. A frame's
+  start is known only from the zero before it. That is why a frame
+  starting a codeword gets a zero of its own there: without it (as at
+  d7d2b80), the zero would be the codeword before's last byte, and a
+  frame all of whose bytes arrived would be lost with that codeword. The
+  team asked for it in its review, and 68dbaea added it.
 - **Control lost.** v2 tries the first data codeword under each open
-  port's key; v3 probes slots 1 to 8, and believes one slot alone only
-  where v2 would have. Either way the burst arrives with no call on
+  port's key. v3 looks only when slot 0 didn't decode at all (a slot 0
+  that decoded but isn't a broadcast control is some other burst), then
+  probes slots 1 to 8, and believes one slot alone only where v2 would
+  have. Either way the burst arrives with no call on
   `HEARD`, and Ragtime then leaves its S/N out of the path's.
 - No resends at this layer. `docs/broadcast.md` lists incremental
   redundancy across broadcast bursts as not done: our parity (PROTOCOL.md,
@@ -199,9 +202,5 @@ are in `data2g/codes_data/mode_thresholds.json` (GEARBOX.md).
 - A dial report from the host's own rig control.
 - A 200 Hz session cap.
 - The Hand (`HAND SEND`, `HAND LISTEN`, Stage 2).
-- In broadcast v3 (PR #121), a zero byte first in any codeword a frame
-  starts, so that frame doesn't depend on the codeword before it (Loss).
-  It costs a byte at those boundaries, and v3 receivers already read it.
-  Ragtime's pieces would then be 3 bytes short of whole codewords, not 2.
 - A note when a v2 broadcast is heard by a v3 host, so an operator knows
   to update.

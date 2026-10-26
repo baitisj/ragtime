@@ -174,6 +174,11 @@ void testModes()
     CHECK_EQ(framedBytes(253), 255);
     CHECK_EQ(framedBytes(254), 257);
     CHECK_EQ(framedBytes(255), 258);
+    // And a zero before a frame that would start a codeword: two 73-byte
+    // frames fill two 76-byte codewords; a 74-byte one starts the second
+    // codeword inside it, so the next frame needs none.
+    CHECK_EQ(burstDataBytes({73, 73}, 76), 152);
+    CHECK_EQ(burstDataBytes({74, 10}, 76), 89);
 
     // A burst is one control codeword and the frames, each framed:
     // qpsk-r1/3 carries 76 bytes a codeword.
@@ -183,8 +188,8 @@ void testModes()
         if (mode.name == "qpsk-r1/3") qpsk = mode;
     }
     CHECK(qpsk.valid());
-    CHECK(std::fabs(qpsk.burstSeconds({74}) - (qpsk.secondsAtOne + (qpsk.secondsAtMax - qpsk.secondsAtOne) / 63)) < 1e-9);
-    CHECK(qpsk.burstSeconds({75}) > qpsk.burstSeconds({74}));
+    CHECK(std::fabs(qpsk.burstSeconds({73}) - (qpsk.secondsAtOne + (qpsk.secondsAtMax - qpsk.secondsAtOne) / 63)) < 1e-9);
+    CHECK(qpsk.burstSeconds({74}) > qpsk.burstSeconds({73}));
     // Never past the most codewords a burst takes.
     CHECK(std::fabs(qpsk.burstSeconds({100000}) - qpsk.secondsAtMax) < 1e-9);
     CHECK(ModeInfo().burstSeconds({10}) == 0.0);
