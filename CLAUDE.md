@@ -131,9 +131,11 @@ with the code when the seal rules change.
   `+l ALC`, `+l SWR` and `+l RFPOWER_METER_WATTS`, and between bursts
   the S-meter `+l STRENGTH` for the band's noise (`radio::NoiseFloor`,
   the gearshift's QRN line), and while the Ear is open the filter
-  (`+m`, `+l PBT_IN`, `+l PBT_OUT`, Jeff's OK 2026-10-26), naming
+  (`+m`, `+l PBT_IN`, `+l PBT_OUT`, `+u MN`, `+l NOTCHF_RAW`, Jeff's
+  OK 2026-10-26), naming
   `currVFO` for a `--vfo` one, and sets only the Ear's filter (`M`,
-  `L PBT_IN`, `L PBT_OUT`, with its box ticked); `Bands`, the US data segments; `PathLog`, a line a
+  `L PBT_IN`, `L PBT_OUT`, `L NOTCHF_RAW`, `U MN`, each only when it
+  differs, with its box ticked); `Bands`, the US data segments; `PathLog`, a line a
   burst heard, appended, and each station's 24-hour strip by band),
   `broadcast::WatchList` (bells, and Tell me when free), and in the app
   `RigConnection`, `PathStripView`, `PathsDialog` and `WatchDialog`.
@@ -188,7 +190,10 @@ with the code when the seal rules change.
   (`ear::FilterEdit`, `ear::Calibration` in `ear/FilterControl`;
   `app/src/EarFilterBar`, `EarControls`): on trial for 15 s with a
   clock beside Undo and Keep, Keep pressed twice for a cut into Data2G's
-  passband, four presets (tap recalls, hold stores), Revert (the
+  passband, Disable (PBT centred, notch off) and four presets (tap
+  recalls, hold stores, pushed in while the rig has them), the notch's
+  bar dragged out of its NF OFF bay (`ear::NotchModel`, learned from the
+  dip, `EdgeFinder::dip`), Revert (the
   filter as the Ear found it), and Calibrate for the twin PBT (`ear::KnobModel`: Hz per knob,
   the real centre and width, and a cut in the audio that hides an edge;
   two turns each side, as Jeff's IC-7100 hides its low edge under a cut
@@ -278,14 +283,15 @@ with the code when the seal rules change.
   copy, never defined terms in the spec.
 - The radio is the source of truth for frequency: retune only when the
   operator asks. Ragtime reads the dial and the transmit meters from
-  rigctld (`\chk_vfo`, `f`, `+m` and `+l` levels only: the operator's
+  rigctld (`\chk_vfo`, `f`, `+m`, `+l` levels and `+u MN` only: the operator's
   rigctld is shared), or from the rig it
   opens with Hamlib, where PTT is the only thing it sets, the SWR
   trip (off by default) the only thing that sets the power, to 0. The
   Ear, with its own box ticked (off by default), is the only thing that
-  sets the receive filter's width and PBT, between bursts, through
-  Hamlib or rigctld (`M` and `L PBT_IN`, `L PBT_OUT`, Jeff's OK
-  2026-10-26); it is the only set command Ragtime ever sends rigctld. It
+  sets the receive filter's width, PBT and manual notch, between bursts,
+  through Hamlib or rigctld (`M`, `L PBT_IN`, `L PBT_OUT`,
+  `L NOTCHF_RAW` and `U MN`, Jeff's OK 2026-10-26); it is the only set
+  command Ragtime ever sends rigctld. It
   never keys through rigctld (NET rigctl is left out of the Hamlib
   list).
 
@@ -364,9 +370,10 @@ in three; `--rig-vfo` plays a rigctld started with `--vfo`; it answers
 the meters too, its SWR 1.3 or `--rig-swr X`, an ALC that follows host
 A's `TXPOWER` for Auto ALC, and the S-meter, -40 dB over S9 or
 `--rig-noise DB`) and prints anything it is
-sent but `\chk_vfo`, `f`, the levels, `+m` and the Ear's settings (it
-starts at USB, a 2400 Hz filter and PBT centred, whatever the pretend
-radio's filter is, takes `M` and `L PBT_IN`, `L PBT_OUT`, prints each
+sent but `\chk_vfo`, `f`, the levels, `+m`, `+u MN` and the Ear's
+settings (it starts at USB, a 2400 Hz filter, PBT centred and the notch
+off at 0.5, whatever the pretend radio's filter is, takes `M`,
+`L PBT_IN`, `L PBT_OUT`, `L NOTCHF_RAW` and `U MN`, prints each
 as `fake rigctld set: ...`, and answers with them after). For Hamlib with no
 radio, pick maker Hamlib, model Dummy in Settings > Rig: a pretend rig
 at 145 MHz, which "Key the rig" keys at the fake hosts' PTT. Headless:

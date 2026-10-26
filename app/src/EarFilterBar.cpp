@@ -8,6 +8,7 @@
 #include <wx/settings.h>
 #include <wx/sizer.h>
 #include <wx/stattext.h>
+#include <wx/utils.h>
 
 #include "EarControls.h"
 #include "EarScope.h"
@@ -32,6 +33,14 @@ constexpr uint64_t READ_BACK_MS = 3000;
 constexpr double CALIBRATE_QUIET_S = 4.0;
 // The edges missed what was wanted by more than this.
 constexpr double MISS_HZ = 100.0;
+// After a write the noise is left out this long: Jeff's IC-7100's AGC
+// swells about 10 dB for 5 to 7 s after each knob turn (2026-10-26).
+constexpr double AGC_SETTLE_S = 7.0;
+// The notch's dip is looked for this far either side of where the model
+// puts it, and the passband is bridged over as far.
+constexpr double DIP_SEARCH_HZ = 450.0;
+// A dip this close to an edge is no measure of the notch's centre.
+constexpr double DIP_EDGE_HZ = 170.0;
 
 const wxString DOT = wxString::FromUTF8(" \xc2\xb7 ");
 const wxString DASH = wxString::FromUTF8("\xe2\x80\x93");
@@ -59,8 +68,9 @@ bool readsBack(const RigFilter& got, const RigFilter& want)
         if (!b) return true;
         return a && std::fabs(*a - *b) <= 1.5 / 255.0;
     };
+    const bool notch = !want.notchOn || (got.notchOn == want.notchOn && (!*want.notchOn || knob(got.notchRaw, want.notchRaw)));
     return got.mode == want.mode && got.widthHz == want.widthHz && knob(got.pbtIn, want.pbtIn) &&
-           knob(got.pbtOut, want.pbtOut);
+           knob(got.pbtOut, want.pbtOut) && notch;
 }
 
 wxColour warningColour()
@@ -77,6 +87,14 @@ EarFilterBar::EarFilterBar(wxWindow* parent, EarScope* scope, FilterEdit& edit, 
     , write_(std::move(write))
 {
     auto* top = new wxBoxSizer(wxHORIZONTAL);
+    // Disable, left of the presets (Jeff, 2026-10-26): the PBT centred and
+    // the notch off. It shows pushed in while no filter is on, a preset
+    // while the rig has what it holds.
+    disable_ = new PresetButton(this, "Disable");
+    disable_->setDetail("PBT " + wxString::FromUTF8("\xc2\xb7") + " NF");
+    disable_->SetToolTip("Centres the PBT and turns the notch off, keeping the rig's width");
+    disable_->onTap([this] { disableFilters(); });
+    top->Add(disable_, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, FromDIP(12));
     for (int i = 0; i < (int)presets_.size(); i++)
     {
         auto* p = new PresetButton(this, wxString::Format("Preset %d", i + 1));
@@ -104,7 +122,8 @@ EarFilterBar::EarFilterBar(wxWindow* parent, EarScope* scope, FilterEdit& edit, 
     // Shortened to fit, the whole of it in the tooltip.
     line_->SetMinSize(FromDIP(wxSize(120, -1)));
     clock_ = new ClockDial(this, 22);
-    clock_->SetToolTip("The change goes back when the clock runs out, unless you press Keep");
+    clock_->SetToolTip("The change goes back when the clock runs out, unless you press Keep. The clock stands "
+                       "still while the pointer is on Undo or Keep.");
     undo_ = new wxButton(this, wxID_ANY, "Undo");
     keep_ = new wxButton(this, wxID_ANY, "Keep anyway");
     keep_->SetMinSize(keep_->GetBestSize());
@@ -138,9 +157,8 @@ EarFilterBar::EarFilterBar(wxWindow* parent, EarScope* scope, FilterEdit& edit, 
         if (edges_) show(nowMs_, *edges_);
     });
     keep_->Bind(wxEVT_BUTTON, [this](wxCommandEvent&) {
-        const std::optional<Span> s = wanted_ ? wanted_ : spanNow();
         // A cut into Data2G's passband is kept only on a second press.
-        if (s && ear::cutsData2G(*s, narrow_) && !keepArmed_)
+        if (cutsData2G() && !keepArmed_)
         {
             keepArmed_ = true;
             if (edges_) show(nowMs_, *edges_);
@@ -152,6 +170,7 @@ EarFilterBar::EarFilterBar(wxWindow* parent, EarScope* scope, FilterEdit& edit, 
         if (edges_) show(nowMs_, *edges_);
     });
     scope_->onDrag([this](const Span& from, const Span& to) { dragged(from, to); });
+    scope_->onNotch([this](std::optional<double> hz) { notchMoved(hz); });
 }
 
 ear::KnobModel EarFilterBar::model(const RigFilter& f) const
@@ -260,8 +279,13 @@ void EarFilterBar::tick(uint64_t nowMs, bool quiet, ear::EdgeFinder& edges, cons
         wanted_.reset();
     }
 
-    // The miss: once the rig has the change and the noise has settled.
-    if (edit_.state() == FilterEdit::State::Trial && miss_.empty() && wanted_ && rig.filter && edit_.pending() &&
+    // The miss: once the rig has the change and the noise has settled, if
+    // the change moved the edges.
+    const std::optional<RigFilter>& before = edit_.before();
+    const std::optional<RigFilter>& pending = edit_.pending();
+    const bool edgesMoved = pending && (!before || before->widthHz != pending->widthHz ||
+                                        before->pbtIn != pending->pbtIn || before->pbtOut != pending->pbtOut);
+    if (edit_.state() == FilterEdit::State::Trial && miss_.empty() && wanted_ && edgesMoved && rig.filter &&
         readsBack(*rig.filter, *edit_.pending()) && nowMs >= writtenMs_ + SETTLE_MS &&
         edges.quietSeconds() >= ear::EdgeFinder::NEEDED_S)
     {
@@ -275,6 +299,13 @@ void EarFilterBar::tick(uint64_t nowMs, bool quiet, ear::EdgeFinder& edges, cons
                                 std::string(spanText(*m).utf8_str()));
         }
     }
+
+    // The clock stands still while the pointer is on Undo or Keep.
+    const wxPoint mouse = wxGetMousePosition();
+    edit_.hold(trialShown_ && (undo_->GetScreenRect().Contains(mouse) || keep_->GetScreenRect().Contains(mouse)),
+               nowMs);
+
+    showNotch(edges);
 
     // The handles, while the operator may drag.
     const bool canDrag = settable() && setting() && !calibration_.running() && !restore_ &&
@@ -321,6 +352,87 @@ void EarFilterBar::dragged(const Span& from, const Span& wanted)
     change(ear::settingFor(ear::dragTarget(from, wanted, *now, m), *now, m), wanted);
 }
 
+const ear::NotchModel& EarFilterBar::notchModel()
+{
+    const std::string key = rig_.filter ? rig_.key + "/" + rig_.filter->mode : std::string();
+    if (key != notchKey_)
+    {
+        notchKey_ = key;
+        notchModel_ = rig_.key.empty() || !rig_.filter ? ear::NotchModel() : loadEarNotch(rig_.key, rig_.filter->mode);
+        learnedRaw_.reset();
+        dipHz_.reset();
+    }
+    return notchModel_;
+}
+
+void EarFilterBar::showNotch(ear::EdgeFinder& edges)
+{
+    const ear::NotchModel& m = notchModel();
+    const std::optional<RigFilter>& rig = rig_.filter;
+    // The rig's notch as read: the noise's run is bridged over it, and its
+    // dip looked for around where the model puts it.
+    const bool on = rig && rig->notchOn && *rig->notchOn && rig->notchRaw;
+    if (on)
+    {
+        const double hz = m.hzOf(*rig->notchRaw);
+        edges.setBridge(hz - DIP_SEARCH_HZ, hz + DIP_SEARCH_HZ);
+        dipHz_.reset();
+        if (auto d = edges.dip(hz - DIP_SEARCH_HZ, hz + DIP_SEARCH_HZ))
+        {
+            dipHz_ = d->hz;
+            // Learned from once for each position, well inside the passband
+            // (an edge or a cut in the audio drags a dip's floor sideways),
+            // and once the rig has what was written.
+            const std::optional<Span> pass = measured(edges);
+            const bool inside = pass && d->hz > pass->lowHz + DIP_EDGE_HZ && d->hz < pass->highHz - DIP_EDGE_HZ;
+            const bool settled = !edit_.pending() || readsBack(*rig, *edit_.pending());
+            if (inside && settled && (!learnedRaw_ || std::fabs(*learnedRaw_ - *rig->notchRaw) > 0.5 / 255.0))
+            {
+                learnedRaw_ = rig->notchRaw;
+                notchModel_.learn(*rig->notchRaw, d->hz);
+                if (!rig_.key.empty()) saveEarNotch(rig_.key, rig->mode, notchModel_);
+            }
+        }
+    }
+    else
+    {
+        edges.setBridge(0, 0);
+        dipHz_.reset();
+    }
+
+    // The bar: where the rig has a notch. It shows the change waiting or on
+    // trial, else the setting.
+    const std::optional<RigFilter> f = edit_.pending() ? edit_.pending() : setting();
+    if (!f || !f->notchOn || onFm())
+    {
+        scope_->setNotch(std::nullopt);
+        return;
+    }
+    EarScope::Notch n;
+    n.on = *f->notchOn && f->notchRaw;
+    if (n.on) n.hz = notchModel_.hzOf(*f->notchRaw);
+    if (on && n.on && rig->notchRaw == f->notchRaw) n.dipHz = dipHz_;
+    n.movable = settable() && !calibration_.running() && !restore_ && edit_.state() != FilterEdit::State::Waiting;
+    scope_->setNotch(n);
+}
+
+void EarFilterBar::notchMoved(std::optional<double> hz)
+{
+    const std::optional<RigFilter> now = setting();
+    if (!settable() || !now || !now->notchOn || calibration_.running()) return;
+    // The edges stay as the noise shows them.
+    change(ear::withNotch(*now, hz, notchModel()), spanNow());
+}
+
+bool EarFilterBar::cutsData2G() const
+{
+    const std::optional<Span> s = wanted_ ? wanted_ : spanNow();
+    if (s && ear::cutsData2G(*s, narrow_)) return true;
+    const std::optional<RigFilter>& p = edit_.pending();
+    return p && p->notchOn && *p->notchOn && p->notchRaw &&
+           ear::notchCutsData2G(notchModel_.hzOf(*p->notchRaw), narrow_);
+}
+
 void EarFilterBar::change(const RigFilter& to, const std::optional<Span>& wanted)
 {
     if (edit_.state() == FilterEdit::State::Idle)
@@ -351,7 +463,22 @@ void EarFilterBar::recall(int n)
                                          n));
         return;
     }
-    change(*p, std::nullopt);
+    // What the preset holds over what the rig has: a preset from before the
+    // notch leaves the notch as it is.
+    RigFilter to = *rig_.filter;
+    to.mode = p->mode;
+    to.widthHz = p->widthHz;
+    if (p->pbtIn) to.pbtIn = p->pbtIn;
+    if (p->pbtOut) to.pbtOut = p->pbtOut;
+    if (p->notchOn) to.notchOn = p->notchOn;
+    if (p->notchRaw) to.notchRaw = p->notchRaw;
+    change(to, std::nullopt);
+}
+
+void EarFilterBar::disableFilters()
+{
+    if (!settable() || !rig_.filter || calibration_.running()) return;
+    change(ear::disabled(*rig_.filter), std::nullopt);
 }
 
 void EarFilterBar::store(int n)
@@ -432,12 +559,14 @@ void EarFilterBar::finishCalibration()
         const ear::KnobModel& m = *calibration_.result();
         saveEarCalibration(rig_.key, calibrationFrom_->mode, calibrationFrom_->widthHz, m);
         calibrationKey_.clear();
-        std::string news = "Calibrated: a knob's full turn moves an edge " +
-                           std::to_string(std::abs(tens(m.hzPerKnob))) + " Hz, and the filter passes " + std::to_string(tens(m.widthHz)) + " Hz about " +
-                           std::to_string(tens(m.centreHz)) + " Hz";
-        if (m.floorHz > 0) news += "; the audio cuts below " + std::to_string(tens(m.floorHz)) + " Hz";
-        if (m.ceilingHz > 0) news += "; the audio cuts above " + std::to_string(tens(m.ceilingHz)) + " Hz";
-        calibrationNews_ = news + ". Drag one edge, or the middle to shift the passband.";
+        // Short enough to fit the line (Hamlet, 2026-10-26: the longer
+        // wording was cut off); the tooltip has it too.
+        std::string news = "Calibrated: " + std::to_string(std::abs(tens(m.hzPerKnob))) + " Hz a turn, " +
+                           std::to_string(tens(m.widthHz)) + " Hz wide about " + std::to_string(tens(m.centreHz)) +
+                           " Hz";
+        if (m.floorHz > 0) news += ", cut below " + std::to_string(tens(m.floorHz)) + " Hz";
+        if (m.ceilingHz > 0) news += ", cut above " + std::to_string(tens(m.ceilingHz)) + " Hz";
+        calibrationNews_ = news + ". Drag an edge or the middle.";
     }
     else
     {
@@ -450,7 +579,7 @@ void EarFilterBar::finishCalibration()
 void EarFilterBar::write(const RigFilter& f, const std::string& why, ear::EdgeFinder& edges)
 {
     write_(f, why);
-    edges.restart();
+    edges.restart(AGC_SETTLE_S);
     writtenMs_ = nowMs_;
 }
 
@@ -458,20 +587,29 @@ void EarFilterBar::showPresets()
 {
     const bool on = settable() && rig_.filter && !calibration_.running();
     for (PresetButton* p : presets_) p->Enable(on);
+    disable_->Enable(on);
+    // Pushed in: what the rig has now, or was last given.
+    const std::optional<RigFilter> f = setting();
+    disable_->setPushed(f && ear::filtersOff(*f));
+    for (std::size_t i = 0; i < presets_.size(); i++)
+        presets_[i]->setPushed(f && presetFilters_[i] && ear::holds(*f, *presetFilters_[i]));
     const std::string key = rig_.filter ? rig_.key + "/" + rig_.filter->mode + "/" + calibrationKey_ : std::string();
     if (key == presetsKey_) return;
     presetsKey_ = key;
     for (int i = 0; i < (int)presets_.size(); i++)
     {
         wxString detail = wxString::FromUTF8("\xe2\x80\x94");
+        presetFilters_[(std::size_t)i].reset();
         if (rig_.filter && !rig_.key.empty())
             if (auto p = loadEarPreset(rig_.key, rig_.filter->mode, i + 1))
             {
+                presetFilters_[(std::size_t)i] = p;
                 const std::optional<ear::KnobModel> m = loadEarCalibration(rig_.key, p->mode, p->widthHz);
                 if (m && p->pbtIn && p->pbtOut)
                     detail = spanText(ear::visible(ear::spanOf(*p, *m), *m));
                 else
                     detail = wxString::Format("%d Hz", p->widthHz);
+                if (p->notchOn && *p->notchOn) detail += " + NF";
             }
         presets_[(std::size_t)i]->setDetail(detail);
     }
@@ -510,20 +648,27 @@ void EarFilterBar::show(uint64_t nowMs, const ear::EdgeFinder&)
     }
     else if (state == FilterEdit::State::Waiting || trial)
     {
-        if (from_ && wanted_)
-            text = utf8(ear::changeText(*from_, *wanted_));
+        // The edges' change and the notch's.
+        const std::string edges = from_ && wanted_ ? ear::changeText(*from_, *wanted_) : std::string();
+        const std::string notch = edit_.before() && edit_.pending()
+                                      ? ear::notchChangeText(*edit_.before(), *edit_.pending(), notchModel_)
+                                      : std::string();
+        if (!notch.empty())
+            text = utf8(edges.empty() || edges == "No change" ? notch : edges + ", " + notch);
+        else if (!edges.empty())
+            text = utf8(edges);
         else
             text = "Changing the filter";
         if (state == FilterEdit::State::Waiting)
             text += DOT + "waiting for a quiet moment";
         else if (!miss_.empty())
             text += DOT + utf8(miss_);
-        const std::optional<Span> s = wanted_ ? wanted_ : spanNow();
-        if (s && ear::cutsData2G(*s, narrow_))
+        if (cutsData2G())
         {
             warn = true;
+            // Short, so the line keeps it in sight beside the clock.
             text += DOT + "cuts into Data2G's " + spanText(Span{d.lowHz, d.highHz}) +
-                    (keepArmed_ ? ": Keep again to keep it" : ": Keep twice to keep it");
+                    (keepArmed_ ? ": Keep again" : ": Keep twice");
         }
     }
     else if (!rig_.problem.empty())
@@ -558,14 +703,14 @@ void EarFilterBar::show(uint64_t nowMs, const ear::EdgeFinder&)
     }
     else if (!calibrated())
     {
-        text = f->pbtIn && f->pbtOut ? "Drag the middle to shift, or an edge for the width (about the centre). "
-                                       "Calibrate frees each edge and makes a shift land where you drop it"
+        text = f->pbtIn && f->pbtOut ? "Drag the middle to shift, or an edge for the width. Calibrate frees each "
+                                       "edge"
                                      : "Drag an edge to change the width: both edges move about the centre";
     }
     else
     {
-        text = "Drag an edge, or the middle to shift the passband. A change goes back in 15 s unless you press "
-               "Keep.";
+        text = f->notchOn ? "Drag an edge, the middle, or NF from its bay. A change goes back in 15 s unless kept"
+                          : "Drag an edge or the middle. A change goes back in 15 s unless kept";
     }
 
     const wxColour colour = warn ? warningColour() : GetForegroundColour();

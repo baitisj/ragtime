@@ -60,6 +60,7 @@ void EdgeFinder::clear()
     weight_ = 0;
     levels_.clear();
     quietRun_ = 0;
+    holdRows_ = 0;
 }
 
 void EdgeFinder::addRow(const std::vector<float>& row, bool transmitting)
@@ -67,6 +68,13 @@ void EdgeFinder::addRow(const std::vector<float>& row, bool transmitting)
     if ((int)row.size() != Spectrum::BINS) return;
     if (transmitting)
     {
+        quietRun_ = 0;
+        return;
+    }
+    if (holdRows_ > 0)
+    {
+        // The rig's AGC settling after a write: not the band.
+        holdRows_ = std::max(0.0, holdRows_ - 1);
         quietRun_ = 0;
         return;
     }
@@ -94,10 +102,44 @@ void EdgeFinder::addRow(const std::vector<float>& row, bool transmitting)
     for (int i = 0; i < Spectrum::BINS; i++) power_[i] += (std::pow(10.0, row[i] / 10.0) - power_[i]) * a;
 }
 
-void EdgeFinder::restart()
+void EdgeFinder::restart(double holdSeconds)
 {
     power_.clear();
     weight_ = 0;
+    holdRows_ = std::max(holdRows_, holdSeconds * rowsPerSecond_);
+}
+
+void EdgeFinder::setBridge(double lowHz, double highHz)
+{
+    bridgeLowHz_ = lowHz;
+    bridgeHighHz_ = highHz;
+}
+
+std::optional<Dip> EdgeFinder::dip(double lowHz, double highHz) const
+{
+    std::vector<float> db;
+    std::vector<bool> heard;
+    double passband = 0;
+    if (!shape(db, heard, passband)) return std::nullopt;
+    int best = -1;
+    for (int i = 0; i < Spectrum::BINS; i++)
+    {
+        const double hz = binHz(i);
+        if (hz < lowHz || hz > highHz || !heard[i]) continue;
+        if (best < 0 || db[i] < db[best]) best = i;
+    }
+    if (best < 0 || passband - db[best] < DIP_DB) return std::nullopt;
+    Dip d;
+    d.depthDb = passband - db[best];
+    d.hz = binHz(best);
+    // Between bins: the parabola through the deepest and its neighbours.
+    if (best > 0 && best < Spectrum::BINS - 1 && heard[best - 1] && heard[best + 1])
+    {
+        const double a = db[best - 1], b = db[best], c = db[best + 1];
+        const double bend = a - 2 * b + c;
+        if (bend > 0) d.hz += 0.5 * (a - c) / bend * topHz_ / Spectrum::BINS;
+    }
+    return d;
 }
 
 double EdgeFinder::quietSeconds() const
@@ -132,15 +174,15 @@ bool EdgeFinder::reachesTop() const
     return 10.0 * std::log10(sum / (double)n) >= passband - DROP_DB;
 }
 
-std::optional<Edges> EdgeFinder::edges() const
+bool EdgeFinder::shape(std::vector<float>& db, std::vector<bool>& heard, double& passband) const
 {
-    if (power_.empty() || quietSeconds() < NEEDED_S) return std::nullopt;
+    if (power_.empty() || quietSeconds() < NEEDED_S) return false;
 
     // Smoothed a little, as power, then in dB. Bins with no audio at all
     // (past half the sound card's rate) are left out.
     const int n = Spectrum::BINS;
-    std::vector<float> db(n);
-    std::vector<bool> heard(n);
+    db.assign(n, 0.0f);
+    heard.assign(n, false);
     for (int i = 0; i < n; i++)
     {
         double sum = 0;
@@ -156,19 +198,33 @@ std::optional<Edges> EdgeFinder::edges() const
     std::vector<float> levels;
     for (int i = 0; i < n; i++)
         if (heard[i]) levels.push_back(db[i]);
-    if (levels.size() < 10) return std::nullopt;
+    if (levels.size() < 10) return false;
 
     // The passband's level: the median of the bins near the top.
     const float top = percentile(levels, 0.9);
     std::vector<float> near;
     for (float v : levels)
         if (v >= top - 10.0f) near.push_back(v);
-    const double passband = percentile(near, 0.5);
+    passband = percentile(near, 0.5);
+    return true;
+}
+
+std::optional<Edges> EdgeFinder::edges() const
+{
+    std::vector<float> db;
+    std::vector<bool> heard;
+    double passband = 0;
+    if (!shape(db, heard, passband)) return std::nullopt;
+    const int n = Spectrum::BINS;
     const double threshold = passband - DROP_DB;
 
     const double binWidth = topHz_ / Spectrum::BINS;
-    // The widest run over the threshold, short dips allowed.
+    // The widest run over the threshold, short dips allowed, and any dip
+    // inside the notch's bridge.
     const int gap = (int)std::lround(GAP_HZ / binWidth);
+    auto bridged = [&](int from, int to) {
+        return bridgeHighHz_ > bridgeLowHz_ && binHz(from) >= bridgeLowHz_ && binHz(to) <= bridgeHighHz_;
+    };
     int bestStart = -1, bestEnd = -1;
     int start = -1, end = -1;
     for (int i = 0; i <= n; i++)
@@ -176,7 +232,7 @@ std::optional<Edges> EdgeFinder::edges() const
         const bool over = i < n && heard[i] && db[i] >= threshold;
         if (over)
         {
-            if (start < 0 || i - end - 1 > gap)
+            if (start < 0 || (i - end - 1 > gap && !bridged(end + 1, i - 1)))
             {
                 if (start >= 0 && end - start > bestEnd - bestStart)
                 {

@@ -486,6 +486,8 @@ void HamlibRig::run()
     bool readsMode = false;
     bool readsPbtIn = false;
     bool readsPbtOut = false;
+    bool readsNotch = false;
+    bool readsNotchRaw = false;
     int modeFailures = 0;
     uint64_t nextFilter = 0;
     radio::SwrTrip trip;
@@ -553,8 +555,14 @@ void HamlibRig::run()
             r = rig_set_mode(rig, RIG_VFO_CURR, mode, f.widthHz);
             if (r != RIG_OK) problem = "Setting the width failed: " + errorText(r);
         }
+        // Each knob only when it differs from the rig's by more than a step
+        // (each turn sets the IC-7100's AGC swelling for seconds).
         auto knob = [&](setting_t level, std::optional<double> v, const char* name) {
             if (!v || rig_has_set_level(rig, level) == 0) return;
+            value_t now;
+            if (rig_has_get_level(rig, level) != 0 && rig_get_level(rig, RIG_VFO_CURR, level, &now) == RIG_OK &&
+                std::fabs(now.f - *v) <= 0.75 / 255.0)
+                return;
             value_t value;
             value.f = (float)*v;
             int k = rig_set_level(rig, RIG_VFO_CURR, level, value);
@@ -562,6 +570,19 @@ void HamlibRig::run()
         };
         knob(RIG_LEVEL_PBT_IN, f.pbtIn, "PBT_IN");
         knob(RIG_LEVEL_PBT_OUT, f.pbtOut, "PBT_OUT");
+        // The manual notch: moved before it goes on, off before it moves.
+        auto notch = [&](bool on) {
+            if (!f.notchOn || *f.notchOn != on || rig_has_set_func(rig, RIG_FUNC_MN) == 0) return;
+            int was = 0;
+            if (rig_has_get_func(rig, RIG_FUNC_MN) != 0 && rig_get_func(rig, RIG_VFO_CURR, RIG_FUNC_MN, &was) == RIG_OK &&
+                (was != 0) == on)
+                return;
+            int n = rig_set_func(rig, RIG_VFO_CURR, RIG_FUNC_MN, on ? 1 : 0);
+            if (n != RIG_OK && problem.empty()) problem = "Setting the notch failed: " + errorText(n);
+        };
+        notch(false);
+        knob(RIG_LEVEL_NOTCHF_RAW, f.notchRaw, "NOTCHF_RAW");
+        notch(true);
         shared->update([&](Status& s) {
             s.filterWrites++;
             s.filterProblem = problem;
@@ -688,6 +709,8 @@ void HamlibRig::run()
                     readsMode = rig->caps->get_mode != nullptr;
                     readsPbtIn = rig_has_get_level(rig, RIG_LEVEL_PBT_IN) != 0;
                     readsPbtOut = rig_has_get_level(rig, RIG_LEVEL_PBT_OUT) != 0;
+                    readsNotch = rig_has_get_func(rig, RIG_FUNC_MN) != 0;
+                    readsNotchRaw = rig_has_get_level(rig, RIG_LEVEL_NOTCHF_RAW) != 0;
                     modeFailures = 0;
                     nextFilter = 0;
                     std::string name = std::string(rig->caps->mfg_name) + " " + rig->caps->model_name;
@@ -812,7 +835,7 @@ void HamlibRig::run()
             }
         }
 
-        else if (!tx && filterWatch && (readsMode || readsPbtIn || readsPbtOut) && now >= nextFilter)
+        else if (!tx && filterWatch && (readsMode || readsPbtIn || readsPbtOut || readsNotch) && now >= nextFilter)
         {
             // The receive filter, for the Ear.
             nextFilter = now + FILTER_MS;
@@ -844,6 +867,19 @@ void HamlibRig::run()
             };
             filter.pbtIn = pbt(RIG_LEVEL_PBT_IN, readsPbtIn);
             filter.pbtOut = pbt(RIG_LEVEL_PBT_OUT, readsPbtOut);
+            if (readsNotch)
+            {
+                int on = 0;
+                if (rig_get_func(rig, RIG_VFO_CURR, RIG_FUNC_MN, &on) == RIG_OK)
+                {
+                    filter.notchOn = on != 0;
+                    filter.notchRaw = pbt(RIG_LEVEL_NOTCHF_RAW, readsNotchRaw);
+                }
+                else
+                {
+                    readsNotch = false;
+                }
+            }
             std::lock_guard<std::mutex> lock(shared->mutex);
             std::optional<radio::RigFilter> got = filter.mode.empty() && !filter.pbtIn && !filter.pbtOut
                                                       ? std::nullopt

@@ -124,6 +124,15 @@ void PresetButton::setDetail(const wxString& detail)
     if (detail == detail_) return;
     detail_ = detail;
     InvalidateBestSize();
+    // Grown or shrunk to fit it.
+    if (GetParent()) GetParent()->Layout();
+    Refresh();
+}
+
+void PresetButton::setPushed(bool pushed)
+{
+    if (pushed == pushed_) return;
+    pushed_ = pushed;
     Refresh();
 }
 
@@ -137,8 +146,11 @@ void PresetButton::tick()
             // Held long enough: stored, and the release is no tap.
             heldMs_ = -1;
             if (HasCapture()) ReleaseMouse();
-            storedMs_ = 0;
-            if (store_) store_();
+            if (store_)
+            {
+                storedMs_ = 0;
+                store_();
+            }
         }
     }
     else if (storedMs_ >= 0)
@@ -182,10 +194,21 @@ void PresetButton::paint()
     const wxColour text = on ? wxSystemSettings::GetColour(wxSYS_COLOUR_BTNTEXT)
                              : wxSystemSettings::GetColour(wxSYS_COLOUR_GRAYTEXT);
     const wxColour accent = wxSystemSettings::GetColour(wxSYS_COLOUR_HIGHLIGHT);
-    gc->SetPen(wxPen(heldMs_ >= 0 ? accent : edge, 1));
-    gc->SetBrush(wxBrush(on && (hover_ || heldMs_ >= 0) ? face.ChangeLightness(face.GetLuminance() < 0.5 ? 115 : 95)
-                                                        : face));
-    gc->DrawRoundedRectangle(0.5, 0.5, s.x - 1, s.y - 1, FromDIP(4));
+    // Pushed in: a sunken face, an inner shadow along the top and the
+    // highlight's edge, and the words a pixel lower.
+    const bool dark = face.GetLuminance() < 0.5;
+    wxColour fill = face;
+    if (pushed_) fill = face.ChangeLightness(dark ? 75 : 82);
+    else if (on && (hover_ || heldMs_ >= 0)) fill = face.ChangeLightness(dark ? 115 : 95);
+    gc->SetPen(wxPen(heldMs_ >= 0 || (pushed_ && on) ? accent : edge, pushed_ ? 2 : 1));
+    gc->SetBrush(wxBrush(fill));
+    const double inset = pushed_ ? 1.0 : 0.5;
+    gc->DrawRoundedRectangle(inset, inset, s.x - 2 * inset, s.y - 2 * inset, FromDIP(4));
+    if (pushed_)
+    {
+        gc->SetPen(wxPen(face.ChangeLightness(dark ? 55 : 60), 1));
+        gc->StrokeLine(FromDIP(4), 2.5, s.x - FromDIP(4), 2.5);
+    }
 
     const wxString detail = storedMs_ >= 0 ? wxString("Stored") : detail_;
     double w, h, w2, h2;
@@ -193,7 +216,7 @@ void PresetButton::paint()
     gc->GetTextExtent(name_, &w, &h);
     gc->SetFont(GetFont().Smaller(), text);
     gc->GetTextExtent(detail, &w2, &h2);
-    const double top = (s.y - h - h2) / 2;
+    const double top = (s.y - h - h2) / 2 + (pushed_ ? 1 : 0);
     gc->SetFont(GetFont().Bold(), text);
     gc->DrawText(name_, (s.x - w) / 2, top);
     gc->SetFont(GetFont().Smaller(), storedMs_ >= 0 ? accent : text);

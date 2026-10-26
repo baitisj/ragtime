@@ -499,6 +499,8 @@ void filter()
         }
         if (out == "+l PBT_IN\n") say(dial, "get_level: PBT_IN\n0.501961\nRPRT 0\n", ms);
         if (out == "+l PBT_OUT\n") say(dial, "get_level: PBT_OUT\n0.623529\nRPRT 0\n", ms);
+        if (out == "+u MN\n") say(dial, "get_func: MN\n1\nRPRT 0\n", ms);
+        if (out == "+l NOTCHF_RAW\n") say(dial, "get_level: NOTCHF_RAW\n0.682353\nRPRT 0\n", ms);
         all += out;
     }
     // Every FILTER_MS, with the dial still once a second.
@@ -512,12 +514,15 @@ void filter()
         CHECK_EQ(dial.filter()->widthHz, 2400);
         CHECK(dial.filter()->pbtIn && pbtCentred(*dial.filter()->pbtIn));
         CHECK(dial.filter()->pbtOut && !pbtCentred(*dial.filter()->pbtOut));
+        CHECK(dial.filter()->notchOn && *dial.filter()->notchOn);
+        CHECK(dial.filter()->notchRaw && std::fabs(*dial.filter()->notchRaw - 0.682353) < 1e-6);
         CHECK_EQ(describe(*dial.filter()),
-                 std::string("USB \xc2\xb7 2400 Hz filter \xc2\xb7 PBT in 0.50, out 0.62"));
+                 std::string("USB \xc2\xb7 2400 Hz filter \xc2\xb7 PBT in 0.50, out 0.62 \xc2\xb7 notch 0.68"));
     }
 
-    // Keyed: none of it.
+    // Keyed: none of it (but a question asked before).
     t += 5000;
+    dial.takeOutput();
     dial.setKeyed(true, t);
     all.clear();
     for (uint64_t ms = t; ms < t + 6000; ms += 100)
@@ -557,6 +562,9 @@ void filter()
     say(vfo, "get_level: currVFO PBT_IN\nRPRT -11\n", T0 + 20);
     CHECK_EQ(vfo.takeOutput(), std::string("+l currVFO PBT_OUT\n"));
     say(vfo, "get_level: currVFO PBT_OUT\nRPRT -11\n", T0 + 30);
+    // No manual notch: its position isn't asked.
+    CHECK_EQ(vfo.takeOutput(), std::string("+u currVFO MN\n"));
+    say(vfo, "get_func: currVFO MN\nRPRT -11\n", T0 + 40);
     CHECK(vfo.filter().has_value());
     if (vfo.filter())
     {
@@ -574,6 +582,8 @@ void filter()
         all += out;
     }
     CHECK(all.find("PBT") == std::string::npos);
+    CHECK(all.find("MN") == std::string::npos);
+    CHECK(all.find("NOTCHF") == std::string::npos);
     CHECK(all.find("+m currVFO\n") != std::string::npos);
     CHECK(vfo.filter() && vfo.filter()->widthHz == 2400);
 
@@ -626,6 +636,10 @@ void filterSet()
     say(dial, "get_level: PBT_IN\n0.501961\nRPRT 0\n", t);
     CHECK_EQ(dial.takeOutput(), std::string("+l PBT_OUT\n"));
     say(dial, "get_level: PBT_OUT\n0.501961\nRPRT 0\n", t);
+    CHECK_EQ(dial.takeOutput(), std::string("+u MN\n"));
+    say(dial, "get_func: MN\n0\nRPRT 0\n", t);
+    CHECK_EQ(dial.takeOutput(), std::string("+l NOTCHF_RAW\n"));
+    say(dial, "get_level: NOTCHF_RAW\n0.682353\nRPRT 0\n", t);
     CHECK(dial.filter().has_value());
     CHECK_EQ(dial.takeOutput(), std::string(""));
 
@@ -634,11 +648,13 @@ void filterSet()
     f.widthHz = 2400;
     f.pbtIn = 0.65098;
     f.pbtOut = 0.5;
+    f.notchOn = false;
+    f.notchRaw = 0.682353;
     t += 100;
     dial.setFilter(f, t);
+    // Only what differs from the reading: PBT_OUT at 0.501961 is the rig's
+    // step for 0.5.
     CHECK_EQ(dial.takeOutput(), std::string("L PBT_IN 0.6510\n"));
-    say(dial, "RPRT 0\n", t);
-    CHECK_EQ(dial.takeOutput(), std::string("L PBT_OUT 0.5000\n"));
     say(dial, "RPRT 0\n", t);
     // Read back at once.
     CHECK_EQ(dial.takeOutput(), std::string("+m\n"));
@@ -649,8 +665,46 @@ void filterSet()
     CHECK(dial.filter() && dial.filter()->pbtIn && *dial.filter()->pbtIn < 0.6);
     CHECK_EQ(dial.takeOutput(), std::string("+l PBT_OUT\n"));
     say(dial, "get_level: PBT_OUT\n0.501961\nRPRT 0\n", t);
+    CHECK(dial.filter() && dial.filter()->pbtIn && *dial.filter()->pbtIn < 0.6);
+    CHECK_EQ(dial.takeOutput(), std::string("+u MN\n"));
+    say(dial, "get_func: MN\n0\nRPRT 0\n", t);
+    CHECK_EQ(dial.takeOutput(), std::string("+l NOTCHF_RAW\n"));
+    say(dial, "get_level: NOTCHF_RAW\n0.682353\nRPRT 0\n", t);
     CHECK(dial.filter() && dial.filter()->pbtIn && std::fabs(*dial.filter()->pbtIn - 0.65098) < 1e-4);
-    CHECK_EQ(dial.filterWrites(), (uint64_t)1);
+
+    // The notch: moved, then on; then off before it moves back.
+    t += 100;
+    f.notchOn = true;
+    f.notchRaw = 0.25;
+    dial.setFilter(f, t);
+    // No knob turned for the notch alone.
+    CHECK_EQ(dial.takeOutput(), std::string("L NOTCHF_RAW 0.2500\n"));
+    say(dial, "RPRT 0\n", t);
+    CHECK_EQ(dial.takeOutput(), std::string("U MN 1\n"));
+    say(dial, "RPRT 0\n", t);
+    CHECK_EQ(dial.takeOutput(), std::string("+m\n"));
+    say(dial, "get_mode:\nMode: USB\nPassband: 2400\nRPRT 0\n", t);
+    say(dial, dial.takeOutput() == "+l PBT_IN\n" ? "get_level: PBT_IN\n0.650980\nRPRT 0\n" : "", t);
+    say(dial, dial.takeOutput() == "+l PBT_OUT\n" ? "get_level: PBT_OUT\n0.501961\nRPRT 0\n" : "", t);
+    say(dial, dial.takeOutput() == "+u MN\n" ? "get_func: MN\n1\nRPRT 0\n" : "", t);
+    say(dial, dial.takeOutput() == "+l NOTCHF_RAW\n" ? "get_level: NOTCHF_RAW\n0.250980\nRPRT 0\n" : "", t);
+    CHECK(dial.filter() && dial.filter()->notchOn == std::optional<bool>(true));
+    t += 100;
+    f.notchOn = false;
+    f.notchRaw = 0.682353;
+    dial.setFilter(f, t);
+    CHECK_EQ(dial.takeOutput(), std::string("U MN 0\n"));
+    say(dial, "RPRT 0\n", t);
+    CHECK_EQ(dial.takeOutput(), std::string("L NOTCHF_RAW 0.6824\n"));
+    say(dial, "RPRT 0\n", t);
+    dial.takeOutput();
+    say(dial, "get_mode:\nMode: USB\nPassband: 2400\nRPRT 0\n", t);
+    say(dial, dial.takeOutput() == "+l PBT_IN\n" ? "get_level: PBT_IN\n0.650980\nRPRT 0\n" : "", t);
+    say(dial, dial.takeOutput() == "+l PBT_OUT\n" ? "get_level: PBT_OUT\n0.501961\nRPRT 0\n" : "", t);
+    say(dial, dial.takeOutput() == "+u MN\n" ? "get_func: MN\n0\nRPRT 0\n" : "", t);
+    say(dial, dial.takeOutput() == "+l NOTCHF_RAW\n" ? "get_level: NOTCHF_RAW\n0.682353\nRPRT 0\n" : "", t);
+    CHECK(dial.filter() && dial.filter()->notchOn == std::optional<bool>(false));
+    CHECK_EQ(dial.filterWrites(), (uint64_t)3);
     CHECK(dial.filterProblem().empty());
 
     // Keyed: held until the burst ends, then the width first.
@@ -675,7 +729,7 @@ void filterSet()
     CHECK_EQ(dial.filterProblem(), std::string("rigctld refused M USB 1800: RPRT -11"));
     all = dial.takeOutput();
     CHECK(all.find("L ") == std::string::npos);
-    CHECK_EQ(dial.filterWrites(), (uint64_t)2);
+    CHECK_EQ(dial.filterWrites(), (uint64_t)4);
 
     // A --vfo rigctld names the VFO.
     DialReader vfo;
@@ -686,6 +740,8 @@ void filterSet()
     say(vfo, "7074000\n", T0);
     f.mode = "PKTUSB";
     f.pbtOut.reset();
+    f.notchOn.reset();
+    f.notchRaw.reset();
     vfo.setFilter(f, T0);
     CHECK_EQ(vfo.takeOutput(), std::string("M currVFO PKTUSB 1800\n"));
     say(vfo, "RPRT 0\n", T0);
@@ -712,7 +768,8 @@ void filterSet()
 void onlyAsks()
 {
     const std::vector<std::string> allowed = {"\\chk_vfo", "f", "+l ALC", "+l SWR", "+l RFPOWER_METER_WATTS",
-                                              "+l RFPOWER_METER", "+l STRENGTH", "+m", "+l PBT_IN", "+l PBT_OUT"};
+                                              "+l RFPOWER_METER", "+l STRENGTH", "+m", "+l PBT_IN", "+l PBT_OUT",
+                                              "+u MN", "+l NOTCHF_RAW"};
     DialReader dial;
     std::string all;
     uint64_t t = T0;

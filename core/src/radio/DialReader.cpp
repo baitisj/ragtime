@@ -6,6 +6,7 @@
 #include <locale>
 #include <sstream>
 #include <string>
+#include <vector>
 
 namespace ragtime
 {
@@ -16,8 +17,11 @@ namespace
 {
 
 // Hamlib's names for the meters, in Meter's order.
+// The manual notch's on and off is a function, MN, asked with "u".
 const char* const LEVELS[DialReader::METERS] = {"ALC",      "SWR",    "RFPOWER_METER_WATTS", "RFPOWER_METER",
-                                                 "STRENGTH", "PBT_IN", "PBT_OUT"};
+                                                 "STRENGTH", "PBT_IN", "PBT_OUT",             "MN",
+                                                 "NOTCHF_RAW"};
+constexpr int FILTER_STEPS = 5;
 
 // A number on a line of its own: digits, perhaps signed, perhaps with a
 // decimal part ("14074000", "14074000.000000", "0.593750").
@@ -130,6 +134,8 @@ bool DialReader::askable(int meter) const
     if (state_[meter] == State::Dropped) return false;
     // A share of full power only from a rig that knows no watts.
     if (meter == (int)Meter::Power) return state_[(int)Meter::Watts] == State::Dropped;
+    // The notch's position only from a rig with a manual notch.
+    if (meter == (int)Meter::NotchRaw) return state_[(int)Meter::NotchOn] != State::Dropped;
     return true;
 }
 
@@ -154,8 +160,10 @@ int DialReader::pickMeter()
 
 void DialReader::askMeter(int meter, uint64_t nowMs)
 {
-    // Questions only: "l" gets a level, and nothing here sets the radio.
-    out_ += std::string("+l ") + (vfo_ == Vfo::Yes ? "currVFO " : "") + LEVELS[meter] + "\n";
+    // Questions only: "l" gets a level, "u" a function, and nothing here
+    // sets the radio.
+    out_ += std::string(meter == (int)Meter::NotchOn ? "+u " : "+l ") + (vfo_ == Vfo::Yes ? "currVFO " : "") +
+            LEVELS[meter] + "\n";
     asking_ = Ask::Meter;
     askedMeter_ = meter;
     askedMs_ = nowMs;
@@ -208,7 +216,7 @@ void DialReader::askNext(uint64_t nowMs)
 bool DialReader::askFilter(uint64_t nowMs)
 {
     if (!filterWatch_ || nowMs < filterDueMs_) return false;
-    while (filterStep_ < 3)
+    while (filterStep_ < FILTER_STEPS)
     {
         const int step = filterStep_++;
         if (step == 0)
@@ -221,7 +229,7 @@ bool DialReader::askFilter(uint64_t nowMs)
             modeName_.clear();
             return true;
         }
-        const int meter = step == 1 ? (int)Meter::PbtIn : (int)Meter::PbtOut;
+        const int meter = filterMeter(step);
         if (askable(meter))
         {
             askMeter(meter, nowMs);
@@ -233,10 +241,16 @@ bool DialReader::askFilter(uint64_t nowMs)
     return false;
 }
 
+int DialReader::filterMeter(int step)
+{
+    static const Meter order[] = {Meter::PbtIn, Meter::PbtOut, Meter::NotchOn, Meter::NotchRaw};
+    return (int)order[step - 1];
+}
+
 bool DialReader::filterQuestionsLeft() const
 {
-    for (int step = filterStep_; step < 3; step++)
-        if (step == 0 ? !modeDropped_ : askable(step == 1 ? (int)Meter::PbtIn : (int)Meter::PbtOut)) return true;
+    for (int step = filterStep_; step < FILTER_STEPS; step++)
+        if (step == 0 ? !modeDropped_ : askable(filterMeter(step))) return true;
     return false;
 }
 
@@ -269,8 +283,8 @@ void DialReader::queueFilter()
 {
     if (setLines_.empty() && filterWrite_)
     {
-        // The commands, worked out when it goes: the mode and width only
-        // when they differ from what the rig said last.
+        // The commands, worked out when it goes: each part only when it
+        // differs from what the rig said last.
         const RigFilter& f = *filterWrite_;
         const std::string vfo = vfo_ == Vfo::Yes ? "currVFO " : "";
         auto number = [](double v) {
@@ -284,8 +298,27 @@ void DialReader::queueFilter()
         if (!f.mode.empty() && f.widthHz > 0 &&
             (!filter_ || filter_->mode != f.mode || filter_->widthHz != f.widthHz))
             setLines_.push_back("M " + vfo + f.mode + " " + std::to_string(f.widthHz));
-        if (f.pbtIn) setLines_.push_back("L " + vfo + "PBT_IN " + number(*f.pbtIn));
-        if (f.pbtOut) setLines_.push_back("L " + vfo + "PBT_OUT " + number(*f.pbtOut));
+        // The knobs too only when they differ: a notch moved alone turns no
+        // knob (each turn sets the IC-7100's AGC swelling for seconds).
+        // Within a step of the rig's 0 to 255 is the same.
+        auto differs = [this](const std::optional<double> RigFilter::*part, double want) {
+            const std::optional<double>& had = filter_ ? (*filter_).*part : std::optional<double>();
+            return !had || std::fabs(*had - want) > 0.75 / 255.0;
+        };
+        if (f.pbtIn && differs(&RigFilter::pbtIn, *f.pbtIn))
+            setLines_.push_back("L " + vfo + "PBT_IN " + number(*f.pbtIn));
+        if (f.pbtOut && differs(&RigFilter::pbtOut, *f.pbtOut))
+            setLines_.push_back("L " + vfo + "PBT_OUT " + number(*f.pbtOut));
+        // The notch, each part only when it differs from what the rig said
+        // last: moved before it goes on, and off before it moves, so it
+        // never notches anywhere but where it is wanted.
+        const bool moves = f.notchRaw && differs(&RigFilter::notchRaw, *f.notchRaw);
+        const bool switches = f.notchOn && (!filter_ || filter_->notchOn != f.notchOn);
+        const std::string raw = moves ? "L " + vfo + "NOTCHF_RAW " + number(*f.notchRaw) : "";
+        const std::string mn = switches ? "U " + vfo + "MN " + (*f.notchOn ? "1" : "0") : "";
+        for (const std::string& line : f.notchOn && *f.notchOn ? std::vector<std::string>{raw, mn}
+                                                                 : std::vector<std::string>{mn, raw})
+            if (!line.empty()) setLines_.push_back(line);
         filterWrite_.reset();
         filterProblem_.clear();
         // A reading begun before is of the old setting: start afresh after.
@@ -421,8 +454,7 @@ void DialReader::answered(uint64_t nowMs)
     if (asking_ == Ask::Meter) meterDueMs_ = nowMs + METER_MS;
     // The filter's last answer: the whole reading at once, never the mode
     // of one with the knobs of the last.
-    const bool filterAnswer = asking_ == Ask::Mode || (asking_ == Ask::Meter && (askedMeter_ == (int)Meter::PbtIn ||
-                                                                                askedMeter_ == (int)Meter::PbtOut));
+    const bool filterAnswer = asking_ == Ask::Mode || (asking_ == Ask::Meter && askedMeter_ >= (int)Meter::PbtIn);
     if (filterAnswer && !filterQuestionsLeft()) publishFilter();
     asking_ = Ask::None;
     askNext(nowMs);
@@ -433,7 +465,9 @@ void DialReader::meterValue(int meter, double value)
     // Nonsense (a negative SWR) is no reading.
     bool strength = meter == (int)Meter::Strength;
     bool pbt = meter == (int)Meter::PbtIn || meter == (int)Meter::PbtOut;
-    if (pbt ? std::fabs(value) > 10000
+    bool notch = meter == (int)Meter::NotchOn || meter == (int)Meter::NotchRaw;
+    if (notch ? (value < 0 || value > 1)
+        : pbt ? std::fabs(value) > 10000
             : strength ? (value < -100 || value > 100) : (value < 0 || (meter == (int)Meter::Alc && value > 2.0)))
         return;
     failures_[meter] = 0;
@@ -442,11 +476,14 @@ void DialReader::meterValue(int meter, double value)
         state_[meter] = State::Answers;
         version_++;
     }
-    if (pbt)
+    if (pbt || notch)
     {
         if (!filterWatch_) return;
         if (!reading_) reading_ = filter_.value_or(RigFilter{});
-        (meter == (int)Meter::PbtIn ? reading_->pbtIn : reading_->pbtOut) = value;
+        if (meter == (int)Meter::PbtIn) reading_->pbtIn = value;
+        if (meter == (int)Meter::PbtOut) reading_->pbtOut = value;
+        if (meter == (int)Meter::NotchOn) reading_->notchOn = value != 0;
+        if (meter == (int)Meter::NotchRaw) reading_->notchRaw = value;
         return;
     }
     if (strength)
@@ -465,7 +502,9 @@ void DialReader::meterValue(int meter, double value)
     case Meter::Power: reading.power = value; break;
     case Meter::Strength:
     case Meter::PbtIn:
-    case Meter::PbtOut: break;
+    case Meter::PbtOut:
+    case Meter::NotchOn:
+    case Meter::NotchRaw: break;
     }
     readings_.push_back(reading);
 }
@@ -476,7 +515,7 @@ void DialReader::meterFailed(int meter, int code)
     // (RIG_EINVAL, RIG_ENIMPL, RIG_ENAVAIL). Anything else may be the rig
     // not transmitting, so it is asked again when keyed.
     // The S-meter is asked between bursts, so its failures count then.
-    // So are the PBT.
+    // So are the PBT and the notch.
     bool unknown = unknownCode(code);
     bool counts = keyed_ || meter >= (int)Meter::Strength;
     if ((!keyed_ && unknown) || (counts && ++failures_[meter] >= 2))
@@ -505,15 +544,16 @@ void DialReader::onLine(const std::string& line, uint64_t nowMs)
         modeName_.clear();
         return;
     }
-    if (inMode_ || (asking_ == Ask::Mode && answering_ < 0 && line.compare(0, 11, "get_level: ") != 0))
+    if (inMode_ || (asking_ == Ask::Mode && answering_ < 0 && line.compare(0, 11, "get_level: ") != 0 &&
+                    line.compare(0, 10, "get_func: ") != 0))
     {
         modeLine(line, nowMs);
         return;
     }
 
     // A long answer: "get_level: SWR" (or "get_level: currVFO SWR"), the
-    // value, then RPRT.
-    if (line.compare(0, 11, "get_level: ") == 0)
+    // value, then RPRT; "get_func: MN" the same.
+    if (line.compare(0, 11, "get_level: ") == 0 || line.compare(0, 10, "get_func: ") == 0)
     {
         std::string name = line.substr(line.rfind(' ') + 1);
         answering_ = -1;

@@ -52,6 +52,15 @@ std::string describe(const RigFilter& filter)
         }
         out += (out.empty() ? "" : dot) + pbt;
     }
+    if (filter.notchOn && *filter.notchOn)
+    {
+        char text[32];
+        if (filter.notchRaw)
+            std::snprintf(text, sizeof text, "notch %.2f", *filter.notchRaw);
+        else
+            std::snprintf(text, sizeof text, "notch on");
+        out += (out.empty() ? "" : dot) + std::string(text);
+    }
     return out;
 }
 

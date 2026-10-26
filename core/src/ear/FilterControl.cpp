@@ -31,6 +31,92 @@ const char* const ARROW = " \xe2\x86\x92 ";
 
 } // namespace
 
+double NotchModel::rawFor(double hz) const
+{
+    return quantise(hzPerUnit != 0 ? (hz - offsetHz) / hzPerUnit : 0.5);
+}
+
+void NotchModel::learn(double raw, double hz)
+{
+    if (seenRaw && seenHz && std::fabs(raw - *seenRaw) >= SLOPE_SPAN)
+    {
+        // Two dips: the slope too, if it is a believable one.
+        const double slope = (hz - *seenHz) / (raw - *seenRaw);
+        if (std::fabs(slope) >= 1000 && std::fabs(slope) <= 20000) hzPerUnit = slope;
+    }
+    offsetHz = hz - hzPerUnit * raw;
+    seenRaw = raw;
+    seenHz = hz;
+}
+
+std::string NotchModel::text() const
+{
+    std::ostringstream out;
+    out.imbue(std::locale::classic());
+    out.setf(std::ios::fixed);
+    out.precision(1);
+    out << hzPerUnit << ' ' << offsetHz << ' ';
+    if (seenRaw && seenHz)
+    {
+        out.precision(4);
+        out << *seenRaw << ' ';
+        out.precision(1);
+        out << *seenHz;
+    }
+    else
+    {
+        out << "- -";
+    }
+    return out.str();
+}
+
+std::optional<NotchModel> NotchModel::fromText(const std::string& text)
+{
+    std::istringstream in(text);
+    in.imbue(std::locale::classic());
+    NotchModel m;
+    std::string raw, hz;
+    if (!(in >> m.hzPerUnit >> m.offsetHz >> raw >> hz) || std::fabs(m.hzPerUnit) < 1) return std::nullopt;
+    if (raw != "-" && hz != "-")
+    {
+        std::istringstream r(raw + " " + hz);
+        r.imbue(std::locale::classic());
+        double a = 0, b = 0;
+        if (r >> a >> b)
+        {
+            m.seenRaw = a;
+            m.seenHz = b;
+        }
+    }
+    return m;
+}
+
+bool notchCutsData2G(double hz, bool narrow)
+{
+    const Passband p = data2gPassband(narrow);
+    return hz + NotchModel::WIDTH_HZ / 2 > p.lowHz && hz - NotchModel::WIDTH_HZ / 2 < p.highHz;
+}
+
+std::string notchChangeText(const RigFilter& from, const RigFilter& to, const NotchModel& m)
+{
+    const bool was = from.notchOn && *from.notchOn, is = to.notchOn && *to.notchOn;
+    if (!was && !is) return std::string();
+    if (!is) return "Notch off";
+    const int at = to.notchRaw ? tens(m.hzOf(*to.notchRaw)) : 0;
+    if (!was) return "Notch on at " + std::to_string(at) + " Hz";
+    const int before = from.notchRaw ? tens(m.hzOf(*from.notchRaw)) : 0;
+    if (before == at) return std::string();
+    return "Notch " + std::to_string(before) + ARROW + std::to_string(at) + " Hz";
+}
+
+RigFilter withNotch(const RigFilter& now, std::optional<double> hz, const NotchModel& m)
+{
+    RigFilter out = now;
+    out.notchOn = hz.has_value();
+    if (hz) out.notchRaw = m.rawFor(*hz);
+    return out;
+}
+
 double knobShift(std::optional<double> knob, double hzPerKnob)
 {
     return knob ? hzPerKnob * (*knob - 0.5) : 0.0;
@@ -96,7 +182,14 @@ Span spanOf(const RigFilter& f, double centreHz, double hzPerKnob)
 Span dragTarget(const Span& from, const Span& to, const RigFilter& now, const KnobModel& m)
 {
     const Span real = spanOf(now, m);
-    return Span{real.lowHz + (to.lowHz - from.lowHz), real.highHz + (to.highHz - from.highHz)};
+    Span out{real.lowHz + (to.lowHz - from.lowHz), real.highHz + (to.highHz - from.highHz)};
+    // A hidden edge dragged by itself: where it was dropped. In a shift
+    // both edges move alike, hidden or not.
+    const double dl = to.lowHz - from.lowHz, dh = to.highHz - from.highHz;
+    if (std::fabs(dl - dh) < 1) return out;
+    if (m.floorHz > 0 && real.lowHz < m.floorHz && std::fabs(dl) >= 1) out.lowHz = to.lowHz;
+    if (m.ceilingHz > 0 && real.highHz > m.ceilingHz && std::fabs(dh) >= 1) out.highHz = to.highHz;
+    return out;
 }
 
 double centreOf(const Span& measured, const RigFilter& f, double hzPerKnob)
@@ -168,6 +261,34 @@ RigFilter shiftedBy(const RigFilter& now, double hz, double hzPerKnob)
 double guessHzPerKnob(const RigFilter& f)
 {
     return f.widthHz > 0 ? f.widthHz : 3000;
+}
+
+RigFilter disabled(const RigFilter& now)
+{
+    RigFilter out = now;
+    if (out.pbtIn) out.pbtIn = quantise(0.5);
+    if (out.pbtOut) out.pbtOut = quantise(0.5);
+    if (out.notchOn) out.notchOn = false;
+    return out;
+}
+
+bool filtersOff(const RigFilter& f)
+{
+    return (!f.pbtIn || radio::pbtCentred(*f.pbtIn)) && (!f.pbtOut || radio::pbtCentred(*f.pbtOut)) &&
+           !(f.notchOn && *f.notchOn);
+}
+
+bool holds(const RigFilter& rig, const RigFilter& preset)
+{
+    auto near = [](const std::optional<double>& a, const std::optional<double>& b) {
+        return !b || (a && std::fabs(*a - *b) <= 1.5 / 255.0);
+    };
+    if (rig.mode != preset.mode || rig.widthHz != preset.widthHz) return false;
+    if (!near(rig.pbtIn, preset.pbtIn) || !near(rig.pbtOut, preset.pbtOut)) return false;
+    if (!preset.notchOn) return true;
+    const bool on = rig.notchOn && *rig.notchOn;
+    if (on != *preset.notchOn) return false;
+    return !on || near(rig.notchRaw, preset.notchRaw);
 }
 
 bool cutsData2G(const Span& span, bool narrow)
@@ -246,7 +367,7 @@ void FilterEdit::putBack()
 
 std::optional<RigFilter> FilterEdit::due(uint64_t nowMs, bool quiet)
 {
-    if (state_ == State::Trial && nowMs >= deadlineMs_) undo();
+    if (state_ == State::Trial && !held_ && nowMs >= deadlineMs_) undo();
     if (state_ != State::Waiting || !quiet || !pending_) return std::nullopt;
     RigFilter write = *pending_;
     everWritten_ = true;
@@ -263,6 +384,7 @@ std::optional<RigFilter> FilterEdit::due(uint64_t nowMs, bool quiet)
         state_ = State::Trial;
         dirty_ = true;
         deadlineMs_ = nowMs + KEEP_MS;
+        heldLeftMs_ = KEEP_MS;
     }
     current_ = write;
     return write;
@@ -291,8 +413,20 @@ std::optional<RigFilter> FilterEdit::quit() const
 
 double FilterEdit::secondsLeft(uint64_t nowMs) const
 {
-    if (state_ != State::Trial || nowMs >= deadlineMs_) return 0;
+    if (state_ != State::Trial) return 0;
+    if (held_) return (double)heldLeftMs_ / 1000.0;
+    if (nowMs >= deadlineMs_) return 0;
     return (double)(deadlineMs_ - nowMs) / 1000.0;
+}
+
+void FilterEdit::hold(bool held, uint64_t nowMs)
+{
+    if (held == held_) return;
+    held_ = held;
+    if (held)
+        heldLeftMs_ = deadlineMs_ > nowMs ? deadlineMs_ - nowMs : 0;
+    else
+        deadlineMs_ = nowMs + heldLeftMs_;
 }
 
 bool Calibration::start(const RigFilter& now)

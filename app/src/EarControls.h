@@ -33,6 +33,7 @@ private:
 // A preset button: a tap recalls, and pressing and holding stores, with a
 // quick clock running down on the button as it is held (Jeff,
 // 2026-10-26). Let go before the clock runs out and nothing is stored.
+// With no store, a hold does nothing (Disable).
 class PresetButton : public wxControl
 {
 public:
@@ -42,6 +43,8 @@ public:
 
     // The second line: the edges or width it holds, or a dash.
     void setDetail(const wxString& detail);
+    // Shown pushed in: the rig has what it holds.
+    void setPushed(bool pushed);
     void onTap(std::function<void()> tap) { tap_ = std::move(tap); }
     void onStore(std::function<void()> store) { store_ = std::move(store); }
 
@@ -60,6 +63,7 @@ private:
     long heldMs_ = -1;          // held this long; -1 not held
     long storedMs_ = -1;        // "Stored" shows this long; -1 not
     bool hover_ = false;
+    bool pushed_ = false;
 };
 
 #endif
