@@ -2616,7 +2616,11 @@ void MainFrame::onDial()
         if (filter->notchOn)
             said += " NF " + (*filter->notchOn && filter->notchRaw ? radio::pbtText(*filter->notchRaw)
                                                                     : std::string("off"));
-        filterEdit_.seen(*filter);
+        // While the Ear is open its filter bar hands on each new reading.
+        // Here, with every dial update, the last reading would come again
+        // after a write until the rig is read back, and look like the
+        // change undone (Jeff, 2026-10-26: edges that "snap back").
+        if (!ear_) filterEdit_.seen(*filter);
     }
     if (said != notedFilter_)
     {

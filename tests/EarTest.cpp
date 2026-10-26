@@ -975,6 +975,58 @@ void clockHeld()
     CHECK(w && w->widthHz == 2400);
 }
 
+// Keep pressed while a change waits: kept as it is written, no trial; a
+// newer drag or Undo drops it.
+void keepAhead()
+{
+    const uint64_t t = 2000000;
+    FilterEdit e;
+    e.seen(usb(2400));
+    e.change(usb(1800), t);
+    e.keep();
+    CHECK(e.keptAhead());
+    CHECK(e.state() == FilterEdit::State::Waiting);
+    CHECK(!e.due(t + 100, false));
+    std::optional<RigFilter> w = e.due(t + 7000, true);
+    CHECK(w && w->widthHz == 1800);
+    CHECK(e.state() == FilterEdit::State::Idle);
+    CHECK(!e.keptAhead());
+    // Nothing goes back later.
+    CHECK(!e.due(t + 60000, true));
+    CHECK(e.current() && e.current()->widthHz == 1800);
+
+    // A second drag during a trial, kept while it waits: kept as written,
+    // and the first goes with it.
+    e.seen(usb(1800));
+    e.change(usb(2000), t + 70000);
+    CHECK(e.due(t + 70000, true).has_value());
+    CHECK(e.state() == FilterEdit::State::Trial);
+    e.change(usb(2100), t + 72000);
+    e.keep();
+    w = e.due(t + 80000, true);
+    CHECK(w && w->widthHz == 2100);
+    CHECK(e.state() == FilterEdit::State::Idle);
+    CHECK(!e.due(t + 100000, true));
+
+    // A newer drag after Keep starts a trial of its own.
+    e.seen(usb(2100));
+    e.change(usb(2200), t + 110000);
+    e.keep();
+    e.change(usb(2300), t + 110500);
+    CHECK(!e.keptAhead());
+    CHECK(e.due(t + 111000, true).has_value());
+    CHECK(e.state() == FilterEdit::State::Trial);
+    // Undo while waiting forgets it: nothing is written.
+    e.keep();
+    e.change(usb(2400), t + 112000);
+    e.keep();
+    e.undo();
+    CHECK(!e.keptAhead());
+    CHECK(e.state() == FilterEdit::State::Idle);
+    CHECK(!e.due(t + 113000, true));
+    CHECK(e.current() && e.current()->widthHz == 2300);
+}
+
 int main()
 {
     fftOfImpulse();
@@ -993,5 +1045,6 @@ int main()
     spans();
     notch();
     clockHeld();
+    keepAhead();
     return ragtime_test::finish();
 }
