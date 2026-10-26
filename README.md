@@ -78,6 +78,38 @@ A tester's report (Help > Save a report) plays back the same way:
 `ragtime_fake_air --replay flight/` gives a Ragtime the host's side of
 the recording, at the spacing the tester saw (docs/FLIGHT_RECORDER.md).
 
+## Frequencies
+
+A quick reference for a first QSO from the US. Set the rig to USB on
+one of these dials. Each sits 3.2 kHz below the band's line between the
+data segment and the phone and image segment, so everything Data2G
+sends up to 2.95 kHz above the dial stays in the data segment, on any
+SSB rig.
+
+| Band | Dial, USB (MHz) | Data segment ends at (MHz) |
+| --- | --- | --- |
+| 80 m | 3.5968 | 3.600 |
+| 40 m | 7.1218 | 7.125 |
+| 20 m | 14.1468 | 14.150 |
+| 17 m | 18.1068 | 18.110 |
+| 15 m | 21.1968 | 21.200 |
+| 12 m | 24.9268 | 24.930 |
+| 10 m | 28.2968 | 28.300 |
+
+- These are proposed spots, not a schedule. Listen before you send.
+- Data on these bands needs a General licence or higher, except on 10 m,
+  where Technicians may send data up to 28.300 MHz.
+- Ragtime turns receive only when the dial is outside a US data
+  segment, or less than 3 kHz inside its edge, and says so in the
+  connection bar.
+- Unattended stations (automatic control) must stay in the narrower
+  segments of 97.221(b); see "Frequencies and band plans" in
+  [docs/PLAN.md](docs/PLAN.md#frequencies-and-band-plans).
+- The same dials let a rig with a 6 to 8 kHz transmit passband carry
+  pictures and voice just above the line one day
+  ([docs/PICTURES_AND_VOICE.md](docs/PICTURES_AND_VOICE.md)). That isn't
+  built yet.
+
 ## The idea
 
 - **Welcome to the D2G net.** D2G is a net that never closes. You check
@@ -106,6 +138,7 @@ Messages are signed, never encrypted, as Part 97 requires.
 | [docs/HOW_SEALS_WORK.md](docs/HOW_SEALS_WORK.md) | Seals in plain words, with pictures: what is inside one, how repairs work, and what a late joiner asks for |
 | [docs/GEARBOX.md](docs/GEARBOX.md) | The gearshift: how a Data2G mode is picked from the Submode Map |
 | [docs/MOCKUPS.md](docs/MOCKUPS.md) | The screens, colours, Globus and seal icons |
+| [docs/PICTURES_AND_VOICE.md](docs/PICTURES_AND_VOICE.md) | Draft spec for SSTVAE pictures and RADE voice clips in chat, with the US band segments and Part 97 notes (not built; waits on Data2G) |
 | [CLAUDE.md](CLAUDE.md) | Working notes and ground rules for contributors |
 
 ## Licence

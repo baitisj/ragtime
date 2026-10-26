@@ -34,6 +34,9 @@ touches. `docs/FLIGHT_RECORDER.md` is the host-link recorder, the report
 and `--replay`. `docs/HOW_SEALS_WORK.md` is the plain-words primer on seals and
 repair (its figures are SVGs in `docs/images/how-seals-work/`); change it
 with the code when the seal rules change.
+`docs/PICTURES_AND_VOICE.md` is the draft spec for pictures and voice in
+chat (not built), with the US band segments, the wide-passband dials
+and the Part 97 check.
 
 ## Status
 
