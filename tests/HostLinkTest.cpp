@@ -488,7 +488,7 @@ void testCuts()
     HostLink link({"ag7ew", true, false});
     link.commandUp(0);
     link.takeCommandOutput();
-    say(link, "OK\rOK\rOK\rOK\rOK\rBCAST PORT 2\rOK\r", 10);
+    say(link, "OK\rOK\rOK\rOK\rOK\rBCAST PORT 2\rOK\rTIMEOUT 300.0\rTXPOWER 0.0\r", 10);
     CHECK(link.data2g());
     CHECK(!link.canCut());
     CHECK(!link.cleanTxBuffer(100, 20)); // no session
@@ -521,6 +521,109 @@ void testCuts()
     CHECK(events.size() == 1 && events[0].type == Type::Clean
           && events[0].clean.result == CommandEvent::Clean::Result::Failed);
     CHECK(!link.data2g() && !link.canCut());
+}
+
+void testTimeoutAndTxPower()
+{
+    // A host from before Data2G PR #118 isn't asked.
+    HostLink old = opened(0);
+    CHECK(!old.idleTimeout() && !old.txPower());
+    CHECK(!old.setTxPower(-6.0, 10));
+    CHECK(old.takeCommandOutput().empty());
+
+    // Since PR #122: once DATA2G ON is taken, the host's own idle timeout
+    // is read, ours set and read back, and the output volume read.
+    HostLink::Settings settings{"ag7ew", true, false};
+    settings.idleTimeoutS = HostLink::RAGCHEW_IDLE_TIMEOUT_S;
+    HostLink link(settings);
+    link.commandUp(0);
+    link.takeCommandOutput();
+    say(link, "OK\rOK\rOK\r", 10);
+    CHECK(linesOf(link.takeCommandOutput())
+          == std::vector<std::string>({"TIMEOUT", "TIMEOUT 86400.0", "TIMEOUT", "TXPOWER"}));
+    say(link, "OK\rOK\rBCAST PORT 2\rOK\rTIMEOUT 300.0\rOK\rTIMEOUT 86400.0\rTXPOWER -3.0\r", 20);
+    std::vector<HostLink::Event> events = link.takeEvents();
+    CHECK(!hasEvent(events, Type::Refused));
+    CHECK(link.idleTimeout() && *link.idleTimeout() == 86400.0);
+    CHECK(link.txPower() && *link.txPower() == -3.0);
+    int timeouts = 0;
+    for (const auto& e : events)
+    {
+        if (e.type == Type::IdleTimeout) timeouts++;
+        if (e.type == Type::TxPower) CHECK(e.value == -3.0);
+    }
+    CHECK_EQ(timeouts, 2);
+
+    // The output volume: set, then read back.
+    CHECK(link.setTxPower(-12.54, 30));
+    CHECK(linesOf(link.takeCommandOutput()) == std::vector<std::string>({"TXPOWER -12.5", "TXPOWER"}));
+    say(link, "OK\rTXPOWER -12.5\r", 40);
+    events = link.takeEvents();
+    CHECK(events.size() == 1 && events[0].type == Type::TxPower && events[0].value == -12.5);
+    CHECK(!link.setTxPower(-60.5, 50) && !link.setTxPower(20.5, 50));
+    CHECK(link.setTxPower(20.0, 50));
+    link.takeCommandOutput();
+    say(link, "WRONG\rTXPOWER -12.5\r", 60);
+    events = link.takeEvents();
+    CHECK(events.size() == 1 && events[0].type == Type::Refused && events[0].text == "TXPOWER 20.0");
+
+    // Back to the host's own idle timeout, as first read.
+    link.setIdleTimeout(0.0, 70);
+    CHECK(linesOf(link.takeCommandOutput()) == std::vector<std::string>({"TIMEOUT 300.0", "TIMEOUT"}));
+    say(link, "OK\rTIMEOUT 300.0\r", 80);
+    CHECK(*link.idleTimeout() == 300.0);
+    link.setIdleTimeout(0.0, 90);
+    CHECK(link.takeCommandOutput().empty());
+
+    // Gone with the command port.
+    link.commandDown(100);
+    CHECK(!link.idleTimeout() && !link.txPower());
+
+    // A host between PRs #118 and #122 answers WRONG: nothing refused.
+    HostLink between({"ag7ew", true, false});
+    between.commandUp(0);
+    between.takeCommandOutput();
+    say(between, "OK\rOK\rOK\rOK\rOK\rBCAST PORT 2\rOK\rWRONG\rWRONG\r", 10);
+    CHECK(between.data2g() && !between.idleTimeout() && !between.txPower());
+    CHECK(!hasEvent(between.takeEvents(), Type::Refused));
+}
+
+void testDisconnectReasons()
+{
+    // The host's reason comes with SessionEnded.
+    HostLink link = opened(0);
+    CHECK(link.call("W1AW", 10));
+    say(link, "OK\rDISCONNECTED BUSY\r", 20);
+    std::vector<HostLink::Event> events = link.takeEvents();
+    bool busy = false;
+    for (const auto& e : events)
+    {
+        busy = busy || (e.type == Type::SessionEnded && e.sessionEnd == HostLink::SessionEnd::NoAnswer
+                        && e.disconnect.reason == "BUSY");
+    }
+    CHECK(busy);
+
+    CHECK(link.call("W1AW", 30));
+    say(link, "OK\rCONNECTED AG7EW W1AW 2300\rDISCONNECTED LINK_FAILED no progress\r", 40);
+    events = link.takeEvents();
+    CHECK(!events.empty() && events.back().type == Type::SessionEnded);
+    if (!events.empty())
+    {
+        CHECK(events.back().sessionEnd == HostLink::SessionEnd::Ended);
+        CHECK(events.back().disconnect.reason == "LINK_FAILED" && events.back().disconnect.detail == "no progress");
+    }
+
+    CHECK(link.call("W1AW", 50));
+    say(link, "OK\rCONNECTED AG7EW W1AW 2300\r", 60);
+    CHECK(link.leave(70));
+    say(link, "OK\rDISCONNECTED CLIENT unconfirmed\r", 80);
+    events = link.takeEvents();
+    CHECK(!events.empty() && events.back().type == Type::SessionEnded);
+    if (!events.empty())
+    {
+        CHECK(events.back().sessionEnd == HostLink::SessionEnd::Left);
+        CHECK(events.back().disconnect.reason == "CLIENT" && events.back().disconnect.unconfirmed);
+    }
 }
 
 void testTheLastModeReported()
@@ -689,6 +792,8 @@ int main()
     testCallingAndLeaving();
     testAbortTransmit();
     testCuts();
+    testTimeoutAndTxPower();
+    testDisconnectReasons();
     testTheLastModeReported();
     testAnUnansweredCommandIsNotWaitedOnForEver();
     testNothingWithoutTheHost();

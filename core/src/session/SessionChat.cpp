@@ -1,7 +1,10 @@
 #include "ragtime/session/SessionChat.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
+#include <optional>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -35,6 +38,23 @@ bool blank(const std::string& text)
 std::string twoDigits(uint64_t n)
 {
     return (n < 10 ? "0" : "") + std::to_string(n);
+}
+
+// An idle timeout in words: "5 minutes", "24 hours".
+std::string idleLength(uint64_t ms)
+{
+    auto count = [](uint64_t n, const char* unit) { return std::to_string(n) + " " + unit + (n == 1 ? "" : "s"); };
+    if (ms >= 3600000 && ms % 3600000 == 0) return count(ms / 3600000, "hour");
+    if (ms >= 60000 && ms % 60000 == 0) return count(ms / 60000, "minute");
+    if (ms < 60000) return count(ms / 1000, "second");
+    return sessionLength(ms);
+}
+
+// Quiet for about a host's idle timeout: from a little short of it to the
+// hosts' goodbyes after it.
+bool nearIdle(uint64_t silentMs, uint64_t idleMs, uint64_t earlyMs, uint64_t lateMs)
+{
+    return silentMs + earlyMs >= idleMs && silentMs < idleMs + lateMs;
 }
 
 } // namespace
@@ -556,7 +576,7 @@ std::vector<protocol::Record> SessionChat::dataBytes(const uint8_t* bytes, size_
         {
             if (r.as<protocol::Text>() != nullptr || r.as<protocol::Status>() != nullptr) onRecord(r, nowMs);
         }
-        if (farewellHeard_ && ending_ == Ending::LinkLost)
+        if (farewellHeard_ && (ending_ == Ending::LinkLost || ending_ == Ending::ClosedThere))
         {
             ending_ = Ending::LeftThere;
             changed();
@@ -679,33 +699,68 @@ void SessionChat::onEvent(const link::HostLink::Event& event, uint64_t nowMs)
         {
             using End = link::HostLink::SessionEnd;
             Ending ending = Ending::LinkLost;
-            switch (event.sessionEnd)
+            // A session ended while up: what we know first, then what happened.
+            auto ended = [&](Ending otherwise) {
+                return cancelling_     ? Ending::Cancelled
+                       : gaveUp_        ? Ending::NoAnswer
+                       : dataLost_      ? Ending::DataLost
+                       : farewellHeard_ ? Ending::LeftThere
+                       : phase_ == Phase::Leaving && connectedMs_ != 0 ? Ending::Left
+                                                                       : otherwise;
+            };
+            // A host since Data2G PR #122 says why; CLIENT and ABORT are our
+            // own Leave, which the flags above say more about.
+            const std::string& why = event.disconnect.reason;
+            bool hostSays = event.sessionEnd != End::HostLost && !why.empty() && why != "CLIENT" && why != "ABORT";
+            if (hostSays)
             {
-                case End::NoAnswer:
+                if (why == "NO_ANSWER")
                     ending = cancelling_ ? Ending::Cancelled : Ending::NoAnswer;
-                    break;
-                case End::Refused:
-                    ending = Ending::Refused;
-                    break;
-                case End::Left:
-                    ending = gaveUp_      ? Ending::NoAnswer
-                             : cancelling_ ? Ending::Cancelled
-                             : dataLost_   ? Ending::DataLost
-                                           : Ending::Left;
-                    break;
-                case End::Ended:
-                    ending = cancelling_     ? Ending::Cancelled
-                             : gaveUp_        ? Ending::NoAnswer
-                             : dataLost_      ? Ending::DataLost
-                             : farewellHeard_ ? Ending::LeftThere
-                             : phase_ == Phase::Leaving && connectedMs_ != 0 ? Ending::Left
-                                                                             : Ending::LinkLost;
-                    break;
-                case End::HostLost:
-                    ending = Ending::HostLost;
-                    break;
+                // The far end said no: that, even if we were stopping the call.
+                else if (why == "BUSY")
+                    ending = Ending::Busy;
+                else if (why == "NOT_LISTENING")
+                    ending = Ending::NotListening;
+                else if (why == "VERSION" || why == "REFUSED")
+                    ending = Ending::RefusedThere;
+                else if (why == "IDLE")
+                    ending = ended(Ending::IdleClosed);
+                else if (why == "PEER")
+                    ending = ended(Ending::ClosedThere);
+                // LINK_LOST, LINK_FAILED, PEER_RECONNECTED, and any reason
+                // newer than this.
+                else
+                    ending = ended(Ending::LinkLost);
+            }
+            else
+            {
+                switch (event.sessionEnd)
+                {
+                    case End::NoAnswer:
+                        ending = cancelling_ ? Ending::Cancelled : Ending::NoAnswer;
+                        break;
+                    case End::Refused:
+                        ending = Ending::Refused;
+                        break;
+                    case End::Left:
+                        ending = gaveUp_      ? Ending::NoAnswer
+                                 : cancelling_ ? Ending::Cancelled
+                                 : dataLost_   ? Ending::DataLost
+                                               : Ending::Left;
+                        break;
+                    case End::Ended:
+                        ending = ended(Ending::LinkLost);
+                        break;
+                    case End::HostLost:
+                        ending = Ending::HostLost;
+                        break;
+                }
             }
             if (phase_ == Phase::Calling && ending == Ending::LinkLost) ending = Ending::NoAnswer;
+            why_ = event.sessionEnd == End::HostLost ? link::CommandEvent::Disconnect() : event.disconnect;
+            idleCloseMs_ = HOST_IDLE_CLOSE_MS;
+            if (std::optional<double> idle = link_.idleTimeout(); idle && *idle > 0.0)
+                idleCloseMs_ = (uint64_t)std::llround(std::min(*idle, 1e9) * 1000.0);
             finish(ending, nowMs);
             break;
         }
@@ -827,7 +882,7 @@ void SessionChat::finish(Ending ending, uint64_t nowMs)
     early_.clear();
     out_.clear();
     endCut();
-    if (ending == Ending::LinkLost)
+    if (ending == Ending::LinkLost || ending == Ending::ClosedThere)
     {
         afterglowUntilMs_ = std::max<uint64_t>(nowMs + AFTERGLOW_MS, 1);
     }
@@ -1025,6 +1080,8 @@ SessionChat::Strip SessionChat::strip(uint64_t nowMs, long utcOffsetS) const
                 case Ending::Left:
                     s.text = "You left the session with " + peer_ + " at " + at + ", after "
                              + sessionLength(sinceMs_ - std::min(sinceMs_, connectedMs_));
+                    // The DISC went out, but no acknowledgement came back.
+                    if (why_.unconfirmed) s.text += DOT + peer_ + " didn't confirm it";
                     break;
                 case Ending::LeftThere:
                     s.text = "Session ended by " + peer_ + " at " + at;
@@ -1032,14 +1089,51 @@ SessionChat::Strip SessionChat::strip(uint64_t nowMs, long utcOffsetS) const
                 case Ending::LinkLost:
                 {
                     uint64_t silent = sinceMs_ > lastHeardMs_ ? sinceMs_ - lastHeardMs_ : 0;
-                    if (silent + HOST_IDLE_EARLY_MS >= HOST_IDLE_CLOSE_MS
-                        && silent < HOST_IDLE_CLOSE_MS + HOST_IDLE_LATE_MS)
+                    const std::string& why = why_.reason;
+                    if (why == "LINK_FAILED")
+                        s.text = "Link failed at " + at + ": data2g-host gave up on it"
+                                 + (why_.detail.empty() ? std::string() : " (" + why_.detail + ")");
+                    else if (why == "PEER_RECONNECTED")
+                        s.text = peer_ + " called again at " + at + ", which ended the session that was up";
+                    // An older host gives no reason: the quiet may have been its idle timeout.
+                    else if (why.empty() && nearIdle(silent, idleCloseMs_, HOST_IDLE_EARLY_MS, HOST_IDLE_LATE_MS))
                         s.text = "data2g-host closed the quiet session with " + peer_ + " at " + at
-                                 + ": it hangs up after 5 minutes with nothing sent either way";
+                                 + ": it hangs up after " + idleLength(idleCloseMs_) + " with nothing sent either way";
                     else if (silent >= 60000)
                         s.text = "Link lost at " + at + " after " + sessionLength(silent) + " without contact";
+                    else if (why == "LINK_LOST")
+                        s.text = "Link lost at " + at;
                     else
                         s.text = "The session with " + peer_ + " ended at " + at;
+                    break;
+                }
+                case Ending::Busy:
+                    s.text = peer_ + " is in another session (" + at + ")";
+                    break;
+                case Ending::NotListening:
+                    s.text = peer_ + " isn't taking sessions (" + at + ")";
+                    break;
+                case Ending::RefusedThere:
+                    if (why_.reason == "VERSION")
+                        s.text = peer_ + "'s data2g-host can't make sessions with yours: another version (" + at + ")";
+                    else
+                        s.text = peer_ + "'s station refused the call ("
+                                 + (why_.detail.empty() ? std::string() : why_.detail + ", ") + at + ")";
+                    break;
+                case Ending::IdleClosed:
+                    s.text = "data2g-host closed the quiet session with " + peer_ + " at " + at + ": it hangs up after "
+                             + idleLength(idleCloseMs_) + " with nothing sent either way";
+                    break;
+                case Ending::ClosedThere:
+                {
+                    // Its host's idle timeout is likely Data2G's own, or ours.
+                    uint64_t silent = sinceMs_ > lastHeardMs_ ? sinceMs_ - lastHeardMs_ : 0;
+                    if (nearIdle(silent, HOST_IDLE_CLOSE_MS, HOST_IDLE_EARLY_MS, HOST_IDLE_LATE_MS)
+                        || nearIdle(silent, idleCloseMs_, HOST_IDLE_EARLY_MS, HOST_IDLE_LATE_MS))
+                        s.text = peer_ + "'s data2g-host closed the quiet session at " + at
+                                 + ": nothing was sent either way for " + sessionLength(silent);
+                    else
+                        s.text = peer_ + "'s end closed the session at " + at;
                     break;
                 }
                 case Ending::HostLost:

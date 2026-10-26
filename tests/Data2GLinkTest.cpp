@@ -146,6 +146,35 @@ void testCleanTxBufferLines()
     CHECK(parseCommandLine("CLEANTXBUFFER MAYBE").type == Type::Other);
 }
 
+void testDisconnectReasons()
+{
+    using Type = CommandEvent::Type;
+    // Data2G PR #122, with DATA2G ON: DISCONNECTED says why.
+    CommandEvent e = parseCommandLine("DISCONNECTED");
+    CHECK(e.type == Type::Disconnected && e.disconnect.reason.empty() && e.disconnect.detail.empty());
+    CHECK(!e.disconnect.unconfirmed);
+    e = parseCommandLine("DISCONNECTED PEER");
+    CHECK(e.type == Type::Disconnected && e.disconnect.reason == "PEER" && e.disconnect.detail.empty());
+    e = parseCommandLine("DISCONNECTED idle unconfirmed");
+    CHECK(e.disconnect.reason == "IDLE" && e.disconnect.unconfirmed && e.disconnect.detail.empty());
+    e = parseCommandLine("DISCONNECTED LINK_FAILED no progress");
+    CHECK(e.disconnect.reason == "LINK_FAILED" && e.disconnect.detail == "no progress" && !e.disconnect.unconfirmed);
+    e = parseCommandLine("DISCONNECTED LINK_FAILED protocol: bad frame");
+    CHECK(e.disconnect.detail == "protocol: bad frame");
+    e = parseCommandLine("DISCONNECTED REFUSED reason 7");
+    CHECK(e.disconnect.reason == "REFUSED" && e.disconnect.detail == "reason 7");
+
+    // TXPOWER and TIMEOUT answers.
+    e = parseCommandLine("TXPOWER -1.2");
+    CHECK(e.type == Type::TxPower && e.value == -1.2);
+    e = parseCommandLine("TIMEOUT 300.0");
+    CHECK(e.type == Type::Timeout && e.value == 300.0);
+    CHECK(parseCommandLine("TIMEOUT").type == Type::Other);
+    CHECK(parseCommandLine("TIMEOUT soon").type == Type::Other);
+    CHECK(parseCommandLine("TXPOWER inf").type == Type::Other);
+    CHECK(parseCommandLine("TXPOWER 1 2").type == Type::Other);
+}
+
 void testCommandCallsign()
 {
     CHECK_EQ(commandCallsign("vk2abc/p"), std::string("VK2ABC/P"));
@@ -202,6 +231,7 @@ int main()
     testKissPortsAndAckMode();
     testCommandLines();
     testCleanTxBufferLines();
+    testDisconnectReasons();
     testCommandCallsign();
     testModes();
     return ragtime_test::finish();

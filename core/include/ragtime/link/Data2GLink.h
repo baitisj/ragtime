@@ -132,10 +132,12 @@ struct CommandEvent
         BcastMissed,    // text: the submode, count: its codewords, snr (any port's: "BCAST *")
         Sn,             // snr: the session partner's last burst (the answer to SN)
         Connected,      // text: caller, peer: called station, number: bandwidth when given
-        Disconnected,
+        Disconnected,   // disconnect: why, from hosts since Data2G PR #122
         Buffer,         // count: bytes still to send in the session
         Cqframe,
         Clean,          // clean: a CLEANTXBUFFER answer, or its SETTLED report
+        TxPower,        // value: the output volume, dB (the answer to TXPOWER)
+        Timeout,        // value: the link idle timeout, seconds (the answer to TIMEOUT)
     } type = Type::Other;
 
     bool on = false;
@@ -149,6 +151,22 @@ struct CommandEvent
     // energy reading (once they know the noise floor); older hosts send
     // neither, and a HEARD without one still parses.
     std::optional<double> snr;
+    double value = 0.0;
+
+    // Why a session ended (Data2G PR #122, with DATA2G ON): "DISCONNECTED
+    // reason [detail] [unconfirmed]". The reason is one word: CLIENT (our
+    // DISCONNECT), IDLE (the host's idle timeout), PEER (the far end left),
+    // ABORT, LINK_LOST, LINK_FAILED (detail: why), NO_ANSWER,
+    // PEER_RECONNECTED, or the far host's refusal: BUSY, VERSION,
+    // NOT_LISTENING, REFUSED (an unknown one: "REFUSED reason n"). CLIENT
+    // and IDLE end in "unconfirmed" when the far end never acknowledged
+    // the DISC. Empty from an older host, or without DATA2G ON.
+    struct Disconnect
+    {
+        std::string reason;
+        std::string detail;
+        bool unconfirmed = false;
+    } disconnect;
 
     // CLEANTXBUFFER (Data2G PR #118; with DATA2G ON, host byte offsets
     // since CONNECTED, ranges [from, to)):

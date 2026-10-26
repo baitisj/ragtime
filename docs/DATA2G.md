@@ -5,7 +5,10 @@ Data2G's own docs and code at
 [arodland/Data2G@13807c6](https://github.com/arodland/Data2G/tree/13807c6c4e51f57a29f034fd5bd38c8cccbfcb51)
 (2026-10-25), so we stop guessing. It is a summary in our words, never
 copied code (CLAUDE.md, "Data2G"). When Data2G moves on, read it again
-and update this page, with the new commit.
+and update this page, with the new commit. What Data2G PR #122 adds
+(DISCONNECTED reasons, `TIMEOUT`, `TXPOWER`) was read at its head,
+[843987e](https://github.com/arodland/Data2G/pull/122/commits/843987e),
+on v0.3.0 (2026-10-26).
 
 ## Where to look in Data2G
 
@@ -32,8 +35,9 @@ Python host needs only numpy and scipy; torch is for training.
   share that rigctld. An operator who gives the host a serial rig
   directly has no rigctld for Ragtime to read. The host can poll the
   dial (`--rig-poll-interval`) but doesn't tell clients.
-- **Transmit level** is `--output-volume` (dB) at start. No command
-  changes it, so Auto ALC still waits.
+- **Transmit level** is `--output-volume` (dB) at start. Since Data2G PR
+  #122, `TXPOWER dB` changes it from the next audio block (with
+  `DATA2G ON`), and it stays as set when the client goes.
 - **Broadcast width** is fixed when the host starts: `--kiss-bw 2400` (the
   default) or `500`. `MODES` lists only the modes inside it, and
   `BCAST MODE` refuses the rest.
@@ -50,7 +54,9 @@ Python host needs only numpy and scipy; torch is for training.
 | `BW500`, `BW1200`, `BW2300`, `BW2750` | `OK` | The **session** width cap only: 500, 1200 or 2400 Hz (`BW2750` is 2400). Broadcast width is `--kiss-bw`. There is no 200 Hz cap; the 200 Hz modes sit inside 500 Hz |
 | `CHAT ON` | `OK` | Sessions favour latency over throughput (`docs/arq.md`, "CHAT ON") |
 | `DATA2G ON` | `OK` | `BUFFER` counts plainly, `CLEANTXBUFFER` reports host byte offsets, bytes written before `CONNECTED` are dropped. Off again when the client goes |
-| `CONNECT from to`, `DISCONNECT`, `ABORT` | `OK` / `WRONG` | `ABORT` drops a session without the handshake, and also stops the transmitter at once and clears its queue (`Transmitter::abort`, broadcast bursts too); it answers `DISCONNECTED` even with no session (read at v0.3.0, 6f0e72f). Ragtime's SWR trip uses it |
+| `CONNECT from to`, `DISCONNECT`, `ABORT` | `OK` / `WRONG` | `ABORT` drops a session without the handshake, and also stops the transmitter at once and clears its queue (`Transmitter::abort`, broadcast bursts too); it answers `DISCONNECTED` (`DISCONNECTED ABORT` with `DATA2G ON`, PR #122) even with no session (read at v0.3.0, 6f0e72f). Ragtime's SWR trip uses it |
+| `TIMEOUT [s]` | `TIMEOUT 300.0` / `OK` / `WRONG` | PR #122, with `DATA2G ON` (else `WRONG`). Bare: the link idle timeout in seconds. With any `s` > 0: sets it, for the session under way and the next. Back to the default when the client goes |
+| `TXPOWER [dB]` | `TXPOWER -1.2` / `OK` / `WRONG` | PR #122, with `DATA2G ON` (else `WRONG`). Bare: the output volume. With `dB`, -60 to 20: sets it (0 puts a burst's peak at full scale). Not reset when the client goes |
 | `CLEANTXBUFFER [n]` | `CLEANTXBUFFER OK a b c` / `LATE` / `BUFFEREMPTY` / `FAILED` | Then `CLEANTXBUFFER SETTLED a b c [UNKNOWN]` (PROTOCOL.md, "Cuts") |
 | `SN` | `SN snr` | The session partner's last burst, pilot S/N in 2500 Hz. `WRONG` before one |
 | `VERSION` | `VERSION Data2G x.y.z` | |
@@ -58,7 +64,8 @@ Python host needs only numpy and scipy; torch is for training.
 | `BCAST MODE n mode` | `OK` / `WRONG` | The port's transmit mode (below) |
 | `MODES` | `MODE ...` lines, then `OK` | `MODE name width-Hz bytes-per-codeword max-codewords seconds-at-1 seconds-at-max`, narrowest first |
 
-Reports: `CONNECTED src dst bw`, `DISCONNECTED`, `PTT ON|OFF`,
+Reports: `CONNECTED src dst bw`, `DISCONNECTED [reason [detail]]`
+(below), `PTT ON|OFF`,
 `BUSY ON|OFF`, `BUFFER n` (again every 30 s while not 0), `MODE submode`
 (the session's), `IAMALIVE` (every 60 s).
 
@@ -176,29 +183,42 @@ are in `data2g/codes_data/mode_thresholds.json` (GEARBOX.md).
 
 - A station already in a session, or not listening, refuses a `CONNECT`
   at once with a NAK (busy, not listening, wrong version, refused), and
-  the caller stops dialing. The caller's host then says only
-  `DISCONNECTED`. The reason is in the host's log, not on the command
-  port.
+  the caller stops dialing.
+- **Why a session ended** (PR #122, with `DATA2G ON`): `DISCONNECTED`
+  then a reason word, and detail words for some. `CLIENT` (our
+  `DISCONNECT`, or the client went), `IDLE` (the idle timeout), `PEER`
+  (the far end's DISC: its operator, or its host's idle timeout),
+  `ABORT`, `LINK_LOST` (nothing heard for 90 s), `LINK_FAILED why`
+  (`no progress`, `link lost`, `protocol: ...`), `NO_ANSWER`,
+  `PEER_RECONNECTED` (the partner called again), and the far end's
+  refusals: `BUSY`, `VERSION`, `NOT_LISTENING`, `REFUSED` (an unknown
+  NAK: `REFUSED reason n`). `CLIENT` and `IDLE` end in `unconfirmed`
+  when the DISC was never acknowledged. Without `DATA2G ON`, or from a
+  host before it, a bare `DISCONNECTED`, and Ragtime guesses as before
+  (`SessionChat`).
 - A caller who dials again while its old session is still up replaces
   that session.
 - The answering side takes the smaller of the two width caps.
 - **An idle session is hung up.** With no data either way for 5 minutes
-  (`IDLE_CLOSE_S`), the host disconnects on its own, so a quiet ragchew
-  ends without a Leave. Ragtime says so ("data2g-host closed the quiet
+  (`IDLE_CLOSE_S`), or what `TIMEOUT` set, the host disconnects on its
+  own (`IDLE` here, `PEER` at the far end). Each host runs its own timer,
+  so a longer one keeps a quiet session up only when both ends set it.
+  Ragtime sets a day (`HostLink::RAGCHEW_IDLE_TIMEOUT_S`), so a ragchew
+  between two Ragtimes ends only on Leave; a far end on another client
+  still hangs up after its own. A host before PR #122 can't be told:
+  Ragtime then says so from the quiet ("data2g-host closed the quiet
   session", `SessionChat::HOST_IDLE_CLOSE_MS`) rather than "Link lost".
-  Keeping it up is an ask (below). While idle,
+  While idle,
   the caller polls every 15 to 30 s (`KEEPALIVE_S`). With nothing heard
   from the partner for 90 s (`LINK_LOST_S`) the session is lost.
 
 ## Not in Data2G yet (asks)
 
-- A way to keep a quiet session up past 5 minutes, so it ends only on
-  Leave.
-- A transmit level command (Auto ALC).
+- `TXPOWER` back to the station's own level when the client goes, as
+  `TIMEOUT` is (asked in the PR #122 review), so a Ragtime that quits
+  doesn't leave the next client a level it set.
 - S/N thresholds in `MODES`.
 - The mode on `BCAST HEARD` (the path log's mode column).
-- The refusal reason on `DISCONNECTED`, so "AG7EW is in a session" can
-  show as such.
 - A dial report from the host's own rig control.
 - A 200 Hz session cap.
 - The Hand (`HAND SEND`, `HAND LISTEN`, Stage 2).

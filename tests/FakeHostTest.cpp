@@ -250,7 +250,10 @@ void testTwoStations()
     // A broadcast, heard at B with the sender's call.
     uint64_t id = a.link.broadcast({textFrame("AG7EW", 1, "CQ CQ de AG7EW")}, "", now);
     CHECK(run(air, a, b, [&] { return a.link.burstState(id) == HostLink::BurstState::Sent; }));
-    CHECK(run(air, a, b, [&] { return b.heard(Type::Heard); }));
+    // The KISS port and the command port are read separately: wait for both.
+    CHECK(run(air, a, b, [&] {
+        return b.heard(Type::Heard) && b.heard(Type::HeardFrom) && a.heard(Type::Ptt) && a.heard(Type::ModeUsed);
+    }));
     std::vector<protocol::Record> heard = heardRecords(b);
     CHECK_EQ(heard.size(), (size_t)1);
     if (heard.size() == 1)
@@ -480,11 +483,67 @@ void testTheHostSaysNo()
 
 } // namespace
 
+// Hosts since Data2G PR #122: DISCONNECTED says why, and TIMEOUT and
+// TXPOWER read and set the idle timeout and the output volume.
+void testReasonsAndTheIdleTimeout()
+{
+    FakeAir air;
+    FakeHost hostA(air), hostB(air);
+    Station a("AG7EW", hostA), b("W1AW", hostB);
+    CHECK(run(air, a, b, [&] {
+        return a.link.groupOpen() && b.link.groupOpen() && a.link.idleTimeout() && a.link.txPower()
+               && b.link.idleTimeout();
+    }));
+    CHECK(*a.link.idleTimeout() == 300.0 && *a.link.txPower() == 0.0);
+    auto ended = [](const Station& s, const std::string& why) {
+        for (const auto& e : s.events)
+        {
+            if (e.type == Type::SessionEnded && e.disconnect.reason == why) return true;
+        }
+        return false;
+    };
+
+    // A station not taking sessions says so at the first call.
+    b.link.setAcceptSessions(false, now);
+    CHECK(run(air, a, b, [&] { return !hostB.listening(); }));
+    CHECK(a.link.call("W1AW", now));
+    CHECK(run(air, a, b, [&] { return a.link.sessionState() == HostLink::SessionState::None; }));
+    CHECK(ended(a, "NOT_LISTENING"));
+    b.link.setAcceptSessions(true, now);
+    CHECK(run(air, a, b, [&] { return hostB.listening(); }));
+
+    // A short idle timeout at A: the quiet session is closed, IDLE here and
+    // PEER there.
+    a.link.setIdleTimeout(0.3, now);
+    CHECK(run(air, a, b, [&] { return a.link.idleTimeout() && *a.link.idleTimeout() == 0.3; }));
+    CHECK(hostA.idleTimeoutS() == 0.3);
+    CHECK(a.link.call("W1AW", now));
+    CHECK(run(air, a, b, [&] { return a.link.sessionState() == HostLink::SessionState::Connected; }));
+    CHECK(run(air, a, b, [&] {
+        return a.link.sessionState() == HostLink::SessionState::None
+               && b.link.sessionState() == HostLink::SessionState::None;
+    }));
+    CHECK(ended(a, "IDLE") && ended(b, "PEER"));
+
+    // The output volume.
+    CHECK(a.link.setTxPower(-6.0, now));
+    CHECK(run(air, a, b, [&] { return *a.link.txPower() == -6.0; }));
+    CHECK(hostA.txPowerDb() == -6.0);
+
+    // A host from before PR #122: a bare DISCONNECTED.
+    hostA.setReasons(false);
+    a.events.clear();
+    CHECK(a.link.call("K1ABC", now));
+    CHECK(run(air, a, b, [&] { return a.link.sessionState() == HostLink::SessionState::None; }));
+    CHECK(ended(a, ""));
+}
+
 int main()
 {
     testTwoStations();
     testACut();
     testSnrs();
     testTheHostSaysNo();
+    testReasonsAndTheIdleTimeout();
     return ragtime_test::finish();
 }

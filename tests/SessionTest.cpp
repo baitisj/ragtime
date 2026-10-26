@@ -7,6 +7,7 @@
 // QRL and QRV broadcasts, the station list's session partner, and the
 // log that carries a station's sessions on from one to the next. The
 // clock is simulated.
+#include <algorithm>
 #include <cstdint>
 #include <filesystem>
 #include <string>
@@ -63,10 +64,20 @@ bool contains(const std::string& text, const std::string& part)
 // end's stream to play by hand.
 struct Rig
 {
-    explicit Rig(uint64_t nowMs = T0) : link({"AG7EW", true, false}), chat(link), now(nowMs)
+    // hostIdleS: a host since Data2G PR #122, with its idle timeout set to
+    // that (0: its own 5 minutes); -1, the default: an older host, without
+    // DATA2G ON.
+    explicit Rig(uint64_t nowMs = T0, double hostIdleS = -1.0)
+        : link({"AG7EW", true, false, std::max(hostIdleS, 0.0)}), chat(link), now(nowMs)
     {
         link.commandUp(now);
-        say("OK\rOK\rWRONG\rOK\rOK\rBCAST PORT 2\rOK\r");
+        if (hostIdleS < 0.0)
+            say("OK\rOK\rWRONG\rOK\rOK\rBCAST PORT 2\rOK\r");
+        else if (hostIdleS == 0.0)
+            say("OK\rOK\rOK\rOK\rOK\rBCAST PORT 2\rOK\rTIMEOUT 300.0\rTXPOWER 0.0\r");
+        else
+            say("OK\rOK\rOK\rOK\rOK\rBCAST PORT 2\rOK\rTIMEOUT 300.0\rOK\rTIMEOUT " + std::to_string(hostIdleS)
+                + "\rTXPOWER 0.0\r");
         link.takeCommandOutput();
         SessionChat::Settings s;
         s.callsign = "ag7ew";
@@ -492,6 +503,89 @@ void testTheFarEndLeavesOrIsLost()
     CHECK(lost.chat.messages().empty());
 }
 
+void testTheHostSaysWhy()
+{
+    // A host since Data2G PR #122 says why a call failed.
+    auto refusedWith = [](const std::string& line, Ending ending, const std::string& text) {
+        Rig rig(T0, 0.0);
+        CHECK(rig.chat.call("K1ABC", rig.now));
+        rig.say("OK\r" + line + "\r");
+        CHECK(rig.chat.ending() == ending);
+        CHECK_EQ(rig.chat.strip(rig.now).text, text);
+    };
+    refusedWith("DISCONNECTED BUSY", Ending::Busy, "K1ABC is in another session (00:00)");
+    refusedWith("DISCONNECTED NOT_LISTENING", Ending::NotListening, "K1ABC isn't taking sessions (00:00)");
+    refusedWith("DISCONNECTED VERSION", Ending::RefusedThere,
+                "K1ABC's data2g-host can't make sessions with yours: another version (00:00)");
+    refusedWith("DISCONNECTED REFUSED", Ending::RefusedThere, "K1ABC's station refused the call (00:00)");
+    refusedWith("DISCONNECTED REFUSED reason 7", Ending::RefusedThere,
+                "K1ABC's station refused the call (reason 7, 00:00)");
+    refusedWith("DISCONNECTED NO_ANSWER", Ending::NoAnswer, "K1ABC didn't answer (00:00)");
+
+    // Our host's idle timeout, as Ragtime set it.
+    Rig idle(T0, 600.0);
+    Far far("W1AW");
+    connect(idle, far);
+    idle.advance(10 * 60 * 1000);
+    idle.say("DISCONNECTED IDLE\r");
+    CHECK(idle.chat.ending() == Ending::IdleClosed);
+    CHECK_EQ(idle.chat.strip(idle.now).text,
+             std::string("data2g-host closed the quiet session with W1AW at 00:10: it hangs up after 10 minutes "
+                         "with nothing sent either way"));
+
+    // The far end's host hung up, with no farewell: its own idle timeout
+    // after five quiet minutes, else just that.
+    Rig quiet(T0, 0.0);
+    Far far2("W1AW");
+    connect(quiet, far2);
+    quiet.advance(SessionChat::HOST_IDLE_CLOSE_MS);
+    quiet.say("DISCONNECTED PEER\r");
+    CHECK(quiet.chat.ending() == Ending::ClosedThere);
+    CHECK_EQ(quiet.chat.strip(quiet.now).text,
+             std::string("W1AW's data2g-host closed the quiet session at 00:05: nothing was sent either way for 5 min"));
+    Rig peer(T0, 0.0);
+    Far far3("W1AW");
+    connect(peer, far3);
+    peer.advance(60 * 1000);
+    peer.say("DISCONNECTED PEER\r");
+    CHECK(peer.chat.ending() == Ending::ClosedThere);
+    CHECK_EQ(peer.chat.strip(peer.now).text, std::string("W1AW's end closed the session at 00:01"));
+    // Its farewell, the ports racing: a leaving after all.
+    peer.advance(SessionChat::AFTERGLOW_MS / 2);
+    peer.from(far3.farewell(peer.now));
+    CHECK(peer.chat.ending() == Ending::LeftThere);
+
+    // The link: no idle guess, even after five quiet minutes.
+    Rig lost(T0, 0.0);
+    Far far4("W1AW");
+    connect(lost, far4);
+    lost.advance(SessionChat::HOST_IDLE_CLOSE_MS);
+    lost.say("DISCONNECTED LINK_LOST\r");
+    CHECK(lost.chat.ending() == Ending::LinkLost);
+    CHECK_EQ(lost.chat.strip(lost.now).text, std::string("Link lost at 00:05 after 5 min without contact"));
+    Rig failed(T0, 0.0);
+    Far far5("W1AW");
+    connect(failed, far5);
+    failed.say("DISCONNECTED LINK_FAILED no progress\r");
+    CHECK(failed.chat.ending() == Ending::LinkLost);
+    CHECK_EQ(failed.chat.strip(failed.now).text,
+             std::string("Link failed at 00:00: data2g-host gave up on it (no progress)"));
+
+    // Our Leave, never acknowledged by the far end.
+    Rig left(T0, 0.0);
+    Far far6("W1AW");
+    connect(left, far6);
+    left.advance(3 * 60 * 1000);
+    CHECK(left.chat.leave(left.now));
+    left.pump();
+    left.advance(SessionChat::FAREWELL_WAIT_MS);
+    CHECK(left.sent("DISCONNECT"));
+    left.say("OK\rDISCONNECTED CLIENT unconfirmed\r");
+    CHECK(left.chat.ending() == Ending::Left);
+    CHECK_EQ(left.chat.strip(left.now).text,
+             std::string("You left the session with W1AW at 00:03, after 3 min \xc2\xb7 W1AW didn't confirm it"));
+}
+
 void testCallsThatDontConnect()
 {
     Rig rig;
@@ -908,6 +1002,7 @@ int main()
     testLinkQuiet();
     testLeaveWithAFarewell();
     testTheFarEndLeavesOrIsLost();
+    testTheHostSaysWhy();
     testCallsThatDontConnect();
     testTheDataPortCloses();
     testAStreamThatIsntRagtimes();
