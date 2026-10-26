@@ -304,6 +304,9 @@ MainFrame::MainFrame()
         // back as it was found, before the rig closes.
         if (ear_) ear_->Close(true);
         if (auto f = filterEdit_.quit()) setRigFilter(*f, "put back as found: Ragtime closed");
+        // data2g-host keeps its TX level after we go: what Auto ALC took
+        // off goes back.
+        if (std::optional<double> back = autoAlc_.restore()) sendTxLevel(*back, "Ragtime closed");
         // Unkeyed and closed before anything else.
         rig_->stop();
         host_->recorder().note("Ragtime closed", HostConnection::nowMs());
@@ -612,6 +615,9 @@ void MainFrame::buildLayout()
     bar_->ear->Bind(wxEVT_TOGGLEBUTTON, [this](wxCommandEvent& e) { setEar(e.IsChecked()); });
     bar_->pause->Bind(wxEVT_TOGGLEBUTTON, [this](wxCommandEvent& e) { setPaused(e.IsChecked()); });
     bar_->swrBar->onClear([this]() { clearSwrTrip(); });
+    bar_->autoAlc->SetValue(loadBool(keys::AUTO_ALC, false));
+    autoAlc_.setEnabled(bar_->autoAlc->GetValue());
+    bar_->autoAlc->Bind(wxEVT_CHECKBOX, [this](wxCommandEvent& e) { setAutoAlc(e.IsChecked()); });
     bar_->acceptSessions->Bind(wxEVT_CHECKBOX, [this](wxCommandEvent& e) {
         acceptWanted_ = e.IsChecked();
         saveBool(keys::ACCEPT_SESSIONS, e.IsChecked());
@@ -782,8 +788,14 @@ void MainFrame::showSettings(SettingsDialog::Page page)
         bool same = prefs_.rig.source == radio::RigSource::Hamlib && radio::sameRig(rig, prefs_.rig);
         return same ? rig_->describe() : std::string();
     };
-    SettingsDialog dialog(this, prefs_, gears, openRig, page);
+    SettingsDialog dialog(this, prefs_, gears, openRig, page, link_.txPower());
     if (dialog.ShowModal() != wxID_OK) return;
+    // The host's TX level is the host's: set there, never kept here.
+    if (std::optional<double> level = dialog.txLevel())
+    {
+        autoAlc_.operatorSet(*level);
+        sendTxLevel(*level, "set in Settings");
+    }
     StationPrefs next = dialog.prefs();
     bool reconnect = next.callsign != prefs_.callsign || next.host != prefs_.host || next.kissPort != prefs_.kissPort
                      || next.commandPort != prefs_.commandPort || host_->state() == HostConnection::State::Off;
@@ -858,6 +870,10 @@ void MainFrame::onHostEvents(const std::vector<Event>& events)
                 break;
             case Event::Type::Refused:
                 note_ = "data2g-host refused \"" + e.text + "\"";
+                break;
+            case Event::Type::TxPower:
+                autoAlc_.hostLevel(e.value);
+                showMeters();
                 break;
             default:
                 break;
@@ -2587,19 +2603,78 @@ void MainFrame::onMeters()
         notedBursts_ = meters.bursts();
         const radio::TxMeters::Burst& burst = *meters.last();
         std::string line = "rig TX " + radio::burstText(burst, "; ");
-        if (burst.turnDownDb > 0)
-            line += "; Auto ALC would turn the drive down " + wxString::Format("%.1f", burst.turnDownDb).ToStdString()
+        std::optional<double> before = autoAlc_.level();
+        std::optional<double> next = autoAlc_.burstEnded(burst);
+        if (next && before)
+            line += "; Auto ALC turns the TX level down " + wxString::Format("%.1f", *before - *next).ToStdString()
                     + " dB";
+        else if (burst.turnDownDb > 0 && !autoAlc_.enabled())
+            line += "; Auto ALC would turn the TX level down "
+                    + wxString::Format("%.1f", burst.turnDownDb).ToStdString() + " dB";
         host_->recorder().note(line, HostConnection::nowMs());
+        if (next) sendTxLevel(*next, "Auto ALC");
     }
     showMeters();
+}
+
+void MainFrame::setAutoAlc(bool on)
+{
+    saveBool(keys::AUTO_ALC, on);
+    // Off: what it took off goes back.
+    if (std::optional<double> back = autoAlc_.setEnabled(on)) sendTxLevel(*back, "Auto ALC off");
+    showMeters();
+}
+
+void MainFrame::sendTxLevel(double dB, const std::string& why)
+{
+    uint64_t now = HostConnection::nowMs();
+    if (!link_.setTxPower(dB, now)) return;
+    host_->recorder().note("TX level " + wxString::Format("%.1f", dB).ToStdString() + " dB: " + why, now);
+    host_->flush();
+}
+
+void MainFrame::showAutoAlc()
+{
+    // The host's level goes with its link.
+    if (!link_.txPower() && autoAlc_.level()) autoAlc_.hostLevel(std::nullopt);
+    bool host = link_.txPower().has_value();
+    bool alc = rig_->readsAlc();
+    int target = (int)std::lround(radio::TxMeters::ALC_TARGET * 100);
+    std::string tip = "Keeps data2g-host's TX level (TXPOWER) just under the rig's ALC: after a burst whose ALC went "
+                      "over " + std::to_string(target) + "% twice in a row it turns the level down 0.5 dB, and 2 dB "
+                      "after one over 80%. It only turns it down, never more than "
+                      + std::to_string((int)radio::AutoAlc::MAX_TRIM_DB)
+                      + " dB under the level it found, and puts that level back when you untick it or close "
+                        "Ragtime (data2g-host keeps a level after Ragtime goes). Set the level itself in Settings.";
+    if (!host)
+        tip += "\n\nIt needs data2g-host connected, and one that takes TXPOWER (Data2G PR #122).";
+    else if (!alc)
+        tip += "\n\nIt needs the rig's ALC: read the rig through rigctld or Hamlib (Settings > Rig), with a rig "
+               "that reports it.";
+    else
+    {
+        tip += "\n\nTX level now " + wxString::Format("%.1f", *link_.txPower()).ToStdString() + " dB";
+        if (autoAlc_.enabled() && autoAlc_.trimmedDb() > 0.05)
+            tip += ", " + wxString::Format("%.1f", autoAlc_.trimmedDb()).ToStdString() + " dB under the "
+                   + wxString::Format("%.1f", *autoAlc_.ceiling()).ToStdString() + " dB it found";
+        tip += ".";
+        if (autoAlc_.enabled() && autoAlc_.atFloor())
+            tip += " Auto ALC has gone as far down as it will: check the rig's drive and ALC.";
+    }
+    bar_->autoAlc->Enable(host && alc);
+    if (bar_->autoAlc->GetToolTipText() != utf8(tip)) bar_->autoAlc->SetToolTip(utf8(tip));
 }
 
 void MainFrame::showMeters()
 {
     const wxString none = wxString::FromUTF8("\xe2\x80\x94");
-    const std::string waits = "Auto ALC waits for data2g-host to take a transmit level command, since data2g-host alone "
-                              "sets the transmit audio.";
+    showAutoAlc();
+    const std::string waits = link_.txPower()
+                                  ? "Auto ALC keeps data2g-host's TX level just under the " +
+                                        std::to_string((int)std::lround(radio::TxMeters::ALC_TARGET * 100)) +
+                                        "% target: see its own tooltip."
+                                  : "Auto ALC needs a data2g-host that takes TXPOWER (Data2G PR #122), since "
+                                    "data2g-host alone sets the transmit audio.";
     if (!rig_->readsMeters() && !rig_->swrTripped())
     {
         std::string when = prefs_.rig.source == radio::RigSource::Hamlib
@@ -2645,9 +2720,12 @@ void MainFrame::showMeters()
         if (!meters.transmitting() && last->alcPeak) tip += " The number beside the meter is its ALC peak.";
         int target = (int)std::lround(radio::TxMeters::ALC_TARGET * 100);
         if (last->turnDownDb > 0)
-            tip += "\nOver the " + std::to_string(target) + "% target: Auto ALC would have turned the drive down "
-                   + wxString::Format("%.1f", last->turnDownDb).ToStdString()
-                   + " dB. Until it can, turn data2g-host's --output-volume down.";
+            tip += "\nOver the " + std::to_string(target) + "% target: "
+                   + (autoAlc_.enabled() && link_.txPower()
+                          ? std::string("Auto ALC turned data2g-host's TX level down.")
+                          : "Auto ALC would have turned the TX level down "
+                                + wxString::Format("%.1f", last->turnDownDb).ToStdString()
+                                + " dB; tick it, or turn the level down in Settings.");
         else if (last->overTarget())
             tip += "\nIt peaked over the " + std::to_string(target) + "% target.";
     }

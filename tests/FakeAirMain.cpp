@@ -40,7 +40,9 @@
 // --rig PORT plays a rigctld on that port (pick another than 4532 where a
 // real one runs): it answers "\chk_vfo" with 0, "f" with the dial,
 // 14.105 MHz or --dial HZ, and the meters "+l ALC", "+l SWR" and
-// "+l RFPOWER_METER_WATTS" (ALC 30% to 60%, SWR 1.3 or --rig-swr X, 38 W),
+// "+l RFPOWER_METER_WATTS" (SWR 1.3 or --rig-swr X, 38 W, and an ALC that
+// follows host A's TXPOWER: 48% to 96% at 0 dB, the host's own start,
+// under half from about -4 dB, for Auto ALC to settle),
 // and the S-meter "+l STRENGTH": the band's noise, -40 dB over S9 (S2/S3)
 // or --rig-noise DB, a few dB more now and then, and a station at -10 dB
 // one reading in six. For the Ear it answers "+m" with USB and a
@@ -66,6 +68,7 @@
 // the radio. Ctrl-C stops it.
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <csignal>
 #include <cstdint>
 #include <cstdio>
@@ -74,12 +77,14 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <locale>
 #include <memory>
 #include <random>
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <fcntl.h>
@@ -159,12 +164,14 @@ void readSome(int fd, std::vector<uint8_t>& out)
 class FakeRig
 {
 public:
-    FakeRig(int port, uint64_t dialHz, bool hop, bool vfo, double swr, int noise)
+    // drive: the TX level of the host that keys this rig, dB.
+    FakeRig(int port, uint64_t dialHz, bool hop, bool vfo, double swr, int noise, std::function<double()> drive)
         : dialHz_(dialHz)
         , hop_(hop)
         , vfo_(vfo)
         , swr_(swr)
         , noise_(noise)
+        , drive_(std::move(drive))
     {
         listener_ = ::socket(AF_INET, SOCK_STREAM, 0);
         int yes = 1;
@@ -208,7 +215,12 @@ public:
                     std::string head = "get_level: " + line.substr(3) + "\n";
                     char value[32] = "";
                     if (level == "ALC")
-                        std::snprintf(value, sizeof value, "%.6f\n", 0.3 + 0.3 * (double)(nowMs / 250 % 7) / 6);
+                    {
+                        // The ALC follows the drive, in voltage.
+                        double gain = 1.6 * std::pow(10.0, (drive_ ? drive_() : 0.0) / 20.0);
+                        double alc = std::min(1.2, (0.3 + 0.3 * (double)(nowMs / 250 % 7) / 6) * gain);
+                        std::snprintf(value, sizeof value, "%.6f\n", alc);
+                    }
                     else if (level == "SWR")
                         std::snprintf(value, sizeof value, "%.6f\n", swr_);
                     else if (level == "RFPOWER_METER_WATTS")
@@ -294,6 +306,7 @@ private:
     bool vfo_;
     double swr_;
     int noise_;
+    std::function<double()> drive_;
     uint64_t strengths_ = 0;
     std::vector<Client> clients_;
 };
@@ -765,7 +778,8 @@ int main(int argc, char** argv)
     {
         a = std::make_unique<FakeHost>(air, 2, 8100, 8300);
         b = std::make_unique<FakeHost>(air, 2, 8110, 8310);
-        if (rigPort > 0) rig = std::make_unique<FakeRig>(rigPort, dialHz, dialHop, rigVfo, rigSwr, rigNoise);
+        if (rigPort > 0) rig = std::make_unique<FakeRig>(rigPort, dialHz, dialHop, rigVfo, rigSwr, rigNoise,
+                                                        [&a]() { return a->txPowerDb(); });
     }
     catch (const std::exception& e)
     {

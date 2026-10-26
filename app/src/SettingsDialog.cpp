@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <cstddef>
 #include <string>
 
@@ -22,6 +23,7 @@
 
 #include "Html.h"
 #include "ragtime/globus/Globe.h"
+#include "ragtime/link/HostLink.h"
 #include "ragtime/protocol/Fields.h"
 #include "ragtime/radio/Bands.h"
 
@@ -95,14 +97,15 @@ wxChoice* wordChoice(wxWindow* parent, const std::vector<wxString>& words, int s
 
 SettingsDialog::SettingsDialog(wxWindow* parent, const StationPrefs& prefs,
                                const std::vector<std::pair<std::string, std::string>>& gears,
-                               std::function<std::string(const radio::RigSettings&)> openRig, Page page)
+                               std::function<std::string(const radio::RigSettings&)> openRig, Page page,
+                               std::optional<double> txLevel)
     : wxDialog(parent, wxID_ANY, "Settings")
     , openRig_(std::move(openRig))
     , testTimer_(this)
     , rigctldTimer_(this)
 {
     auto* book = new wxNotebook(this, wxID_ANY);
-    book->AddPage(stationPage(book, prefs, gears), "Station");
+    book->AddPage(stationPage(book, prefs, gears, txLevel), "Station");
     book->AddPage(rigPage(book, prefs), "Rig");
     book->SetSelection(page == Page::Rig ? 1 : 0);
 
@@ -154,7 +157,8 @@ SettingsDialog::~SettingsDialog()
 //-------------------------------------------------------------------------
 
 wxWindow* SettingsDialog::stationPage(wxNotebook* book, const StationPrefs& prefs,
-                                      const std::vector<std::pair<std::string, std::string>>& gears)
+                                      const std::vector<std::pair<std::string, std::string>>& gears,
+                                      std::optional<double> txLevel)
 {
     auto* page = new wxPanel(book);
     // Controls go inside their static boxes, as wx wants them.
@@ -195,6 +199,27 @@ wxWindow* SettingsDialog::stationPage(wxNotebook* book, const StationPrefs& pref
     hostGrid->Add(commandPort_, 0);
     hostGrid->AddSpacer(0);
     hostGrid->Add(dataPort_, 0);
+    // The host's transmit level (TXPOWER, Data2G PR #122): read from the
+    // host as the dialog opens, set on it with OK, never kept here.
+    hostTxLevel_ = txLevel;
+    txLevel_ = new wxSpinCtrlDouble(box, wxID_ANY, "", wxDefaultPosition, wxDefaultSize, wxSP_ARROW_KEYS,
+                                    link::HostLink::TX_POWER_MIN_DB, link::HostLink::TX_POWER_MAX_DB,
+                                    txLevel ? *txLevel : 0.0, 0.5);
+    txLevel_->SetDigits(1);
+    txLevel_->Enable(txLevel.has_value());
+    txLevel_->SetToolTip(txLevel ? "data2g-host's transmit audio level (TXPOWER), in dB: 0 puts a burst's peak at "
+                                   "full scale. It is data2g-host's own, as it answered just now; OK sets it there "
+                                   "at once, and data2g-host keeps it after Ragtime quits. Auto ALC, on the "
+                                   "connection bar, only ever turns it down from here."
+                                 : "data2g-host's transmit audio level (TXPOWER). It needs data2g-host connected, "
+                                   "and one from Data2G PR #122 on; until then set its --output-volume.");
+    auto* txRow = new wxBoxSizer(wxHORIZONTAL);
+    txRow->Add(txLevel_, 0, wxALIGN_CENTER_VERTICAL);
+    auto* txNote = new wxStaticText(box, wxID_ANY, txLevel ? "dB, data2g-host's own" : "dB (data2g-host can't say)");
+    txNote->SetForegroundColour(secondaryText());
+    txRow->Add(txNote, 0, wxALIGN_CENTER_VERTICAL | wxLEFT, 6);
+    hostGrid->Add(new wxStaticText(box, wxID_ANY, "TX level"), 0, wxALIGN_CENTER_VERTICAL);
+    hostGrid->Add(txRow, 0);
     host->Add(hostGrid, 0, wxEXPAND | wxALL, 6);
 
     auto* files = new wxStaticBoxSizer(wxVERTICAL, page, "Files");
@@ -740,6 +765,14 @@ void SettingsDialog::onRigctldTimer()
 //-------------------------------------------------------------------------
 // Both
 //-------------------------------------------------------------------------
+
+std::optional<double> SettingsDialog::txLevel() const
+{
+    if (!hostTxLevel_ || !txLevel_->IsEnabled()) return std::nullopt;
+    double dB = txLevel_->GetValue();
+    if (std::fabs(dB - *hostTxLevel_) < 0.05) return std::nullopt;
+    return dB;
+}
 
 StationPrefs SettingsDialog::prefs() const
 {

@@ -1,6 +1,6 @@
 // Rig control without a rig: the settings as Hamlib's configuration words,
 // the words kept in the settings file, and the PTT follower's keying and
-// its safety unkeys, and the transmit meters burst by burst.
+// its safety unkeys, the transmit meters burst by burst, and Auto ALC.
 #include <cmath>
 #include <cstdint>
 #include <string>
@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "Check.h"
+#include "ragtime/radio/AutoAlc.h"
 #include "ragtime/radio/PttFollower.h"
 #include "ragtime/radio/RigSettings.h"
 #include "ragtime/radio/TxMeters.h"
@@ -381,6 +382,87 @@ void swr()
 
 } // namespace
 
+TxMeters::Burst burstDown(double dB)
+{
+    TxMeters::Burst burst;
+    burst.readings = 10;
+    burst.alcPeak = 0.9;
+    burst.turnDownDb = dB;
+    return burst;
+}
+
+bool near(const std::optional<double>& value, double want)
+{
+    return value && std::fabs(*value - want) < 0.001;
+}
+
+// Auto ALC: down only, never above the level it found, at most 20 dB
+// down, and that level put back when it is turned off.
+void autoAlc()
+{
+    AutoAlc alc;
+    // Off, it sends nothing.
+    alc.hostLevel(-3.0);
+    CHECK(!alc.burstEnded(burstDown(2.0)));
+
+    CHECK(!alc.setEnabled(true));
+    CHECK(near(alc.ceiling(), -3.0));
+    // A burst over the target: down by what the burst says, to a tenth.
+    CHECK(near(alc.burstEnded(burstDown(2.0)), -5.0));
+    // The host's answer to our own TXPOWER keeps the ceiling.
+    alc.hostLevel(-5.0);
+    CHECK(near(alc.ceiling(), -3.0));
+    CHECK(near(alc.level(), -5.0));
+    CHECK(alc.trimmedDb() > 1.99 && alc.trimmedDb() < 2.01);
+    // A burst under the target: nothing.
+    CHECK(!alc.burstEnded(burstDown(0.0)));
+
+    // No further than MAX_TRIM_DB under the ceiling.
+    for (int i = 0; i < 20; i++)
+    {
+        std::optional<double> next = alc.burstEnded(burstDown(2.0));
+        if (!next) break;
+        alc.hostLevel(*next);
+    }
+    CHECK(near(alc.level(), -3.0 - AutoAlc::MAX_TRIM_DB));
+    CHECK(alc.atFloor());
+    CHECK(!alc.burstEnded(burstDown(2.0)));
+
+    // Turned off: the level it found goes back.
+    CHECK(near(alc.setEnabled(false), -3.0));
+    alc.hostLevel(-3.0);
+    CHECK(near(alc.ceiling(), -3.0));
+    CHECK(!alc.restore());
+
+    // A level Ragtime didn't send (the operator's, in data2g-host's own
+    // window) is the new ceiling.
+    alc.setEnabled(true);
+    CHECK(near(alc.burstEnded(burstDown(0.5)), -3.5));
+    alc.hostLevel(-3.5);
+    alc.hostLevel(-10.0);
+    CHECK(near(alc.ceiling(), -10.0));
+    CHECK(!alc.restore());
+    // So is one the operator sets in Ragtime.
+    alc.operatorSet(-8.04);
+    alc.hostLevel(-8.0);
+    CHECK(near(alc.ceiling(), -8.0));
+    CHECK(near(alc.burstEnded(burstDown(0.5)), -8.5));
+    alc.hostLevel(-8.5);
+    // Quitting puts it back.
+    CHECK(near(alc.restore(), -8.0));
+
+    // No host level (a host without TXPOWER, or none): nothing.
+    alc.hostLevel(std::nullopt);
+    CHECK(!alc.burstEnded(burstDown(2.0)));
+    CHECK(!alc.restore());
+
+    // Never under TXPOWER's floor.
+    AutoAlc low;
+    low.hostLevel(-59.0);
+    low.setEnabled(true);
+    CHECK(near(low.burstEnded(burstDown(2.0)), AutoAlc::LEVEL_MIN_DB));
+}
+
 int main()
 {
     backendConf();
@@ -391,5 +473,6 @@ int main()
     safety();
     meters();
     swr();
+    autoAlc();
     return ragtime_test::finish();
 }

@@ -7,12 +7,11 @@
 // the top of its ALC zone); SWR is the ratio; power is in watts where the
 // backend knows them, or else a share of full power.
 //
-// It only reads; Ragtime never plays to the sound card, and data2g-host
-// takes no transmit level command yet, so nothing turns the drive down.
-// But each burst works out what Auto ALC would have done, by Glissando's
+// It only reads; Ragtime never plays to the sound card. Each burst works
+// out what Auto ALC should take off data2g-host's TX level, by Glissando's
 // rule (its Drive knob, docs/APP.md there): two ALC readings in a row over
 // ALC_TARGET turn the drive down STEP_DB, one over ALC_HIGH turns it down
-// BIG_STEP_DB. When the host gains its command, that sum is what to send.
+// BIG_STEP_DB. AutoAlc sends that to the host (TXPOWER) when ticked.
 //
 // The time is always passed in, so tests run it on a simulated clock.
 #ifndef RAGTIME_RADIO_TX_METERS_H

@@ -25,6 +25,7 @@
 #include "ragtime/files/SessionFiles.h"
 #include "ragtime/gearbox/Gearbox.h"
 #include "ragtime/link/HostLink.h"
+#include "ragtime/radio/AutoAlc.h"
 #include "ragtime/radio/PathLog.h"
 #include "ragtime/radio/RecentWork.h"
 #include "ragtime/session/SessionChat.h"
@@ -163,6 +164,10 @@ private:
     // a line in the flight recorder for each burst.
     void onMeters();
     void showMeters();
+    // Auto ALC and data2g-host's transmit level (TXPOWER).
+    void setAutoAlc(bool on);
+    void sendTxLevel(double dB, const std::string& why);
+    void showAutoAlc();
     // The SWR trip (Settings > Rig): ABORT to the host and sending held
     // until the operator clears it (the SWR bar, or the Settings menu).
     void onSwrTrip(const std::string& what);
@@ -272,6 +277,7 @@ private:
     // puts the rig back after the Ear has closed).
     ragtime::ear::FilterEdit filterEdit_;
     std::string notedFilter_;   // the rig's filter, as last written there
+    ragtime::radio::AutoAlc autoAlc_;   // the TX level, kept under the rig's ALC
     ragtime::radio::WorkOrder recentOrder_ = ragtime::radio::WorkOrder::LikelyNow;
     uint64_t recentVersion_ = ~0ull;    // the path log's version Recent work was drawn from
     uint64_t recentMs_ = 0;

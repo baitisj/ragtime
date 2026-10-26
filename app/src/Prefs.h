@@ -134,6 +134,7 @@ std::string pathLogPath();
 namespace keys
 {
 constexpr const char* ACCEPT_SESSIONS = "/Connection/AcceptSessions";
+constexpr const char* AUTO_ALC = "/Connection/AutoAlc";             // Auto ALC ticked; the level is the host's
 constexpr const char* PAUSED = "/Broadcast/Paused";
 constexpr const char* NARROW_ONLY = "/Gearshift/NarrowOnly";         // the 500 Hz switch
 constexpr const char* GLOBUS = "/Window/Globus";
