@@ -331,10 +331,10 @@ The window opens at its last size and place, works at 1280×720, and uses the sy
 
 ## Pictures and voice, *later*
 
-The SSTVAE pictures and RADE voice clips you decided on 2026-10-19 were already Data2G only, so they move to this client unchanged. The spec stays in its own doc, [Images and voice in chat](https://claude.ai/code/artifact/1ba7e70a-4807-49c0-b37d-9db535c6ea76), and this plan only leaves room for it:
+The SSTVAE pictures and RADE voice clips you decided on 2026-10-19 were already Data2G only, so they move to this client unchanged. The spec stays in its own doc, [docs/PICTURES_AND_VOICE.md](PICTURES_AND_VOICE.md) (captured from the Claude Doc "Images and voice in chat" on 2026-10-26), and this plan only leaves room for it:
 
 - Session and broadcast timelines take **object cards** (a picture or a clip with its caption, sender and how many copies were stacked), beside text and file cards.
-- The client will need its own microphone and speaker devices for voice clips. Today it needs no audio at all, because Data2G owns the radio sound card.
+- The client will need its own microphone and speaker devices for voice clips. Today it never plays to the radio sound card, which Data2G owns; the Ear only listens to it.
 - The Part 97 notes in that doc apply: text in the data segment, pictures and voice on the phone side, and CW or spoken ID every 10 minutes.
 - It waits on Andrew's latents spec and the "latents over KISS" extension in data2g-host. No work on it in the first versions.
 
