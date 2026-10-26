@@ -62,6 +62,8 @@ public:
     bool readsAlc() const;
     bool readsSwr() const;
     bool readsMeters() const;
+    // "Hamlib" or "rigctld": how the meters are read, for the tooltips.
+    const char* meterPath() const;
 
     // The SWR trip (Settings > Rig): tripped until the operator clears it,
     // and what was done, "SWR 3.6: Ragtime unkeyed the rig and set its
@@ -74,6 +76,8 @@ public:
 private:
     void onTimer(wxTimerEvent& event);
     void sync();
+    // The meters and the SWR trip from rigctld.
+    void syncRigctld();
 
     std::function<void()> changed_;
     std::function<void()> metersChanged_;
@@ -82,6 +86,9 @@ private:
     ragtime::rig::HamlibRig hamlib_;
     ragtime::radio::PttFollower follower_;
     ragtime::radio::TxMeters meters_;
+    // Through rigctld the trip only stops data2g-host: Ragtime sends a
+    // shared rigctld no set commands, so it never unkeys or turns down.
+    ragtime::radio::SwrTrip rigctldTrip_;
     ragtime::radio::RigSettings settings_;
     bool started_ = false;
     bool hostPtt_ = false;

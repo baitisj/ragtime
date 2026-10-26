@@ -61,6 +61,16 @@ public:
     const std::string& connectedTo() const { return connectedTo_; }
     bool vfoMode() const { return reader_.vfoMode(); }
 
+    // The transmit meters, asked while keyed: which rigctld answers, and
+    // the readings since last time.
+    bool readsAlc() const { return up_ && reader_.reads(ragtime::radio::DialReader::Meter::Alc); }
+    bool readsSwr() const { return up_ && reader_.reads(ragtime::radio::DialReader::Meter::Swr); }
+    bool readsPower() const { return up_ && reader_.readsPower(); }
+    bool readsMeters() const { return up_ && reader_.readsAny(); }
+    std::vector<ragtime::radio::MeterReading> takeReadings() { return reader_.takeReadings(); }
+    // The SWR trip is on: the SWR every other question while keyed.
+    void setSwrWatch(bool on) { reader_.setSwrWatch(on); }
+
 private:
     void resolve();
     void connect();

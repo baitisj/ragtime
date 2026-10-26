@@ -640,13 +640,14 @@ repair and the flight recorder). Nothing here goes on the air.
 
 **The dial.** With **Read the dial from rigctld** picked (Settings >
 Rig; off by default, `127.0.0.1:4532`), Ragtime asks rigctld
-the radio's frequency once a second, and only that: `radio::DialReader`
-writes `\chk_vfo` once on connecting and then `f` (or `f currVFO`), and
-nothing else, ever (a test drives it through errors, keying and silence
-and checks every byte it wrote). It never tunes or
+the radio's frequency once a second, and while data2g-host transmits
+the rig's meters (below), and only that: `radio::DialReader` writes
+`\chk_vfo` once on connecting, then `f` (or `f currVFO`) and the meter
+questions, and nothing else, ever (a test drives it through errors,
+keying and silence and checks every byte it wrote). It never tunes or
 sets anything, since the radio is the source of truth and the
-operator's rigctld is often shared (fldigi). It doesn't ask while the
-host reports PTT, and the last reading stands through a burst.
+operator's rigctld is often shared (fldigi). It doesn't ask the dial
+while the host reports PTT, and the last reading stands through a burst.
 `RigConnection` is the socket, beside `HostConnection`, trying again 2,
 4, 8, 15 and then every 30 s. A rigctld started with `--vfo` wants a
 VFO named after each command, and a VFO name sent to one without would
@@ -664,9 +665,10 @@ rigctld: 127.0.0.1:4532 refused, [::1]:4532 refused").
 
 **Test** beside the port (Settings > Rig, 2026-10-26, after Jeff's
 rigctld didn't connect and nothing said why) connects as Ragtime would,
-with a connection of its own, asks the dial once, and says what
-happened under the row: "rigctld at [::1]:4532 answered: 14.105 MHz,
-20 m (started with --vfo)", "Connected to 127.0.0.1:4532, but rigctld
+with a connection of its own, asks which meters the rig reports and the
+dial once, and says what happened under the row: "rigctld at
+[::1]:4532 answered: 14.105 MHz, 20 m; the rig reports ALC, SWR and
+power (rigctld started with --vfo)", "Connected to 127.0.0.1:4532, but rigctld
 answered RPRT -11", the refusals above, "Can't find" a host name, or no
 answer in 10 s. The flight recorder notes how rigctld is answering
 whenever that changes (docs/FLIGHT_RECORDER.md), so a report shows it.
@@ -794,8 +796,8 @@ one of three, `radio::RigSettings`:
 
 - **No rig.** Ragtime doesn't know the band.
 - **Read the dial from rigctld, already running**: as before (above),
-  `\chk_vfo` and `f` and nothing else, with its own Test. It never keys, so a shared rigctld (fldigi's)
-  is safe.
+  `\chk_vfo`, `f` and the meters and nothing else, with its own Test.
+  It never keys, so a shared rigctld (fldigi's) is safe.
 - **Open the rig with Hamlib**: Ragtime opens the rig itself, as fldigi
   and WSJT-X do. The rig is picked by maker and model from Hamlib's own
   list (every rig the linked Hamlib knows, in reading order, IC-703
@@ -866,6 +868,22 @@ failed meter never closes the rig. The dial isn't read while
 transmitting. An IC-7100 reports all three; Hamlib's ALC there is the
 meter's ALC zone, raw 0 to 120 as 0 to 1.
 
+**Through rigctld** (Jeff, 2026-10-26: "If rigctld is connected, those
+two should update while the red TX is active") the same meters are read
+with rigctld's `l` (get level), a question like `f`: `+l ALC`, `+l SWR`
+and `+l RFPOWER_METER_WATTS` (`+l RFPOWER_METER` for a rig that knows no
+watts), with `currVFO` for a `--vfo` rigctld. The `+` asks for rigctld's
+long answer, `get_level: SWR`, the value, then `RPRT 0`: it names the
+level, so an answer that comes late, after Ragtime gave up waiting, is
+never taken for another meter's. On connecting Ragtime asks each once,
+to learn which the rig reports (RPRT -1, -4 or -11 means it doesn't);
+while the host has PTT on it asks one every 250 ms after the last
+answer, one question at a time, and no dial. A meter that fails twice in
+a row while keyed isn't asked again on that connection. The readings
+feed the same `TxMeters`, ALC meter, SWR bar and flight recorder line as
+Hamlib's. The bench's `--rig` answers them; Hamlib's own `rigctld -m 1`
+does too (ALC and SWR 0, the watts wandering).
+
 `radio::TxMeters` gathers them burst by burst: the newest of each, and
 for the burst its ALC peak and mean, SWR peak and mean power. The
 connection bar's meter beside Auto ALC shows the ALC live while
@@ -893,11 +911,17 @@ left end, 1.5 at 0.3 of the way, 2 at half way, 3 at three quarters and
 5 at the right end (`radio::swrScale`). A reading under 1 is no reading
 (Hamlib's dummy rig reads 0).
 
-**The SWR trip** (Settings > Rig, "Over 3:1 SWR, turn the rig's power
-to 0 and unkey", Hamlib only, off by default). With it ticked the rig's
-thread reads SWR every other meter, so every 400 ms, and two readings in
-a row over 3:1 within a burst trip it (`radio::SwrTrip`: one noisy
-reading doesn't). The rig's thread then, at once and on its own:
+**The SWR trip** (Settings > Rig, "Over 3:1 SWR, stop data2g-host; with
+Hamlib also unkey the rig and turn its power to 0", off by default;
+below the Hamlib box, since it works with rigctld too). With it ticked
+SWR is asked every other meter, and two readings in a row over 3:1
+within a burst trip it (`radio::SwrTrip`: one noisy reading doesn't).
+Through rigctld the trip only does the last part below, ABORT and the
+hold: Ragtime sends a shared rigctld no set commands, so it doesn't
+unkey or turn down (`note rig SWR trip: SWR 3.6 through rigctld; the
+rig itself was left alone; ABORT sent to data2g-host`); the host,
+stopped, unkeys the rig itself. With Hamlib the rig's thread, at once
+and on its own:
 
 1. unkeys the rig with Hamlib, whoever keyed it (a rig whose driver
    data2g-host also has open takes the PTT OFF);

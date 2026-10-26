@@ -316,17 +316,18 @@ wxWindow* SettingsDialog::rigPage(wxNotebook* book, const StationPrefs& prefs)
     noRig_ = new wxRadioButton(page, wxID_ANY, "No rig: Ragtime doesn't know the band", wxDefaultPosition,
                                wxDefaultSize, wxRB_GROUP);
     useRigctld_ = new wxRadioButton(page, wxID_ANY, "Read the dial from rigctld, already running");
-    useRigctld_->SetToolTip("Once a second Ragtime asks rigctld the radio's frequency, and nothing else: it never "
-                            "tunes the radio, keys it or sets anything, since rigctld is often shared (fldigi). "
-                            "Ragtime never starts rigctld: you run it.");
+    useRigctld_->SetToolTip("Once a second Ragtime asks rigctld the radio's frequency, and while data2g-host "
+                            "transmits the rig's ALC, SWR and power, and nothing else: it never tunes the radio, "
+                            "keys it or sets anything, since rigctld is often shared (fldigi). Ragtime never "
+                            "starts rigctld: you run it.");
     rigctldHost_ = new wxTextCtrl(page, wxID_ANY, utf8(r.rigctldHost), wxDefaultPosition, wxSize(FromDIP(120), -1));
     rigctldHost_->SetToolTip("The computer rigctld runs on");
     rigctldPort_ = new wxSpinCtrl(page, wxID_ANY, "", wxDefaultPosition, wxDefaultSize, wxSP_ARROW_KEYS, 1, 65535,
                                   r.rigctldPort);
     rigctldPort_->SetToolTip("rigctld's port, 4532 unless you started it with another");
     rigctldTest_ = new wxButton(page, wxID_ANY, "Test");
-    rigctldTest_->SetToolTip("Connects to rigctld as Ragtime would, trying IPv4 and IPv6, and asks it the dial "
-                             "frequency once. It asks nothing else.");
+    rigctldTest_->SetToolTip("Connects to rigctld as Ragtime would, trying IPv4 and IPv6, asks which transmit "
+                             "meters the rig reports, and asks the dial frequency once. It sets nothing.");
     rigctldResult_ = new wxStaticText(page, wxID_ANY, "", wxDefaultPosition, wxDefaultSize, wxST_ELLIPSIZE_END);
     useHamlib_ = new wxRadioButton(page, wxID_ANY, "Open the rig with Hamlib (" + utf8(rig::hamlibVersion()) + ")");
     useHamlib_->SetToolTip("Ragtime opens the rig itself, as other ham programs do, and reads its dial. It keys the "
@@ -476,16 +477,19 @@ wxWindow* SettingsDialog::rigPage(wxNotebook* book, const StationPrefs& prefs)
     hamlib->AddSpacer(4);
     hamlib->Add(hint, 0, wxLEFT | wxRIGHT, 30);
 
-    // The SWR trip, off by default (Jeff, 2026-10-26).
-    swrTrip_ = new wxCheckBox(box, wxID_ANY, "Over 3:1 SWR, turn the rig's power to 0 and unkey");
+    // The SWR trip, off by default (Jeff, 2026-10-26), for rigctld and
+    // Hamlib alike; only Hamlib, where Ragtime opens the rig, may unkey and
+    // turn down.
+    swrTrip_ = new wxCheckBox(page, wxID_ANY, "Over 3:1 SWR, stop data2g-host; with Hamlib also unkey the rig "
+                                              "and turn its power to 0");
     swrTrip_->SetValue(r.swrTrip);
-    swrTrip_->SetToolTip("While data2g-host transmits, Ragtime reads the rig's SWR. With this ticked, two "
-                         "readings in a row over 3:1 and Ragtime unkeys the rig, whoever keyed it, sets its "
-                         "power to 0, tells data2g-host to stop (ABORT, which also ends a session), and holds "
-                         "sending until you clear the trip (Settings > Clear the SWR trip, or click the SWR "
-                         "bar). It never puts the power back: turn it up on the rig. For rigs that report SWR "
-                         "through Hamlib.");
-    hamlib->Add(swrTrip_, 0, wxLEFT | wxRIGHT | wxTOP, 10);
+    swrTrip_->SetToolTip("While data2g-host transmits, Ragtime reads the rig's SWR, through rigctld or Hamlib. "
+                         "With this ticked, two readings in a row over 3:1 and Ragtime tells data2g-host to stop "
+                         "(ABORT, which also ends a session) and holds sending until you clear the trip "
+                         "(Settings > Clear the SWR trip, or click the SWR bar). With Hamlib it also unkeys the "
+                         "rig, whoever keyed it, and sets its power to 0, and never puts the power back: turn it "
+                         "up on the rig. Through rigctld it sets nothing, since rigctld is often shared. For rigs "
+                         "that report their SWR.");
     hamlib->AddSpacer(6);
 
     usSegmentsOnly_ = new wxCheckBox(page, wxID_ANY, "Receive only outside the US data segments");
@@ -502,6 +506,7 @@ wxWindow* SettingsDialog::rigPage(wxNotebook* book, const StationPrefs& prefs)
     sizer->Add(rigctldResultRow, 0, wxEXPAND | wxLEFT | wxRIGHT, 12);
     sizer->Add(useHamlib_, 0, wxLEFT | wxRIGHT | wxTOP, 12);
     sizer->Add(hamlib, 0, wxEXPAND | wxLEFT | wxRIGHT | wxTOP, 12);
+    sizer->Add(swrTrip_, 0, wxLEFT | wxRIGHT | wxTOP, 12);
     sizer->Add(usSegmentsOnly_, 0, wxALL, 12);
     page->SetSizer(sizer);
     return page;
@@ -676,8 +681,16 @@ void SettingsDialog::onRigctldTimer()
     {
         uint64_t hz = *probe.dialHz();
         std::string band = radio::bandOf(hz);
+        std::vector<std::string> meters;
+        if (probe.readsAlc()) meters.push_back("ALC");
+        if (probe.readsSwr()) meters.push_back("SWR");
+        if (probe.readsPower()) meters.push_back("power");
+        std::string reports = "no transmit meters";
+        for (size_t i = 0; i < meters.size(); i++)
+            reports = (i == 0 ? std::string() : reports + (i + 1 == meters.size() ? " and " : ", ")) + meters[i];
         result = "rigctld at " + probe.connectedTo() + " answered: " + radio::formatMHz(hz)
-                 + (band.empty() ? "" : ", " + band) + (probe.vfoMode() ? " (started with --vfo)" : "");
+                 + (band.empty() ? "" : ", " + band) + "; the rig reports " + reports
+                 + (probe.vfoMode() ? " (rigctld started with --vfo)" : "");
         good = true;
     }
     else if (probe.up() && !probe.problem().empty())
@@ -758,7 +771,7 @@ void SettingsDialog::check()
     poll_->Enable(hamlib);
     testButton_->Enable(hamlib && !testRig_);
     keyRig_->Enable(hamlib);
-    swrTrip_->Enable(hamlib);
+    swrTrip_->Enable(hamlib || rigctld);
     bool keying = hamlib && keyRig_->GetValue();
     for (wxWindow* w : keying_) w->Enable(keying);
     radio::PttMethod ptt = valueAt(PTTS, ptt_);

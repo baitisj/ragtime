@@ -7,7 +7,7 @@
 //
 //   ragtime_fake_air [--bots N] [--airtime MS] [--call CALL] [--fade] [--rate BPS]
 //                    [--loss PCT] [--files] [--no-snr] [--no-cut]
-//                    [--rig PORT [--dial HZ] [--dial-hop] [--rig-vfo]]
+//                    [--rig PORT [--dial HZ] [--dial-hop] [--rig-vfo] [--rig-swr X]]
 //   ragtime_fake_air --replay FILE|FOLDER... [--from TIME] [--speed X]
 //
 // --call CALL has the first bot that takes sessions call CALL half a
@@ -34,10 +34,12 @@
 // a host from before it.
 //
 // --rig PORT plays a rigctld on that port (pick another than 4532 where a
-// real one runs): it answers "\chk_vfo" with 0 and "f" with the dial,
-// 14.105 MHz or --dial HZ, and prints anything else it is sent (Ragtime
-// should only ever ask those two). --rig-vfo plays one started with --vfo:
-// \chk_vfo is 1, and it answers "f currVFO", but not a bare "f".
+// real one runs): it answers "\chk_vfo" with 0, "f" with the dial,
+// 14.105 MHz or --dial HZ, and the meters "+l ALC", "+l SWR" and
+// "+l RFPOWER_METER_WATTS" (ALC 30% to 60%, SWR 1.3 or --rig-swr X, 38 W),
+// and prints anything else it is sent (Ragtime should only ever ask those).
+// --rig-vfo plays one started with --vfo: \chk_vfo is 1, and it answers
+// "f currVFO" and "+l currVFO ALC", but not a bare "f".
 // --dial-hop moves the dial to 14.250 MHz, outside the US data segments,
 // for one minute in every three, so receive only shows.
 //
@@ -144,10 +146,11 @@ void readSome(int fd, std::vector<uint8_t>& out)
 class FakeRig
 {
 public:
-    FakeRig(int port, uint64_t dialHz, bool hop, bool vfo)
+    FakeRig(int port, uint64_t dialHz, bool hop, bool vfo, double swr)
         : dialHz_(dialHz)
         , hop_(hop)
         , vfo_(vfo)
+        , swr_(swr)
     {
         listener_ = ::socket(AF_INET, SOCK_STREAM, 0);
         int yes = 1;
@@ -185,6 +188,19 @@ public:
                 {
                     answer = vfo_ ? "1\n" : "0\n";
                 }
+                else if (line.compare(0, vfo_ ? 11 : 3, vfo_ ? "+l currVFO " : "+l ") == 0)
+                {
+                    std::string level = line.substr(line.rfind(' ') + 1);
+                    std::string head = "get_level: " + line.substr(3) + "\n";
+                    char value[32] = "";
+                    if (level == "ALC")
+                        std::snprintf(value, sizeof value, "%.6f\n", 0.3 + 0.3 * (double)(nowMs / 250 % 7) / 6);
+                    else if (level == "SWR")
+                        std::snprintf(value, sizeof value, "%.6f\n", swr_);
+                    else if (level == "RFPOWER_METER_WATTS")
+                        std::snprintf(value, sizeof value, "%.6f\n", 38.0);
+                    answer = head + (value[0] != 0 ? std::string(value) + "RPRT 0\n" : std::string("RPRT -11\n"));
+                }
                 else if (line == (vfo_ ? "f currVFO" : "f"))
                 {
                     // One minute in three outside the data segments.
@@ -193,7 +209,8 @@ public:
                 }
                 else
                 {
-                    std::printf("fake rigctld was sent \"%s\": Ragtime should only ask \"\\chk_vfo\" and \"%s\"\n",
+                    std::printf("fake rigctld was sent \"%s\": Ragtime should only ask \"\\chk_vfo\", \"%s\" and "
+                                "the meters\n",
                                 line.c_str(), vfo_ ? "f currVFO" : "f");
                     std::fflush(stdout);
                     // A --vfo rigctld waits for the VFO a bare "f" lacks.
@@ -214,6 +231,7 @@ private:
     uint64_t dialHz_;
     bool hop_;
     bool vfo_;
+    double swr_;
     std::vector<Client> clients_;
 };
 
@@ -611,6 +629,7 @@ int main(int argc, char** argv)
     uint64_t dialHz = 14105000;
     bool dialHop = false;
     bool rigVfo = false;
+    double rigSwr = 1.3;
     std::vector<std::string> replayPaths;
     ReplayHost::Options replayOptions;
     for (int i = 1; i < argc; i++)
@@ -641,6 +660,8 @@ int main(int argc, char** argv)
             dialHop = true;
         else if (std::strcmp(argv[i], "--rig-vfo") == 0)
             rigVfo = true;
+        else if (std::strcmp(argv[i], "--rig-swr") == 0 && i + 1 < argc)
+            rigSwr = std::atof(argv[++i]);
         else if (std::strcmp(argv[i], "--replay") == 0 && i + 1 < argc)
         {
             while (i + 1 < argc && argv[i + 1][0] != '-') replayPaths.push_back(argv[++i]);
@@ -654,7 +675,7 @@ int main(int argc, char** argv)
         {
             std::fprintf(stderr, "usage: ragtime_fake_air [--bots N] [--airtime MS] [--call CALL] [--fade] "
                                  "[--rate BPS] [--loss PCT] [--files] [--no-snr] [--no-cut] "
-                                 "[--rig PORT [--dial HZ] [--dial-hop] [--rig-vfo]]\n"
+                                 "[--rig PORT [--dial HZ] [--dial-hop] [--rig-vfo] [--rig-swr X]]\n"
                                  "       ragtime_fake_air --replay FILE|FOLDER... [--from 2026-10-25T16:20] "
                                  "[--speed X]\n");
             return 2;
@@ -675,7 +696,7 @@ int main(int argc, char** argv)
     {
         a = std::make_unique<FakeHost>(air, 2, 8100, 8300);
         b = std::make_unique<FakeHost>(air, 2, 8110, 8310);
-        if (rigPort > 0) rig = std::make_unique<FakeRig>(rigPort, dialHz, dialHop, rigVfo);
+        if (rigPort > 0) rig = std::make_unique<FakeRig>(rigPort, dialHz, dialHop, rigVfo, rigSwr);
     }
     catch (const std::exception& e)
     {
