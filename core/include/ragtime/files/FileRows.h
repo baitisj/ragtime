@@ -36,6 +36,9 @@ extern const char* const BROADCAST_PEER;
 constexpr uint8_t PIECE_WAITING = 0;    // not yet sent or heard
 constexpr uint8_t PIECE_HELD = 1;
 constexpr uint8_t PIECE_MISSED = 2;     // its turn went by without it
+// Missing, but a repair (parity) piece held stands in for it: it is
+// rebuilt once as many repair pieces as are missing have come.
+constexpr uint8_t PIECE_COVERED = 3;
 
 // One row of "In progress and parts".
 struct FileRow
@@ -66,7 +69,8 @@ struct FileRow
     double bytesPerSecond = 0;  // over the last 2 minutes; 0 while not known
     uint64_t finishAtMs = 0;    // one estimate of when it ends; 0 while not known
     // A broadcast file's pieces, for a segmented bar: PIECE_WAITING,
-    // PIECE_HELD or PIECE_MISSED each; empty for a session file.
+    // PIECE_HELD, PIECE_MISSED or PIECE_COVERED each; empty for a session
+    // file.
     std::vector<uint8_t> pieces;
 };
 

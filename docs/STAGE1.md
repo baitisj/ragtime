@@ -593,6 +593,18 @@ The brief:
   Re-open repairs (a closed share's menu, and Completed files), and
   Andrew's three: Slowest repair gear and a repair airtime cap per file
   (30 minutes) in Settings, and a Repair gear submenu per file.
+- Repairs on the screen (Jeff and KC2G, 2026-10-26: a file stopped at
+  31 of 43 pieces got a round of 39 repair pieces, closed, refused,
+  re-opened and came whole, and neither screen showed any of it): a
+  share's card and Files tab row name the stations that asked
+  ("KC2G asked, 39 repair pieces sent"), and while a round carries its
+  pieces say so ("Sending repairs to KC2G, 12 of 39 pieces"), from
+  `Seals::fileRepairs`. A listener counts the repair pieces it holds
+  toward the whole ("Repairing, 39 of 43 pieces, 27 of them repair
+  pieces"), and the piece bar shades the gaps they will fill
+  (`files::PIECE_COVERED`). The status bar says when a round starts,
+  and on both ends when repairs re-open (`BroadcastFiles` events
+  Repairing and Reopened).
 
 ## I. Packaging and the first release
 

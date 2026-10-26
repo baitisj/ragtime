@@ -122,14 +122,18 @@ public:
         };
         if (!r->pieces.empty())
         {
-            // A broadcast file: each piece held, missed or still to come.
+            // A broadcast file: each piece held, covered by a repair piece,
+            // missed or still to come.
             size_t n = r->pieces.size();
             for (size_t i = 0; i < n; i++)
             {
                 if (r->pieces[i] == PIECE_WAITING) continue;
                 int x0 = bar.x + (int)((double)bar.width * (double)i / (double)n);
                 int x1 = bar.x + (int)((double)bar.width * (double)(i + 1) / (double)n);
-                dc->SetBrush(wxBrush(r->pieces[i] == PIECE_HELD ? done : blendColour(surface, MISSED, 0.35)));
+                // Covered: missing, but a repair piece held stands in for it.
+                dc->SetBrush(wxBrush(r->pieces[i] == PIECE_HELD      ? done
+                                     : r->pieces[i] == PIECE_COVERED ? handed
+                                                                     : blendColour(surface, MISSED, 0.35)));
                 dc->DrawRectangle(x0, bar.y, std::max(1, x1 - x0), bar.height);
             }
         }

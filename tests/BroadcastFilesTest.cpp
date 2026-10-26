@@ -2036,6 +2036,130 @@ void testCloseTakesBack()
     CHECK(sentAfter <= sentBefore + 1);
 }
 
+// Jeff and KC2G, 2026-10-26: a file stopped part way, a round of repairs
+// for KC2G, repairs closed and KC2G refused, then re-opened and whole. Both
+// screens show it as it goes: the sender who asked and the round going
+// (to whom, pieces sent of those in it), the listener the repair pieces it
+// holds counted toward the whole; and each hears of the re-open.
+void testRepairsShown()
+{
+    Air air;
+    Station& a = air.add("AG7EW", 1);
+    Station& b = air.add("KC2G", 2);
+    b.files.setAutoReceive(freshFolder("shown").string());
+    bool loseRepairs = false;
+    uint16_t total = 0;
+    b.lose = [&](protocol::Record& r) {
+        const protocol::FilePiece* p = r.as<protocol::FilePiece>();
+        return p != nullptr && loseRepairs && total != 0 && p->index >= total;
+    };
+    air.run(2000);
+    std::string error;
+    uint64_t id = a.files.send(makeFile("shown.bin", 6000, 51), "qpsk-r1/3", now, error);
+    CHECK(id != 0);
+    BroadcastFile mine;
+    for (int i = 0; i < 2000 && a.files.find(id, now, mine) && mine.held < 4; i++) air.run(250);
+    total = mine.pieces;
+    CHECK(mine.held >= 4 && mine.held + 4 < mine.pieces);
+    CHECK(a.files.cancel(id));
+
+    // The round, as it goes.
+    bool roundShown = false, rowShown = false, coveredShown = false;
+    uint32_t mostSent = 0;
+    for (int i = 0; i < 4000; i++)
+    {
+        air.run(250);
+        a.files.find(id, now, mine);
+        if (mine.roundPieces > 0)
+        {
+            roundShown = roundShown || (mine.repairingFor == std::vector<std::string>{"KC2G"});
+            CHECK(mine.roundSent <= mine.roundPieces);
+            mostSent = std::max(mostSent, mine.roundSent);
+            for (const files::FileRow& r : a.files.rows(now))
+            {
+                if (r.id == id && r.state.find("Stopped at ") == 0
+                    && r.state.find("sending repairs to KC2G, ") != std::string::npos)
+                    rowShown = true;
+            }
+        }
+        BroadcastFile theirs = fileFrom(b, "AG7EW");
+        if (theirs.state == FileState::Receiving && theirs.repairHeld > 0)
+        {
+            CHECK(theirs.held + theirs.repairHeld < theirs.pieces);
+            CHECK(std::count(theirs.pieceMap.begin(), theirs.pieceMap.end(), files::PIECE_COVERED)
+                  == theirs.repairHeld);
+            for (const files::FileRow& r : b.files.rows(now))
+            {
+                if (r.id == theirs.id) coveredShown = coveredShown || r.handed > r.done;
+            }
+        }
+        // The round goes on to its end, though the file is whole.
+        if (theirs.state == FileState::Saved && mine.roundPieces == 0) break;
+    }
+    CHECK(roundShown);
+    CHECK(rowShown);
+    CHECK(mostSent > 0);
+    CHECK(coveredShown);
+    CHECK(fileFrom(b, "AG7EW").state == FileState::Saved);
+    // Between rounds: who asked, and what has gone.
+    a.files.find(id, now, mine);
+    CHECK(mine.state == FileState::Repairing);
+    CHECK_EQ(mine.roundPieces, (uint32_t)0);
+    CHECK(mine.askedBy == std::vector<std::string>{"KC2G"});
+    CHECK(mine.repairPieces >= mostSent);
+    std::string words = broadcast::repairText(mine);
+    CHECK(words.find("KC2G asked, ") == 0 && words.find(" repair pieces sent") != std::string::npos);
+    bool repairingEvent = false;
+    for (const auto& e : a.files.takeEvents())
+        repairingEvent = repairingEvent || (e.type == BroadcastFiles::Event::Type::Repairing && e.id == id);
+    CHECK(repairingEvent);
+    CHECK(a.files.closeRepairs(id));
+    CHECK(a.files.find(id, now, mine) && mine.state == FileState::Cancelled && mine.reopenable);
+
+    // Again, to a station that hears no repairs: closed, it is refused;
+    // re-opened, it asks again by itself and the file comes whole.
+    Station& c = air.add("W1AW", 3);
+    c.files.setAutoReceive(freshFolder("shown-c").string());
+    c.lose = [&](protocol::Record& r) {
+        const protocol::FilePiece* p = r.as<protocol::FilePiece>();
+        return p != nullptr && (p->index >= total || p->index % 2 == 0) && loseRepairs;
+    };
+    loseRepairs = true;
+    uint64_t second = a.files.send(makeFile("shown2.bin", 3000, 52), "qpsk-r1/3", now, error);
+    CHECK(second != 0);
+    a.files.find(second, now, mine);
+    total = mine.pieces;
+    for (int i = 0; i < 4000 && fileFrom(c, "AG7EW").id == 0; i++) air.run(250);
+    for (int i = 0; i < 4000 && a.files.find(second, now, mine) && mine.repairPieces == 0; i++) air.run(250);
+    CHECK(mine.repairPieces > 0);
+    CHECK(a.files.closeRepairs(second));
+    for (int i = 0; i < 4000 && !fileFrom(c, "AG7EW").refusal; i++) air.run(250);
+    air.run(1000);
+    BroadcastFile theirs = fileFrom(c, "AG7EW");
+    CHECK(theirs.state == FileState::Incomplete && theirs.refusal);
+    c.files.takeEvents();
+    a.files.takeEvents();
+    loseRepairs = false;
+    CHECK(a.files.reopen(second, now + 30 * 60 * 1000, now, error));
+    a.files.find(second, now, mine);
+    CHECK(mine.state == FileState::Repairing);
+    CHECK_EQ(mine.repairPieces, (uint32_t)0);
+    CHECK(mine.askedBy == std::vector<std::string>{"W1AW"});
+    bool reopenedHere = false;
+    for (const auto& e : a.files.takeEvents())
+        reopenedHere = reopenedHere || (e.type == BroadcastFiles::Event::Type::Reopened && e.id == second);
+    CHECK(reopenedHere);
+    for (int i = 0; i < 8000 && fileFrom(c, "AG7EW").state != FileState::Saved; i++) air.run(250);
+    theirs = fileFrom(c, "AG7EW");
+    CHECK(theirs.state == FileState::Saved);
+    bool reopenedThere = false;
+    for (const auto& e : c.files.takeEvents())
+        reopenedThere = reopenedThere || (e.type == BroadcastFiles::Event::Type::Reopened && e.id == theirs.id);
+    CHECK(reopenedThere);
+    a.files.find(second, now, mine);
+    CHECK(mine.repairPieces > 0);
+}
+
 int main()
 {
     testAirtime();
@@ -2077,6 +2201,7 @@ int main()
     testRepairGearOverride();
     testRepairCapAndReopen();
     testCloseTakesBack();
+    testRepairsShown();
     std::filesystem::remove_all(scratch());
     return ragtime_test::finish();
 }
