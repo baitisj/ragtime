@@ -173,12 +173,22 @@ void KissDecoder::reset()
     inFrame_ = false;
 }
 
+int burstDataBytes(const std::vector<int>& frameBytes, int bytesPerCodeword)
+{
+    int bytes = 0;
+    for (int length : frameBytes)
+    {
+        if (bytesPerCodeword > 0 && bytes % bytesPerCodeword == 0) bytes++;
+        bytes += framedBytes(length);
+    }
+    return bytes;
+}
+
 double ModeInfo::burstSeconds(const std::vector<int>& frameBytes) const
 {
     if (!valid()) return 0.0;
 
-    int bytes = 0;
-    for (int length : frameBytes) bytes += framedBytes(length);
+    int bytes = burstDataBytes(frameBytes, bytesPerCodeword);
     int codewords = 1 + (bytes + bytesPerCodeword - 1) / bytesPerCodeword;
     codewords = std::min(codewords, maxCodewords);
     if (maxCodewords <= 1) return secondsAtOne;

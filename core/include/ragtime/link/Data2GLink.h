@@ -76,6 +76,11 @@ private:
 // to 253 bytes, so it counts both.
 constexpr int framedBytes(int n) { return n + 2 + n / 254; }
 
+// The bytes these frames take in a burst's data, back to back: each
+// framed, and in v3 a zero more before any frame that would start a
+// codeword, the first included. At most a byte a frame over v2's count.
+int burstDataBytes(const std::vector<int>& frameBytes, int bytesPerCodeword);
+
 // One line of the MODES list: "MODE name bandwidth-Hz bytes-per-codeword
 // max-codewords seconds-at-1 seconds-at-max".
 struct ModeInfo
@@ -90,7 +95,7 @@ struct ModeInfo
     bool valid() const { return !name.empty() && bytesPerCodeword > 0 && maxCodewords > 0; }
 
     // How long a burst carrying these frames takes: one control codeword,
-    // then the frames back to back, each framed (framedBytes).
+    // then the frames back to back (burstDataBytes).
     double burstSeconds(const std::vector<int>& frameBytes) const;
 };
 

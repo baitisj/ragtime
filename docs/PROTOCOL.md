@@ -734,9 +734,11 @@ two.
 
 - A file is at most 300 KB. Its pieces fill a frame: three codewords in
   the FSK modes, otherwise as much as the 255-byte frame takes, with the
-  sender's callsign in each piece's header. A frame fills whole codewords
-  once framed (`link::framedBytes`: n + 2 bytes up to 253, one more past
-  that), so a piece never spills into one more codeword.
+  sender's callsign in each piece's header. A piece's frame is k codewords
+  less 3 bytes: COBS's byte, the zero ending the frame, and the zero
+  broadcast v3 puts before a frame that starts a codeword
+  (`link::framedBytes`, `link::burstDataBytes`). It fills whole codewords
+  in v3 and never spills into one more in v2, where it wastes a byte.
 - **Bursts stay long.** A burst carries as many pieces as fit 12 s
   and 8 frames (`MAX_BURST_SECONDS`, `MAX_FRAMES_PER_BURST`), whatever
   the path. From Data2G's broadcast v3 (PR
@@ -745,9 +747,7 @@ two.
   pays its control codeword and the 4 s gap below once for more pieces.
   Under v2, a lost codeword lost the rest of its burst, which was why
   shorter bursts on fading paths were considered (ragtime #68), and then
-  dropped for v3. One cost remains in v3 as it stands: a piece that
-  starts a codeword is lost with the codeword before it, since its start
-  is known only from the zero there (docs/DATA2G.md, "Loss").
+  dropped for v3 (docs/DATA2G.md, "Loss").
 - The first pass goes one burst at a time, so others can get a word
   in: the announce, then the pieces, with the announce again ahead of
   every 20 pieces. A burst Not sent goes once more.

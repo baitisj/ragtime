@@ -55,9 +55,10 @@ constexpr uint64_t WINDOW_TURNAROUND_MS = 4000;
 uint64_t listeningWindowMs(const link::ModeInfo& mode);
 
 // The frame a file's pieces fill in a mode: the most that framed
-// (link::framedBytes) fits whole codewords (3 codewords in the FSK modes,
-// as many as fit the frame limit in the others), at most
-// MAX_BROADCAST_FRAME.
+// (link::framedBytes), with the zero v3 puts before a frame starting a
+// codeword, fits whole codewords: k codewords less 3 bytes (3 codewords in
+// the FSK modes, as many as fit the frame limit in the others), at most
+// MAX_BROADCAST_FRAME. Each piece then starts a codeword.
 int pieceFrameBytes(const link::ModeInfo& mode);
 
 // The bytes of a file each FilePiece carries, for a sender with this

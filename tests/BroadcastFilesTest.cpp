@@ -338,16 +338,16 @@ void testAirtime()
     uint64_t wq = broadcast::listeningWindowMs(qpsk);
     CHECK(wq > 12000 && wq < 14000);
 
-    // Pieces fill three FSK codewords, less Data2G's framing.
-    CHECK_EQ(broadcast::pieceFrameBytes(fsk), 3 * 38 - 2);
-    // Framed, a piece never spills into a codeword more: a 254-byte frame
-    // takes 257 bytes, so two 128-byte codewords hold 253; and 255 bytes
-    // take 258, three 86-byte codewords exactly.
+    // Pieces fill three FSK codewords, less Data2G's framing: COBS, the
+    // zero ending it and the zero before a frame starting a codeword.
+    CHECK_EQ(broadcast::pieceFrameBytes(fsk), 3 * 38 - 3);
+    // Framed, a piece never spills into a codeword more: two 128-byte
+    // codewords hold 253 bytes (256 framed), three 86-byte ones 254 (258).
     link::ModeInfo m128{"m128", 2400, 128, 32, 1.0, 10.0};
     link::ModeInfo m86{"m86", 2400, 86, 32, 1.0, 10.0};
     link::ModeInfo m278{"m278", 2400, 278, 32, 1.0, 10.0};
     CHECK_EQ(broadcast::pieceFrameBytes(m128), 253);
-    CHECK_EQ(broadcast::pieceFrameBytes(m86), 255);
+    CHECK_EQ(broadcast::pieceFrameBytes(m86), 254);
     CHECK_EQ(broadcast::pieceFrameBytes(m278), (int)protocol::MAX_BROADCAST_FRAME);
     // One data codeword whatever its size.
     CHECK(std::fabs(broadcast::oneCodewordSeconds(m278) - (1.0 + 9.0 / 31)) < 1e-9);
@@ -357,7 +357,9 @@ void testAirtime()
     protocol::FilePiece p;
     p.bytes.assign((size_t)bytes, 1);
     r.body = p;
-    CHECK_EQ((int)protocol::encodeFrame({r}).size(), broadcast::pieceFrameBytes(fsk));
+    // The piece is even, so its frame may be a byte short.
+    int frame = (int)protocol::encodeFrame({r}).size();
+    CHECK(frame <= broadcast::pieceFrameBytes(fsk) && frame >= broadcast::pieceFrameBytes(fsk) - 1);
     CHECK(broadcast::pieceBytesFor(qpsk, "AG7EW") > bytes);
     CHECK((int)protocol::encodeFrame({r}).size() <= (int)protocol::MAX_BROADCAST_FRAME);
 
