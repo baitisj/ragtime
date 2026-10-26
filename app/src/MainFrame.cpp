@@ -16,6 +16,7 @@
 #include <wx/clipbrd.h>
 #include <wx/config.h>
 #include <wx/datetime.h>
+#include <wx/dialog.h>
 #include <wx/ffile.h>
 #include <wx/file.h>
 #include <wx/filedlg.h>
@@ -46,6 +47,7 @@
 #include "GearshiftDialog.h"
 #include "HostConnection.h"
 #include "PathsDialog.h"
+#include "QuitSignal.h"
 #include "RecentWorkPane.h"
 #include "Report.h"
 #include "RigControl.h"
@@ -795,12 +797,12 @@ void MainFrame::showSettings(SettingsDialog::Page page)
         sendTxLevel(dB, "set in Settings");
     };
     SettingsDialog dialog(this, prefs_, gears, openRig, page, link_.txPower(), setTxLevel);
-    std::optional<double> ceiling = autoAlc_.ceiling();
+    std::optional<double> base = autoAlc_.base();
     autoAlc_.hold(true);
     bool ok = dialog.ShowModal() == wxID_OK;
     dialog.finishTxLevel(ok);
-    // Cancel puts back the level, and the ceiling Auto ALC had.
-    if (!ok && ceiling) autoAlc_.operatorSet(*ceiling, HostConnection::nowMs());
+    // Cancel puts back the level, and the base Auto ALC had.
+    if (!ok && base) autoAlc_.operatorSet(*base, HostConnection::nowMs());
     autoAlc_.hold(false);
     if (!ok) return;
     StationPrefs next = dialog.prefs();
@@ -926,6 +928,26 @@ void MainFrame::onHostEvents(const std::vector<Event>& events)
 void MainFrame::onClock()
 {
     uint64_t now = HostConnection::nowMs();
+    if (int signal = quitSignal())
+    {
+        // Asked to quit by a signal: a dialog open is cancelled first (a
+        // TX level turned in Settings goes back), then the window closes as
+        // the close box would, so the TX level, the rig and the logs are
+        // seen to.
+        for (wxWindow* w : wxTopLevelWindows)
+        {
+            auto* dialog = dynamic_cast<wxDialog*>(w);
+            if (dialog && dialog->IsModal())
+            {
+                dialog->EndModal(wxID_CANCEL);
+                return;
+            }
+        }
+        host_->recorder().note("Ragtime asked to quit by signal " + std::to_string(signal), now);
+        clock_.Stop();
+        Close(true);
+        return;
+    }
     // Never keyed with no host to say PTT OFF.
     if (host_->state() != HostConnection::State::Connected) rig_->hostLost();
     applySendGuard();
@@ -2620,8 +2642,9 @@ void MainFrame::onMeters()
                     + wxString::Format("%.1f", *next).ToStdString();
         else if (burst.alcStepDb != 0 && !autoAlc_.enabled())
             line += "; Auto ALC would turn the TX level " + move(burst.alcStepDb);
-        else if (burst.alcStepDb > 0 && autoAlc_.atCeiling())
-            line += "; Auto ALC is at the TX level set in Settings";
+        else if (burst.alcStepDb > 0 && autoAlc_.atTop())
+            line += "; Auto ALC is at its most, " + std::to_string((int)radio::AutoAlc::CLIMB_DB)
+                    + " dB over the TX level set";
         host_->recorder().note(line, HostConnection::nowMs());
         if (next) sendTxLevel(*next, "Auto ALC");
     }
@@ -2653,10 +2676,11 @@ void MainFrame::showAutoAlc()
     bool alc = rig_->readsAlc();
     std::string tip = "Keeps the rig's ALC near 55% by moving data2g-host's TX level (TXPOWER) after each burst, "
                       "from the middle of its ALC readings: over 80% down 2 dB, over 65% down 0.5 dB, under 45% "
-                      "up 0.5 dB, under 25% up 1 dB, and between 45% and 65% it leaves it. It never goes above "
-                      "the TX level set in Settings (or the level it found when ticked), never more than "
+                      "up 0.5 dB, under 25% up 1 dB, and between 45% and 65% it leaves it. It works around the "
+                      "TX level set in Settings (or the level it found when ticked): never more than "
+                      + std::to_string((int)radio::AutoAlc::CLIMB_DB) + " dB over it, never more than "
                       + std::to_string((int)radio::AutoAlc::MAX_TRIM_DB)
-                      + " dB under it, and puts that level back when you untick it or close Ragtime "
+                      + " dB under it, and it puts that level back when you untick it or close Ragtime "
                         "(data2g-host keeps a level after Ragtime goes).";
     if (!host)
         tip += "\n\nIt needs data2g-host connected, and one that takes TXPOWER (Data2G PR #122).";
@@ -2666,15 +2690,17 @@ void MainFrame::showAutoAlc()
     else
     {
         tip += "\n\nTX level now " + wxString::Format("%.1f", *link_.txPower()).ToStdString() + " dB";
-        if (autoAlc_.enabled() && autoAlc_.trimmedDb() > 0.05)
-            tip += ", " + wxString::Format("%.1f", autoAlc_.trimmedDb()).ToStdString() + " dB under the "
-                   + wxString::Format("%.1f", *autoAlc_.ceiling()).ToStdString() + " dB it found";
+        double offset = autoAlc_.offsetDb();
+        if (autoAlc_.enabled() && autoAlc_.base() && std::fabs(offset) > 0.05)
+            tip += ", " + wxString::Format("%.1f", std::fabs(offset)).ToStdString()
+                   + (offset < 0 ? " dB under" : " dB over") + " the "
+                   + wxString::Format("%.1f", *autoAlc_.base()).ToStdString() + " dB set";
         tip += ".";
         if (autoAlc_.enabled() && autoAlc_.atFloor())
             tip += " Auto ALC has gone as far down as it will: check the rig's drive and ALC.";
-        else if (autoAlc_.enabled() && autoAlc_.atCeiling())
-            tip += " The ALC wants more than the TX level set in Settings: raise it there to let Auto ALC "
-                   "reach 55%.";
+        else if (autoAlc_.enabled() && autoAlc_.atTop())
+            tip += " The ALC still wants more: raise the TX level in Settings, or check the rig's drive "
+                   "and ALC.";
     }
     bar_->autoAlc->Enable(host && alc);
     if (bar_->autoAlc->GetToolTipText() != utf8(tip)) bar_->autoAlc->SetToolTip(utf8(tip));
@@ -2742,8 +2768,8 @@ void MainFrame::showMeters()
                    + std::to_string(last->alcStepDb < 0 ? high : low) + "%: "
                    + (autoAlc_.enabled() && link_.txPower()
                           ? "Auto ALC turns data2g-host's TX level " + way
-                                + (last->alcStepDb > 0 && autoAlc_.atCeiling()
-                                       ? ", but it is at the level set in Settings."
+                                + (last->alcStepDb > 0 && autoAlc_.atTop()
+                                       ? ", but it is at its most over the level set in Settings."
                                        : ".")
                           : "Auto ALC would turn the TX level " + way + " "
                                 + wxString::Format("%.1f", std::fabs(last->alcStepDb)).ToStdString()

@@ -945,15 +945,19 @@ every change, and keeps no copy in its settings.
   are read in turn, so a short burst may have only one):
   over 80% down 2 dB, over 65% down 0.5 dB, under 45% up 0.5 dB, under
   25% up 1 dB, and between 45% and 65% nothing. With Auto ALC ticked
-  that goes to the host as the burst ends (`radio::AutoAlc`). It never
-  goes above the ceiling, the TX level set in Settings (or in
-  data2g-host's own window, or a restarted host's, or the level it
-  found when ticked), never more than 20 dB under it, and never under
-  -60. To let it reach 55% from a cold rig, set the ceiling higher.
+  that goes to the host as the burst ends (`radio::AutoAlc`). It works
+  around the base, the TX level set in Settings (or in data2g-host's
+  own window, or a restarted host's, or the level it found when
+  ticked): never more than 6 dB over it, so a rig whose ALC reads low
+  or not at all can't run the drive away, never more than 20 dB under
+  it, and within -60 to +20 (Jeff, 2026-10-26, after his IC-7100 sat at
+  40% at the level Auto ALC found and it couldn't climb to 55%).
   A burst begun before a level was set by hand moves nothing (it was
   sent at the old level), and a step starts from the newest level sent,
   not the host's last answer. Unticking it, or closing Ragtime, puts
-  back the ceiling, so a trim never outlives Ragtime. It needs the
+  back the base, so a change never outlives Ragtime; SIGTERM, SIGINT
+  and SIGHUP close Ragtime as its close box does (`app/src/QuitSignal`),
+  so a `kill` puts it back too. It needs the
   rig's ALC (rigctld or Hamlib) and a host with `TXPOWER`; greyed
   otherwise, and the burst's line then says what it would have done.
   On the IC-7100, Hamlib's ALC is 100% at the top of the radio's ALC
@@ -961,8 +965,8 @@ every change, and keeps no copy in its settings.
 - The flight recorder notes each change and why: `note TX level -2.0
   dB: Auto ALC`, `... set in Settings`, `... Auto ALC off`, `...
   Ragtime closed`; the burst's line ends `Auto ALC turns the TX level
-  down 2.0 dB to -2.0`, or `Auto ALC is at the TX level set in
-  Settings` when it would go up but can't.
+  down 2.0 dB to -2.0`, or `Auto ALC is at its most, 6 dB over the TX
+  level set` when it would go up but can't.
 - The SWR trip doesn't touch the TX level: a level turned to -60 would
   outlive Ragtime and quietly mute the next session (ABORT and the hold
   already stop sending).

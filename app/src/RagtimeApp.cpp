@@ -8,6 +8,7 @@
 
 #include "MainFrame.h"
 #include "Prefs.h"
+#include "QuitSignal.h"
 #include "Theme.h"
 #include "ragtime/Version.h"
 
@@ -27,6 +28,8 @@ public:
         if (theme == (int)ThemeChoice::Light || theme == (int)ThemeChoice::Dark) applyTheme((ThemeChoice)theme);
         auto* frame = new MainFrame();
         frame->Show();
+        // kill, Ctrl+C and a closed terminal close it as the close box does.
+        watchQuitSignals();
         return true;
     }
 

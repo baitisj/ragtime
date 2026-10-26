@@ -30,10 +30,10 @@ std::optional<double> AutoAlc::setEnabled(bool on)
     enabled_ = on;
     wantsMore_ = false;
     version_++;
-    // From here, never above the level it finds.
+    // From here, around the level it finds.
     if (on)
     {
-        if (newest()) ceiling_ = newest();
+        if (newest()) base_ = newest();
         return std::nullopt;
     }
     return restore();
@@ -43,6 +43,18 @@ std::optional<double> AutoAlc::newest() const
 {
     if (!sent_.empty()) return sent_.back();
     return level_;
+}
+
+std::optional<double> AutoAlc::top() const
+{
+    if (!base_) return std::nullopt;
+    return std::min(LEVEL_MAX_DB, *base_ + CLIMB_DB);
+}
+
+std::optional<double> AutoAlc::floor() const
+{
+    if (!base_) return std::nullopt;
+    return std::max(LEVEL_MIN_DB, *base_ - MAX_TRIM_DB);
 }
 
 void AutoAlc::hostLevel(std::optional<double> dB, uint64_t nowMs)
@@ -56,14 +68,14 @@ void AutoAlc::hostLevel(std::optional<double> dB, uint64_t nowMs)
     }
     // Each TXPOWER we send is answered in turn. A level we didn't send is
     // the operator's own (data2g-host's window) or a restarted host's: the
-    // new ceiling, and what was sent before it is moot.
+    // new base, and what was sent before it is moot.
     if (!sent_.empty() && same(*dB, sent_.front()))
     {
         sent_.pop_front();
     }
     else
     {
-        ceiling_ = *dB;
+        base_ = *dB;
         sent_.clear();
         setMs_ = nowMs;
         wantsMore_ = false;
@@ -74,20 +86,25 @@ void AutoAlc::hostLevel(std::optional<double> dB, uint64_t nowMs)
 
 void AutoAlc::operatorSet(double dB, uint64_t nowMs)
 {
-    ceiling_ = tenths(dB);
+    base_ = tenths(dB);
     setMs_ = nowMs;
     wantsMore_ = false;
+    version_++;
+}
+
+void AutoAlc::sent(double dB)
+{
+    sent_.push_back(tenths(dB));
     version_++;
 }
 
 std::optional<double> AutoAlc::burstEnded(const TxMeters::Burst& burst)
 {
     std::optional<double> now = newest();
-    if (!enabled_ || held_ || !now || !ceiling_ || burst.alcStepDb == 0) return std::nullopt;
+    if (!enabled_ || held_ || !now || !base_ || burst.alcStepDb == 0) return std::nullopt;
     // Sent at the level before the operator's: it says nothing of this one.
     if (burst.startMs < setMs_) return std::nullopt;
-    double floor = std::max(LEVEL_MIN_DB, *ceiling_ - MAX_TRIM_DB);
-    double target = tenths(std::min(*ceiling_, std::max(floor, *now + burst.alcStepDb)));
+    double target = tenths(std::min(*top(), std::max(*floor(), *now + burst.alcStepDb)));
     bool more = burst.alcStepDb > 0 && target <= *now + 0.05;
     if (more != wantsMore_)
     {
@@ -101,29 +118,22 @@ std::optional<double> AutoAlc::burstEnded(const TxMeters::Burst& burst)
 std::optional<double> AutoAlc::restore()
 {
     std::optional<double> now = newest();
-    if (!now || !ceiling_ || same(*now, *ceiling_)) return std::nullopt;
-    return ceiling_;
+    if (!now || !base_ || same(*now, *base_)) return std::nullopt;
+    return base_;
 }
 
-void AutoAlc::sent(double dB)
-{
-    sent_.push_back(tenths(dB));
-    version_++;
-}
-
-double AutoAlc::trimmedDb() const
+double AutoAlc::offsetDb() const
 {
     std::optional<double> now = newest();
-    if (!now || !ceiling_) return 0;
-    return std::max(0.0, *ceiling_ - *now);
+    if (!now || !base_) return 0;
+    return *now - *base_;
 }
 
 bool AutoAlc::atFloor() const
 {
     std::optional<double> now = newest();
-    if (!now || !ceiling_) return false;
-    double floor = std::max(LEVEL_MIN_DB, *ceiling_ - MAX_TRIM_DB);
-    return *now <= floor + 0.05;
+    if (!now || !base_) return false;
+    return *now <= *floor() + 0.05;
 }
 
 } // namespace radio
