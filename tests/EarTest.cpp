@@ -19,6 +19,7 @@
 #include <vector>
 
 #include "Check.h"
+#include "ragtime/ear/AutoSpan.h"
 #include "ragtime/ear/Edges.h"
 #include "ragtime/ear/FilterControl.h"
 #include "ragtime/ear/Graph.h"
@@ -299,13 +300,14 @@ struct Lift
     double lowHz, highHz, db;
 };
 
-std::vector<float> noiseRow(std::mt19937& rng, double low, double high, std::vector<Lift> extra = {})
+std::vector<float> noiseRow(std::mt19937& rng, double low, double high, std::vector<Lift> extra = {},
+                            double topHz = Spectrum::DEFAULT_TOP_HZ)
 {
     std::exponential_distribution<double> draw(1.0);
     std::vector<float> row(Spectrum::BINS);
     for (int i = 0; i < Spectrum::BINS; i++)
     {
-        const double hz = Spectrum::binHz(i);
+        const double hz = Spectrum::binHz(i, topHz);
         double shape = std::min(-6.0 + (hz - low) * 0.4, -6.0 + (high - hz) * 0.4);
         shape = std::max(-60.0, std::min(0.0, shape));
         double db = -50.0 + shape;
@@ -446,7 +448,7 @@ Span spanFrom(const Edges& e)
 {
     Span s;
     s.lowHz = e.lowHz.value_or(0);
-    s.highHz = e.highHz.value_or(Spectrum::TOP_HZ);
+    s.highHz = e.highHz.value_or(Spectrum::DEFAULT_TOP_HZ);
     return s;
 }
 
@@ -710,6 +712,95 @@ void calibrate()
     CHECK(d.problem().find("hardly moved") != std::string::npos);
 }
 
+Edges edgesAt(double lowHz, std::optional<double> highHz)
+{
+    Edges e;
+    e.lowHz = lowHz;
+    e.highHz = highHz;
+    return e;
+}
+
+void spans()
+{
+    // A tone at 9 kHz, on a 12 kHz picture.
+    Spectrum s(48000, 10.0);
+    s.setTopHz(12000);
+    CHECK_EQ(s.topHz(), 12000.0);
+    std::vector<float> x = tone(48000, 9000.0, 1.0, 1.0);
+    auto rows = s.push(x.data(), x.size());
+    CHECK(!rows.empty());
+    if (!rows.empty())
+    {
+        CHECK_EQ(peakBin(rows.back()), Spectrum::binOf(9000.0, 12000.0));
+        CHECK(rows.back()[Spectrum::binOf(9000.0, 12000.0)] > -6.0f);
+    }
+    // A narrow span: steps finer than the FFT's bins still read.
+    s.setTopHz(2500);
+    x = tone(48000, 1000.0, 1.0, 1.0);
+    rows = s.push(x.data(), x.size());
+    CHECK(!rows.empty() && std::abs(peakBin(rows.back()) - Spectrum::binOf(1000.0, 2500.0)) <= 1);
+    s.setTopHz(100000);
+    CHECK_EQ(s.topHz(), Spectrum::MAX_TOP_HZ);
+
+    // FM audio, 300 to 6000 Hz, on an 8 kHz picture.
+    std::mt19937 rng(5);
+    EdgeFinder f(10.0);
+    f.setTopHz(8000);
+    for (int i = 0; i < 40; i++) f.addRow(noiseRow(rng, 300, 6000, {}, 8000), false);
+    std::optional<Edges> e = f.edges();
+    CHECK(e && near(e->lowHz, 300, 40) && near(e->highHz, 6000, 40));
+    // And on a 4 kHz one its top runs off the picture.
+    EdgeFinder g(10.0);
+    for (int i = 0; i < 40; i++) g.addRow(noiseRow(rng, 300, 6000), false);
+    e = g.edges();
+    CHECK(!e || !e->highHz);
+
+    // Auto's fit: past the edge by 400 Hz, rounded up to 500 Hz.
+    CHECK_EQ(AutoSpan::fit(3050), 3500.0);
+    CHECK_EQ(AutoSpan::fit(3100), 3500.0);
+    CHECK_EQ(AutoSpan::fit(3101), 4000.0);
+    CHECK_EQ(AutoSpan::fit(100), Spectrum::MIN_TOP_HZ);
+    CHECK_EQ(AutoSpan::fit(20000), Spectrum::MAX_TOP_HZ);
+    CHECK(fmMode("PKTFM") && fmMode("FMN") && !fmMode("PKTUSB"));
+    CHECK(wideAudioMode("AM") && !wideAudioMode("USB"));
+
+    const uint64_t t = 1000000;
+    AutoSpan a;
+    // No rig: 4 kHz until the edges say.
+    CHECK_EQ(a.update(t, 0, std::nullopt, std::nullopt, false, 24000), 4000.0);
+    // The rig on PKTUSB, edges at 70 and 3050 Hz: narrows to 3.5 kHz, but
+    // only once that has held for 10 s.
+    CHECK_EQ(a.update(t, 0, std::string("PKTUSB"), std::nullopt, false, 24000), 4000.0);
+    CHECK_EQ(a.update(t + 100, 0, std::string("PKTUSB"), edgesAt(70, 3050), false, 24000), 4000.0);
+    CHECK_EQ(a.update(t + 5000, 0, std::string("PKTUSB"), edgesAt(70, 3050), false, 24000), 4000.0);
+    CHECK_EQ(a.update(t + 10100, 0, std::string("PKTUSB"), edgesAt(70, 3050), false, 24000), 3500.0);
+    // The edges start afresh with the span: it holds meanwhile.
+    CHECK_EQ(a.update(t + 10600, 0, std::string("PKTUSB"), std::nullopt, false, 24000), 3500.0);
+    // A wider filter: wider at once.
+    CHECK_EQ(a.update(t + 11000, 0, std::string("PKTUSB"), edgesAt(70, 3700), false, 24000), 4500.0);
+    // Its top off the picture: the next step at once.
+    CHECK_EQ(a.update(t + 12000, 0, std::string("PKTUSB"), edgesAt(70, std::nullopt), false, 24000), 8000.0);
+    // A narrowing that doesn't hold doesn't happen.
+    CHECK_EQ(a.update(t + 13000, 0, std::string("PKTUSB"), edgesAt(70, 2700), false, 24000), 8000.0);
+    CHECK_EQ(a.update(t + 20000, 0, std::string("PKTUSB"), edgesAt(70, 3900), false, 24000), 8000.0);
+    CHECK_EQ(a.update(t + 24000, 0, std::string("PKTUSB"), edgesAt(70, 2700), false, 24000), 8000.0);
+    // FM: 8 kHz at once.
+    CHECK_EQ(a.update(t + 30000, 0, std::string("USB"), std::nullopt, false, 24000), 4000.0);
+    CHECK_EQ(a.update(t + 31000, 0, std::string("FM"), std::nullopt, false, 24000), 8000.0);
+    // FM's audio reaching the top: wider; on SSB that is more likely the
+    // sound card's own noise, and it stays.
+    CHECK_EQ(a.update(t + 31500, 0, std::string("FM"), std::nullopt, true, 24000), 12000.0);
+    AutoSpan b;
+    CHECK_EQ(b.update(t, 0, std::string("USB"), std::nullopt, true, 24000), 4000.0);
+    CHECK_EQ(b.update(t + 100, 0, std::string("USB"), std::nullopt, true, 24000), 4000.0);
+    CHECK(f.reachesTop() == false);
+    CHECK(g.reachesTop());
+    // Fixed choices, and never past half the sound card's rate.
+    CHECK_EQ(a.update(t + 32000, 12000, std::string("FM"), std::nullopt, false, 24000), 12000.0);
+    CHECK_EQ(a.update(t + 33000, 12000, std::string("FM"), std::nullopt, false, 4000), 4000.0);
+    CHECK_EQ(a.update(t + 34000, 0, std::string("FM"), std::nullopt, false, 4000), 4000.0);
+}
+
 } // namespace
 
 int main()
@@ -727,5 +818,6 @@ int main()
     twinPbtModel();
     keepAndUndo();
     calibrate();
+    spans();
     return ragtime_test::finish();
 }

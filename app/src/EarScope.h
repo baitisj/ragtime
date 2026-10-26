@@ -11,10 +11,11 @@
 
 #include "ragtime/ear/Edges.h"
 #include "ragtime/ear/FilterControl.h"
+#include "ragtime/ear/Spectrum.h"
 
 // The Ear's picture (docs/STAGE1.md, "The Ear"): the averaged spectrum on
 // top and the waterfall under it, newest row at the top, both from 0 to
-// ear::Spectrum::TOP_HZ across. Data2G's passbands are shaded green (the
+// the span across (setTopHz: 4 kHz, or as ear::AutoSpan picks). Data2G's passbands are shaded green (the
 // one in use darker), and the frequency under the mouse is marked. Rows
 // heard while the rig transmits are greyed: its receive audio is muted
 // then.
@@ -42,6 +43,8 @@ public:
     void addRows(const std::vector<std::vector<float>>& rows, bool transmitting);
     void clear();
     void setRowsPerSecond(double rowsPerSecond);
+    // A new span: the waterfall so far is stretched or squeezed to it.
+    void setTopHz(double topHz);
     void setNarrow(bool narrow);
     // The edges the noise shows, if any.
     void setEdges(const std::optional<ragtime::ear::Edges>& edges);
@@ -82,6 +85,7 @@ private:
     double floor_ = -100.0;
     bool haveFloor_ = false;
     double rowsPerSecond_ = 10.0;
+    double topHz_ = ragtime::ear::Spectrum::DEFAULT_TOP_HZ;
     bool narrow_ = false;
     int rows_ = 0;
     int mouseX_ = -1;

@@ -190,7 +190,10 @@ with the code when the seal rules change.
   the real centre and width, and a cut in the audio that hides an edge;
   two turns each side, as Jeff's IC-7100 hides its low edge under a cut
   at 70 Hz). Quitting puts the filter back as found
-  (`MainFrame::filterEdit_`).
+  (`MainFrame::filterEdit_`). Span (Jeff, 2026-10-26): the picture goes
+  to 4, 8 or 12 kHz, or Auto fits it past the filter's high edge
+  (`ear::AutoSpan`; FM and AM start at 8 kHz, and on FM the Ear draws
+  and sets no filter).
 - Data2G PR #98 (merged 2026-10-23) gives SNRs: on `BCAST HEARD` and
   `MISSED`, and `SN` for the session partner. Ragtime shows them in the
   station list's SNR column and feeds the gearshift's Auto the weakest
@@ -372,7 +375,7 @@ For the Ear, `tools/ear/pretend_radio.sh up` (needs PipeWire with
 a pretend radio source with Data2G-like bursts and a stand-in
 `data2g-host` recording from it; `... down` removes them.
 `build/tests/ragtime_ear_probe --seconds N` prints what the Ear finds
-and hears, with no window. In a headless cloud session, PipeWire needs
+and hears, with no window (`--span HZ` up to 12000). In a headless cloud session, PipeWire needs
 an `XDG_RUNTIME_DIR` of its own, a session D-Bus there, then `pipewire`,
 `wireplumber` and `pipewire-pulse` started in the background; and
 `openbox` on the Xvfb display, or floating windows stack wrong. Never

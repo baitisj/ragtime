@@ -12,6 +12,7 @@
 #include "EarControls.h"
 #include "EarScope.h"
 #include "Prefs.h"
+#include "ragtime/ear/AutoSpan.h"
 #include "ragtime/ear/Passbands.h"
 
 using namespace ragtime;
@@ -169,6 +170,11 @@ ear::KnobModel EarFilterBar::model(const RigFilter& f) const
     return ear::KnobModel::about(centre_.value_or((d.lowHz + d.highHz) / 2), f);
 }
 
+bool EarFilterBar::onFm() const
+{
+    return rig_.filter && ear::fmMode(rig_.filter->mode);
+}
+
 bool EarFilterBar::calibrated() const
 {
     const std::optional<RigFilter> f = setting();
@@ -271,7 +277,7 @@ void EarFilterBar::tick(uint64_t nowMs, bool quiet, ear::EdgeFinder& edges, cons
     }
 
     // The handles, while the operator may drag.
-    const bool canDrag = rig.canSet && setting() && !calibration_.running() && !restore_ &&
+    const bool canDrag = settable() && setting() && !calibration_.running() && !restore_ &&
                          edit_.state() != FilterEdit::State::Waiting;
     const std::optional<RigFilter> f = setting();
     scope_->setHandles(canDrag ? spanNow() : std::nullopt, !calibrated());
@@ -300,7 +306,7 @@ void EarFilterBar::closing()
 void EarFilterBar::dragged(const Span& from, const Span& wanted)
 {
     const std::optional<RigFilter> now = setting();
-    if (!rig_.canSet || !now || calibration_.running()) return;
+    if (!settable() || !now || calibration_.running()) return;
     ear::KnobModel m = model(*now);
     // Uncalibrated, only the width: about the centre the passband has now.
     if (!m.known()) m.centreHz = from.centre();
@@ -328,7 +334,7 @@ void EarFilterBar::change(const RigFilter& to, const std::optional<Span>& wanted
 
 void EarFilterBar::recall(int n)
 {
-    if (!rig_.canSet || !rig_.filter || calibration_.running()) return;
+    if (!settable() || !rig_.filter || calibration_.running()) return;
     const std::optional<RigFilter> p = loadEarPreset(rig_.key, rig_.filter->mode, n);
     if (!p)
     {
@@ -356,7 +362,7 @@ void EarFilterBar::calibrate()
         restore_ = calibrationFrom_;
         calibrationNews_ = "Calibrate stopped";
     }
-    else if (rig_.canSet && rig_.filter && edit_.state() == FilterEdit::State::Idle &&
+    else if (settable() && rig_.filter && edit_.state() == FilterEdit::State::Idle &&
              calibration_.start(*rig_.filter))
     {
         calibrationFrom_ = rig_.filter;
@@ -418,8 +424,8 @@ void EarFilterBar::finishCalibration()
         const ear::KnobModel& m = *calibration_.result();
         saveEarCalibration(rig_.key, calibrationFrom_->mode, calibrationFrom_->widthHz, m);
         calibrationKey_.clear();
-        std::string news = "Calibrated: a knob's full turn moves an edge " + std::to_string(std::abs(tens(m.hzPerKnob))) +
-                           " Hz, and the filter passes " + std::to_string(tens(m.widthHz)) + " Hz about " +
+        std::string news = "Calibrated: a knob's full turn moves an edge " +
+                           std::to_string(std::abs(tens(m.hzPerKnob))) + " Hz, and the filter passes " + std::to_string(tens(m.widthHz)) + " Hz about " +
                            std::to_string(tens(m.centreHz)) + " Hz";
         if (m.floorHz > 0) news += "; the audio cuts below " + std::to_string(tens(m.floorHz)) + " Hz";
         if (m.ceilingHz > 0) news += "; the audio cuts above " + std::to_string(tens(m.ceilingHz)) + " Hz";
@@ -442,7 +448,7 @@ void EarFilterBar::write(const RigFilter& f, const std::string& why, ear::EdgeFi
 
 void EarFilterBar::showPresets()
 {
-    const bool on = rig_.canSet && rig_.filter && !calibration_.running();
+    const bool on = settable() && rig_.filter && !calibration_.running();
     for (PresetButton* p : presets_) p->Enable(on);
     const std::string key = rig_.filter ? rig_.key + "/" + rig_.filter->mode + "/" + calibrationKey_ : std::string();
     if (key == presetsKey_) return;
@@ -473,8 +479,8 @@ void EarFilterBar::show(uint64_t nowMs, const ear::EdgeFinder&)
 
     calibrate_->SetLabel(calibrating ? "Stop" : "Calibrate");
     calibrate_->Enable(calibrating ||
-                       (rig_.canSet && f && f->pbtIn && f->pbtOut && idle && !restore_ && !edit_.reverting()));
-    putBack_->Enable(rig_.canSet && idle && !calibrating && !restore_ && edit_.found() && edit_.current() &&
+                       (settable() && f && f->pbtIn && f->pbtOut && idle && !restore_ && !edit_.reverting()));
+    putBack_->Enable(settable() && idle && !calibrating && !restore_ && edit_.found() && edit_.current() &&
                      *edit_.found() != *edit_.current());
 
     wxString text;
@@ -524,6 +530,10 @@ void EarFilterBar::show(uint64_t nowMs, const ear::EdgeFinder&)
     else if (rig_.via.empty())
     {
         text = "No rig in Settings > Rig: the Ear only shows the filter";
+    }
+    else if (onFm())
+    {
+        text = "On FM the rig's filter is the IF's, and PBT does nothing: the Ear only shows the audio";
     }
     else if (!rig_.allowed)
     {

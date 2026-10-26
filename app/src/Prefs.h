@@ -151,6 +151,7 @@ constexpr const char* WATCH_LIST = "/Stations/Watch";                // callsign
 constexpr const char* AUTO_RECEIVE_BROADCAST = "/Files/AutoReceiveBroadcast";   // files on D2G, into the received folder
 constexpr const char* EAR_SOURCE = "/Ear/Source";                    // a PipeWire source's node.name; empty follows data2g-host
 constexpr const char* EAR_SPEED = "/Ear/RowsPerSecond";               // the waterfall's rows a second
+constexpr const char* EAR_SPAN = "/Ear/SpanHz";                       // how high the picture goes; 0 is Auto
 } // namespace keys
 
 #endif

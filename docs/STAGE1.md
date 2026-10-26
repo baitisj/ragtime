@@ -1235,7 +1235,35 @@ words and the scope.
   Ragtime closed)` or a Calibrate step; the readings that follow are
   logged as in step 2.
 
-"Listen to" and Speed are kept (`/Ear/Source`, `/Ear/RowsPerSecond`).
+**Span** (Jeff, 2026-10-26: "It's nice to not have the right side of the
+waterfall full of black space if not needed", and "This might be
+important when operating in 2m or 70cm modes especially on FM"). Beside
+Speed, Span picks how high the picture goes: 4, 8 or 12 kHz, or Auto,
+the default (`ear::AutoSpan`). Auto fits the picture to what the radio
+passes: the high edge the noise shows plus 400 Hz, rounded up to 500 Hz,
+so Jeff's 3000 Hz filter with its edge at 3050 Hz gets 3.5 kHz, and the
+choice says so ("Auto · 3.5 kHz"). Until the edges are measured it goes
+by the rig's mode: 8 kHz for FM and AM, 4 kHz for the rest. A high edge
+off the right of the picture widens it to the next of 4, 8 and 12 kHz,
+and so, on FM and AM only, does audio that reaches the top with no edge
+at all (`EdgeFinder::reachesTop`); on SSB that is likelier the sound
+card's own flat noise. It widens at once, but narrows only once the
+narrower span has held for 10 s, so dragging an edge doesn't make the
+axis jump. Never past 12 kHz or half the sound card's rate. The rows
+keep 512 steps whatever the span (23 Hz each at 12 kHz), the waterfall
+so far is stretched or squeezed to a new span, and the edges start
+afresh with it. On the bench, a pretend FM radio whose audio runs to
+about 9 kHz went from 8 to 12 kHz, then settled at 10 kHz.
+
+**FM.** The rig's width on FM is its IF filter's (about 15 kHz), not
+the audio's, and its PBT does nothing, so on FM the Ear draws no rig
+bracket and sets nothing (no handles, presets or Calibrate) and says
+why. FM's noise rises towards the top of the audio and de-emphasis pulls
+it back down, so the edges the noise shows there are a rough guide until
+someone has looked on the air.
+
+"Listen to", Speed and Span are kept (`/Ear/Source`,
+`/Ear/RowsPerSecond`, `/Ear/SpanHz`, 0 for Auto).
 Windows has no Ear yet: a stand-in says it needs PipeWire.
 
 **On the bench.** `tools/ear/pretend_radio.sh up` makes a pretend radio
@@ -1243,8 +1271,9 @@ in PipeWire: a null sink playing noise through an SSB filter with Data2G
 bursts and a drifting carrier (`tools/ear/make_radio_noise.py`), a source
 called Pretend-radio, and a stand-in recorder named `data2g-host`
 recording from it, so the Ear has a host to follow. `... down` takes it
-away. `build/tests/ragtime_ear_probe` prints what the Ear would find and
-the loudest frequency each second, without a window. Neither touches a
+away. `build/tests/ragtime_ear_probe` prints what the Ear would find,
+the loudest frequency each second and the edges, without a window
+(`--span 8000` for FM's wider audio). Neither touches a
 real sound card; never point them at the radio's USB codec.
 
 ## Waiting on Andrew (via Jeff)

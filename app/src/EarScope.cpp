@@ -84,6 +84,33 @@ void EarScope::setRowsPerSecond(double rowsPerSecond)
     clear();
 }
 
+void EarScope::setTopHz(double topHz)
+{
+    if (topHz <= 0 || topHz == topHz_) return;
+    // Each bin of the new span takes the old bin under its frequency; past
+    // the old top it is dark.
+    const wxImage old = waterfall_.Copy();
+    const unsigned char* from = old.GetData();
+    unsigned char* to = waterfall_.GetData();
+    unsigned char dark[3];
+    colourOf(0.0, dark);
+    for (int y = 0; y < HISTORY; y++)
+        for (int i = 0; i < Spectrum::BINS; i++)
+        {
+            const double hz = Spectrum::binHz(i, topHz);
+            unsigned char* px = to + 3 * (y * Spectrum::BINS + i);
+            if (hz >= topHz_)
+                std::memcpy(px, dark, 3);
+            else
+                std::memcpy(px, from + 3 * (y * Spectrum::BINS + Spectrum::binOf(hz, topHz_)), 3);
+        }
+    topHz_ = topHz;
+    // The averaged spectrum starts afresh.
+    recent_.clear();
+    average_.clear();
+    Refresh();
+}
+
 void EarScope::setNarrow(bool narrow)
 {
     if (narrow == narrow_) return;
@@ -120,13 +147,13 @@ void EarScope::setWanted(const std::optional<ragtime::ear::Span>& wanted)
 
 double EarScope::hzAt(int x) const
 {
-    return std::max(0.0, std::min(Spectrum::TOP_HZ, (x - plot_.x) * Spectrum::TOP_HZ / std::max(1, plot_.width)));
+    return std::max(0.0, std::min(topHz_, (x - plot_.x) * topHz_ / std::max(1, plot_.width)));
 }
 
 EarScope::Grip EarScope::gripAt(int x, int y) const
 {
     if (!handles_ || y < plot_.y || y > plot_.GetBottom()) return Grip::None;
-    auto xOf = [this](double hz) { return plot_.x + hz / Spectrum::TOP_HZ * plot_.width; };
+    auto xOf = [this](double hz) { return plot_.x + hz / topHz_ * plot_.width; };
     const int near = FromDIP(6);
     if (std::abs(x - (int)xOf(handles_->lowHz)) <= near) return Grip::Low;
     if (std::abs(x - (int)xOf(handles_->highHz)) <= near) return Grip::High;
@@ -272,7 +299,7 @@ void EarScope::paint()
 
     std::unique_ptr<wxGraphicsContext> gc(wxGraphicsContext::Create(dc));
     if (!gc) return;
-    auto xOf = [this](double hz) { return plot_.x + hz / Spectrum::TOP_HZ * plot_.width; };
+    auto xOf = [this](double hz) { return plot_.x + hz / topHz_ * plot_.width; };
     const double bottomDb = (haveFloor_ ? floor_ : -100.0) - 10.0;
     auto yOf = [&](double db) {
         const double t = (db - bottomDb) / PLOT_SPAN_DB;
@@ -295,7 +322,9 @@ void EarScope::paint()
     gc->SetFont(small, text);
     const wxColour grid = dark ? wxColour(255, 255, 255, 40) : wxColour(0, 0, 0, 35);
     gc->SetPen(wxPen(grid));
-    for (int hz = 500; hz < (int)Spectrum::TOP_HZ; hz += 500)
+    // A line every 500 Hz to 4.5 kHz, then every 1 or 2 kHz.
+    const int gridHz = topHz_ <= 4500 ? 500 : topHz_ <= 8500 ? 1000 : 2000;
+    for (int hz = gridHz; hz < (int)topHz_; hz += gridHz)
         gc->StrokeLine(xOf(hz), plot_.y, xOf(hz), plot_.GetBottom());
     for (int db = (int)std::ceil(bottomDb / 10) * 10; db <= bottomDb + PLOT_SPAN_DB; db += 10)
     {
@@ -322,7 +351,7 @@ void EarScope::paint()
         wxGraphicsPath line = gc->CreatePath();
         for (int i = 0; i < Spectrum::BINS; i++)
         {
-            const double x = xOf(Spectrum::binHz(i)), y = yOf(average_[i]);
+            const double x = xOf(Spectrum::binHz(i, topHz_)), y = yOf(average_[i]);
             if (i == 0) line.MoveToPoint(x, y);
             else line.AddLineToPoint(x, y);
         }
@@ -436,10 +465,10 @@ void EarScope::paint()
     }
 
     // The frequency axis between the two.
-    for (int hz = 0; hz <= (int)Spectrum::TOP_HZ; hz += 500)
+    for (int hz = 0; hz <= (int)topHz_; hz += gridHz)
     {
-        wxString label = hz == 0 ? wxString("0") : hz == (int)Spectrum::TOP_HZ ? wxString::Format("%d Hz", hz)
-                                                                           : wxString::Format("%d", hz);
+        const bool last = hz + gridHz > (int)topHz_;
+        wxString label = hz == 0 ? wxString("0") : last ? wxString::Format("%d Hz", hz) : wxString::Format("%d", hz);
         double w, h;
         gc->GetTextExtent(label, &w, &h);
         double x = std::min(xOf(hz) - w / 2, (double)plot_.GetRight() - w);
@@ -476,7 +505,7 @@ void EarScope::paint()
     // The frequency under the mouse.
     if (mouseX_ >= plot_.x && mouseX_ <= plot_.GetRight())
     {
-        const double hz = (mouseX_ - plot_.x) * Spectrum::TOP_HZ / plot_.width;
+        const double hz = (mouseX_ - plot_.x) * topHz_ / plot_.width;
         gc->SetPen(wxPen(dark ? wxColour(255, 255, 255, 140) : wxColour(0, 0, 0, 120)));
         gc->StrokeLine(mouseX_, plot_.y, mouseX_, fall_.GetBottom());
         wxString label = wxString::Format("%d Hz", (int)std::lround(hz / 10.0) * 10);

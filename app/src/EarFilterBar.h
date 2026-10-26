@@ -76,6 +76,11 @@ private:
     // goes by until it has run.
     ragtime::ear::KnobModel model(const ragtime::radio::RigFilter& f) const;
     bool calibrated() const;
+    // The rig is on FM: its width is the IF filter's and PBT does nothing,
+    // so the Ear sets nothing.
+    bool onFm() const;
+    // The Ear may set the filter now.
+    bool settable() const { return rig_.canSet && !onFm(); }
     std::optional<ragtime::ear::Span> spanOfFilter(const ragtime::radio::RigFilter& f) const;
     std::optional<ragtime::ear::Span> measured(const ragtime::ear::EdgeFinder& edges) const;
     std::optional<ragtime::radio::RigFilter> setting() const;

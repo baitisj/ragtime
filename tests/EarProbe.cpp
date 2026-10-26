@@ -3,9 +3,10 @@
 // data2g-host, or to --source NAME) for --seconds, and prints what it
 // finds in PipeWire's graph, the loudest part of each second's audio, and
 // the filter edges the band's noise shows (ear::EdgeFinder, as the Ear
-// window draws them). It only records; it never plays a sound. Not a test.
+// window draws them), from 0 to --span HZ (4000 by default; up to 12000,
+// for FM). It only records; it never plays a sound. Not a test.
 //
-//   ragtime_ear_probe [--seconds N] [--source NODE_NAME] [--port 8300]
+//   ragtime_ear_probe [--seconds N] [--source NODE_NAME] [--port 8300] [--span HZ]
 #include <atomic>
 #include <chrono>
 #include <cstdio>
@@ -28,12 +29,14 @@ int main(int argc, char** argv)
 {
     int seconds = 5;
     int port = 8300;
+    double span = ear::Spectrum::DEFAULT_TOP_HZ;
     std::string source;
     for (int i = 1; i + 1 < argc; i += 2)
     {
         if (!std::strcmp(argv[i], "--seconds")) seconds = std::atoi(argv[i + 1]);
         else if (!std::strcmp(argv[i], "--source")) source = argv[i + 1];
         else if (!std::strcmp(argv[i], "--port")) port = std::atoi(argv[i + 1]);
+        else if (!std::strcmp(argv[i], "--span")) span = std::atof(argv[i + 1]);
     }
 
     std::mutex mutex;
@@ -41,6 +44,8 @@ int main(int argc, char** argv)
     constexpr double ROWS_PER_SECOND = 10.0;
     ear::Spectrum spectrum(48000, ROWS_PER_SECOND);
     ear::EdgeFinder edges(ROWS_PER_SECOND);
+    spectrum.setTopHz(span);
+    edges.setTopHz(spectrum.topHz());
     std::vector<std::vector<float>> rows;
     std::atomic<long> samples{0};
     auto ear = audio::makeEarAudio();
@@ -72,8 +77,8 @@ int main(int argc, char** argv)
                 mean += r[i];
             }
             char text[96];
-            std::snprintf(text, sizeof text, "loudest %.0f Hz at %.1f dB, mean %.1f dB", ear::Spectrum::binHz(peak),
-                          r[peak], mean / (double)r.size());
+            std::snprintf(text, sizeof text, "loudest %.0f Hz at %.1f dB, mean %.1f dB",
+                          ear::Spectrum::binHz(peak, spectrum.topHz()), r[peak], mean / (double)r.size());
             row = text;
             for (const auto& each : rows) edges.addRow(each, false);
             rows.clear();

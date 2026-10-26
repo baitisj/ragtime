@@ -14,6 +14,7 @@
 
 #include "EarFilterBar.h"
 #include "ragtime/audio/EarAudio.h"
+#include "ragtime/ear/AutoSpan.h"
 #include "ragtime/ear/Edges.h"
 #include "ragtime/ear/Spectrum.h"
 #include "ragtime/radio/RigFilter.h"
@@ -63,12 +64,15 @@ private:
     void chooseSource();
     void lookForHost();
     void showFilter(const ragtime::audio::EarStatus& status);
+    // The span to show, as Span says: fixed, or Auto's pick.
+    void fitSpan(const ragtime::audio::EarStatus& status);
 
     std::unique_ptr<ragtime::audio::EarAudio> audio_;
     std::function<void()> onClosed_;
 
     wxChoice* source_ = nullptr;
     wxChoice* speed_ = nullptr;
+    wxChoice* span_ = nullptr;
     wxStaticText* format_ = nullptr;
     EarScope* scope_ = nullptr;
     wxStaticText* status_ = nullptr;
@@ -83,6 +87,7 @@ private:
     std::vector<std::vector<float>> pending_;
     std::atomic<bool> changed_{true};
     ragtime::ear::EdgeFinder edges_;
+    ragtime::ear::AutoSpan autoSpan_;
     std::function<EarRig()> rig_;
     wxString noiseText_;    // " · QRN S3", beside the rate
 

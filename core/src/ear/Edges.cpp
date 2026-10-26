@@ -14,7 +14,6 @@ namespace ear
 namespace
 {
 
-constexpr double BIN_HZ = Spectrum::TOP_HZ / Spectrum::BINS;
 // Bins either side averaged before looking for the edges.
 constexpr int SMOOTH = 2;
 // The stopband is read this far outside the passband's ends.
@@ -32,7 +31,20 @@ float percentile(std::vector<float> values, double p)
 
 EdgeFinder::EdgeFinder(double rowsPerSecond)
     : rowsPerSecond_(rowsPerSecond > 0 ? rowsPerSecond : 10.0)
+    , topHz_(Spectrum::DEFAULT_TOP_HZ)
 {
+}
+
+void EdgeFinder::setTopHz(double topHz)
+{
+    if (topHz <= 0 || topHz == topHz_) return;
+    topHz_ = topHz;
+    clear();
+}
+
+double EdgeFinder::binHz(int i) const
+{
+    return Spectrum::binHz(i, topHz_);
 }
 
 void EdgeFinder::setRowsPerSecond(double rowsPerSecond)
@@ -100,6 +112,26 @@ std::vector<float> EdgeFinder::average() const
     return out;
 }
 
+bool EdgeFinder::reachesTop() const
+{
+    if (power_.empty() || quietSeconds() < NEEDED_S) return false;
+    std::vector<float> db;
+    for (double p : power_)
+        if (p > 1e-15) db.push_back((float)(10.0 * std::log10(p)));
+    if (db.size() < 40) return false;
+    // The passband's level, as edges() finds it.
+    const float top = percentile(db, 0.9);
+    std::vector<float> near;
+    for (float v : db)
+        if (v >= top - 10.0f) near.push_back(v);
+    const double passband = percentile(near, 0.5);
+    // The highest twentieth of the bins heard, as power.
+    double sum = 0;
+    const std::size_t n = db.size() / 20;
+    for (std::size_t i = db.size() - n; i < db.size(); i++) sum += std::pow(10.0, db[i] / 10.0);
+    return 10.0 * std::log10(sum / (double)n) >= passband - DROP_DB;
+}
+
 std::optional<Edges> EdgeFinder::edges() const
 {
     if (power_.empty() || quietSeconds() < NEEDED_S) return std::nullopt;
@@ -134,8 +166,9 @@ std::optional<Edges> EdgeFinder::edges() const
     const double passband = percentile(near, 0.5);
     const double threshold = passband - DROP_DB;
 
+    const double binWidth = topHz_ / Spectrum::BINS;
     // The widest run over the threshold, short dips allowed.
-    const int gap = (int)std::lround(GAP_HZ / BIN_HZ);
+    const int gap = (int)std::lround(GAP_HZ / binWidth);
     int bestStart = -1, bestEnd = -1;
     int start = -1, end = -1;
     for (int i = 0; i <= n; i++)
@@ -163,7 +196,7 @@ std::optional<Edges> EdgeFinder::edges() const
     if (bestStart < 0) return std::nullopt;
 
     // The stopband: everything clear of the run's skirts.
-    const int skirt = (int)std::lround(SKIRT_HZ / BIN_HZ);
+    const int skirt = (int)std::lround(SKIRT_HZ / binWidth);
     std::vector<float> outside;
     for (int i = 0; i < n; i++)
         if (heard[i] && (i < bestStart - skirt || i > bestEnd + skirt)) outside.push_back(db[i]);
@@ -179,11 +212,11 @@ std::optional<Edges> EdgeFinder::edges() const
     auto cross = [&](int under, int over) {
         const double span = db[over] - db[under];
         const double t = span > 0 ? (threshold - db[under]) / span : 0.5;
-        return Spectrum::binHz(under) + (over - under) * BIN_HZ * std::max(0.0, std::min(1.0, t));
+        return binHz(under) + (over - under) * binWidth * std::max(0.0, std::min(1.0, t));
     };
-    if (bestStart > 0 && heard[bestStart - 1] && Spectrum::binHz(bestStart) > END_HZ)
+    if (bestStart > 0 && heard[bestStart - 1] && binHz(bestStart) > END_HZ)
         e.lowHz = cross(bestStart - 1, bestStart);
-    if (bestEnd < n - 1 && heard[bestEnd + 1] && Spectrum::binHz(bestEnd) < Spectrum::TOP_HZ - END_HZ)
+    if (bestEnd < n - 1 && heard[bestEnd + 1] && binHz(bestEnd) < topHz_ - END_HZ)
         e.highHz = cross(bestEnd + 1, bestEnd);
     return e;
 }

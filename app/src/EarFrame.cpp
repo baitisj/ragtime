@@ -22,6 +22,9 @@ namespace
 
 constexpr double SPEEDS[] = {5.0, 10.0, 20.0};
 const char* const SPEED_NAMES[] = {"Slow", "Normal", "Fast"};
+// How high the picture goes: Auto (0), or fixed.
+constexpr double SPANS_HZ[] = {0.0, 4000.0, 8000.0, 12000.0};
+const char* const SPAN_NAMES[] = {"Auto", "4 kHz", "8 kHz", "12 kHz"};
 constexpr int TICK_MS = 50;
 constexpr int HOST_LOOK_TICKS = 100;    // every 5 s
 
@@ -63,11 +66,18 @@ EarFrame::EarFrame(wxWindow* parent, ear::FilterEdit& edit, EarFilterBar::Write 
     speed_ = new wxChoice(panel, wxID_ANY);
     for (const char* name : SPEED_NAMES) speed_->Append(name);
     speed_->SetToolTip("How fast the waterfall runs: 5, 10 or 20 rows a second");
+    span_ = new wxChoice(panel, wxID_ANY);
+    for (const char* name : SPAN_NAMES) span_->Append(name);
+    span_->SetToolTip("How high the picture goes. Auto fits it to what the radio passes, a little past the "
+                      "filter's high edge, and goes by the mode until it has measured the edges: 4 kHz for SSB "
+                      "and data, 8 kHz for FM and AM.");
     format_ = new wxStaticText(panel, wxID_ANY, "");
     top->Add(new wxStaticText(panel, wxID_ANY, "Listen to"), 0, wxALIGN_CENTER_VERTICAL);
     top->Add(source_, 0, wxALIGN_CENTER_VERTICAL | wxLEFT, FromDIP(8));
     top->Add(new wxStaticText(panel, wxID_ANY, "Speed"), 0, wxALIGN_CENTER_VERTICAL | wxLEFT, FromDIP(16));
     top->Add(speed_, 0, wxALIGN_CENTER_VERTICAL | wxLEFT, FromDIP(8));
+    top->Add(new wxStaticText(panel, wxID_ANY, "Span"), 0, wxALIGN_CENTER_VERTICAL | wxLEFT, FromDIP(16));
+    top->Add(span_, 0, wxALIGN_CENTER_VERTICAL | wxLEFT, FromDIP(8));
     top->AddStretchSpacer();
     top->Add(format_, 0, wxALIGN_CENTER_VERTICAL | wxLEFT, FromDIP(12));
 
@@ -103,7 +113,18 @@ EarFrame::EarFrame(wxWindow* parent, ear::FilterEdit& edit, EarFilterBar::Write 
     scope_->setRowsPerSecond(SPEEDS[speed]);
     edges_.setRowsPerSecond(SPEEDS[speed]);
 
+    const int spanHz = loadInt(keys::EAR_SPAN, 0);
+    int spanPick = 0;
+    for (int i = 0; i < 4; i++)
+        if ((int)SPANS_HZ[i] == spanHz) spanPick = i;
+    span_->SetSelection(spanPick);
+
     source_->Bind(wxEVT_CHOICE, [this](wxCommandEvent&) { chooseSource(); });
+    span_->Bind(wxEVT_CHOICE, [this](wxCommandEvent&) {
+        saveInt(keys::EAR_SPAN, (int)SPANS_HZ[std::max(0, span_->GetSelection())]);
+        const audio::EarStatus status = audio_->status();
+        fitSpan(status);
+    });
     speed_->Bind(wxEVT_CHOICE, [this](wxCommandEvent&) {
         const double rps = SPEEDS[std::max(0, speed_->GetSelection())];
         {
@@ -206,6 +227,7 @@ void EarFrame::tick()
     if (changed_.exchange(false) || ticks_ % 10 == 0)
     {
         const audio::EarStatus status = audio_->status();
+        fitSpan(status);
         showFilter(status);
         showStatus(status);
     }
@@ -301,7 +323,10 @@ void EarFrame::showFilter(const audio::EarStatus& s)
         says = "The rig hasn't said its filter yet (" + utf8(rig.via) + ")";
     else
         says = "The rig says " + utf8(radio::describe(*rig.filter));
-    scope_->setRigWidth(rig.filter ? rig.filter->widthHz : 0);
+    // On FM the rig's width is its IF filter's, not the audio's: not drawn.
+    const bool fm = rig.filter && ear::fmMode(rig.filter->mode);
+    if (fm) says += " (the IF filter's; the noise shows the audio)";
+    scope_->setRigWidth(rig.filter && !fm ? rig.filter->widthHz : 0);
     noiseText_ = rig.noiseDb ? "QRN " + utf8(radio::sUnitText(*rig.noiseDb)) : wxString();
 
     const std::optional<ear::Edges> e = s.streaming ? edges_.edges() : std::nullopt;
@@ -316,7 +341,8 @@ void EarFrame::showFilter(const audio::EarStatus& s)
                 wxString::Format("%d", (int)(std::lround(*e->highHz / 10.0) - std::lround(*e->lowHz / 10.0)) * 10) +
                 " Hz wide";
     else if (e && e->lowHz)
-        shows = "The noise shows a low edge at " + hz(*e->lowHz) + " Hz; the top is past 4 kHz";
+        shows = "The noise shows a low edge at " + hz(*e->lowHz) + " Hz; the top is past " +
+                wxString::Format("%g kHz", edges_.topHz() / 1000.0);
     else if (e && e->highHz)
         shows = "The noise shows a high edge at " + hz(*e->highHz) + " Hz";
     else if (edges_.quietSeconds() < ear::EdgeFinder::NEEDED_S)
@@ -334,6 +360,34 @@ void EarFrame::showFilter(const audio::EarStatus& s)
         noiseShows_->SetToolTip("Where the band's noise falls 6 dB below the passband, from the quiet moments "
                                 "between signals: the filter's real edges, whatever the rig says.");
     }
+}
+
+void EarFrame::fitSpan(const audio::EarStatus& s)
+{
+    const std::optional<ear::Edges> edges = s.streaming ? edges_.edges() : std::nullopt;
+    const bool reachesTop = s.streaming && edges_.reachesTop();
+    const int pick = std::max(0, span_->GetSelection());
+    std::optional<std::string> mode;
+    if (rigNow_.filter) mode = rigNow_.filter->mode;
+    const double maxHz = s.rate > 0 ? s.rate / 2.0 : ear::Spectrum::MAX_TOP_HZ;
+    const double top = autoSpan_.update(nowMs(), SPANS_HZ[pick], mode, edges, reachesTop, maxHz);
+    // Auto says what it picked.
+    const wxString autoName = pick == 0 ? "Auto" + DOT + wxString::Format("%g kHz", top / 1000.0)
+                                        : wxString(SPAN_NAMES[0]);
+    if (span_->GetString(0) != autoName)
+    {
+        span_->SetString(0, autoName);
+        span_->InvalidateBestSize();
+        span_->GetParent()->Layout();
+    }
+    if (top == edges_.topHz()) return;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        spectrum_.setTopHz(top);
+        pending_.clear();
+    }
+    scope_->setTopHz(top);
+    edges_.setTopHz(top);
 }
 
 void EarFrame::chooseSource()
