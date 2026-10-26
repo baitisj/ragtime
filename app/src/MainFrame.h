@@ -32,6 +32,7 @@
 class BroadcastPage;
 struct FileCard;
 class ConnectionBar;
+class EarFrame;
 class FilesPage;
 class GlobusPanel;
 class GlobusToggle;
@@ -191,6 +192,8 @@ private:
 
     // Globus on or off, and the toggle on the tab strip.
     void setGlobus(bool on);
+    // The Ear, opened or closed (the ear button, View > Ear).
+    void setEar(bool open);
     void placeTabToggle();
     void rememberDividers();
 
@@ -216,6 +219,7 @@ private:
     ragtime::files::FileTraffic fileTraffic_;
 
     ConnectionBar* bar_ = nullptr;
+    EarFrame* ear_ = nullptr;               // while the Ear is open
     wxSplitterWindow* outer_ = nullptr;     // station list | the rest
     wxSplitterWindow* left_ = nullptr;      // station list over Recent work
     wxSplitterWindow* inner_ = nullptr;     // the tabs | Globus

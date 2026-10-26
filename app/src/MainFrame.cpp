@@ -41,6 +41,7 @@
 #include "ConnectionBar.h"
 #include "SwrBar.h"
 #include "DrawnIcon.h"
+#include "EarFrame.h"
 #include "FilesPage.h"
 #include "GearshiftDialog.h"
 #include "HostConnection.h"
@@ -78,6 +79,7 @@ enum
     ID_CLEAR_SWR_TRIP,
     ID_NARROW,
     ID_GLOBUS,
+    ID_EAR,
     ID_MESSAGE_STATION,
     ID_CHECK_IN,
     ID_PAUSE,
@@ -382,6 +384,7 @@ void MainFrame::buildMenus()
 
     viewMenu_ = new wxMenu;
     viewMenu_->AppendCheckItem(ID_GLOBUS, "&Globus\tCtrl+Shift+G");
+    viewMenu_->AppendCheckItem(ID_EAR, "&Ear\tCtrl+E", "A waterfall of what the radio hears");
     auto* columns = new wxMenu;
     for (broadcast::Column c : broadcast::ALL_COLUMNS)
     {
@@ -429,6 +432,7 @@ void MainFrame::buildMenus()
     Bind(wxEVT_UPDATE_UI, [this](wxUpdateUIEvent& e) { e.Enable(rig_ && rig_->swrTripped()); }, ID_CLEAR_SWR_TRIP);
     Bind(wxEVT_MENU, [this](wxCommandEvent& e) { setNarrow(e.IsChecked()); }, ID_NARROW);
     Bind(wxEVT_MENU, [this](wxCommandEvent& e) { setGlobus(e.IsChecked()); }, ID_GLOBUS);
+    Bind(wxEVT_MENU, [this](wxCommandEvent& e) { setEar(e.IsChecked()); }, ID_EAR);
     Bind(wxEVT_MENU, [this](wxCommandEvent& e) { setPaused(e.IsChecked()); }, ID_PAUSE);
     Bind(wxEVT_MENU, [this](wxCommandEvent&) { checkIn(); }, ID_CHECK_IN);
     Bind(wxEVT_MENU, [this](wxCommandEvent&) { showWatchList(); }, ID_WATCH_LIST);
@@ -600,6 +604,7 @@ void MainFrame::buildLayout()
 
     // The connection bar.
     bar_->narrow->Bind(wxEVT_TOGGLEBUTTON, [this](wxCommandEvent& e) { setNarrow(e.IsChecked()); });
+    bar_->ear->Bind(wxEVT_TOGGLEBUTTON, [this](wxCommandEvent& e) { setEar(e.IsChecked()); });
     bar_->pause->Bind(wxEVT_TOGGLEBUTTON, [this](wxCommandEvent& e) { setPaused(e.IsChecked()); });
     bar_->swrBar->onClear([this]() { clearSwrTrip(); });
     bar_->acceptSessions->Bind(wxEVT_CHECKBOX, [this](wxCommandEvent& e) {
@@ -780,6 +785,7 @@ void MainFrame::showSettings(SettingsDialog::Page page)
     prefs_ = next;
     saveStationPrefs(prefs_);
     applyPrefs(reconnect);
+    if (ear_) ear_->setHost(prefs_.host, prefs_.commandPort);
     // A rig already open the same way stays open.
     applyRadioPrefs();
 }
@@ -801,6 +807,7 @@ void MainFrame::onHostEvents(const std::vector<Event>& events)
             case Event::Type::Ptt:
                 bar_->tx->setOn(e.on);
                 rig_->hostPtt(e.on);
+                if (ear_) ear_->setTransmitting(e.on);
                 break;
             case Event::Type::ModeUsed:
                 modeUsed_ = e.text;
@@ -2411,12 +2418,40 @@ void MainFrame::updatePathSnr(uint64_t nowMs)
     showGear();
 }
 
+void MainFrame::setEar(bool open)
+{
+    if (open && ear_ == nullptr)
+    {
+        ear_ = new EarFrame(this, [this] {
+            ear_ = nullptr;
+            bar_->setEarOpen(false);
+            GetMenuBar()->Check(ID_EAR, false);
+        });
+        ear_->setHost(prefs_.host, prefs_.commandPort);
+        ear_->setNarrow(gearshift_.narrowOnly());
+        ear_->setTransmitting(bar_->tx->isOn());
+        ear_->CentreOnParent();
+        ear_->Show();
+    }
+    else if (open)
+    {
+        ear_->Raise();
+    }
+    else if (ear_ != nullptr)
+    {
+        ear_->Close();
+    }
+    bar_->setEarOpen(ear_ != nullptr);
+    GetMenuBar()->Check(ID_EAR, ear_ != nullptr);
+}
+
 void MainFrame::setNarrow(bool narrow)
 {
     gearshift_.setNarrowOnly(narrow);
     saveBool(keys::NARROW_ONLY, narrow);
     link_.setNarrow(narrow, HostConnection::nowMs());
     bar_->setNarrow(narrow);
+    if (ear_) ear_->setNarrow(narrow);
     GetMenuBar()->Check(ID_NARROW, narrow);
     saveGearshift(gearshift_);
     showGear();
@@ -2515,8 +2550,8 @@ void MainFrame::onMeters()
 void MainFrame::showMeters()
 {
     const wxString none = wxString::FromUTF8("\xe2\x80\x94");
-    const std::string waits = "Auto ALC waits for data2g-host to take a transmit level command, since Ragtime never "
-                              "touches the sound card.";
+    const std::string waits = "Auto ALC waits for data2g-host to take a transmit level command, since data2g-host alone "
+                              "sets the transmit audio.";
     if (!rig_->readsMeters() && !rig_->swrTripped())
     {
         std::string when = prefs_.rig.source == radio::RigSource::Hamlib

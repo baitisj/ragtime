@@ -159,6 +159,34 @@ wxBitmapBundle bellIcon(const wxColour& ink, int sizeDip)
     return drawnIcon([ink](wxGraphicsContext& gc, double size) { drawBellIcon(gc, size, ink); }, sizeDip);
 }
 
+void drawEarIcon(wxGraphicsContext& gc, double size, const wxColour& ink)
+{
+    // Drawn on a 24-unit grid: the rim of a right ear, from the top of the
+    // helix round to the lobe, and the fold inside it.
+    const double u = size / 24.0;
+    gc.SetBrush(*wxTRANSPARENT_BRUSH);
+    gc.SetPen(gc.CreatePen(wxGraphicsPenInfo(ink, 2.2 * u).Cap(wxCAP_ROUND).Join(wxJOIN_ROUND)));
+    wxGraphicsPath rim = gc.CreatePath();
+    rim.MoveToPoint(6.5 * u, 10.0 * u);
+    rim.AddCurveToPoint(6.5 * u, 4.5 * u, 10.0 * u, 2.5 * u, 12.5 * u, 2.5 * u);
+    rim.AddCurveToPoint(16.5 * u, 2.5 * u, 18.5 * u, 5.5 * u, 18.5 * u, 9.0 * u);
+    rim.AddCurveToPoint(18.5 * u, 12.5 * u, 15.0 * u, 13.5 * u, 14.0 * u, 16.0 * u);
+    rim.AddCurveToPoint(13.0 * u, 18.5 * u, 13.0 * u, 21.5 * u, 10.0 * u, 21.5 * u);
+    rim.AddCurveToPoint(8.5 * u, 21.5 * u, 7.5 * u, 20.5 * u, 7.0 * u, 19.5 * u);
+    gc.StrokePath(rim);
+    wxGraphicsPath fold = gc.CreatePath();
+    fold.MoveToPoint(10.0 * u, 10.0 * u);
+    fold.AddCurveToPoint(10.0 * u, 7.0 * u, 11.5 * u, 6.0 * u, 12.8 * u, 6.0 * u);
+    fold.AddCurveToPoint(14.5 * u, 6.0 * u, 15.2 * u, 7.5 * u, 15.2 * u, 9.0 * u);
+    fold.AddCurveToPoint(15.2 * u, 10.5 * u, 13.5 * u, 11.0 * u, 12.5 * u, 12.5 * u);
+    gc.StrokePath(fold);
+}
+
+wxBitmapBundle earIcon(const wxColour& ink, int sizeDip)
+{
+    return drawnIcon([ink](wxGraphicsContext& gc, double size) { drawEarIcon(gc, size, ink); }, sizeDip);
+}
+
 wxString bellHtml(const wxWindow* window, int sizeDip, const wxColour& ink)
 {
     int px = window->FromDIP(sizeDip);

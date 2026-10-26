@@ -13,10 +13,12 @@ class wxCheckBox;
 class wxGauge;
 class wxStaticText;
 class wxToggleButton;
+class wxBitmapToggleButton;
 
 // The bar across the top of the window (docs/MOCKUPS.md, "Connection
 // bar"), left to right: my callsign, the group D2G, the radio's dial
-// (while Ragtime reads it from rigctld), the 500 Hz switch,
+// (while Ragtime reads it from rigctld), the ear that opens the Ear, the
+// 500 Hz switch,
 // Accept sessions, Pause sending, Auto ALC with
 // its level meter (the rig's ALC, read through Hamlib while transmitting)
 // with the SWR bar under it, and the TX light. The window wires the controls; the
@@ -37,9 +39,12 @@ public:
     void setAlc(bool readable, int percent, const wxString& text, const wxString& tip, bool warn);
     // The rig's SWR: the bar at swr (nullopt: empty), the reading beside
     // it, red when warn, the trip, and their tooltip.
+    // The ear button, lit while the Ear is open.
+    void setEarOpen(bool open);
     void setSwr(bool readable, std::optional<double> swr, const wxString& text, const wxString& tip, bool warn,
                 bool tripped);
 
+    wxBitmapToggleButton* ear = nullptr;   // opens and closes the Ear
     ToggleSwitch* narrow = nullptr;  // on: 500 Hz modes only (BW500)
     wxCheckBox* acceptSessions = nullptr;
     wxToggleButton* pause = nullptr;

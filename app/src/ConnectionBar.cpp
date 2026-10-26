@@ -5,11 +5,13 @@
 #include <wx/button.h>
 #include <wx/checkbox.h>
 #include <wx/gauge.h>
+#include <wx/settings.h>
 #include <wx/sizer.h>
 #include <wx/statline.h>
 #include <wx/stattext.h>
 #include <wx/tglbtn.h>
 
+#include "DrawnIcon.h"
 #include "Html.h"
 #include "SwrBar.h"
 #include "ToggleSwitch.h"
@@ -35,6 +37,14 @@ ConnectionBar::ConnectionBar(wxWindow* parent)
     group->SetToolTip("The broadcast group Ragtime opens on data2g-host");
     dial_ = new wxStaticText(this, wxID_ANY, "");
     dial_->Hide();
+    ear = new wxBitmapToggleButton(this, wxID_ANY, earIcon(wxSystemSettings::GetColour(wxSYS_COLOUR_BTNTEXT)),
+                                   wxDefaultPosition, wxDefaultSize, wxBU_EXACTFIT);
+    ear->SetToolTip("The Ear: a waterfall of what the radio hears, from the sound card data2g-host records from "
+                    "(View > Ear)");
+    Bind(wxEVT_SYS_COLOUR_CHANGED, [this](wxSysColourChangedEvent& e) {
+        ear->SetBitmap(earIcon(wxSystemSettings::GetColour(wxSYS_COLOUR_BTNTEXT)));
+        e.Skip();
+    });
 
     narrow = new ToggleSwitch(this, wxID_ANY, "500 Hz");
     narrow->SetToolTip("On: data2g-host uses only 500 Hz modes (BW500). Off: any width (BW2300)");
@@ -61,7 +71,7 @@ ConnectionBar::ConnectionBar(wxWindow* parent)
         t->SetLabel(wxString::FromUTF8("\xe2\x80\x94"));
     }
     autoAlc->SetToolTip("Keeps transmit drive just under the rig's ALC. It waits for data2g-host to take a TX "
-                        "level command, since Ragtime never touches the sound card.");
+                        "level command, since data2g-host alone sets the transmit audio.");
     autoAlc->Disable();
     setAlc(false, 0, wxString::FromUTF8("\xe2\x80\x94"),
            "The rig's ALC while transmitting, when Ragtime opens the rig with Hamlib (Settings > Rig).", false);
@@ -76,6 +86,7 @@ ConnectionBar::ConnectionBar(wxWindow* parent)
     add(left_, callsign_, 8);
     add(left_, group, 12);
     add(left_, dial_, 12);
+    add(left_, ear, 8);
     left_->Add(divider(this), 0, wxEXPAND | wxLEFT | wxTOP | wxBOTTOM, FromDIP(8));
     add(left_, narrow, 8);
     add(left_, acceptSessions, 14);
@@ -187,6 +198,11 @@ void ConnectionBar::setSwr(bool readable, std::optional<double> swr, const wxStr
         swrReading->SetForegroundColour(warn ? badText() : wxNullColour);
         swrReading->Refresh();
     }
+}
+
+void ConnectionBar::setEarOpen(bool open)
+{
+    if (ear->GetValue() != open) ear->SetValue(open);
 }
 
 void ConnectionBar::setDial(const wxString& text, const wxString& tip, bool held)
