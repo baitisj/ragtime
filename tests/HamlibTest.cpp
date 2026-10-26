@@ -175,8 +175,35 @@ void filterWatch()
     CHECK(waitFor(r, [](const HamlibRig::Status& st) {
         return st.filter && st.filter->pbtIn && *st.filter->pbtIn > 0.74 && *st.filter->pbtIn < 0.76;
     }));
+
+    // The Ear's write: the width with the mode, and the knobs, read back.
+    radio::RigFilter f = *r.status().filter;
+    f.widthHz = 1800;
+    f.pbtIn = 0.4;
+    f.pbtOut = 0.6;
+    r.setFilter(f);
+    CHECK(waitFor(r, [](const HamlibRig::Status& st) {
+        return st.filterWrites == 1 && st.filter && st.filter->widthHz == 1800 && st.filter->pbtOut
+               && *st.filter->pbtOut > 0.59 && *st.filter->pbtOut < 0.61;
+    }));
+    CHECK(r.status().filterProblem.empty());
+    // Not while transmitting: it waits.
+    r.setTransmitting(true);
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    f.widthHz = 2400;
+    r.setFilter(f);
+    std::this_thread::sleep_for(std::chrono::milliseconds(300));
+    CHECK_EQ(r.status().filterWrites, (uint64_t)1);
+    r.setTransmitting(false);
+    CHECK(waitFor(r, [](const HamlibRig::Status& st) { return st.filterWrites == 2; }));
+
     r.setFilterWatch(false);
     CHECK(waitFor(r, [](const HamlibRig::Status& st) { return !st.filter; }));
+
+    // A write left when stopping is written before the rig closes.
+    f.widthHz = 3000;
+    r.setTransmitting(true);
+    r.setFilter(f);
     r.stop();
 }
 

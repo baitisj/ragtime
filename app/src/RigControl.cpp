@@ -162,6 +162,34 @@ std::optional<radio::RigFilter> RigControl::filter() const
     return std::nullopt;
 }
 
+bool RigControl::canSetFilter() const
+{
+    return settings_.source == radio::RigSource::Hamlib && settings_.earFilters && hamlib_.status().open;
+}
+
+void RigControl::setFilter(const radio::RigFilter& filter)
+{
+    // Never through rigctld: it is shared.
+    if (settings_.source != radio::RigSource::Hamlib || !settings_.earFilters) return;
+    hamlib_.setFilter(filter);
+}
+
+std::string RigControl::filterProblem() const
+{
+    return settings_.source == radio::RigSource::Hamlib ? hamlib_.status().filterProblem : std::string();
+}
+
+std::string RigControl::rigKey() const
+{
+    switch (settings_.source)
+    {
+    case radio::RigSource::Hamlib: return "hamlib-" + std::to_string(settings_.model);
+    case radio::RigSource::Rigctld: return "rigctld";
+    case radio::RigSource::None: break;
+    }
+    return std::string();
+}
+
 bool RigControl::readsNoise() const
 {
     if (settings_.source == radio::RigSource::Rigctld) return rigctld_->readsStrength();

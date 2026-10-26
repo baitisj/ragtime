@@ -74,6 +74,16 @@ public:
     // Read only.
     void setFilterWatch(bool on);
     std::optional<ragtime::radio::RigFilter> filter() const;
+    // The Ear may set the filter: Hamlib, with "Let the Ear change the
+    // rig's filters" ticked, and the rig open.
+    bool canSetFilter() const;
+    // Writes it (Hamlib only, when allowed), between bursts; a rig not
+    // open now gets it once it is.
+    void setFilter(const ragtime::radio::RigFilter& filter);
+    // Why the last write failed, if it did.
+    std::string filterProblem() const;
+    // The rig, for the Ear's presets and calibrations: "hamlib-3070".
+    std::string rigKey() const;
     // "Hamlib" or "rigctld": how the meters are read, for the tooltips.
     const char* meterPath() const;
 

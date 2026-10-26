@@ -176,8 +176,15 @@ with the code when the seal rules change.
   only while open. Step 2: it reads the rig's filter while open (mode,
   width, PBT; `radio::RigFilter`, through rigctld or Hamlib) and
   measures the real edges from the band's noise (`ear::EdgeFinder`),
-  drawing both. Next, step 3: dragging them (Hamlib only, opt-in, a
-  Keep/Undo clock).
+  drawing both. Step 3: with the rig opened with Hamlib and "Let the
+  Ear change the rig's filters" ticked (off by default), the edges are
+  dragged on the scope and the filter is set between bursts
+  (`ear::FilterEdit`, `ear::Calibration` in `ear/FilterControl`;
+  `app/src/EarFilterBar`, `EarControls`): on trial for 15 s with a
+  clock beside Undo and Keep, Keep pressed twice for a cut into Data2G's
+  passband, four presets (tap recalls, hold stores), Put back as I found
+  them, and Calibrate for the twin PBT's Hz per knob. Quitting puts the
+  filter back as found (`MainFrame::filterEdit_`).
 - Data2G PR #98 (merged 2026-10-23) gives SNRs: on `BCAST HEARD` and
   `MISSED`, and `SN` for the session partner. Ragtime shows them in the
   station list's SNR column and feeds the gearshift's Auto the weakest
@@ -261,8 +268,10 @@ with the code when the seal rules change.
   operator asks. Ragtime reads the dial and the transmit meters from
   rigctld (`\chk_vfo`, `f`, `+m` and `+l` levels only, never a set command:
   the operator's rigctld is shared), or from the rig it
-  opens with Hamlib, where PTT is the only thing it sets, and the SWR
-  trip (off by default) the only thing that sets the power, to 0. It
+  opens with Hamlib, where PTT is the only thing it sets, the SWR
+  trip (off by default) the only thing that sets the power, to 0, and
+  the Ear (with its own box ticked, off by default) the only thing that
+  sets the receive filter's width and PBT, between bursts. It
   never keys through rigctld (NET rigctl is left out of the Hamlib
   list).
 
@@ -270,7 +279,7 @@ with the code when the seal rules change.
 
 | Path | What |
 | --- | --- |
-| `core/` | `ragtime_core`, the socket-free library: no wx, no sockets in the engines, all unit-tested. Headers in `core/include/ragtime/`, sources in `core/src/`, one subfolder per area: `protocol/`, `link/`, `text/`, `files/` (package B; G adds `FileRows`, `FileTraffic`), `globus/` (C), `gearbox/` (D), `broadcast/` (E, with `BroadcastLog`; H adds `Airtime`, `Seals`, `BroadcastFiles`), `session/` (F, and `SessionLog`; `StreamLog` for cuts), `radio/` (the dial from rigctld, the US data segments, the path log, Recent work, the rig settings and the PTT follower), `ear/` (the Ear's spectrum, finding data2g-host's sound card in PipeWire's graph, the host's process by its port, Data2G's passbands). Add sources to `core/CMakeLists.txt` |
+| `core/` | `ragtime_core`, the socket-free library: no wx, no sockets in the engines, all unit-tested. Headers in `core/include/ragtime/`, sources in `core/src/`, one subfolder per area: `protocol/`, `link/`, `text/`, `files/` (package B; G adds `FileRows`, `FileTraffic`), `globus/` (C), `gearbox/` (D), `broadcast/` (E, with `BroadcastLog`; H adds `Airtime`, `Seals`, `BroadcastFiles`), `session/` (F, and `SessionLog`; `StreamLog` for cuts), `radio/` (the dial from rigctld, the US data segments, the path log, Recent work, the rig settings and the PTT follower), `ear/` (the Ear's spectrum, finding data2g-host's sound card in PipeWire's graph, the host's process by its port, Data2G's passbands, the filter's edges from the noise, the filter model, its trials and Calibrate). Add sources to `core/CMakeLists.txt` |
 | `audio/` | `ragtime_audio`: `audio::EarAudio`, the Ear's listener, PipeWire loaded with `dlopen` (never linked) on its own thread; with `-DRAGTIME_PIPEWIRE=OFF` (and on Windows) a stand-in that says the Ear needs PipeWire |
 | `rig/` | `ragtime_rig`: `rig::HamlibRig`, the rig opened with Hamlib on a thread of its own, Hamlib's rig list and the serial ports. Kept out of core (no ports there); with `-DRAGTIME_HAMLIB=OFF` a stand-in that says Hamlib is missing |
 | `app/` | The wxWidgets app (`app/src/`). It draws and wires; logic goes in core. `MainFrame` is the one main window and owns the engines; `HostConnection` (data2g-host) and `RigConnection` (rigctld, read only) are the only code with sockets, and `RigControl` holds the rig as Settings > Rig has it; `Prefs` holds every wxConfig key, and `appDataDir()` is where Ragtime keeps its own files (never wx's `GetUserDataDir()`: on Linux that is `~/.Ragtime`, the settings file); `app/src/globus/` is the Globus pane (`GlobusPanel`, `GlobusView`, `GlobusToggle`) |

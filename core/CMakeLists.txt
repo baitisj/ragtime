@@ -60,6 +60,7 @@ add_library(ragtime_core STATIC
     # The Ear: the spectrum, and finding data2g-host's sound card in
     # PipeWire's graph (the listening itself is in audio/).
     src/ear/Edges.cpp
+    src/ear/FilterControl.cpp
     src/ear/Graph.cpp
     src/ear/ProcNet.cpp
     src/ear/Spectrum.cpp

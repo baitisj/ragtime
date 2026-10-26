@@ -2,12 +2,14 @@
 #define RAGTIME_PREFS_H
 
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <vector>
 
 #include "ragtime/broadcast/Seals.h"
 #include "ragtime/broadcast/Stations.h"
 #include "ragtime/gearbox/Gearbox.h"
+#include "ragtime/radio/RigFilter.h"
 #include "ragtime/radio/RigSettings.h"
 
 // What Ragtime remembers between runs, in wxConfig (~/.Ragtime on Linux,
@@ -57,6 +59,16 @@ int loadInt(const char* key, int fallback);
 void saveInt(const char* key, int value);
 std::string loadString(const char* key, const std::string& fallback);
 void saveString(const char* key, const std::string& value);
+
+// The Ear's presets (1 to EAR_PRESETS) and its calibrations of the twin
+// PBT, by rig (RigControl::rigKey) and mode, and for calibrations the
+// width: under /Ear/Presets and /Ear/Calibration.
+constexpr int EAR_PRESETS = 4;
+std::optional<ragtime::radio::RigFilter> loadEarPreset(const std::string& rig, const std::string& mode, int n);
+void saveEarPreset(const std::string& rig, int n, const ragtime::radio::RigFilter& filter);
+// Hz per knob, or 0 when not calibrated.
+double loadEarCalibration(const std::string& rig, const std::string& mode, int widthHz);
+void saveEarCalibration(const std::string& rig, const std::string& mode, int widthHz, double hzPerKnob);
 
 // The broadcast numbering is kept across restarts, one for each callsign
 // (docs/PROTOCOL.md, "Sequence numbers").

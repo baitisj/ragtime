@@ -326,6 +326,7 @@ struct HamlibRig::Shared
     bool transmitting = false;
     bool swrTrip = false;
     bool filterWatch = false;
+    std::optional<radio::RigFilter> filterWrite;
     bool clearTrip = false;
     std::vector<std::pair<std::string, double>> pokes;   // tests on the dummy rig
     int pollSeconds = 1;
@@ -409,6 +410,16 @@ void HamlibRig::setFilterWatch(bool on)
         std::lock_guard<std::mutex> lock(shared_->mutex);
         if (shared_->filterWatch == on) return;
         shared_->filterWatch = on;
+    }
+    shared_->wake.notify_all();
+}
+
+void HamlibRig::setFilter(const radio::RigFilter& filter)
+{
+    if (!shared_) return;
+    {
+        std::lock_guard<std::mutex> lock(shared_->mutex);
+        shared_->filterWrite = filter;
     }
     shared_->wake.notify_all();
 }
@@ -529,6 +540,34 @@ void HamlibRig::run()
     };
     const radio::RigSettings settings = shared->settings;
 
+    // The Ear's filter: the width with the mode (only when either
+    // differs, as a width rewrites the rig's filter memory), then the knobs.
+    auto writeFilter = [&](const radio::RigFilter& f) {
+        std::string problem;
+        rmode_t mode = rig_parse_mode(f.mode.c_str());
+        rmode_t nowMode = RIG_MODE_NONE;
+        pbwidth_t nowWidth = 0;
+        int r = rig_get_mode(rig, RIG_VFO_CURR, &nowMode, &nowWidth);
+        if (mode != RIG_MODE_NONE && f.widthHz > 0 && (r != RIG_OK || nowMode != mode || nowWidth != f.widthHz))
+        {
+            r = rig_set_mode(rig, RIG_VFO_CURR, mode, f.widthHz);
+            if (r != RIG_OK) problem = "Setting the width failed: " + errorText(r);
+        }
+        auto knob = [&](setting_t level, std::optional<double> v, const char* name) {
+            if (!v || rig_has_set_level(rig, level) == 0) return;
+            value_t value;
+            value.f = (float)*v;
+            int k = rig_set_level(rig, RIG_VFO_CURR, level, value);
+            if (k != RIG_OK && problem.empty()) problem = std::string("Setting ") + name + " failed: " + errorText(k);
+        };
+        knob(RIG_LEVEL_PBT_IN, f.pbtIn, "PBT_IN");
+        knob(RIG_LEVEL_PBT_OUT, f.pbtOut, "PBT_OUT");
+        shared->update([&](Status& s) {
+            s.filterWrites++;
+            s.filterProblem = problem;
+        });
+    };
+
     // Closes the rig after a failure; tries again later.
     auto failed = [&](const std::string& why) {
         closeRig(rig);
@@ -553,6 +592,7 @@ void HamlibRig::run()
     for (;;)
     {
         bool want, tx, clear, watch;
+        std::optional<radio::RigFilter> write;
         int poll;
         std::vector<std::pair<std::string, double>> pokes;
         {
@@ -566,9 +606,18 @@ void HamlibRig::run()
             clear = shared->clearTrip;
             shared->clearTrip = false;
             watch = shared->filterWatch;
+            // Written only while the rig doesn't transmit.
+            if (rig != nullptr && !(shared->transmitting || keyed) && want == keyed) write.swap(shared->filterWrite);
             pokes.swap(shared->pokes);
         }
         uint64_t now = nowMs();
+        if (write)
+        {
+            writeFilter(*write);
+            // Read straight back, for the Ear.
+            nextFilter = now;
+            continue;
+        }
         if (watch != filterWatch)
         {
             // Watched from now; forgotten when the Ear closes.
@@ -816,11 +865,19 @@ void HamlibRig::run()
         shared->wake.wait_for(lock, std::chrono::milliseconds(until > now ? until - now : 1), [&]() {
             return shared->stopping || (rig != nullptr && (shared->wantPtt && !trip.tripped()) != keyed)
                    || (shared->transmitting || keyed) != tx || shared->clearTrip || !shared->pokes.empty()
-                   || shared->filterWatch != filterWatch;
+                   || shared->filterWatch != filterWatch
+                   || (rig != nullptr && shared->filterWrite && !(shared->transmitting || keyed));
         });
     }
 
     if (rig != nullptr && keyed) rig_set_ptt(rig, RIG_VFO_CURR, RIG_PTT_OFF);
+    // A filter still to write (quitting puts the rig back as found).
+    std::optional<radio::RigFilter> last;
+    {
+        std::lock_guard<std::mutex> lock(shared->mutex);
+        last.swap(shared->filterWrite);
+    }
+    if (rig != nullptr && last) writeFilter(*last);
     closeRig(rig);
     shared->update([](Status& s) {
         s.running = false;

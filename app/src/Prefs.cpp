@@ -1,8 +1,11 @@
 #include "Prefs.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cstdlib>
+#include <locale>
 #include <optional>
+#include <sstream>
 
 #include <wx/config.h>
 #include <wx/filename.h>
@@ -61,6 +64,7 @@ ragtime::radio::RigSettings loadRig()
     r.pollSeconds = std::min(std::max(r.pollSeconds, POLL_MIN_SECONDS), POLL_MAX_SECONDS);
     r.keyRig = config().ReadBool("/Hamlib/KeyRig", r.keyRig);
     r.swrTrip = config().ReadBool("/Hamlib/SwrTrip", r.swrTrip);
+    r.earFilters = config().ReadBool("/Hamlib/EarFilters", r.earFilters);
     r.ptt = pttFromWord(word("/Hamlib/Ptt"));
     r.pttPort = readString("/Hamlib/PttPort", r.pttPort);
     return r;
@@ -87,6 +91,7 @@ void saveRig(const ragtime::radio::RigSettings& r)
     config().Write("/Hamlib/PollSeconds", (long)r.pollSeconds);
     config().Write("/Hamlib/KeyRig", r.keyRig);
     config().Write("/Hamlib/SwrTrip", r.swrTrip);
+    config().Write("/Hamlib/EarFilters", r.earFilters);
     config().Write("/Hamlib/Ptt", wxString(pttWord(r.ptt)));
     config().Write("/Hamlib/PttPort", wxString::FromUTF8(r.pttPort));
 }
@@ -153,6 +158,86 @@ std::string loadString(const char* key, const std::string& fallback)
 void saveString(const char* key, const std::string& value)
 {
     config().Write(key, wxString::FromUTF8(value));
+}
+
+namespace
+{
+
+// A rig or mode as a wxConfig path part: letters, digits, - and _.
+std::string pathPart(const std::string& s)
+{
+    std::string out;
+    for (char c : s) out += (std::isalnum((unsigned char)c) || c == '-' || c == '_') ? c : '_';
+    return out.empty() ? std::string("_") : out;
+}
+
+std::string presetKey(const std::string& rig, const std::string& mode, int n)
+{
+    return "/Ear/Presets/" + pathPart(rig) + "/" + pathPart(mode) + "/" + std::to_string(n);
+}
+
+std::string calibrationKey(const std::string& rig, const std::string& mode, int widthHz)
+{
+    return "/Ear/Calibration/" + pathPart(rig) + "/" + pathPart(mode) + "/" + std::to_string(widthHz);
+}
+
+} // namespace
+
+std::optional<ragtime::radio::RigFilter> loadEarPreset(const std::string& rig, const std::string& mode, int n)
+{
+    // "2400 0.5020 0.4510", a dash for a knob the rig hasn't; read and
+    // written in the C locale, whatever the desktop's.
+    std::istringstream in(loadString(presetKey(rig, mode, n).c_str(), ""));
+    in.imbue(std::locale::classic());
+    int width = 0;
+    std::string knobs[2];
+    if (!(in >> width >> knobs[0] >> knobs[1]) || width <= 0) return std::nullopt;
+    ragtime::radio::RigFilter f;
+    f.mode = mode;
+    f.widthHz = width;
+    std::optional<double>* fields[2] = {&f.pbtIn, &f.pbtOut};
+    for (int i = 0; i < 2; i++)
+    {
+        if (knobs[i] == "-") continue;
+        std::istringstream k(knobs[i]);
+        k.imbue(std::locale::classic());
+        double v = 0;
+        if (k >> v) *fields[i] = v;
+    }
+    return f;
+}
+
+void saveEarPreset(const std::string& rig, int n, const ragtime::radio::RigFilter& f)
+{
+    std::ostringstream out;
+    out.imbue(std::locale::classic());
+    out.setf(std::ios::fixed);
+    out.precision(4);
+    out << f.widthHz;
+    for (const std::optional<double>& v : {f.pbtIn, f.pbtOut})
+    {
+        out << ' ';
+        if (v)
+            out << *v;
+        else
+            out << '-';
+    }
+    saveString(presetKey(rig, f.mode, n).c_str(), out.str());
+    config().Flush();
+}
+
+double loadEarCalibration(const std::string& rig, const std::string& mode, int widthHz)
+{
+    double v = 0;
+    config().Read(wxString::FromUTF8(calibrationKey(rig, mode, widthHz)), &v, 0.0);
+    return v;
+}
+
+void saveEarCalibration(const std::string& rig, const std::string& mode, int widthHz, double hzPerKnob)
+{
+    config().Write(wxString::FromUTF8(calibrationKey(rig, mode, widthHz)), hzPerKnob);
+    // Half a minute of the operator's band: kept at once.
+    config().Flush();
 }
 
 int loadInt(const char* key, int fallback)

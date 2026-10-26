@@ -103,6 +103,10 @@ struct RigSettings
     // Over 3:1 SWR, stop data2g-host, and with Hamlib turn the rig's power
     // to 0 and unkey (radio::SwrTrip). Off by default.
     bool swrTrip = false;
+
+    // The Ear may set the rig's receive filter (its width and twin PBT),
+    // Hamlib only, off by default (docs/STAGE1.md, "The Ear").
+    bool earFilters = false;
 };
 
 constexpr int POLL_MIN_SECONDS = 1;

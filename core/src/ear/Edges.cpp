@@ -47,11 +47,17 @@ void EdgeFinder::clear()
     power_.clear();
     weight_ = 0;
     levels_.clear();
+    quietRun_ = 0;
 }
 
 void EdgeFinder::addRow(const std::vector<float>& row, bool transmitting)
 {
-    if ((int)row.size() != Spectrum::BINS || transmitting) return;
+    if ((int)row.size() != Spectrum::BINS) return;
+    if (transmitting)
+    {
+        quietRun_ = 0;
+        return;
+    }
 
     // A row lifted over the quieter rows of the last while has a signal in it.
     const float level = percentile(row, 0.9);
@@ -63,12 +69,23 @@ void EdgeFinder::addRow(const std::vector<float>& row, bool transmitting)
     }
     levels_.push_back(level);
     while ((double)levels_.size() > HISTORY_S * rowsPerSecond_) levels_.pop_front();
-    if (!quiet) return;
+    if (!quiet)
+    {
+        quietRun_ = 0;
+        return;
+    }
+    quietRun_++;
 
     if (power_.empty()) power_.assign(Spectrum::BINS, 0.0);
     weight_ = std::min(weight_ + 1.0, AVERAGE_S * rowsPerSecond_);
     const double a = 1.0 / weight_;
     for (int i = 0; i < Spectrum::BINS; i++) power_[i] += (std::pow(10.0, row[i] / 10.0) - power_[i]) * a;
+}
+
+void EdgeFinder::restart()
+{
+    power_.clear();
+    weight_ = 0;
 }
 
 double EdgeFinder::quietSeconds() const

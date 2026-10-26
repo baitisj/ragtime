@@ -1,6 +1,7 @@
 #include "EarFrame.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <utility>
 
@@ -30,6 +31,15 @@ wxString utf8(const std::string& s)
 }
 
 const wxString DOT = wxString::FromUTF8(" \xc2\xb7 ");
+// A line of text cut short to fit, never grown over its neighbours.
+constexpr long LINE = wxST_ELLIPSIZE_END | wxST_NO_AUTORESIZE;
+
+uint64_t nowMs()
+{
+    return (uint64_t)std::chrono::duration_cast<std::chrono::milliseconds>(
+               std::chrono::steady_clock::now().time_since_epoch())
+        .count();
+}
 
 bool onThisMachine(const std::string& host)
 {
@@ -38,7 +48,7 @@ bool onThisMachine(const std::string& host)
 
 } // namespace
 
-EarFrame::EarFrame(wxWindow* parent, std::function<void()> onClosed)
+EarFrame::EarFrame(wxWindow* parent, ear::FilterEdit& edit, EarFilterBar::Write write, std::function<void()> onClosed)
     : wxFrame(parent, wxID_ANY, wxString::FromUTF8("Ear \xc2\xb7 what the radio hears"), wxDefaultPosition,
               wxDefaultSize, wxDEFAULT_FRAME_STYLE | wxFRAME_FLOAT_ON_PARENT)
     , audio_(audio::makeEarAudio())
@@ -63,23 +73,25 @@ EarFrame::EarFrame(wxWindow* parent, std::function<void()> onClosed)
 
     // What the rig says of its filter, and what the noise shows.
     auto* filter = new wxBoxSizer(wxHORIZONTAL);
-    rigSays_ = new wxStaticText(panel, wxID_ANY, "", wxDefaultPosition, wxDefaultSize, wxST_ELLIPSIZE_END);
-    noiseShows_ = new wxStaticText(panel, wxID_ANY, "", wxDefaultPosition, wxDefaultSize, wxST_ELLIPSIZE_END);
+    rigSays_ = new wxStaticText(panel, wxID_ANY, "", wxDefaultPosition, wxDefaultSize, LINE);
+    noiseShows_ = new wxStaticText(panel, wxID_ANY, "", wxDefaultPosition, wxDefaultSize, LINE);
     filter->Add(rigSays_, 1, wxALIGN_CENTER_VERTICAL);
     filter->Add(noiseShows_, 1, wxALIGN_CENTER_VERTICAL | wxLEFT, FromDIP(16));
 
     scope_ = new EarScope(panel);
-    status_ = new wxStaticText(panel, wxID_ANY, "", wxDefaultPosition, wxDefaultSize, wxST_ELLIPSIZE_END);
+    filterBar_ = new EarFilterBar(panel, scope_, edit, std::move(write));
+    status_ = new wxStaticText(panel, wxID_ANY, "", wxDefaultPosition, wxDefaultSize, LINE);
 
     auto* outer = new wxBoxSizer(wxVERTICAL);
     outer->Add(top, 0, wxEXPAND | wxALL, FromDIP(10));
     outer->Add(filter, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, FromDIP(10));
+    outer->Add(filterBar_, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, FromDIP(10));
     outer->Add(scope_, 1, wxEXPAND | wxLEFT | wxRIGHT, FromDIP(4));
     outer->Add(status_, 0, wxEXPAND | wxALL, FromDIP(10));
     panel->SetSizer(outer);
     // Fits a 1366 x 768 screen with room to spare.
-    SetClientSize(FromDIP(wxSize(900, 560)));
-    SetMinClientSize(FromDIP(wxSize(640, 400)));
+    SetClientSize(FromDIP(wxSize(900, 640)));
+    SetMinClientSize(FromDIP(wxSize(700, 480)));
 
     chosen_ = loadString(keys::EAR_SOURCE, "");
     const int rows = loadInt(keys::EAR_SPEED, 10);
@@ -106,6 +118,8 @@ EarFrame::EarFrame(wxWindow* parent, std::function<void()> onClosed)
     Bind(wxEVT_TIMER, [this](wxTimerEvent&) { tick(); });
     Bind(wxEVT_CLOSE_WINDOW, [this](wxCloseEvent&) {
         timer_.Stop();
+        // An unkept change goes back, and Calibrate puts the knobs back.
+        filterBar_->closing();
         audio_->stop();
         if (onClosed_) onClosed_();
         Destroy();
@@ -140,6 +154,7 @@ void EarFrame::setHost(const std::string& host, int commandPort)
 
 void EarFrame::setNarrow(bool narrow)
 {
+    narrow_ = narrow;
     scope_->setNarrow(narrow);
 }
 
@@ -151,6 +166,7 @@ void EarFrame::setTransmitting(bool on)
 void EarFrame::setRig(std::function<EarRig()> rig)
 {
     rig_ = std::move(rig);
+    if (rig_) rigNow_ = rig_();
     changed_ = true;
 }
 
@@ -174,6 +190,12 @@ void EarFrame::tick()
         scope_->addRows(rows, transmitting_);
         for (const auto& row : rows) edges_.addRow(row, transmitting_);
     }
+
+    // The filter bar: the rig asked every other tick; quiet means not keyed
+    // and no burst in the last half second.
+    if (ticks_ % 2 == 0 && rig_) rigNow_ = rig_();
+    const bool quiet = !transmitting_ && edges_.quietRunSeconds() >= 0.5;
+    filterBar_->tick(nowMs(), quiet, edges_, rigNow_, narrow_);
 
     if (++ticks_ % HOST_LOOK_TICKS == 0)
     {
@@ -271,7 +293,7 @@ void EarFrame::showStatus(const audio::EarStatus& s)
 void EarFrame::showFilter(const audio::EarStatus& s)
 {
     const wxString dash = wxString::FromUTF8("\xe2\x80\x93");
-    const EarRig rig = rig_ ? rig_() : EarRig();
+    const EarRig& rig = rigNow_;
     wxString says;
     if (rig.via.empty())
         says = "The rig: none in Settings > Rig, so only the noise shows the filter";

@@ -19,6 +19,7 @@
 #include "ragtime/broadcast/Seals.h"
 #include "ragtime/broadcast/Stations.h"
 #include "ragtime/broadcast/WatchList.h"
+#include "ragtime/ear/FilterControl.h"
 #include "ragtime/files/FileRows.h"
 #include "ragtime/files/FileTraffic.h"
 #include "ragtime/files/SessionFiles.h"
@@ -194,6 +195,9 @@ private:
     void setGlobus(bool on);
     // The Ear, opened or closed (the ear button, View > Ear).
     void setEar(bool open);
+    // The Ear sets the rig's filter (Hamlib only; RigControl refuses
+    // rigctld), noted in the flight recorder with why.
+    void setRigFilter(const ragtime::radio::RigFilter& filter, const std::string& why);
     void placeTabToggle();
     void rememberDividers();
 
@@ -264,6 +268,9 @@ private:
     uint64_t stripMs_ = 0;
     uint64_t trimmedMs_ = 0;    // the path log's memory last cut back
     uint64_t notedBursts_ = 0;  // transmit bursts written to the flight recorder
+    // The Ear's filter change and what the rig had (kept here, so quitting
+    // puts the rig back after the Ear has closed).
+    ragtime::ear::FilterEdit filterEdit_;
     std::string notedFilter_;   // the rig's filter, as last written there
     ragtime::radio::WorkOrder recentOrder_ = ragtime::radio::WorkOrder::LikelyNow;
     uint64_t recentVersion_ = ~0ull;    // the path log's version Recent work was drawn from

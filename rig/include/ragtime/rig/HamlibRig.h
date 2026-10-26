@@ -20,10 +20,14 @@
 // tried again 2, 4, 8, 15 and then every 30 s (link::Reconnect). Stopping
 // unkeys the rig, if keyed, before closing it.
 //
-// It never tunes the rig or sets its mode: the radio is the source of
-// truth for frequency. PTT is the only thing it sets when told to
-// (PttFollower, with "Key the rig when data2g-host keys" ticked), and the
-// SWR trip the only thing that sets the power.
+// It never tunes the rig: the radio is the source of truth for frequency.
+// PTT is the only thing it sets when told to (PttFollower, with "Key the
+// rig when data2g-host keys" ticked), the SWR trip the only thing that sets
+// the power, and the Ear the only thing that sets the receive filter
+// (setFilter: the mode's passband width and the twin PBT, with "Let the
+// Ear change the rig's filters" ticked), never while the rig transmits. A
+// filter still to write when stopping is written before the rig closes,
+// so quitting can leave the rig as Ragtime found it.
 //
 // Built without Hamlib (-DRAGTIME_HAMLIB=OFF), available() is false and a
 // HamlibRig only says so.
@@ -120,6 +124,9 @@ public:
 
         // The receive filter, while the Ear watches it.
         std::optional<radio::RigFilter> filter;
+        // Goes up with each filter written, and why the last failed.
+        uint64_t filterWrites = 0;
+        std::string filterProblem;
 
         // The SWR trip, from the trip until clearSwrTrip().
         bool swrTripped = false;
@@ -154,6 +161,9 @@ public:
     void setTransmitting(bool on);
     // The Ear is open: read the filter between bursts. Off forgets it.
     void setFilterWatch(bool on);
+    // Writes the receive filter (its width with its mode, and the knobs it
+    // has) as soon as the rig isn't transmitting, then reads it back.
+    void setFilter(const radio::RigFilter& filter);
     // Settings > Rig's SWR trip, on or off, from now.
     void setSwrTrip(bool on);
     // The operator cleared a trip: the rig may be keyed again. Its power

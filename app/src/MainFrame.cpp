@@ -300,6 +300,10 @@ MainFrame::MainFrame()
         // What is under way ends here; a part received is kept, and the
         // log keeps it for next time.
         sessionFiles_.stopAll("Ragtime was closed");
+        // The Ear's change goes back, and a filter Ragtime changed is put
+        // back as it was found, before the rig closes.
+        if (ear_) ear_->Close(true);
+        if (auto f = filterEdit_.quit()) setRigFilter(*f, "put back as found: Ragtime closed");
         // Unkeyed and closed before anything else.
         rig_->stop();
         host_->recorder().note("Ragtime closed", HostConnection::nowMs());
@@ -2423,7 +2427,10 @@ void MainFrame::setEar(bool open)
 {
     if (open && ear_ == nullptr)
     {
-        ear_ = new EarFrame(this, [this] {
+        // The filter, set from the Ear: only with Hamlib and the box ticked
+        // (RigControl refuses rigctld), noted in the flight recorder.
+        auto write = [this](const radio::RigFilter& f, const std::string& why) { setRigFilter(f, why); };
+        ear_ = new EarFrame(this, filterEdit_, write, [this] {
             ear_ = nullptr;
             rig_->setFilterWatch(false);
             bar_->setEarOpen(false);
@@ -2439,6 +2446,10 @@ void MainFrame::setEar(bool open)
             if (prefs_.rig.source != radio::RigSource::None) r.via = rig_->meterPath();
             r.filter = rig_->filter();
             if (rig_->readsNoise()) r.noiseDb = rig_->noiseDb();
+            r.allowed = prefs_.rig.source == radio::RigSource::Hamlib && prefs_.rig.earFilters;
+            r.canSet = rig_->canSetFilter();
+            r.problem = rig_->filterProblem();
+            r.key = rig_->rigKey();
             return r;
         });
         ear_->CentreOnParent();
@@ -2533,6 +2544,15 @@ void MainFrame::applyRadioPrefs()
     rig_->apply(prefs_.rig);
     applySendGuard();
     showDial();
+}
+
+void MainFrame::setRigFilter(const radio::RigFilter& f, const std::string& why)
+{
+    std::string said = "rig filter set " + f.mode + " " + std::to_string(f.widthHz) + " Hz";
+    if (f.pbtIn) said += " PBT_IN " + radio::pbtText(*f.pbtIn);
+    if (f.pbtOut) said += " PBT_OUT " + radio::pbtText(*f.pbtOut);
+    host_->recorder().note(said + " (" + why + ")", HostConnection::nowMs());
+    rig_->setFilter(f);
 }
 
 void MainFrame::onDial()

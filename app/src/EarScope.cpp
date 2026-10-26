@@ -50,8 +50,12 @@ EarScope::EarScope(wxWindow* parent)
     SetMinSize(FromDIP(wxSize(520, 300)));
     clear();
     Bind(wxEVT_PAINT, [this](wxPaintEvent&) { paint(); });
-    Bind(wxEVT_MOTION, [this](wxMouseEvent& e) {
-        mouseX_ = e.GetX();
+    Bind(wxEVT_MOTION, [this](wxMouseEvent& e) { mouseMove(e); });
+    Bind(wxEVT_LEFT_DOWN, [this](wxMouseEvent& e) { mouseDown(e); });
+    Bind(wxEVT_LEFT_UP, [this](wxMouseEvent& e) { mouseUp(e); });
+    Bind(wxEVT_MOUSE_CAPTURE_LOST, [this](wxMouseCaptureLostEvent&) {
+        grip_ = Grip::None;
+        drag_.reset();
         Refresh();
     });
     Bind(wxEVT_LEAVE_WINDOW, [this](wxMouseEvent&) {
@@ -98,6 +102,98 @@ void EarScope::setRigWidth(int widthHz)
     if (widthHz == rigWidth_) return;
     rigWidth_ = widthHz;
     Refresh();
+}
+
+void EarScope::setHandles(const std::optional<ragtime::ear::Span>& at, bool together)
+{
+    together_ = together;
+    if (grip_ != Grip::None) return;     // not under the operator's hand
+    handles_ = at;
+    Refresh();
+}
+
+void EarScope::setWanted(const std::optional<ragtime::ear::Span>& wanted)
+{
+    wanted_ = wanted;
+    Refresh();
+}
+
+double EarScope::hzAt(int x) const
+{
+    return std::max(0.0, std::min(Spectrum::TOP_HZ, (x - plot_.x) * Spectrum::TOP_HZ / std::max(1, plot_.width)));
+}
+
+EarScope::Grip EarScope::gripAt(int x, int y) const
+{
+    if (!handles_ || y < plot_.y || y > plot_.GetBottom()) return Grip::None;
+    auto xOf = [this](double hz) { return plot_.x + hz / Spectrum::TOP_HZ * plot_.width; };
+    const int near = FromDIP(6);
+    if (std::abs(x - (int)xOf(handles_->lowHz)) <= near) return Grip::Low;
+    if (std::abs(x - (int)xOf(handles_->highHz)) <= near) return Grip::High;
+    // Until Calibrate has measured the knobs only the width can change.
+    if (!together_ && x > xOf(handles_->lowHz) && x < xOf(handles_->highHz) && y <= plot_.y + FromDIP(30))
+        return Grip::Shift;
+    return Grip::None;
+}
+
+void EarScope::mouseDown(wxMouseEvent& e)
+{
+    grip_ = gripAt(e.GetX(), e.GetY());
+    if (grip_ == Grip::None) return;
+    gripHz_ = hzAt(e.GetX());
+    dragFrom_ = *handles_;
+    drag_ = dragFrom_;
+    CaptureMouse();
+    Refresh();
+}
+
+void EarScope::mouseMove(wxMouseEvent& e)
+{
+    mouseX_ = e.GetX();
+    if (grip_ != Grip::None && drag_)
+    {
+        const double hz = hzAt(e.GetX());
+        const double centre = dragFrom_.centre();
+        ragtime::ear::Span s = dragFrom_;
+        switch (grip_)
+        {
+        case Grip::Low:
+            s.lowHz = std::min(hz, s.highHz - 50);
+            if (together_) s.highHz = std::max(centre + 25, 2 * centre - s.lowHz);
+            break;
+        case Grip::High:
+            s.highHz = std::max(hz, s.lowHz + 50);
+            if (together_) s.lowHz = std::min(centre - 25, 2 * centre - s.highHz);
+            break;
+        case Grip::Shift:
+            s.lowHz += hz - gripHz_;
+            s.highHz += hz - gripHz_;
+            break;
+        case Grip::None: break;
+        }
+        drag_ = s;
+    }
+    else
+    {
+        const Grip g = gripAt(e.GetX(), e.GetY());
+        SetCursor(g == Grip::Low || g == Grip::High ? wxCursor(wxCURSOR_SIZEWE)
+                  : g == Grip::Shift                ? wxCursor(wxCURSOR_HAND)
+                                                    : wxNullCursor);
+    }
+    Refresh();
+}
+
+void EarScope::mouseUp(wxMouseEvent&)
+{
+    if (grip_ == Grip::None) return;
+    if (HasCapture()) ReleaseMouse();
+    const std::optional<ragtime::ear::Span> s = drag_;
+    grip_ = Grip::None;
+    drag_.reset();
+    Refresh();
+    if (s && (std::fabs(s->lowHz - dragFrom_.lowHz) >= 10 || std::fabs(s->highHz - dragFrom_.highHz) >= 10) &&
+        dragged_)
+        dragged_(*s);
 }
 
 void EarScope::addRows(const std::vector<std::vector<float>>& rows, bool transmitting)
@@ -281,6 +377,62 @@ void EarScope::paint()
         // Above the bracket's right end, clear of the edges' lines.
         gc->DrawText(label, std::max((double)plot_.x, std::min(x1, (double)plot_.GetRight()) - w), y - h - 1);
         gc->SetFont(small, text);
+    }
+
+    // The passband wanted (being dragged, or waiting, or on trial), dashed,
+    // and what of Data2G's it would cut, in red.
+    const std::optional<ragtime::ear::Span> wanted = drag_ ? drag_ : wanted_;
+    if (wanted)
+    {
+        const ragtime::ear::Passband pb = narrow_ ? narrow : wide;
+        const wxColour red = dark ? wxColour(255, 90, 80, 110) : wxColour(220, 30, 30, 90);
+        gc->SetPen(*wxTRANSPARENT_PEN);
+        gc->SetBrush(wxBrush(red));
+        const double stripY = plot_.GetBottom() - FromDIP(8);
+        if (wanted->lowHz > pb.lowHz + 10)
+            gc->DrawRectangle(xOf(pb.lowHz), stripY, xOf(std::min(wanted->lowHz, pb.highHz)) - xOf(pb.lowHz),
+                              FromDIP(8));
+        if (wanted->highHz < pb.highHz - 10)
+        {
+            const double from = std::max(wanted->highHz, pb.lowHz);
+            gc->DrawRectangle(xOf(from), stripY, xOf(pb.highHz) - xOf(from), FromDIP(8));
+        }
+        const wxColour ink = dark ? wxColour(255, 255, 255) : wxColour(20, 20, 20);
+        gc->SetPen(wxPen(ink, FromDIP(2), wxPENSTYLE_LONG_DASH));
+        for (double hz : {wanted->lowHz, wanted->highHz}) gc->StrokeLine(xOf(hz), plot_.y, xOf(hz), plot_.GetBottom());
+        if (drag_)
+        {
+            wxString label = wxString::Format("%d", (int)std::lround(wanted->lowHz / 10) * 10) +
+                             wxString::FromUTF8("\xe2\x80\x93") +
+                             wxString::Format("%d Hz", (int)std::lround(wanted->highHz / 10) * 10);
+            double w, h;
+            gc->SetFont(small, ink);
+            gc->GetTextExtent(label, &w, &h);
+            const double x = std::max((double)plot_.x, std::min(xOf(wanted->centre()) - w / 2, plot_.GetRight() - w));
+            gc->SetPen(*wxTRANSPARENT_PEN);
+            gc->SetBrush(wxBrush(panel));
+            gc->DrawRectangle(x - 2, plot_.y + FromDIP(34), w + 4, h + 2);
+            gc->DrawText(label, x, plot_.y + FromDIP(35));
+            gc->SetFont(small, text);
+        }
+    }
+    // The handles: a tab on each edge, and the shift band between them.
+    if (handles_ && !drag_)
+    {
+        gc->SetPen(*wxTRANSPARENT_PEN);
+        gc->SetBrush(wxBrush(orange));
+        const double tab = FromDIP(7);
+        for (double hz : {handles_->lowHz, handles_->highHz})
+        {
+            wxGraphicsPath p = gc->CreatePath();
+            p.MoveToPoint(xOf(hz) - tab, plot_.y);
+            p.AddLineToPoint(xOf(hz) + tab, plot_.y);
+            p.AddLineToPoint(xOf(hz), plot_.y + tab * 1.4);
+            p.CloseSubpath();
+            gc->FillPath(p);
+        }
+        gc->SetBrush(wxBrush(wxColour(orange.Red(), orange.Green(), orange.Blue(), 40)));
+        gc->DrawRectangle(xOf(handles_->lowHz), plot_.y, xOf(handles_->highHz) - xOf(handles_->lowHz), FromDIP(30));
     }
 
     // The frequency axis between the two.

@@ -65,6 +65,9 @@ public:
     // A new speed starts afresh.
     void setRowsPerSecond(double rowsPerSecond);
     void clear();
+    // The filter changed: the average starts afresh, but what it knows of
+    // how loud the quiet is stays.
+    void restart();
 
     // One of Spectrum's rows; rows heard while transmitting only count
     // toward nothing.
@@ -77,12 +80,16 @@ public:
     std::vector<float> average() const;
     // Seconds of quiet rows in the average (capped at what it remembers).
     double quietSeconds() const;
+    // Seconds since the last row with a signal in it, or heard while
+    // transmitting: how long the band has been quiet.
+    double quietRunSeconds() const { return quietRun_ / rowsPerSecond_; }
 
 private:
     double rowsPerSecond_;
     std::vector<double> power_;     // the average, as power
     double weight_ = 0;             // quiet rows in it, capped
     std::deque<float> levels_;      // recent rows' passband levels
+    double quietRun_ = 0;           // quiet rows in a row
 };
 
 // The pth percentile (0..1) of some values.

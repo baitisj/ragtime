@@ -29,6 +29,8 @@ add_executable(ragtime WIN32
     src/FilesPage.cpp
     src/GearshiftDialog.cpp
     src/DrawnIcon.cpp
+    src/EarControls.cpp
+    src/EarFilterBar.cpp
     src/EarFrame.cpp
     src/EarScope.cpp
     src/GearshiftIcon.cpp
