@@ -151,8 +151,8 @@ It reads the radio's dial from rigctld, or opens the rig itself with
 Hamlib (Settings > Rig), and can key it when data2g-host does, for rigs
 whose drivers can't be opened twice (off by default). Through Hamlib or
 rigctld, the Ear can also set the rig's receive filter: drag the edges
-on the waterfall, and the change goes back after 15 s unless you keep
-it (off by default).
+on the waterfall, or the notch out of its bay, and the change goes back
+after 15 s unless you keep it (off by default).
 Messages are signed, never encrypted, as Part 97 requires.
 
 ## Plan

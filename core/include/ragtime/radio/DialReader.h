@@ -90,9 +90,11 @@ public:
         Strength,   // STRENGTH, the S-meter, asked between bursts
         PbtIn,      // PBT_IN and PBT_OUT, asked only while the Ear is open
         PbtOut,
+        NotchOn,    // the manual notch (the MN function, "+u"), and
+        NotchRaw,   // NOTCHF_RAW, its position: also only while the Ear is open
     };
-    static constexpr int METERS = 7;
-    // Probed on connecting: all but the PBT.
+    static constexpr int METERS = 9;
+    // Probed on connecting: all but the filter's.
     static constexpr int PROBED = 5;
 
     // The socket to rigctld has connected or closed.
@@ -184,6 +186,7 @@ private:
     void queueFilter();
     bool writeFilter(uint64_t nowMs);
     bool filterQuestionsLeft() const;
+    static int filterMeter(int step);
     void publishFilter();
     void modeLine(const std::string& line, uint64_t nowMs);
     int pickMeter();
@@ -217,7 +220,7 @@ private:
     std::vector<double> strength_;
     bool filterWatch_ = false;
     uint64_t filterDueMs_ = 0;
-    int filterStep_ = 0;            // 0 the mode, 1 PBT_IN, 2 PBT_OUT
+    int filterStep_ = 0;            // 0 the mode, then filterMeter(step)
     bool inMode_ = false;           // "get_mode:" came: its long answer follows
     int modeWidth_ = 0;
     bool modeDropped_ = false;

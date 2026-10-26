@@ -9,6 +9,8 @@
 #include <wx/image.h>
 #include <wx/panel.h>
 
+class wxGraphicsContext;
+
 #include "ragtime/ear/Edges.h"
 #include "ragtime/ear/FilterControl.h"
 #include "ragtime/ear/Spectrum.h"
@@ -32,12 +34,27 @@
 // as a dashed line until the change is kept or undone, with the part of
 // Data2G's passband it would cut in red.
 //
+// Where the rig has a manual notch, a bay to the right of the spectrum
+// holds its bar while it is off (NF OFF). Dragged into the spectrum the
+// notch goes on there; dragged back to the bay, off (Jeff, 2026-10-26).
+// On, the bar sits at the notch's centre with its width shaded, and a
+// small mark shows where the noise shows its dip.
+//
 // The colours follow the noise: the floor is a slow average of each
 // row's quieter part, and the waterfall runs from just under it to 50 dB
 // over it, so a quiet band and a noisy one both show.
 class EarScope : public wxPanel
 {
 public:
+    // The notch as drawn.
+    struct Notch
+    {
+        bool on = false;
+        double hz = 0;                  // its centre, while on
+        std::optional<double> dipHz;    // where the noise shows it
+        bool movable = false;           // the Ear may set it
+    };
+
     explicit EarScope(wxWindow* parent);
 
     void addRows(const std::vector<std::vector<float>>& rows, bool transmitting);
@@ -59,6 +76,10 @@ public:
     }
     // The passband wanted, drawn dashed, or none.
     void setWanted(const std::optional<ragtime::ear::Span>& wanted);
+    // The notch's bar and bay, or none where the rig has no notch.
+    void setNotch(const std::optional<Notch>& notch);
+    // The bar let go: at hz, or in the bay (none).
+    void onNotch(std::function<void(std::optional<double> hz)> moved) { notchMoved_ = std::move(moved); }
 
 private:
     void paint();
@@ -70,9 +91,15 @@ private:
         Low,
         High,
         Shift,
+        Notch,
     };
     Grip gripAt(int x, int y) const;
     double hzAt(int x) const;
+    // The notch's knob, on the bar at x.
+    wxRect notchKnob(double x) const;
+    // Where a notch dragged to x would go: none in the bay.
+    std::optional<double> notchAt(int x) const;
+    void paintNotch(wxGraphicsContext& gc, bool dark, const wxFont& small);
     void mouseDown(wxMouseEvent& e);
     void mouseMove(wxMouseEvent& e);
     void mouseUp(wxMouseEvent& e);
@@ -100,10 +127,14 @@ private:
     double gripHz_ = 0;             // where the drag began
     ragtime::ear::Span dragFrom_;
     std::optional<ragtime::ear::Span> drag_;
+    std::optional<Notch> notch_;
+    std::function<void(std::optional<double>)> notchMoved_;
+    std::optional<double> notchDrag_;   // being dragged: where (none in the bay)
 
     // The areas, in pixels, worked out at each paint.
     wxRect plot_;       // the spectrum
     wxRect fall_;       // the waterfall
+    wxRect bay_;        // the notch's parking bay; empty with no notch
     int left_ = 0;      // the axis labels' margin
 };
 

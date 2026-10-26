@@ -176,6 +176,11 @@ std::string presetKey(const std::string& rig, const std::string& mode, int n)
     return "/Ear/Presets/" + pathPart(rig) + "/" + pathPart(mode) + "/" + std::to_string(n);
 }
 
+std::string notchKey(const std::string& rig, const std::string& mode)
+{
+    return "/Ear/Notch/" + pathPart(rig) + "/" + pathPart(mode);
+}
+
 std::string calibrationKey(const std::string& rig, const std::string& mode, int widthHz)
 {
     return "/Ear/Calibration/" + pathPart(rig) + "/" + pathPart(mode) + "/" + std::to_string(widthHz);
@@ -185,25 +190,34 @@ std::string calibrationKey(const std::string& rig, const std::string& mode, int 
 
 std::optional<ragtime::radio::RigFilter> loadEarPreset(const std::string& rig, const std::string& mode, int n)
 {
-    // "2400 0.5020 0.4510", a dash for a knob the rig hasn't; read and
+    // "2400 0.5020 0.4510 1 0.2510": the width, the PBT knobs, the notch
+    // on (1) or off (0) and where; a dash for what the rig hasn't, and a
+    // preset from before the notch has only the first three. Read and
     // written in the C locale, whatever the desktop's.
     std::istringstream in(loadString(presetKey(rig, mode, n).c_str(), ""));
     in.imbue(std::locale::classic());
     int width = 0;
-    std::string knobs[2];
+    std::string knobs[4];
     if (!(in >> width >> knobs[0] >> knobs[1]) || width <= 0) return std::nullopt;
+    in >> knobs[2] >> knobs[3];
     ragtime::radio::RigFilter f;
     f.mode = mode;
     f.widthHz = width;
-    std::optional<double>* fields[2] = {&f.pbtIn, &f.pbtOut};
-    for (int i = 0; i < 2; i++)
+    std::optional<double> notch;
+    std::optional<double>* fields[3] = {&f.pbtIn, &f.pbtOut, &notch};
+    for (int i = 0; i < 4; i++)
     {
-        if (knobs[i] == "-") continue;
+        if (knobs[i].empty() || knobs[i] == "-") continue;
         std::istringstream k(knobs[i]);
         k.imbue(std::locale::classic());
         double v = 0;
-        if (k >> v) *fields[i] = v;
+        if (!(k >> v)) continue;
+        if (i == 3)
+            f.notchRaw = v;
+        else
+            *fields[i] = v;
     }
+    if (notch) f.notchOn = *notch != 0;
     return f;
 }
 
@@ -214,7 +228,8 @@ void saveEarPreset(const std::string& rig, int n, const ragtime::radio::RigFilte
     out.setf(std::ios::fixed);
     out.precision(4);
     out << f.widthHz;
-    for (const std::optional<double>& v : {f.pbtIn, f.pbtOut})
+    const std::optional<double> notch = f.notchOn ? std::optional<double>(*f.notchOn ? 1 : 0) : std::nullopt;
+    for (const std::optional<double>& v : {f.pbtIn, f.pbtOut, notch, f.notchRaw})
     {
         out << ' ';
         if (v)
@@ -239,6 +254,17 @@ void saveEarCalibration(const std::string& rig, const std::string& mode, int wid
     saveString(calibrationKey(rig, mode, widthHz).c_str(), model.text());
     // Half a minute of the operator's band: kept at once.
     config().Flush();
+}
+
+ragtime::ear::NotchModel loadEarNotch(const std::string& rig, const std::string& mode)
+{
+    return ragtime::ear::NotchModel::fromText(loadString(notchKey(rig, mode).c_str(), ""))
+        .value_or(ragtime::ear::NotchModel());
+}
+
+void saveEarNotch(const std::string& rig, const std::string& mode, const ragtime::ear::NotchModel& model)
+{
+    saveString(notchKey(rig, mode).c_str(), model.text());
 }
 
 int loadInt(const char* key, int fallback)

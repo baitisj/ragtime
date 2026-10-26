@@ -72,6 +72,10 @@ std::optional<ragtime::ear::KnobModel> loadEarCalibration(const std::string& rig
                                                           int widthHz);
 void saveEarCalibration(const std::string& rig, const std::string& mode, int widthHz,
                         const ragtime::ear::KnobModel& model);
+// Where the notch's position puts it, as learned for this rig and mode
+// (/Ear/Notch), or the IC-7100's line.
+ragtime::ear::NotchModel loadEarNotch(const std::string& rig, const std::string& mode);
+void saveEarNotch(const std::string& rig, const std::string& mode, const ragtime::ear::NotchModel& model);
 
 // The broadcast numbering is kept across restarts, one for each callsign
 // (docs/PROTOCOL.md, "Sequence numbers").

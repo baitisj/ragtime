@@ -524,6 +524,14 @@ void twinPbtModel()
     const Span shown{66, 3052};
     Span target = dragTarget(shown, Span{66, 2452}, usb(3000), ic7100);
     CHECK(std::fabs(target.lowHz + 71) < 1e-9 && std::fabs(target.highHz - 2469) < 1e-9);
+    // The hidden low edge dragged by itself goes where it was dropped
+    // (Hamlet: dropped at 400, it landed at 280 when moved by the drag);
+    // in a shift it moves as far as the other.
+    target = dragTarget(shown, Span{400, shown.highHz}, usb(3000), ic7100);
+    CHECK(std::fabs(target.lowHz - 400) < 1e-9 && std::fabs(target.highHz - 3069) < 1e-9);
+    target = dragTarget(shown, Span{shown.lowHz + 300, shown.highHz + 300}, usb(3000), ic7100);
+    CHECK(std::fabs(target.lowHz - 229) < 1e-9);
+    target = dragTarget(shown, Span{66, 2452}, usb(3000), ic7100);
     f = settingFor(target, usb(3000), ic7100);
     CHECK_EQ(f.widthHz, 3000);
     CHECK(f.pbtIn && std::fabs(*f.pbtIn - 0.5) <= 1.0 / 255);
@@ -553,6 +561,36 @@ void twinPbtModel()
     noKnobs.pbtIn.reset();
     noKnobs.pbtOut.reset();
     CHECK(shiftedBy(noKnobs, 300, 3000) == noKnobs);
+
+    // Disable: the knobs centred and the notch off, the width kept; and
+    // which presets the rig holds.
+    RigFilter busy = usb(2400, 0.6, 0.45);
+    busy.notchOn = true;
+    busy.notchRaw = 0.3;
+    CHECK(!filtersOff(busy));
+    RigFilter plain = disabled(busy);
+    CHECK(filtersOff(plain));
+    CHECK_EQ(plain.widthHz, 2400);
+    CHECK(plain.notchOn == std::optional<bool>(false) && plain.notchRaw == std::optional<double>(0.3));
+    CHECK(filtersOff(noKnobs));
+    RigFilter notchOnly = usb(2400);
+    notchOnly.notchOn = true;
+    CHECK(!filtersOff(notchOnly));
+    CHECK(holds(busy, busy));
+    RigFilter readBack = busy;
+    readBack.pbtIn = 0.6 + 1.0 / 255;
+    readBack.notchRaw = 0.3 - 1.0 / 255;
+    CHECK(holds(readBack, busy));
+    CHECK(!holds(plain, busy));
+    CHECK(!holds(usb(1800, 0.6, 0.45), usb(2400, 0.6, 0.45)));
+    // A preset from before the notch holds whatever the notch does.
+    CHECK(holds(busy, usb(2400, 0.6, 0.45)));
+    RigFilter off = busy;
+    off.notchOn = false;
+    off.notchRaw = 0.9;
+    RigFilter offPreset = busy;
+    offPreset.notchOn = false;
+    CHECK(holds(off, offPreset));
 
     // Cutting Data2G.
     CHECK(!cutsData2G(Span{300, 2700}, false));
@@ -822,6 +860,121 @@ void spans()
 
 } // namespace
 
+// The notch: its model, the dip it leaves in the noise, the passband
+// bridged over it, and the edges held off while the rig's AGC settles.
+void notch()
+{
+    std::mt19937 rng(11);
+    // A notch's V: 340 Hz across, 45 dB down at its centre.
+    const std::vector<Lift> hole = {{1330, 1670, -10.0}, {1400, 1600, -10.0}, {1450, 1550, -10.0}, {1480, 1520, -15.0}};
+
+    // Unbridged, the 340 Hz hole splits the passband and the edges go wrong.
+    {
+        EdgeFinder f(10.0);
+        for (int i = 0; i < 60; i++) f.addRow(noiseRow(rng, 300, 2700, hole), false);
+        std::optional<Edges> e = f.edges();
+        CHECK(e && !(near(e->lowHz, 300, 20) && near(e->highHz, 2700, 20)));
+        // Bridged over where the notch is, they're right, and the dip is found.
+        f.setBridge(1050, 1950);
+        e = f.edges();
+        CHECK(e && near(e->lowHz, 300, 20) && near(e->highHz, 2700, 20));
+        std::optional<Dip> d = f.dip(1050, 1950);
+        CHECK(d && std::fabs(d->hz - 1500) < 30 && d->depthDb > 30);
+        // No dip where there is none.
+        CHECK(!f.dip(2000, 2500));
+    }
+
+    // After a write the noise is left out for the hold.
+    {
+        EdgeFinder f(10.0);
+        for (int i = 0; i < 60; i++) f.addRow(noiseRow(rng, 300, 2700), false);
+        CHECK(f.edges().has_value());
+        f.restart(7.0);
+        for (int i = 0; i < 70; i++) f.addRow(noiseRow(rng, 300, 2700, {{0, 4000, 10.0}}), false);
+        CHECK(f.quietSeconds() == 0.0);
+        CHECK(f.quietRunSeconds() == 0.0);
+        CHECK(!f.edges());
+        for (int i = 0; i < 30; i++) f.addRow(noiseRow(rng, 300, 2700), false);
+        CHECK(f.edges().has_value());
+    }
+
+    // The model: the IC-7100's line, then corrected by dips.
+    {
+        NotchModel m;
+        CHECK(std::fabs(m.hzOf(0.498) - 1505) < 1);
+        CHECK(std::fabs(m.hzOf(m.rawFor(1500)) - 1500) < 15);
+        CHECK(m.rawFor(-5000) == 0.0 && m.rawFor(9000) == 1.0);
+        CHECK(!m.learned());
+        // One dip moves the line.
+        m.learn(0.5, 1600);
+        CHECK(std::fabs(m.hzOf(0.5) - 1600) < 1e-6);
+        CHECK(m.hzPerUnit == NotchModel::HZ_PER_UNIT);
+        // A second close by moves it again; one far enough away sets the slope.
+        m.learn(0.55, 1850);
+        CHECK(m.hzPerUnit == NotchModel::HZ_PER_UNIT);
+        m.learn(0.75, 2850);
+        CHECK(std::fabs(m.hzPerUnit - 5000) < 1e-6);
+        CHECK(std::fabs(m.hzOf(0.75) - 2850) < 1e-6);
+        // An unbelievable slope is ignored.
+        NotchModel n;
+        n.learn(0.3, 500);
+        n.learn(0.6, 520);
+        CHECK(n.hzPerUnit == NotchModel::HZ_PER_UNIT);
+        // Kept as text and back.
+        std::optional<NotchModel> back = NotchModel::fromText(m.text());
+        CHECK(back && std::fabs(back->hzPerUnit - m.hzPerUnit) < 0.1 && std::fabs(back->offsetHz - m.offsetHz) < 0.1);
+        CHECK(back && back->seenRaw && std::fabs(*back->seenRaw - 0.75) < 1e-4);
+        back = NotchModel::fromText(NotchModel().text());
+        CHECK(back && !back->learned());
+        CHECK(!NotchModel::fromText(""));
+        CHECK(!NotchModel::fromText("0 5 - -"));
+    }
+
+    // Data2G's passband, and the change's words.
+    CHECK(notchCutsData2G(1500, false));
+    CHECK(notchCutsData2G(200, false));
+    CHECK(!notchCutsData2G(100, false));
+    CHECK(!notchCutsData2G(1000, true));
+    CHECK(notchCutsData2G(1100, true));
+    {
+        const NotchModel m;
+        RigFilter off = usb(2400);
+        off.notchOn = false;
+        off.notchRaw = 0.5;
+        const RigFilter on = withNotch(off, 1500.0, m);
+        CHECK(on.notchOn && *on.notchOn && on.notchRaw && std::fabs(m.hzOf(*on.notchRaw) - 1500) < 15);
+        CHECK(on.pbtIn == off.pbtIn && on.widthHz == off.widthHz);
+        const RigFilter moved = withNotch(on, 1200.0, m);
+        const RigFilter offAgain = withNotch(moved, std::nullopt, m);
+        CHECK(offAgain.notchOn && !*offAgain.notchOn && offAgain.notchRaw == moved.notchRaw);
+        // In the rig's steps, about 20 Hz apart.
+        CHECK_EQ(notchChangeText(off, on, m), std::string("Notch on at 1510 Hz"));
+        CHECK_EQ(notchChangeText(on, moved, m), std::string("Notch 1510 \xe2\x86\x92 1190 Hz"));
+        CHECK_EQ(notchChangeText(moved, offAgain, m), std::string("Notch off"));
+        CHECK_EQ(notchChangeText(off, off, m), std::string());
+        CHECK_EQ(notchChangeText(usb(2400), usb(1800), m), std::string());
+    }
+}
+
+// The clock stands still while held.
+void clockHeld()
+{
+    const uint64_t t = 1000000;
+    FilterEdit e;
+    e.seen(usb(2400));
+    e.change(usb(1800), t);
+    CHECK(e.due(t, true).has_value());
+    e.hold(true, t + 5000);
+    CHECK(!e.due(t + 40000, true));
+    CHECK(e.state() == FilterEdit::State::Trial);
+    CHECK(std::fabs(e.secondsLeft(t + 40000) - 10.0) < 1e-9);
+    e.hold(false, t + 40000);
+    CHECK(!e.due(t + 49000, true));
+    CHECK(std::fabs(e.secondsLeft(t + 45000) - 5.0) < 1e-9);
+    std::optional<RigFilter> w = e.due(t + 50000, true);
+    CHECK(w && w->widthHz == 2400);
+}
+
 int main()
 {
     fftOfImpulse();
@@ -838,5 +991,7 @@ int main()
     keepAndUndo();
     calibrate();
     spans();
+    notch();
+    clockHeld();
     return ragtime_test::finish();
 }

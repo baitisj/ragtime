@@ -1126,10 +1126,13 @@ frequency.
 **The filter, read only** (step 2). Jeff said yes to reading the rig's
 mode and passband tuning through his shared rigctld (2026-10-26). While
 the Ear is open, between bursts, every 2 s, Ragtime asks the rig's mode
-and the width Hamlib gives with it, and PBT_IN and PBT_OUT where the rig
-has them: through rigctld `+m`, `+l PBT_IN` and `+l PBT_OUT` (with
-`currVFO` for a `--vfo` one; a question the rig can't answer is dropped),
-or through Hamlib `rig_get_mode` and `rig_get_level`. Nothing is set.
+and the width Hamlib gives with it, PBT_IN and PBT_OUT where the rig
+has them, and the manual notch, on or off and where (Hamlib's MN function
+and NOTCHF_RAW level): through rigctld `+m`, `+l PBT_IN`, `+l PBT_OUT`,
+`+u MN` and `+l NOTCHF_RAW` (with `currVFO` for a `--vfo` one; a
+question the rig can't answer is dropped, and NOTCHF_RAW isn't asked
+where MN was), or through Hamlib `rig_get_mode`, `rig_get_level` and
+`rig_get_func`. Nothing is set.
 Closing the Ear stops the questions. `radio::RigFilter` holds the answer:
 "USB · 2400 Hz filter · PBT centred". An Icom's PBT (the IC-7100's
 among them) is the knob's position, 0 to 1 with 0.5 in the middle, not
@@ -1163,7 +1166,7 @@ same in words: "The rig says USB · 2400 Hz filter · PBT centred" and
 rate the corner shows the band's noise from the S-meter, the gearshift's
 QRN ("48 kHz · QRN S2"), when the rig reports it. Each filter reading
 that differs from the last goes to the flight recorder, as
-`rig filter USB 2400 Hz PBT_IN 0.50 PBT_OUT 0.50`.
+`rig filter USB 2400 Hz PBT_IN 0.50 PBT_OUT 0.50 NF off`.
 
 ![The Ear with a 500 Hz filter that the rig calls 2400 Hz](images/ear-edges.png)
 
@@ -1171,12 +1174,18 @@ that differs from the last goes to the flight recorder, as
 filters" ticked (Settings > Rig, off by default, beside "Receive only
 outside the US data segments"). With the rig opened with Hamlib,
 `HamlibRig` sets it. Through rigctld (Jeff, 2026-10-26: "Yes please. I do
-so allow"), `DialReader` sends `M USB 1800` when the mode or width
-changes, then `L PBT_IN 0.6510` and `L PBT_OUT 0.5000` (with `currVFO`
-for a `--vfo` rigctld), one at a time, each answered by an `RPRT`, and
-reads the filter back at once. A refusal stops the rest and shows in
-red. These are the only set commands Ragtime ever sends rigctld, and
-every program sharing it sees them. The filter bar sits between the
+so allow"; for the notch, 2026-10-26: "All access is granted"),
+`DialReader` sends `M USB 1800` when the mode or width changes,
+`L PBT_IN 0.6510` and `L PBT_OUT 0.5000` when a knob moves, and for the
+notch `L NOTCHF_RAW 0.4980` and `U MN 1` (moved before it goes on, off
+before it moves, so it never notches anywhere it wasn't asked to), with
+`currVFO` for a `--vfo` rigctld, one at a time, each answered by an
+`RPRT`, and reads the filter back at once. Each part goes only when it
+differs from the last reading by more than a step of the rig's 0 to 255
+(Hamlib reads the rig first to the same end): a knob turned to where it
+already is still sets the IC-7100's AGC swelling. A refusal stops the
+rest and shows in red. These are the only set commands Ragtime ever
+sends rigctld, and every program sharing it sees them. The filter bar sits between the
 words and the scope.
 
 ![Dragging the low edge up: on trial, with the clock beside Undo](images/ear-filter.png)
@@ -1216,21 +1225,33 @@ words and the scope.
   70 Hz: the noise shows 70 Hz there, not the edge. A drag goes from the
   model's edges, not the noise's: each edge moves as far as it was
   dragged (`ear::dragTarget`), so dragging the high edge leaves the
-  hidden low one where it is.
+  hidden low one where it is. The hidden edge dragged by itself goes
+  where it is dropped: it shows at the cut, not where it is, so moving it
+  by the drag fell short (dropped at 400 Hz, it landed at 280 on Hamlet).
+  In a shift both edges move alike, hidden or not.
+- **The AGC swell.** On the IC-7100 each knob turn sets off a swell of
+  about 10 dB across the band for 5 to 7 s, the AGC catching up (Hamlet,
+  2026-10-26). After every write the noise is left out for 7 s
+  (`EdgeFinder::restart`), so the swell is neither measured as the
+  passband nor taken for a burst-free moment, and Calibrate's measures
+  start after it.
 - **Between bursts, then on trial** (`ear::FilterEdit`). A change waits
   for a quiet moment: data2g-host not keyed and no burst in the last half
   second, and `HamlibRig` itself never writes while it is keying or a
   PTT change is pending. Once written, the change is on trial for 15 s,
   with a kitchen-timer clock running down beside **Undo** and **Keep**,
   and it goes back when the clock runs out unless kept. More drags during
-  a trial carry on from it; Undo goes back past all of them. After a
+  a trial carry on from it; Undo goes back past all of them. The clock
+  stands still while the pointer is on Undo or Keep (Hamlet: 15 s went
+  quickly while reading the line), and runs on from where it stood when
+  the pointer leaves. After a
   write the noise's average starts afresh, and once 3 s of quiet are in
   the line says what it shows: "noise shows 580–2740 Hz", or "missed by
   N Hz" when an edge is more than 100 Hz from what was dragged.
 - **Cutting into Data2G.** A change that cuts more than 10 Hz into
   Data2G's passband (the wide one, or the 500 Hz one with the 500 Hz
   switch on) turns the line red, and Keep needs a second press ("Keep
-  anyway").
+  anyway"). So does a notch anywhere in Data2G's passband.
 - **Presets** (Jeff, 2026-10-26). Four along the top. A tap recalls one
   (a change like a drag: on trial); press and hold stores the filter the
   rig has now, with a quick clock running down in the button's corner
@@ -1238,7 +1259,39 @@ words and the scope.
   the clock runs out and it is a tap. They are kept per rig and mode
   (`/Ear/Presets/<rig>/<mode>/<n>`, the rig being `hamlib-<model>` or
   `rigctld`), and
-  each says what it holds: the edges once calibrated, else the width.
+  each says what it holds: the edges once calibrated, else the width,
+  and "+ NF" with the notch on. A preset holds the notch too ("2400
+  0.5020 0.4510 1 0.4980": the width, the knobs, the notch on and where;
+  one stored before the notch has the first three and leaves the notch
+  as it is). A preset shows pushed in while the rig has what it holds
+  (the same mode and width, the knobs and the notch within a step and a
+  half), and pressing and holding a pushed-in one still stores.
+- **Disable** (Jeff, 2026-10-26), left of the presets, centres both
+  knobs and turns the notch off, keeping the mode and width; a change
+  like a preset. It shows pushed in while no filter is on (knobs centred,
+  notch off), so a preset pops it out and Disable pops the preset out.
+- **The notch** (Jeff, 2026-10-26). Where the rig reports a manual
+  notch, a bay right of the spectrum holds its bar while it is off
+  ("NF OFF"). Drag the bar into the spectrum and the notch goes on
+  there; drag it back to the bay and it goes off. Each is a change like a
+  drag of the edges: written once quiet, on trial, with Keep and Undo,
+  and the line says "Notch on at 1510 Hz", "Notch 1510 → 1190 Hz" or
+  "Notch off". On, the bar sits at the notch's centre with its width
+  shaded, a mark at the foot where the noise shows its dip, and the
+  waterfall a faint line down it. The noise's passband is bridged over
+  the notch, so the edges still read true (`EdgeFinder::setBridge`).
+  NOTCHF_RAW is a position, not Hz: `ear::NotchModel` turns one into
+  the other. On Jeff's IC-7100 (Hamlet, PKTUSB, 3000 Hz filter), the
+  dip's centre is about 5010 Hz × NOTCHF_RAW - 990 Hz (0.25 at 262 Hz,
+  partly under the 70 Hz cut; 0.50 at 1473; 0.75 at 2777), about 340
+  Hz wide at -6 dB and 42 to 45 dB deep, and 0 and 1 fall outside the
+  passband. Its width can't be set over CAT. Every rig starts from that
+  line; each time the noise shows the dip (`EdgeFinder::dip`, 15 dB or
+  more down, at least 170 Hz inside the passband's edges) the line moves
+  to it, and a second dip at least 0.1 away sets its slope too. That is
+  kept per rig and mode (`/Ear/Notch/<rig>/<mode>`, "Hz-per-unit offset
+  last-position last-Hz"), so the bar learns where the notch really
+  lands. Steps of the rig's 0 to 255 are about 20 Hz.
 - **Revert.** The first filter the Ear reads is what
   the rig had. This button puts it back (once quiet), and so does
   quitting Ragtime when it ever changed the filter: `MainFrame` keeps the
@@ -1270,11 +1323,15 @@ words and the scope.
   edges in 45 s gives up and puts the knobs back. The model is kept per
   rig, mode and width (`/Ear/Calibration/<rig>/<mode>/<width>`, "k
   centre width nominal floor ceiling"; an older single number is
-  ignored), written at once. It takes about half a minute on a quiet
-  band. On the bench, against a pretend IC-7100 through the fake
-  rigctld, it measured 3050 Hz per knob against 3000.
+  ignored), written at once, and the line says what it found, kept short
+  to fit: "Calibrated: 2850 Hz a turn, 3050 Hz wide about 1480 Hz, cut
+  below 70 Hz. Drag an edge or the middle." It takes about a minute on a
+  quiet band. On the bench, against a pretend IC-7100 through the fake
+  rigctld, it measured 3050 Hz per knob against 3000; on Jeff's IC-7100
+  (Hamlet, 2026-10-26) 2850 Hz per turn, 3050 Hz wide about 1480 Hz, and
+  the 70 Hz cut, within 5% of his hand measures (3000, 3140, 1497).
 - **The flight recorder** has every write and why:
-  `rig filter set USB 2400 Hz PBT_IN 0.67 PBT_OUT 0.51 (on trial)`, then
+  `rig filter set USB 2400 Hz PBT_IN 0.67 PBT_OUT 0.51 NF 0.50 (on trial)`, then
   `(put back)`, `(put back: the Ear closed)`, `(put back as found:
   Ragtime closed)` or a Calibrate step; the readings that follow are
   logged as in step 2.

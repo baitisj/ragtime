@@ -48,8 +48,10 @@
 // or --rig-noise DB, a few dB more now and then, and a station at -10 dB
 // one reading in six. For the Ear it answers "+m" with USB and a
 // 2400 Hz filter, and "+l PBT_IN" and "+l PBT_OUT" with the knob in the
-// middle (0.5), and takes the Ear's settings, "M USB 1800" and
-// "L PBT_IN 0.6510", printing each and answering with them after. It
+// middle (0.5), "+u MN" (the manual notch, off) and "+l NOTCHF_RAW"
+// (0.5), and takes the Ear's settings, "M USB 1800", "L PBT_IN 0.6510",
+// "U MN 1" and "L NOTCHF_RAW 0.25", printing each and answering with them
+// after. It
 // prints anything else it is sent (Ragtime should only ever ask those).
 // --rig-vfo plays one started with --vfo: \chk_vfo is 1, and it answers
 // "f currVFO" and "+l currVFO ALC", but not a bare "f".
@@ -161,7 +163,8 @@ void readSome(int fd, std::vector<uint8_t>& out)
 
 // A rigctld that knows the questions Ragtime asks: "\chk_vfo", "f", the
 // dial frequency ("f currVFO" when it plays --vfo), the levels and "+m";
-// and takes the Ear's filter settings, "M" and "L PBT_IN", "L PBT_OUT".
+// and takes the Ear's filter settings, "M", "L PBT_IN", "L PBT_OUT",
+// "U MN" and "L NOTCHF_RAW".
 class FakeRig
 {
 public:
@@ -228,10 +231,16 @@ public:
                         std::snprintf(value, sizeof value, "%.6f\n", 38.0);
                     else if (level == "PBT_IN" || level == "PBT_OUT")
                         std::snprintf(value, sizeof value, "%.6f\n", level == "PBT_IN" ? pbtIn_ : pbtOut_);
+                    else if (level == "NOTCHF_RAW")
+                        std::snprintf(value, sizeof value, "%.6f\n", notchRaw_);
                     else if (level == "STRENGTH")
                         std::snprintf(value, sizeof value, "%d\n",
                                       ++strengths_ % 6 == 0 ? -10 : noise_ + (int)(nowMs / 5000 % 4));
                     answer = head + (value[0] != 0 ? std::string(value) + "RPRT 0\n" : std::string("RPRT -11\n"));
+                }
+                else if (line == (vfo_ ? "+u currVFO MN" : "+u MN"))
+                {
+                    answer = "get_func: " + line.substr(3) + "\n" + (notchOn_ ? "1" : "0") + "\nRPRT 0\n";
                 }
                 else if (line == (vfo_ ? "+m currVFO" : "+m"))
                 {
@@ -290,9 +299,16 @@ private:
         }
         std::string level;
         double v = 0;
-        if (command != "L" || !(in >> level >> v) || v < 0 || v > 1) return false;
+        if ((command != "L" && command != "U") || !(in >> level >> v) || v < 0 || v > 1) return false;
+        if (command == "U")
+        {
+            if (level != "MN") return false;
+            notchOn_ = v != 0;
+            return true;
+        }
         if (level == "PBT_IN") pbtIn_ = v;
         else if (level == "PBT_OUT") pbtOut_ = v;
+        else if (level == "NOTCHF_RAW") notchRaw_ = v;
         else return false;
         return true;
     }
@@ -301,6 +317,8 @@ private:
     int width_ = 2400;
     double pbtIn_ = 0.5;
     double pbtOut_ = 0.5;
+    bool notchOn_ = false;
+    double notchRaw_ = 0.5;
     int listener_ = -1;
     uint64_t dialHz_;
     bool hop_;

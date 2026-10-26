@@ -51,6 +51,11 @@ struct EarRig
 // (ear::KnobModel) for the rig, mode and width. The write hook goes to
 // RigControl, which writes through Hamlib or rigctld, only with the box
 // ticked.
+//
+// The notch's bar on the scope is a change like any other: dragged into
+// the spectrum it turns the notch on there, dragged to its bay off. Where
+// the noise shows the notch's dip, ear::NotchModel learns from it, kept
+// for the rig and mode.
 class EarFilterBar : public wxPanel
 {
 public:
@@ -66,6 +71,14 @@ public:
 
 private:
     void dragged(const ragtime::ear::Span& from, const ragtime::ear::Span& wanted);
+    void notchMoved(std::optional<double> hz);
+    // The notch as the scope draws it, the dip the noise shows, and what
+    // the model learns from it.
+    void showNotch(ragtime::ear::EdgeFinder& edges);
+    // The notch model for the rig and mode now.
+    const ragtime::ear::NotchModel& notchModel();
+    // Whether the setting on trial or waiting cuts into Data2G's passband.
+    bool cutsData2G() const;
     void recall(int n);
     void store(int n);
     void calibrate();
@@ -87,12 +100,15 @@ private:
     std::optional<ragtime::ear::Span> spanNow() const;
     void finishCalibration();
     void showPresets();
+    void disableFilters();
     void change(const ragtime::radio::RigFilter& to, const std::optional<ragtime::ear::Span>& wanted);
 
     EarScope* scope_;
     ragtime::ear::FilterEdit& edit_;
     Write write_;
+    PresetButton* disable_ = nullptr;
     std::array<PresetButton*, 4> presets_{};
+    std::array<std::optional<ragtime::radio::RigFilter>, 4> presetFilters_{};   // what each holds
     wxButton* calibrate_ = nullptr;
     wxButton* putBack_ = nullptr;
     wxStaticText* line_ = nullptr;
@@ -123,6 +139,11 @@ private:
     uint64_t calibrationStepMs_ = 0;
     std::string calibrationNews_;           // its outcome, until the next change
     int ticks_ = 0;
+
+    std::string notchKey_;                  // notchModel_'s rig and mode
+    ragtime::ear::NotchModel notchModel_;
+    std::optional<double> dipHz_;           // where the noise shows the notch
+    std::optional<double> learnedRaw_;      // the position the model last learned at
 };
 
 #endif

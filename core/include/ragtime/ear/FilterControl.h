@@ -29,6 +29,13 @@
 // keyed and never while a burst is heard. Then it is on trial for KEEP_MS,
 // the clock beside Undo, and goes back unless the operator presses Keep.
 //
+// The notch (Jeff, 2026-10-26). Where the rig has a manual notch (Hamlib's
+// MN and NOTCHF_RAW), its bar is dragged into the spectrum to turn it on
+// there, and back to its bay (NF OFF) to turn it off. NOTCHF_RAW is a
+// position, 0 to 1, not Hz: ear::NotchModel turns one into the other,
+// starting from Jeff's IC-7100 and learning from where the dip shows in
+// the noise (EdgeFinder::dip).
+//
 // The time is always passed in, so tests run it on a simulated clock.
 #ifndef RAGTIME_EAR_FILTER_CONTROL_H
 #define RAGTIME_EAR_FILTER_CONTROL_H
@@ -78,6 +85,49 @@ struct KnobModel
     static std::optional<KnobModel> fromText(const std::string& text);
 };
 
+// Where the notch's position puts it in the audio. Measured on Jeff's
+// IC-7100 in PKTUSB with a 3000 Hz filter (2026-10-26): the dip's centre
+// is about 5010 Hz x NOTCHF_RAW - 990 Hz (0.25 at 262 Hz, 0.50 at 1473,
+// 0.75 at 2777), about 340 Hz wide at -6 dB and 42 to 45 dB deep; 0 and 1
+// lie outside the passband. Other rigs start from the same line, and each
+// dip measured corrects it: one moves the line, a second far enough from
+// the first sets its slope too. Kept for each rig and mode.
+struct NotchModel
+{
+    static constexpr double HZ_PER_UNIT = 5010;
+    static constexpr double OFFSET_HZ = -990;
+    static constexpr double WIDTH_HZ = 340;
+    // Two dips this far apart in position give the slope.
+    static constexpr double SLOPE_SPAN = 0.1;
+
+    double hzPerUnit = HZ_PER_UNIT;
+    double offsetHz = OFFSET_HZ;
+    // The last dip measured.
+    std::optional<double> seenRaw;
+    std::optional<double> seenHz;
+
+    double hzOf(double raw) const { return hzPerUnit * raw + offsetHz; }
+    // The position for a centre, in the rig's steps, 0 to 1.
+    double rawFor(double hz) const;
+    // A dip found at hz with the notch at raw.
+    void learn(double raw, double hz);
+    // Whether it has learned from a dip.
+    bool learned() const { return seenRaw.has_value(); }
+
+    // "5010.0 -990.0 0.6824 2430.0", the last two a dash for none, in the
+    // C locale; and back.
+    std::string text() const;
+    static std::optional<NotchModel> fromText(const std::string& text);
+};
+
+// Whether a notch at hz cuts into Data2G's passband.
+bool notchCutsData2G(double hz, bool narrow);
+// The notch's change, or empty: "Notch on at 1500 Hz", "Notch 1500 →
+// 1200 Hz", "Notch off".
+std::string notchChangeText(const RigFilter& from, const RigFilter& to, const NotchModel& m);
+// The notch on, centred at hz (off with none), the rest as it is.
+RigFilter withNotch(const RigFilter& now, std::optional<double> hz, const NotchModel& m);
+
 // A knob's shift in Hz, and back.
 double knobShift(std::optional<double> knob, double hzPerKnob);
 // The passband a setting gives: the filter's own, past any cut in the
@@ -89,8 +139,11 @@ Span spanOf(const RigFilter& f, double centreHz, double hzPerKnob);
 double centreOf(const Span& measured, const RigFilter& f, double hzPerKnob);
 // The passband to set for a drag of the edges the noise shows from `from`
 // to `to`: each edge moves as far as it was dragged from where the model
-// puts it, so an edge hidden under a cut, or measured a little off the
-// model, stays where it is when only the other is dragged.
+// puts it, so an edge measured a little off the model stays where it is
+// when only the other is dragged. An edge the model puts under a cut in
+// the audio shows at the cut, not where it is, so dragged by itself it
+// goes where it was dropped (Hamlet, 2026-10-26: the IC-7100's low edge at -72 Hz,
+// shown at 70, dropped at 400 landed at 280 when moved by the drag).
 Span dragTarget(const Span& from, const Span& to, const RigFilter& now, const KnobModel& m);
 // A width the rig takes: 50 Hz steps to 500 Hz, then 100 Hz (an Icom's
 // steps; other rigs round as they will), at least 50 Hz.
@@ -109,6 +162,16 @@ RigFilter shiftedBy(const RigFilter& now, double hz, double hzPerKnob);
 // so a shift made with it may land a little off; the edges in the noise
 // show where it went.
 double guessHzPerKnob(const RigFilter& f);
+// Disable (Jeff, 2026-10-26): the setting with the PBT centred and the
+// notch off, the mode and width as they are; and whether a setting has
+// them so (a knob the rig hasn't counts as centred, a notch it hasn't as
+// off).
+RigFilter disabled(const RigFilter& now);
+bool filtersOff(const RigFilter& f);
+// The rig has what a preset holds: the same mode and width, the knobs
+// and the notch within one and a half of the rig's steps. Parts the
+// preset doesn't hold match anything.
+bool holds(const RigFilter& rig, const RigFilter& preset);
 // Whether a passband cuts into Data2G's (the wide modes', or the 500 Hz
 // ones' with the 500 Hz switch on), by more than 10 Hz.
 bool cutsData2G(const Span& span, bool narrow);
@@ -161,6 +224,10 @@ public:
     bool reverting() const { return state_ == State::Waiting && revert_; }
     // Seconds left on the clock, while on trial.
     double secondsLeft(uint64_t nowMs) const;
+    // The clock stands still while held (the pointer on Undo or Keep, so
+    // reaching for Keep never loses the change).
+    void hold(bool held, uint64_t nowMs);
+    bool held() const { return held_; }
     const std::optional<RigFilter>& found() const { return found_; }
     const std::optional<RigFilter>& current() const { return current_; }
     // The trial or waiting setting.
@@ -180,6 +247,8 @@ private:
     bool dirty_ = false;        // written since before_
     bool everWritten_ = false;
     uint64_t deadlineMs_ = 0;
+    bool held_ = false;
+    uint64_t heldLeftMs_ = 0;       // left on the clock when held
 };
 
 // Calibrate: how far a knob's turn moves an edge, measured from the noise.
