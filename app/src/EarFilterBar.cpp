@@ -150,20 +150,29 @@ EarFilterBar::EarFilterBar(wxWindow* parent, EarScope* scope, FilterEdit& edit, 
         wanted_.reset();
         if (edges_) show(nowMs_, *edges_);
     });
-    scope_->onDrag([this](const Span& wanted) { dragged(wanted); });
+    scope_->onDrag([this](const Span& from, const Span& to) { dragged(from, to); });
 }
 
-double EarFilterBar::hzPerKnob() const
+ear::KnobModel EarFilterBar::model(const RigFilter& f) const
+{
+    if (!rig_.key.empty())
+    {
+        const std::string key = rig_.key + "/" + f.mode + "/" + std::to_string(f.widthHz);
+        if (key != calibrationKey_)
+        {
+            calibrationKey_ = key;
+            calibrated_ = loadEarCalibration(rig_.key, f.mode, f.widthHz);
+        }
+        if (calibrated_) return *calibrated_;
+    }
+    const ear::Passband d = ear::data2gPassband(false);
+    return ear::KnobModel::about(centre_.value_or((d.lowHz + d.highHz) / 2), f);
+}
+
+bool EarFilterBar::calibrated() const
 {
     const std::optional<RigFilter> f = setting();
-    if (!f || rig_.key.empty()) return 0;
-    const std::string key = rig_.key + "/" + f->mode + "/" + std::to_string(f->widthHz);
-    if (key != calibrationKey_)
-    {
-        calibrationKey_ = key;
-        calibrationHz_ = loadEarCalibration(rig_.key, f->mode, f->widthHz);
-    }
-    return calibrationHz_;
+    return f && f->pbtIn && f->pbtOut && model(*f).known();
 }
 
 std::optional<RigFilter> EarFilterBar::setting() const
@@ -175,8 +184,8 @@ std::optional<RigFilter> EarFilterBar::setting() const
 
 std::optional<Span> EarFilterBar::spanOfFilter(const RigFilter& f) const
 {
-    const ear::Passband d = ear::data2gPassband(false);
-    return ear::spanOf(f, centre_.value_or((d.lowHz + d.highHz) / 2), hzPerKnob());
+    const ear::KnobModel m = model(f);
+    return ear::visible(ear::spanOf(f, m), m);
 }
 
 std::optional<Span> EarFilterBar::measured(const ear::EdgeFinder& edges) const
@@ -210,10 +219,11 @@ void EarFilterBar::tick(uint64_t nowMs, bool quiet, ear::EdgeFinder& edges, cons
         miss_.clear();
     }
 
-    // Where the passband sits with the knobs centred, from the noise.
+    // Not calibrated: where the passband sits with the knobs centred, from
+    // the noise (Calibrate learns it better, past any cut in the audio).
     if (!calibration_.running() && edit_.state() == FilterEdit::State::Idle && rig.filter && edit_.current() &&
-        readsBack(*rig.filter, *edit_.current()))
-        if (auto m = measured(edges)) centre_ = ear::centreOf(*m, *rig.filter, hzPerKnob());
+        readsBack(*rig.filter, *edit_.current()) && !model(*rig.filter).known())
+        if (auto m = measured(edges)) centre_ = m->centre();
 
     if (calibration_.running())
     {
@@ -247,7 +257,9 @@ void EarFilterBar::tick(uint64_t nowMs, bool quiet, ear::EdgeFinder& edges, cons
     {
         if (auto m = measured(edges))
         {
-            const double off = std::max(std::fabs(m->lowHz - wanted_->lowHz), std::fabs(m->highHz - wanted_->highHz));
+            // What the noise can show of what was wanted, past a cut.
+            const Span want = ear::visible(*wanted_, model(*edit_.pending()));
+            const double off = std::max(std::fabs(m->lowHz - want.lowHz), std::fabs(m->highHz - want.highHz));
             miss_ = std::string((off > MISS_HZ ? "missed by " + std::to_string(tens(off)) + " Hz: noise shows "
                                                : std::string("noise shows ")) +
                                 std::string(spanText(*m).utf8_str()));
@@ -258,8 +270,7 @@ void EarFilterBar::tick(uint64_t nowMs, bool quiet, ear::EdgeFinder& edges, cons
     const bool canDrag = rig.canSet && setting() && !calibration_.running() && !restore_ &&
                          edit_.state() != FilterEdit::State::Waiting;
     const std::optional<RigFilter> f = setting();
-    scope_->setHandles(canDrag ? spanNow() : std::nullopt,
-                       hzPerKnob() == 0 || !f || !f->pbtIn || !f->pbtOut);
+    scope_->setHandles(canDrag ? spanNow() : std::nullopt, !calibrated());
     if (edit_.state() == FilterEdit::State::Idle) wanted_.reset();
     scope_->setWanted(wanted_);
 
@@ -282,16 +293,14 @@ void EarFilterBar::closing()
     wanted_.reset();
 }
 
-void EarFilterBar::dragged(const Span& wanted)
+void EarFilterBar::dragged(const Span& from, const Span& wanted)
 {
     const std::optional<RigFilter> now = setting();
     if (!rig_.canSet || !now || calibration_.running()) return;
-    const std::optional<Span> s = spanNow();
-    const double centre = centre_ ? *centre_ : s ? s->centre() : wanted.centre();
-    const double k = hzPerKnob();
+    ear::KnobModel m = model(*now);
     // Uncalibrated, only the width: about the centre the passband has now.
-    const double c = k != 0 ? centre : s ? s->centre() : centre;
-    change(ear::settingFor(wanted, *now, c, k), wanted);
+    if (!m.known()) m.centreHz = from.centre();
+    change(ear::settingFor(ear::dragTarget(from, wanted, *now, m), *now, m), wanted);
 }
 
 void EarFilterBar::change(const RigFilter& to, const std::optional<Span>& wanted)
@@ -377,7 +386,7 @@ void EarFilterBar::runCalibration(uint64_t nowMs, bool quiet, ear::EdgeFinder& e
     }
     const bool settled = (rig_.filter && readsBack(*rig_.filter, *want)) || nowMs >= writtenMs_ + READ_BACK_MS;
     if (!settled || nowMs < writtenMs_ + SETTLE_MS) return;
-    if (calibration_.step() == 3)
+    if (calibration_.step() == ear::Calibration::PUT_BACK)
     {
         calibration_.measured(Span{});
         finishCalibration();
@@ -388,18 +397,22 @@ void EarFilterBar::runCalibration(uint64_t nowMs, bool quiet, ear::EdgeFinder& e
     calibration_.measured(*m);
     calibrationWritten_ = false;
     calibrationStepMs_ = nowMs;
-    // After the third measure the knobs go back; the result waits for that.
+    // After the last measure the knobs go back; the result waits for that.
 }
 
 void EarFilterBar::finishCalibration()
 {
     if (calibration_.result() && calibrationFrom_)
     {
-        saveEarCalibration(rig_.key, calibrationFrom_->mode, calibrationFrom_->widthHz, *calibration_.result());
+        const ear::KnobModel& m = *calibration_.result();
+        saveEarCalibration(rig_.key, calibrationFrom_->mode, calibrationFrom_->widthHz, m);
         calibrationKey_.clear();
-        calibrationNews_ = "Calibrated: the knobs' full travel moves an edge " +
-                           std::to_string(std::abs(tens(*calibration_.result()))) +
-                           " Hz. Drag one edge, or the middle to shift the passband.";
+        std::string news = "Calibrated: a knob's full turn moves an edge " + std::to_string(std::abs(tens(m.hzPerKnob))) +
+                           " Hz, and the filter passes " + std::to_string(tens(m.widthHz)) + " Hz about " +
+                           std::to_string(tens(m.centreHz)) + " Hz";
+        if (m.floorHz > 0) news += "; the audio cuts below " + std::to_string(tens(m.floorHz)) + " Hz";
+        if (m.ceilingHz > 0) news += "; the audio cuts above " + std::to_string(tens(m.ceilingHz)) + " Hz";
+        calibrationNews_ = news + ". Drag one edge, or the middle to shift the passband.";
     }
     else
     {
@@ -429,9 +442,9 @@ void EarFilterBar::showPresets()
         if (rig_.filter && !rig_.key.empty())
             if (auto p = loadEarPreset(rig_.key, rig_.filter->mode, i + 1))
             {
-                const double k = loadEarCalibration(rig_.key, p->mode, p->widthHz);
-                if (k != 0 && centre_ && p->pbtIn && p->pbtOut)
-                    detail = spanText(ear::spanOf(*p, *centre_, k));
+                const std::optional<ear::KnobModel> m = loadEarCalibration(rig_.key, p->mode, p->widthHz);
+                if (m && p->pbtIn && p->pbtOut)
+                    detail = spanText(ear::visible(ear::spanOf(*p, *m), *m));
                 else
                     detail = wxString::Format("%d Hz", p->widthHz);
             }
@@ -501,24 +514,20 @@ void EarFilterBar::show(uint64_t nowMs, const ear::EdgeFinder&)
     {
         text = "No rig in Settings > Rig: the Ear only shows the filter";
     }
-    else if (rig_.via == "rigctld")
-    {
-        text = "Read only through rigctld, which is shared. To drag the edges, open the rig with Hamlib "
-               "(Settings > Rig) and tick \"Let the Ear change the rig's filters\".";
-    }
     else if (!rig_.allowed)
     {
         text = "To drag the edges, tick \"Let the Ear change the rig's filters\" in Settings > Rig";
     }
     else if (!rig_.canSet)
     {
-        text = "The rig isn't open, so its filter can't be set";
+        text = rig_.via == "rigctld" ? "rigctld isn't answering, so the filter can't be set"
+                                     : "The rig isn't open, so its filter can't be set";
     }
     else if (!f)
     {
         text = "Waiting for the rig to say its filter";
     }
-    else if (hzPerKnob() == 0 || !f->pbtIn || !f->pbtOut)
+    else if (!calibrated())
     {
         text = f->pbtIn && f->pbtOut ? "Drag an edge to change the width: both edges move about the centre until "
                                        "Calibrate has measured the PBT knobs"

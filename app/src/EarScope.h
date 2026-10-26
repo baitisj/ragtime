@@ -50,7 +50,10 @@ public:
     // The handles: where they sit, or none to hide them. together: both
     // edges move about the centre.
     void setHandles(const std::optional<ragtime::ear::Span>& at, bool together);
-    void onDrag(std::function<void(const ragtime::ear::Span&)> done) { dragged_ = std::move(done); }
+    void onDrag(std::function<void(const ragtime::ear::Span& from, const ragtime::ear::Span& to)> done)
+    {
+        dragged_ = std::move(done);
+    }
     // The passband wanted, drawn dashed, or none.
     void setWanted(const std::optional<ragtime::ear::Span>& wanted);
 
@@ -87,7 +90,7 @@ private:
     std::optional<ragtime::ear::Span> handles_;
     bool together_ = false;
     std::optional<ragtime::ear::Span> wanted_;
-    std::function<void(const ragtime::ear::Span&)> dragged_;
+    std::function<void(const ragtime::ear::Span&, const ragtime::ear::Span&)> dragged_;
     Grip grip_ = Grip::None;        // being dragged
     double gripHz_ = 0;             // where the drag began
     ragtime::ear::Span dragFrom_;

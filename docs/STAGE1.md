@@ -1024,8 +1024,8 @@ where Jeff answered its questions. It comes in three steps, one PR each:
    (`m`, `l PBT_IN`, `l PBT_OUT`, through rigctld or Hamlib; Jeff said
    yes to those reads on his shared rigctld), drawn against the edges the
    noise shows.
-3. **Drag to set**, Hamlib only and behind an opt-in box in Settings >
-   Rig: handles, presets along the top (a tap recalls; press and hold
+3. **Drag to set**, behind an opt-in box in Settings > Rig, through
+   Hamlib or rigctld: handles, presets along the top (a tap recalls; press and hold
    stores, with a quick clock running down on the button), Keep and Undo
    with a clock that runs down beside Undo and puts the filter back when
    it runs out, "Put back as I found them", and Calibrate. Glissando
@@ -1129,11 +1129,16 @@ that differs from the last goes to the flight recorder, as
 
 ![The Ear with a 500 Hz filter that the rig calls 2400 Hz](images/ear-edges.png)
 
-**Setting the filter** (step 3). Only with the rig opened with Hamlib
-and "Let the Ear change the rig's filters" ticked (Settings > Rig, off by
-default, beside the keying box; Jeff, 2026-10-26). Through rigctld the
-Ear stays read only and says how to change that: rigctld is shared, and
-Ragtime never sets anything through it. The filter bar sits between the
+**Setting the filter** (step 3). Only with "Let the Ear change the rig's
+filters" ticked (Settings > Rig, off by default, beside "Receive only
+outside the US data segments"). With the rig opened with Hamlib,
+`HamlibRig` sets it. Through rigctld (Jeff, 2026-10-26: "Yes please. I do
+so allow"), `DialReader` sends `M USB 1800` when the mode or width
+changes, then `L PBT_IN 0.6510` and `L PBT_OUT 0.5000` (with `currVFO`
+for a `--vfo` rigctld), one at a time, each answered by an `RPRT`, and
+reads the filter back at once. A refusal stops the rest and shows in
+red. These are the only set commands Ragtime ever sends rigctld, and
+every program sharing it sees them. The filter bar sits between the
 words and the scope.
 
 ![Dragging the low edge up: on trial, with the clock beside Undo](images/ear-filter.png)
@@ -1150,13 +1155,24 @@ words and the scope.
   = centre + width/2 + min(in, out), each shift being hzPerKnob × (knob -
   0.5). So the low edge is one knob, the high edge the other, and a
   shift is both. Nobody publishes hzPerKnob for an Icom (its PBT reads as
-  the knob's position), so until Calibrate has measured it only the
-  width can change: both edges move together about the centre, and the
+  the knob's position), so until Calibrate has measured it
+  (`ear::KnobModel`) only the width can change: both edges move together about the centre, and the
   middle doesn't grab. Widening past the rig's width sets a wider width,
   as does narrowing past what the knobs reach (50 Hz steps to 500 Hz,
   then 100 Hz, as an Icom's DSP filter takes them). A width rewrites the
   rig's filter memory for that mode, which is why what the rig had is
   kept (below).
+- **On Jeff's IC-7100** (2026-10-26, PKTUSB with a 3000 Hz filter, PBT
+  turned through his rigctld with his OK): the model holds. Turning a
+  knob up moves only the low edge, down only the high edge, both up
+  shifts the passband, and PBT_IN and PBT_OUT act the same. A full turn
+  moves an edge about 3000 Hz, the filter's width. The filter really
+  passes about 3140 Hz at -6 dB, about 1500 Hz, so with the knobs
+  centred its low edge is near -70 Hz, under a cut in the audio at about
+  70 Hz: the noise shows 70 Hz there, not the edge. A drag goes from the
+  model's edges, not the noise's: each edge moves as far as it was
+  dragged (`ear::dragTarget`), so dragging the high edge leaves the
+  hidden low one where it is.
 - **Between bursts, then on trial** (`ear::FilterEdit`). A change waits
   for a quiet moment: data2g-host not keyed and no burst in the last half
   second, and `HamlibRig` itself never writes while it is keying or a
@@ -1176,27 +1192,37 @@ words and the scope.
   rig has now, with a quick clock running down in the button's corner
   for the second it takes, and "Stored" under its name. Let go before
   the clock runs out and it is a tap. They are kept per rig and mode
-  (`/Ear/Presets/<rig>/<mode>/<n>`, the rig being `hamlib-<model>`), and
+  (`/Ear/Presets/<rig>/<mode>/<n>`, the rig being `hamlib-<model>` or
+  `rigctld`), and
   each says what it holds: the edges once calibrated, else the width.
 - **Put back as I found them.** The first filter the Ear reads is what
   the rig had. This button puts it back (once quiet), and so does
   quitting Ragtime when it ever changed the filter: `MainFrame` keeps the
   `FilterEdit`, so quitting puts the rig back even after the Ear has
-  closed, and `HamlibRig` writes a pending setting before it closes the
-  rig. Closing the Ear, or losing the rig (closed, the box unticked),
+  closed; `HamlibRig` writes a pending setting before it closes the
+  rig, and through rigctld every line goes at once before the
+  connection closes (`DialReader::flushFilter`). Closing the Ear, or losing the rig (closed, the box unticked),
   takes an unkept change back.
 - **Calibrate** (`ear::Calibration`). From the setting now it centres
-  both knobs and measures the passband, turns PBT_IN up by 0.15 and
-  measures, turns it back and PBT_OUT down by 0.15 and measures, then
-  puts the knobs back. Each turn moves one filter, so an edge moves
-  hzPerKnob × 0.15: the two turns must agree within 30%, and each edge
-  must move at least 40 Hz, or it says why not. Each measure waits for
-  the rig to read the setting back and 4 s of quiet in a fresh average;
-  a step that sees no clear edges in 45 s gives up and puts the knobs
-  back. The answer is kept per rig, mode and width
-  (`/Ear/Calibration/...`), written at once. It takes about 20 s on a
-  quiet band. On the bench, against a pretend radio of 1800 Hz per knob,
-  it measured 1760.
+  both knobs and measures the passband; turns PBT_IN up by 0.15 and by
+  0.30, measuring each; turns it back and PBT_OUT down by 0.15 and by
+  0.30, measuring each; then puts the knobs back. Each pair moves one
+  edge, and the move between its two turns gives hzPerKnob: two turns
+  from one side, not one from the centre, because an edge at the centre
+  can hide under a cut in the audio, as the IC-7100's low edge does (one
+  turn from the centre showed two thirds of the move there, and the two
+  knobs would have disagreed). The two pairs must agree within 30%, and
+  each edge must move at least 40 Hz, or it says why not. From the same
+  measures come the real centre and width with the knobs centred, and
+  where a cut hides an edge (the centred measure short of the edge the
+  turns put there). Each measure waits for the rig to read the setting
+  back and 4 s of quiet in a fresh average; a step that sees no clear
+  edges in 45 s gives up and puts the knobs back. The model is kept per
+  rig, mode and width (`/Ear/Calibration/<rig>/<mode>/<width>`, "k
+  centre width nominal floor ceiling"; an older single number is
+  ignored), written at once. It takes about half a minute on a quiet
+  band. On the bench, against a pretend IC-7100 through the fake
+  rigctld, it measured 3050 Hz per knob against 3000.
 - **The flight recorder** has every write and why:
   `rig filter set USB 2400 Hz PBT_IN 0.67 PBT_OUT 0.51 (on trial)`, then
   `(put back)`, `(put back: the Ear closed)`, `(put back as found:

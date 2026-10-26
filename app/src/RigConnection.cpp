@@ -54,6 +54,9 @@ void RigConnection::start(const std::string& host, int port)
 
 void RigConnection::stop()
 {
+    // A filter put back as found goes before the line closes.
+    reader_.flushFilter();
+    write();
     close(std::string());
     running_ = false;
     reconnect_.connected();
@@ -70,6 +73,12 @@ void RigConnection::setKeyed(bool keyed)
 void RigConnection::setFilterWatch(bool on)
 {
     reader_.setFilterWatch(on, HostConnection::nowMs());
+    write();
+}
+
+void RigConnection::setFilter(const ragtime::radio::RigFilter& filter)
+{
+    reader_.setFilter(filter, HostConnection::nowMs());
     write();
 }
 

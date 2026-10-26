@@ -8,6 +8,7 @@
 
 #include "ragtime/broadcast/Seals.h"
 #include "ragtime/broadcast/Stations.h"
+#include "ragtime/ear/FilterControl.h"
 #include "ragtime/gearbox/Gearbox.h"
 #include "ragtime/radio/RigFilter.h"
 #include "ragtime/radio/RigSettings.h"
@@ -66,9 +67,11 @@ void saveString(const char* key, const std::string& value);
 constexpr int EAR_PRESETS = 4;
 std::optional<ragtime::radio::RigFilter> loadEarPreset(const std::string& rig, const std::string& mode, int n);
 void saveEarPreset(const std::string& rig, int n, const ragtime::radio::RigFilter& filter);
-// Hz per knob, or 0 when not calibrated.
-double loadEarCalibration(const std::string& rig, const std::string& mode, int widthHz);
-void saveEarCalibration(const std::string& rig, const std::string& mode, int widthHz, double hzPerKnob);
+// What Calibrate learned, if it has run for this rig, mode and width.
+std::optional<ragtime::ear::KnobModel> loadEarCalibration(const std::string& rig, const std::string& mode,
+                                                          int widthHz);
+void saveEarCalibration(const std::string& rig, const std::string& mode, int widthHz,
+                        const ragtime::ear::KnobModel& model);
 
 // The broadcast numbering is kept across restarts, one for each callsign
 // (docs/PROTOCOL.md, "Sequence numbers").

@@ -1,7 +1,8 @@
 // FilterControl: the Ear setting the rig's receive filter (docs/STAGE1.md,
-// "The Ear", step 3). Only with the rig opened with Hamlib and "Let the Ear
-// change the rig's filters" ticked (Settings > Rig, off by default); never
-// through rigctld, which is shared.
+// "The Ear", step 3). Only with "Let the Ear change the rig's filters"
+// ticked (Settings > Rig, off by default), with the rig opened with Hamlib
+// or through rigctld (Jeff's OK, 2026-10-26: rigctld is shared, so the box
+// is the operator's say-so).
 //
 // The model. Twin passband tuning runs two filters of the rig's width in a
 // row, each shifted by its own knob, and only their overlap passes. With
@@ -14,7 +15,11 @@
 // which is why dragging the low edge up moves one knob, the high edge down
 // the other, and the middle both. Nobody publishes hzPerKnob (an Icom's
 // PBT reads as the knob's position, 0 to 1), so Calibrate measures it from
-// the noise (ear::Calibration). Until then only the width can be set, and
+// the noise (ear::Calibration), with the passband's real centre and width
+// (the rig's width is nominal: Jeff's IC-7100 passes about 3140 Hz at
+// -6 dB for its 3000 Hz filter, and a full turn of either knob moves an
+// edge 3000 Hz) and any cut in the audio that hides an edge (about 70 Hz
+// there): ear::KnobModel. Until then only the width can be set, and
 // the edges move together about the centre. Widening past the width sets
 // a wider width, as does narrowing past what the knobs reach; a width
 // rewrites the rig's filter memory, so the first change keeps what the rig
@@ -52,18 +57,48 @@ struct Span
     double centre() const { return (lowHz + highHz) / 2; }
 };
 
+// What Calibrate learned of a rig's twin PBT, for one mode and width; or,
+// not calibrated, the centre and width the Ear goes by.
+struct KnobModel
+{
+    double hzPerKnob = 0;   // an edge's move for a full turn; 0 not known
+    double centreHz = 0;    // the passband's centre with the knobs centred
+    double widthHz = 0;     // its width then, at -6 dB
+    double nominalHz = 0;   // the width the rig said then
+    double floorHz = 0;     // a cut in the audio hides edges below this; 0 none
+    double ceilingHz = 0;   // and above this; 0 none
+
+    bool known() const { return hzPerKnob != 0; }
+    // Not calibrated: the edges move about this centre, the rig's width.
+    static KnobModel about(double centreHz, const RigFilter& f);
+
+    // "3000 1500 3140 3000 70 0", in the C locale, for the settings file;
+    // and back (nothing from anything else, an older single number too).
+    std::string text() const;
+    static std::optional<KnobModel> fromText(const std::string& text);
+};
+
 // A knob's shift in Hz, and back.
 double knobShift(std::optional<double> knob, double hzPerKnob);
-// The passband a setting gives.
+// The passband a setting gives: the filter's own, past any cut in the
+// audio; visible() is what the noise will show of it.
+Span spanOf(const RigFilter& f, const KnobModel& m);
+Span visible(const Span& s, const KnobModel& m);
 Span spanOf(const RigFilter& f, double centreHz, double hzPerKnob);
 // The centre with the knobs centred, from a passband measured with f set.
 double centreOf(const Span& measured, const RigFilter& f, double hzPerKnob);
+// The passband to set for a drag of the edges the noise shows from `from`
+// to `to`: each edge moves as far as it was dragged from where the model
+// puts it, so an edge hidden under a cut, or measured a little off the
+// model, stays where it is when only the other is dragged.
+Span dragTarget(const Span& from, const Span& to, const RigFilter& now, const KnobModel& m);
 // A width the rig takes: 50 Hz steps to 500 Hz, then 100 Hz (an Icom's
 // steps; other rigs round as they will), at least 50 Hz.
 int roundWidth(double hz, bool up);
 // The setting for the passband wanted, from the setting now: the knobs
 // where they reach (hzPerKnob known and the rig has them), the width for
 // the rest. The mode stays.
+RigFilter settingFor(const Span& wanted, const RigFilter& now, const KnobModel& m);
 RigFilter settingFor(const Span& wanted, const RigFilter& now, double centreHz, double hzPerKnob);
 // Whether a passband cuts into Data2G's (the wide modes', or the 500 Hz
 // ones' with the 500 Hz switch on), by more than 10 Hz.
@@ -136,14 +171,19 @@ private:
 };
 
 // Calibrate: how far a knob's turn moves an edge, measured from the noise.
-// From the setting now it centres both knobs and measures the passband,
-// turns PBT_IN up by STEP and measures again, then PBT_IN back and PBT_OUT
-// down by STEP, and measures a third time, then puts the setting back.
-// Each turn shifts one filter, so an edge moves by hzPerKnob * STEP (the
-// low edge up, or the high edge down if the knob runs the other way), and
-// the two turns are averaged. The caller writes what next() says, waits
-// for the rig to read it back and the noise to settle, and hands in the
-// passband measured.
+// It measures the passband with both knobs centred, then with PBT_IN up by
+// STEP and by twice STEP, then PBT_IN back and PBT_OUT down by STEP and by
+// twice STEP, then puts the setting back. Each pair of turns moves one edge
+// (the low one up, or the high one down if the knobs run the other way),
+// and the move between the two of a pair gives Hz per knob: two turns from
+// one side and not one from the centre, since an edge at the centre can
+// sit hidden under a cut in the audio (Jeff's IC-7100: its filter's low
+// edge is near -70 Hz, under a cut at 70 Hz, so a single turn up from the
+// centre showed two thirds of the move; measured 2026-10-26). The two
+// pairs must agree. From the same measures come the passband's real centre
+// and width with the knobs centred, and any cut that hides an edge. The
+// caller writes what setting() says, waits for the rig to read it back
+// and the noise to settle, and hands in the passband measured.
 class Calibration
 {
 public:
@@ -153,11 +193,14 @@ public:
     // An edge moving less than this is no measure.
     static constexpr double LEAST_HZ = 40;
 
+    // Steps 0 to MEASURES - 1 measure; PUT_BACK puts the setting back.
+    static constexpr int MEASURES = 5;
+    static constexpr int PUT_BACK = MEASURES;
+
     // Starts from the setting now, which must have both knobs.
     bool start(const RigFilter& now);
     void cancel();
-    bool running() const { return step_ >= 0 && step_ < 4; }
-    // 0 to 2 measure; 3 puts the setting back.
+    bool running() const { return step_ >= 0 && step_ <= PUT_BACK; }
     int step() const { return step_; }
 
     // The setting to write for this step, while running.
@@ -166,18 +209,18 @@ public:
     // measure: pass anything.
     void measured(const Span& span);
 
-    // Once done: Hz per knob (signed: negative when a knob runs the other
-    // way), or why there is none.
-    std::optional<double> result() const { return result_; }
+    // Once done: the model (Hz per knob signed: negative when a knob runs
+    // the other way), or why there is none.
+    const std::optional<KnobModel>& result() const { return result_; }
     const std::string& problem() const { return problem_; }
-    // "Measuring with the knobs centred (1 of 3)".
+    // "Measuring with the knobs centred (1 of 5)".
     std::string stepText() const;
 
 private:
     RigFilter original_;
     int step_ = -1;
     std::vector<Span> spans_;
-    std::optional<double> result_;
+    std::optional<KnobModel> result_;
     std::string problem_;
 };
 

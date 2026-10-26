@@ -414,22 +414,33 @@ void edgesFromNoise()
 }
 
 // A pretend IC-7100: its filter's passband follows its width and knobs,
-// by the model, with its own centre and Hz per knob.
+// by the model, with its own centre, Hz per knob, real width and a cut in
+// the audio that hides what lies under it.
 struct PretendRig
 {
-    double centreHz;
-    double hzPerKnob;
+    KnobModel truth;
     RigFilter filter;
 
     // The edges the noise shows after this many quiet seconds.
     std::optional<Edges> listen(std::mt19937& rng, double seconds = 4.0)
     {
         EdgeFinder f(10.0);
-        const Span s = spanOf(filter, centreHz, hzPerKnob);
+        const Span s = visible(spanOf(filter, truth), truth);
         for (int i = 0; i < (int)(seconds * 10); i++) f.addRow(noiseRow(rng, s.lowHz, s.highHz), false);
         return f.edges();
     }
 };
+
+KnobModel knobs(double k, double centre, double width = 0, double nominal = 0, double floor = 0)
+{
+    KnobModel m;
+    m.hzPerKnob = k;
+    m.centreHz = centre;
+    m.widthHz = width;
+    m.nominalHz = nominal;
+    m.floorHz = floor;
+    return m;
+}
 
 Span spanFrom(const Edges& e)
 {
@@ -495,6 +506,34 @@ void twinPbtModel()
     f = settingFor(Span{500, 2500}, usb(2400, 0.5, 0.5), 1500, 0);
     CHECK_EQ(f.widthHz, 2000);
     CHECK(f.pbtIn && *f.pbtIn == 0.5);
+
+    // The model as Calibrate learns it on Jeff's IC-7100: a 3000 Hz filter
+    // that passes 3140 Hz, its low edge under a cut at 70 Hz.
+    const KnobModel ic7100 = knobs(3000, 1499, 3140, 3000, 70);
+    s = spanOf(usb(3000), ic7100);
+    CHECK(std::fabs(s.lowHz + 71) < 1e-9 && std::fabs(s.highHz - 3069) < 1e-9);
+    s = visible(s, ic7100);
+    CHECK(std::fabs(s.lowHz - 70) < 1e-9 && std::fabs(s.highHz - 3069) < 1e-9);
+    // Another width keeps the extra 140 Hz.
+    s = spanOf(usb(2400), ic7100);
+    CHECK(std::fabs(s.width() - 2540) < 1e-9);
+    // The high edge dragged from what the noise shows: the hidden low edge
+    // stays where it is, and the low knob centred.
+    const Span shown{66, 3052};
+    Span target = dragTarget(shown, Span{66, 2452}, usb(3000), ic7100);
+    CHECK(std::fabs(target.lowHz + 71) < 1e-9 && std::fabs(target.highHz - 2469) < 1e-9);
+    f = settingFor(target, usb(3000), ic7100);
+    CHECK_EQ(f.widthHz, 3000);
+    CHECK(f.pbtIn && std::fabs(*f.pbtIn - 0.5) <= 1.0 / 255);
+    CHECK(f.pbtOut && *f.pbtOut < 0.5);
+    // Kept in the settings file as text, in any locale.
+    std::optional<KnobModel> back = KnobModel::fromText(ic7100.text());
+    CHECK(back && back->hzPerKnob == 3000 && back->centreHz == 1499 && back->widthHz == 3140 &&
+          back->nominalHz == 3000 && back->floorHz == 70 && back->ceilingHz == 0);
+    CHECK_EQ(ic7100.text(), std::string("3000.0 1499.0 3140.0 3000.0 70.0 0.0"));
+    CHECK(!KnobModel::fromText("2890"));
+    CHECK(!KnobModel::fromText(""));
+    CHECK(!KnobModel::fromText("0 1500 2400 2400 0 0"));
 
     // Cutting Data2G.
     CHECK(!cutsData2G(Span{300, 2700}, false));
@@ -586,18 +625,21 @@ void keepAndUndo()
 void calibrate()
 {
     std::mt19937 rng(11);
-    // Calibrate a pretend rig whose knobs move an edge 1800 Hz a full turn,
-    // centred at 1450 Hz, starting with the out knob a little down.
-    PretendRig rig{1450, 1800, usb(2400, 0.5, 0.45)};
+    // Calibrate a pretend IC-7100, as measured on Jeff's (2026-10-26): a
+    // full turn moves an edge 3000 Hz, its 3000 Hz filter passes 3140 Hz
+    // about 1499 Hz, and the audio cuts at 70 Hz, hiding the low edge with
+    // the knobs centred. Started with the out knob a little down.
+    PretendRig rig{knobs(3000, 1499, 3140, 3000, 70), usb(3000, 0.5, 0.45)};
     Calibration c;
     RigFilter noKnobs;
     noKnobs.mode = "USB";
-    noKnobs.widthHz = 2400;
+    noKnobs.widthHz = 3000;
     CHECK(!c.start(noKnobs));
     CHECK(c.start(rig.filter));
     int steps = 0;
     while (c.running() && steps++ < 10)
     {
+        CHECK(!c.stepText().empty());
         std::optional<RigFilter> f = c.setting();
         CHECK(f.has_value());
         if (!f) break;
@@ -606,26 +648,41 @@ void calibrate()
         CHECK(e.has_value());
         c.measured(e ? spanFrom(*e) : Span{});
     }
-    CHECK_EQ(steps, 4);
-    CHECK(rig.filter == usb(2400, 0.5, 0.45));     // put back
+    CHECK_EQ(steps, Calibration::MEASURES + 1);
+    CHECK(rig.filter == usb(3000, 0.5, 0.45));     // put back
     CHECK(c.result().has_value());
-    const double k = c.result().value_or(0);
-    CHECK(std::fabs(k - 1800) < 1800 * 0.08);
+    const KnobModel m = c.result().value_or(KnobModel{});
+    CHECK(std::fabs(m.hzPerKnob - 3000) < 3000 * 0.08);
+    CHECK(std::fabs(m.centreHz - 1499) < 40);
+    CHECK(std::fabs(m.widthHz - 3140) < 80);
+    CHECK_EQ(m.nominalHz, 3000.0);
+    CHECK(m.floorHz > 40 && m.floorHz < 110);
+    CHECK_EQ(m.ceilingHz, 0.0);
 
-    // Then a drag lands where it was meant to.
+    // Then a drag of the high edge lands where it was meant to, the low
+    // edge still hidden.
+    rig.filter = usb(3000);
     std::optional<Edges> now = rig.listen(rng);
     CHECK(now.has_value());
     if (now)
     {
-        const double centre = centreOf(spanFrom(*now), rig.filter, k);
-        CHECK(std::fabs(centre - 1450) < 30);
-        rig.filter = settingFor(Span{300, 2450}, rig.filter, centre, k);
+        const Span from = spanFrom(*now);
+        rig.filter = settingFor(dragTarget(from, Span{from.lowHz, 2450}, rig.filter, m), rig.filter, m);
         std::optional<Edges> after = rig.listen(rng);
-        CHECK(after && near(after->lowHz, 300, 40) && near(after->highHz, 2450, 40));
+        CHECK(after && near(after->lowHz, from.lowHz, 30) && near(after->highHz, 2450, 40));
+        // The middle 300 Hz up: the low edge comes into sight.
+        if (after)
+        {
+            const Span a = spanFrom(*after);
+            rig.filter =
+                settingFor(dragTarget(a, Span{a.lowHz + 300, a.highHz + 300}, rig.filter, m), rig.filter, m);
+            std::optional<Edges> shifted = rig.listen(rng);
+            CHECK(shifted && near(shifted->lowHz, 229, 40) && near(shifted->highHz, 2750, 40));
+        }
     }
 
     // A rig whose knobs do nothing: no measure, and says why.
-    PretendRig deaf{1500, 0, usb(2400)};
+    PretendRig deaf{knobs(0, 1500, 2400, 2400), usb(2400)};
     Calibration d;
     d.start(deaf.filter);
     while (d.running())

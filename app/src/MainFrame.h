@@ -195,8 +195,8 @@ private:
     void setGlobus(bool on);
     // The Ear, opened or closed (the ear button, View > Ear).
     void setEar(bool open);
-    // The Ear sets the rig's filter (Hamlib only; RigControl refuses
-    // rigctld), noted in the flight recorder with why.
+    // The Ear sets the rig's filter (RigControl writes only with the box
+    // ticked), noted in the flight recorder with why.
     void setRigFilter(const ragtime::radio::RigFilter& filter, const std::string& why);
     void placeTabToggle();
     void rememberDividers();

@@ -71,14 +71,13 @@ public:
     std::optional<double> noiseDb() const;
     // The Ear is open: read the rig's receive filter between bursts, its
     // mode, width and PBT (radio::RigFilter), through rigctld or Hamlib.
-    // Read only.
     void setFilterWatch(bool on);
     std::optional<ragtime::radio::RigFilter> filter() const;
-    // The Ear may set the filter: Hamlib, with "Let the Ear change the
-    // rig's filters" ticked, and the rig open.
+    // The Ear may set the filter: "Let the Ear change the rig's filters"
+    // ticked, and the Hamlib rig open or rigctld answering.
     bool canSetFilter() const;
-    // Writes it (Hamlib only, when allowed), between bursts; a rig not
-    // open now gets it once it is.
+    // Writes it (only when allowed), between bursts; a Hamlib rig not open
+    // now gets it once it is.
     void setFilter(const ragtime::radio::RigFilter& filter);
     // Why the last write failed, if it did.
     std::string filterProblem() const;
@@ -113,7 +112,8 @@ private:
     ragtime::radio::NoiseFloor noise_;
     std::string noiseBand_;         // the band noise_ was read on
     // Through rigctld the trip only stops data2g-host: Ragtime sends a
-    // shared rigctld no set commands, so it never unkeys or turns down.
+    // shared rigctld no set commands but the Ear's filter, so it never
+    // unkeys or turns down.
     ragtime::radio::SwrTrip rigctldTrip_;
     ragtime::radio::RigSettings settings_;
     bool started_ = false;

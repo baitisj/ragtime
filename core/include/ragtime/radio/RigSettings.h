@@ -78,7 +78,7 @@ struct RigSettings
 {
     RigSource source = RigSource::None;
 
-    // rigctld, read only.
+    // rigctld: read only, but for the Ear's filter settings (earFilters).
     std::string rigctldHost = "127.0.0.1";
     int rigctldPort = 4532;
 
@@ -105,7 +105,7 @@ struct RigSettings
     bool swrTrip = false;
 
     // The Ear may set the rig's receive filter (its width and twin PBT),
-    // Hamlib only, off by default (docs/STAGE1.md, "The Ear").
+    // through Hamlib or rigctld, off by default (docs/STAGE1.md, "The Ear").
     bool earFilters = false;
 };
 

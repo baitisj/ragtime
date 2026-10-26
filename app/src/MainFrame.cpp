@@ -2446,7 +2446,7 @@ void MainFrame::setEar(bool open)
             if (prefs_.rig.source != radio::RigSource::None) r.via = rig_->meterPath();
             r.filter = rig_->filter();
             if (rig_->readsNoise()) r.noiseDb = rig_->noiseDb();
-            r.allowed = prefs_.rig.source == radio::RigSource::Hamlib && prefs_.rig.earFilters;
+            r.allowed = prefs_.rig.source != radio::RigSource::None && prefs_.rig.earFilters;
             r.canSet = rig_->canSetFilter();
             r.problem = rig_->filterProblem();
             r.key = rig_->rigKey();

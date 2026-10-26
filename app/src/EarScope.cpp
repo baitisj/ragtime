@@ -193,7 +193,7 @@ void EarScope::mouseUp(wxMouseEvent&)
     Refresh();
     if (s && (std::fabs(s->lowHz - dragFrom_.lowHz) >= 10 || std::fabs(s->highHz - dragFrom_.highHz) >= 10) &&
         dragged_)
-        dragged_(*s);
+        dragged_(dragFrom_, *s);
 }
 
 void EarScope::addRows(const std::vector<std::vector<float>>& rows, bool transmitting)

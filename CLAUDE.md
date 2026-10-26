@@ -132,7 +132,8 @@ with the code when the seal rules change.
   the S-meter `+l STRENGTH` for the band's noise (`radio::NoiseFloor`,
   the gearshift's QRN line), and while the Ear is open the filter
   (`+m`, `+l PBT_IN`, `+l PBT_OUT`, Jeff's OK 2026-10-26), naming
-  `currVFO` for a `--vfo` one; `Bands`, the US data segments; `PathLog`, a line a
+  `currVFO` for a `--vfo` one, and sets only the Ear's filter (`M`,
+  `L PBT_IN`, `L PBT_OUT`, with its box ticked); `Bands`, the US data segments; `PathLog`, a line a
   burst heard, appended, and each station's 24-hour strip by band),
   `broadcast::WatchList` (bells, and Tell me when free), and in the app
   `RigConnection`, `PathStripView`, `PathsDialog` and `WatchDialog`.
@@ -145,7 +146,8 @@ with the code when the seal rules change.
   `app/src/RecentWorkPane`, under the station list in the `left_`
   splitter.
 - Rig control (2026-10-26, Andrew's suggestion, `docs/STAGE1.md`):
-  Settings > Rig picks no rig, the dial from rigctld (read only), or
+  Settings > Rig picks no rig, the dial from rigctld (read only, but for
+  the Ear's filter with its box ticked), or
   the rig opened with Hamlib (`radio::RigSettings`, `radio::hamlibConf`;
   `rig::HamlibRig` in `rig/`, on its own thread), with "Key the rig when
   data2g-host keys" (`radio::PttFollower`, off by default) following
@@ -158,7 +160,7 @@ with the code when the seal rules change.
   under the ALC meter (`app/src/SwrBar`), and the SWR trip (Settings >
   Rig, off by default, `radio::SwrTrip`) sends the host ABORT and holds
   sending until the operator clears it; with Hamlib it also unkeys the
-  rig and sets its power to 0 (through rigctld it sets nothing).
+  rig and sets its power to 0 (through rigctld it sets no power).
 - The flight recorder (2026-10-25, idea 2 of "Ideas before
   signatures"): `link::FlightRecorder` keeps every command line, KISS
   frame and session byte count to and from the host, with millisecond
@@ -176,15 +178,19 @@ with the code when the seal rules change.
   only while open. Step 2: it reads the rig's filter while open (mode,
   width, PBT; `radio::RigFilter`, through rigctld or Hamlib) and
   measures the real edges from the band's noise (`ear::EdgeFinder`),
-  drawing both. Step 3: with the rig opened with Hamlib and "Let the
-  Ear change the rig's filters" ticked (off by default), the edges are
-  dragged on the scope and the filter is set between bursts
+  drawing both. Step 3: with "Let the Ear change the rig's filters"
+  ticked (off by default; through Hamlib or rigctld, Jeff's OK
+  2026-10-26), the edges are dragged on the scope and the filter is set
+  between bursts
   (`ear::FilterEdit`, `ear::Calibration` in `ear/FilterControl`;
   `app/src/EarFilterBar`, `EarControls`): on trial for 15 s with a
   clock beside Undo and Keep, Keep pressed twice for a cut into Data2G's
   passband, four presets (tap recalls, hold stores), Put back as I found
-  them, and Calibrate for the twin PBT's Hz per knob. Quitting puts the
-  filter back as found (`MainFrame::filterEdit_`).
+  them, and Calibrate for the twin PBT (`ear::KnobModel`: Hz per knob,
+  the real centre and width, and a cut in the audio that hides an edge;
+  two turns each side, as Jeff's IC-7100 hides its low edge under a cut
+  at 70 Hz). Quitting puts the filter back as found
+  (`MainFrame::filterEdit_`).
 - Data2G PR #98 (merged 2026-10-23) gives SNRs: on `BCAST HEARD` and
   `MISSED`, and `SN` for the session partner. Ragtime shows them in the
   station list's SNR column and feeds the gearshift's Auto the weakest
@@ -266,12 +272,14 @@ with the code when the seal rules change.
   copy, never defined terms in the spec.
 - The radio is the source of truth for frequency: retune only when the
   operator asks. Ragtime reads the dial and the transmit meters from
-  rigctld (`\chk_vfo`, `f`, `+m` and `+l` levels only, never a set command:
-  the operator's rigctld is shared), or from the rig it
+  rigctld (`\chk_vfo`, `f`, `+m` and `+l` levels only: the operator's
+  rigctld is shared), or from the rig it
   opens with Hamlib, where PTT is the only thing it sets, the SWR
-  trip (off by default) the only thing that sets the power, to 0, and
-  the Ear (with its own box ticked, off by default) the only thing that
-  sets the receive filter's width and PBT, between bursts. It
+  trip (off by default) the only thing that sets the power, to 0. The
+  Ear, with its own box ticked (off by default), is the only thing that
+  sets the receive filter's width and PBT, between bursts, through
+  Hamlib or rigctld (`M` and `L PBT_IN`, `L PBT_OUT`, Jeff's OK
+  2026-10-26); it is the only set command Ragtime ever sends rigctld. It
   never keys through rigctld (NET rigctl is left out of the Hamlib
   list).
 
@@ -282,7 +290,7 @@ with the code when the seal rules change.
 | `core/` | `ragtime_core`, the socket-free library: no wx, no sockets in the engines, all unit-tested. Headers in `core/include/ragtime/`, sources in `core/src/`, one subfolder per area: `protocol/`, `link/`, `text/`, `files/` (package B; G adds `FileRows`, `FileTraffic`), `globus/` (C), `gearbox/` (D), `broadcast/` (E, with `BroadcastLog`; H adds `Airtime`, `Seals`, `BroadcastFiles`), `session/` (F, and `SessionLog`; `StreamLog` for cuts), `radio/` (the dial from rigctld, the US data segments, the path log, Recent work, the rig settings and the PTT follower), `ear/` (the Ear's spectrum, finding data2g-host's sound card in PipeWire's graph, the host's process by its port, Data2G's passbands, the filter's edges from the noise, the filter model, its trials and Calibrate). Add sources to `core/CMakeLists.txt` |
 | `audio/` | `ragtime_audio`: `audio::EarAudio`, the Ear's listener, PipeWire loaded with `dlopen` (never linked) on its own thread; with `-DRAGTIME_PIPEWIRE=OFF` (and on Windows) a stand-in that says the Ear needs PipeWire |
 | `rig/` | `ragtime_rig`: `rig::HamlibRig`, the rig opened with Hamlib on a thread of its own, Hamlib's rig list and the serial ports. Kept out of core (no ports there); with `-DRAGTIME_HAMLIB=OFF` a stand-in that says Hamlib is missing |
-| `app/` | The wxWidgets app (`app/src/`). It draws and wires; logic goes in core. `MainFrame` is the one main window and owns the engines; `HostConnection` (data2g-host) and `RigConnection` (rigctld, read only) are the only code with sockets, and `RigControl` holds the rig as Settings > Rig has it; `Prefs` holds every wxConfig key, and `appDataDir()` is where Ragtime keeps its own files (never wx's `GetUserDataDir()`: on Linux that is `~/.Ragtime`, the settings file); `app/src/globus/` is the Globus pane (`GlobusPanel`, `GlobusView`, `GlobusToggle`) |
+| `app/` | The wxWidgets app (`app/src/`). It draws and wires; logic goes in core. `MainFrame` is the one main window and owns the engines; `HostConnection` (data2g-host) and `RigConnection` (rigctld: questions, and the Ear's filter settings) are the only code with sockets, and `RigControl` holds the rig as Settings > Rig has it; `Prefs` holds every wxConfig key, and `appDataDir()` is where Ragtime keeps its own files (never wx's `GetUserDataDir()`: on Linux that is `~/.Ragtime`, the settings file); `app/src/globus/` is the Globus pane (`GlobusPanel`, `GlobusView`, `GlobusToggle`) |
 | `tests/` | ctest unit tests for core, plain executables on `tests/Check.h` (`CHECK`, `CHECK_EQ`). Add one with `ragtime_test(<name> <source>)` in `tests/CMakeLists.txt`. `FakeHost.*` is a fake data2g-host on loopback sockets (POSIX, so its test and the bench build only `if(UNIX)`); `FakeAirMain.cpp` is the bench `ragtime_fake_air`, and `ReplayHost.*` its `--replay` |
 | `tools/` | Reference scripts: `icon/` (`make_leaf_svg.py` draws the icon, the Maple Leaf Rag's leaf going digital, as `app/res/ragtime.svg`; `make_icons.sh` renders its PNG and ICO), `globe/` (sunlit globe renderer, and the generators of the map tables in `core/src/globus/`: coasts and borders from Natural Earth, the big lakes from `ne_110m_lakes.geojson`, state and province lines from Natural Earth's 1:10m admin-1 lines, fetched for the run, for the countries in `gen_admin1_lines.py`), `gearbox/` (ladders), `ear/` (`pretend_radio.sh`, a pretend radio and data2g-host recorder in PipeWire for the Ear, and `make_radio_noise.py`, its audio), `ham_table/` (text table 0 generator and corpus: `gen_table.py --check`), `gcc16/check.py` (GCC 16 check) |
 | `cmake/` | CMake helpers. `ragtime_warnings(<target>)` gives every target `-Wall -Wextra` and, with `RAGTIME_WERROR` (on by default), `-Werror`; `Toolchain-mingw64.cmake` (the Windows cross build), `BuildWxWidgets.cmake` (wxWidgets 3.2.9 cloned and built statically with `-DRAGTIME_BUILD_WX=ON`), `BuildHamlib.cmake` (Hamlib 4.5.5 cloned and built statically with autotools, `-DRAGTIME_BUILD_HAMLIB=ON`), `EmbedFile.cmake` (the window icon built in) |
@@ -349,8 +357,10 @@ PR #98. `--rig PORT` plays a rigctld for the dial (14.105 MHz, or
 in three; `--rig-vfo` plays a rigctld started with `--vfo`; it answers
 the meters too, its SWR 1.3 or `--rig-swr X`, and the S-meter, -40 dB
 over S9 or `--rig-noise DB`) and prints anything it is
-sent but `\chk_vfo`, `f`, the levels and `+m` (it says USB, a 2400 Hz
-filter and PBT centred, whatever the pretend radio's filter is). For Hamlib with no
+sent but `\chk_vfo`, `f`, the levels, `+m` and the Ear's settings (it
+starts at USB, a 2400 Hz filter and PBT centred, whatever the pretend
+radio's filter is, takes `M` and `L PBT_IN`, `L PBT_OUT`, prints each
+as `fake rigctld set: ...`, and answers with them after). For Hamlib with no
 radio, pick maker Hamlib, model Dummy in Settings > Rig: a pretend rig
 at 145 MHz, which "Key the rig" keys at the fake hosts' PTT. Headless:
 `Xvfb :91 &`, `DISPLAY=:91 ragtime ...`, `xdotool` to click and type,

@@ -226,16 +226,17 @@ void saveEarPreset(const std::string& rig, int n, const ragtime::radio::RigFilte
     config().Flush();
 }
 
-double loadEarCalibration(const std::string& rig, const std::string& mode, int widthHz)
+std::optional<ragtime::ear::KnobModel> loadEarCalibration(const std::string& rig, const std::string& mode,
+                                                          int widthHz)
 {
-    double v = 0;
-    config().Read(wxString::FromUTF8(calibrationKey(rig, mode, widthHz)), &v, 0.0);
-    return v;
+    // An older single number (Hz per knob alone) reads as none: calibrate again.
+    return ragtime::ear::KnobModel::fromText(loadString(calibrationKey(rig, mode, widthHz).c_str(), ""));
 }
 
-void saveEarCalibration(const std::string& rig, const std::string& mode, int widthHz, double hzPerKnob)
+void saveEarCalibration(const std::string& rig, const std::string& mode, int widthHz,
+                        const ragtime::ear::KnobModel& model)
 {
-    config().Write(wxString::FromUTF8(calibrationKey(rig, mode, widthHz)), hzPerKnob);
+    saveString(calibrationKey(rig, mode, widthHz).c_str(), model.text());
     // Half a minute of the operator's band: kept at once.
     config().Flush();
 }

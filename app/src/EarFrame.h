@@ -31,9 +31,9 @@ class wxStaticText;
 // Under the controls it says what the rig reports of its receive filter
 // (read between bursts while the Ear is open, through rigctld or Hamlib)
 // and the edges the band's noise shows (ear::EdgeFinder), and the scope
-// draws both: step 2 of docs/STAGE1.md's "The Ear". With the rig opened
-// with Hamlib and "Let the Ear change the rig's filters" ticked, the filter
-// bar (EarFilterBar) and the scope's handles set it: step 3.
+// draws both: step 2 of docs/STAGE1.md's "The Ear". With "Let the Ear
+// change the rig's filters" ticked (Hamlib or rigctld), the filter bar
+// (EarFilterBar) and the scope's handles set it: step 3.
 //
 // "Listen to" and the speed are kept in wxConfig (keys::EAR_SOURCE,
 // keys::EAR_SPEED). The window tells the owner when it closes.

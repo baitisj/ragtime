@@ -27,9 +27,10 @@ struct EarRig
     std::optional<ragtime::radio::RigFilter> filter;
     // The band's noise from the S-meter, in dB over S9 (the gearshift's QRN).
     std::optional<double> noiseDb;
-    // "Let the Ear change the rig's filters" is ticked (Hamlib only).
+    // "Let the Ear change the rig's filters" is ticked, with a rig chosen.
     bool allowed = false;
-    // The Ear may set the filter (Hamlib, the box ticked, the rig open).
+    // The Ear may set the filter (the box ticked, the rig open or rigctld
+    // answering).
     bool canSet = false;
     // Why the rig refused the last write, if it did.
     std::string problem;
@@ -46,9 +47,10 @@ struct EarRig
 // rig back after the Ear has closed): a drag on the scope or a preset is a
 // change, written once the band is quiet, then on trial for 15 s. A change
 // that cuts into Data2G's passband needs Keep pressed twice. Calibrate
-// (ear::Calibration) turns the knobs, measures, and keeps Hz per knob for
-// the rig, mode and width. Nothing here is written through rigctld: the
-// write hook goes to RigControl, which writes only with Hamlib.
+// (ear::Calibration) turns the knobs, measures, and keeps what it learned
+// (ear::KnobModel) for the rig, mode and width. The write hook goes to
+// RigControl, which writes through Hamlib or rigctld, only with the box
+// ticked.
 class EarFilterBar : public wxPanel
 {
 public:
@@ -63,14 +65,17 @@ public:
     void closing();
 
 private:
-    void dragged(const ragtime::ear::Span& wanted);
+    void dragged(const ragtime::ear::Span& from, const ragtime::ear::Span& wanted);
     void recall(int n);
     void store(int n);
     void calibrate();
     void runCalibration(uint64_t nowMs, bool quiet, ragtime::ear::EdgeFinder& edges);
     void write(const ragtime::radio::RigFilter& f, const std::string& why, ragtime::ear::EdgeFinder& edges);
     void show(uint64_t nowMs, const ragtime::ear::EdgeFinder& edges);
-    double hzPerKnob() const;
+    // Calibrate's model for this setting, or the centre and width the Ear
+    // goes by until it has run.
+    ragtime::ear::KnobModel model(const ragtime::radio::RigFilter& f) const;
+    bool calibrated() const;
     std::optional<ragtime::ear::Span> spanOfFilter(const ragtime::radio::RigFilter& f) const;
     std::optional<ragtime::ear::Span> measured(const ragtime::ear::EdgeFinder& edges) const;
     std::optional<ragtime::radio::RigFilter> setting() const;
@@ -102,8 +107,8 @@ private:
     std::string miss_;                      // where the edges really went
     uint64_t writtenMs_ = 0;
     std::optional<ragtime::radio::RigFilter> restore_;  // to write once quiet
-    mutable std::string calibrationKey_;            // hzPerKnob()'s cache: rig, mode, width
-    mutable double calibrationHz_ = 0;
+    mutable std::string calibrationKey_;    // model()'s cache: rig, mode, width
+    mutable std::optional<ragtime::ear::KnobModel> calibrated_;
     std::string presetsKey_;                // the presets shown: rig and mode
     bool trialShown_ = false;               // the clock, Undo and Keep are showing
 
