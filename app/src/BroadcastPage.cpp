@@ -23,6 +23,7 @@
 #include "GearshiftIcon.h"
 #include "Html.h"
 #include "PhraseHighlight.h"
+#include "ReactionChips.h"
 #include "SealBadge.h"
 #include "Theme.h"
 #include "ragtime/gearbox/Gearbox.h"
@@ -217,6 +218,7 @@ const int ID_RESEND = wxID_HIGHEST + 403;
 const int ID_COPY = wxID_HIGHEST + 404;
 const int ID_SEAL_LINE = wxID_HIGHEST + 405;
 const int ID_FILE_ACTION = wxID_HIGHEST + 410;     // and FILE_MENU_IDS after it
+const int ID_REACT = wxID_HIGHEST + 470;           // and REACTION_MENU_IDS after it
 
 } // namespace
 
@@ -240,7 +242,17 @@ protected:
     void OnLinkClicked(size_t n, const wxHtmlLinkInfo& link) override
     {
         const Message* m = at(n);
-        if (m != nullptr && m->file != 0 && owner_->onFileAction_)
+        if (m == nullptr) return;
+        if (uint8_t code = reactionHref(link.GetHref()))
+        {
+            // A chip: ours added to it, or, ours still waiting, taken back.
+            bool takeBack = code == m->myWaiting && owner_->chat_.reactionWaiting(m->id);
+            uint64_t id = m->id;
+            BroadcastPage* owner = owner_;
+            if (owner_->onReact_) owner_->CallAfter([owner, id, code, takeBack]() { owner->onReact_(id, takeBack ? 0 : code); });
+            return;
+        }
+        if (m->file != 0 && owner_->onFileAction_)
             owner_->onFileAction_(m->file, std::string(link.GetHref().utf8_str()));
     }
 
@@ -291,7 +303,12 @@ protected:
              << "<td valign=\"top\" nowrap><font" << colour(secondaryText()) << ">" << clock(m->atMs)
              << "</font></td>"
              << "<td valign=\"top\" width=\"100%\"><font" << body << "><b>" << htmlEscape(m->from) << "</b>&nbsp; "
-             << to << htmlEscape(m->text) << "</font></td>"
+             << to << htmlEscape(m->text) << "</font>";
+        // Its reactions, as chips under it.
+        wxString chips = reactionChipsHtml(m->reactions, m->myReaction, m->myWaiting, me, owner_->chat_.canReact(*m),
+                                           owner_->chat_.reactionWaiting(m->id), picked);
+        if (!chips.empty()) html << "<br>" << chips;
+        html << "</td>"
              << "<td valign=\"top\" nowrap align=\"right\">" << gear << "</td>"
              << "</tr></table>";
         return html;
@@ -653,6 +670,15 @@ void BroadcastPage::showMenu(int row)
         menu.AppendSeparator();
     }
     if (!m->ours) menu.Append(ID_REPLY, "Reply to " + wxString::FromUTF8(from));
+    if (chat_.canReact(*m))
+    {
+        uint8_t current = m->myWaiting != 0 ? m->myWaiting : m->myReaction;
+        menu.AppendSubMenu(reactionMenu(ID_REACT, current, chat_.reactionWaiting(id),
+                                        [this, id](uint8_t code) {
+                                            if (onReact_) onReact_(id, code);
+                                        }),
+                           "React");
+    }
     if (m->ours && m->state == State::Queued) menu.Append(ID_CANCEL, "Cancel");
     if (chat_.canResend(*m)) menu.Append(ID_RESEND, "Re-send");
     if (menu.GetMenuItemCount() > 0) menu.AppendSeparator();

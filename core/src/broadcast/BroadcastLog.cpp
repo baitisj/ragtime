@@ -175,6 +175,23 @@ std::vector<Message> parseBroadcastLog(const std::string& text, size_t max)
             any = true;
             lastMs = std::max(lastMs, atMs);
         }
+        else if ((kind == "X" && f.size() >= 6) || (kind == "Y" && f.size() >= 5))
+        {
+            // A reaction, to a line of this run or an earlier one: the
+            // newest line with that sender, number and time.
+            uint64_t seq = 0, time = 0, code = 0;
+            bool ours = kind == "Y";
+            if (!number(f[2], seq) || !number(f[3], time) || !number(f[ours ? 4 : 5], code) || code == 0 || code > 255)
+                continue;
+            std::string from = unescape(f[1]);
+            for (auto it = rows.rbegin(); it != rows.rend(); ++it)
+            {
+                if (it->kind != Kind::Text || it->from != from || it->seq != seq || it->time != time) continue;
+                if (ours) it->myReaction = (uint8_t)code;
+                else protocol::setReaction(it->reactions, unescape(f[4]), (uint8_t)code);
+                break;
+            }
+        }
         else if (kind == "R" && f.size() >= 3)
         {
             uint64_t id = 0;
@@ -287,6 +304,20 @@ void BroadcastLog::settled(const Message& m)
 {
     if (m.kind != Kind::Text) return;
     append(join({"S", std::to_string(m.id), std::string(1, stateLetter(m.state)), escape(m.mode)}));
+}
+
+void BroadcastLog::reacted(const Message& line, const std::string& call, uint8_t code)
+{
+    if (line.kind != Kind::Text) return;
+    append(join({"X", escape(line.from), std::to_string(line.seq), std::to_string(line.time), escape(call),
+                 std::to_string(code)}));
+}
+
+void BroadcastLog::weReacted(const Message& line, uint8_t code)
+{
+    if (line.kind != Kind::Text) return;
+    append(join({"Y", escape(line.from), std::to_string(line.seq), std::to_string(line.time),
+                 std::to_string(code)}));
 }
 
 void BroadcastLog::fileEnded(const Message& card, const std::string& outcome)

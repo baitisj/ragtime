@@ -206,6 +206,14 @@ and the Part 97 check.
   to 4, 8 or 12 kHz, or Auto fits it past the filter's high edge
   (`ear::AutoSpan`; FM and AM start at 8 kHz, and on FM the Ear draws
   and sets no filter).
+- Reactions (2026-10-26, Jeff's idea, `docs/STAGE1.md`): the Reaction
+  record (`0x14`) names one of 20 palette entries (12 emoji, 8 ham words,
+  `protocol/Reactions.h`, frozen like text table 0). On D2G ours rides
+  in our next burst within 30 s, else goes alone at most once a minute
+  (`BroadcastChat::react`); in a session it goes into the stream at
+  once (`SessionChat::react`). Chips under the line and a React submenu
+  (`app/src/ReactionChips`); Hello takes bit 6, so `TAKES_ALL_V0` is
+  `0x7F`.
 - Data2G PR #98 (merged 2026-10-23) gives SNRs: on `BCAST HEARD` and
   `MISSED`, and `SN` for the session partner. Ragtime shows them in the
   station list's SNR column and feeds the gearshift's Auto the weakest
@@ -359,7 +367,7 @@ bulletin 20 s later, and `--fade` gives their sessions a 45 s fade every
 two minutes, for Link quiet. Bots save the files you send them (in the
 temp folder) and offer their bulletin again when you mention a file;
 `--rate BPS` caps session bytes (400 a second by default) so transfers
-take a while. `--replay FOLDER` plays a flight recording (a report's
+take a while. The bots react to about one line in two. `--replay FOLDER` plays a flight recording (a report's
 `flight/`) on host A's ports instead of the air, with `--from TIME` and
 `--speed X` (docs/FLIGHT_RECORDER.md). The bots seal what they broadcast, answer repair requests
 and take broadcast files without asking; `--loss PCT` has hosts A and B

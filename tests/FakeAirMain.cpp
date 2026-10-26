@@ -3,7 +3,9 @@
 // stations of its own that check in, chat and answer, so the station list,
 // Globus and the Broadcast tab have something to show. The bots that take
 // sessions answer a Call and ragchew: they answer what you type, and
-// leave after you send 73.
+// leave after you send 73. They react to about one line in two, on D2G
+// and in a ragchew: 73 to a 73, a wave to a CQ, and otherwise a thumbs
+// up, a laugh, a cheer or FB.
 //
 //   ragtime_fake_air [--bots N] [--airtime MS] [--call CALL] [--fade] [--rate BPS]
 //                    [--loss PCT] [--files] [--no-snr] [--no-cut] [--no-reasons]
@@ -370,6 +372,16 @@ bool mentionsAFile(std::string text)
            || text.find("bulletin") != std::string::npos;
 }
 
+// The reaction a bot gives a line, 0 for none (about one line in two).
+uint8_t reactionFor(const std::string& text, std::mt19937& random)
+{
+    if (std::uniform_int_distribution<int>(0, 1)(random) == 0) return 0;
+    if (says73(text)) return 13;
+    if (text.find("CQ") != std::string::npos) return 9;
+    static const uint8_t SOME[] = {1, 1, 3, 6, 7, 18};
+    return SOME[std::uniform_int_distribution<size_t>(0, sizeof(SOME) - 1)(random)];
+}
+
 // A bot's folder, for its bulletin and what it is sent.
 std::filesystem::path botFolder(const char* call)
 {
@@ -456,6 +468,7 @@ struct Bot
             {
                 const session::Message* m = session.find(e.id);
                 if (m == nullptr) continue;
+                if (uint8_t code = reactionFor(m->text, random)) session.react(e.id, code, now);
                 if (mentionsAFile(m->text))
                 {
                     say("Sure, here comes my bulletin.", now + 3000);
@@ -575,6 +588,7 @@ struct Bot
             seals.onEvent(e, now);
             broadcasts.onEvent(e, now);
             std::vector<protocol::Record> heard = chat.onEvent(e, now);
+            const size_t heardFirst = heard.size();
             for (size_t i = 0; i < heard.size(); i++)
             {
                 const protocol::Record r = heard[i];
@@ -587,6 +601,16 @@ struct Bot
                     heard.push_back(again);
                 }
                 const protocol::Text* text = r.as<protocol::Text>();
+                if (text != nullptr && i < heardFirst)
+                {
+                    // A reaction now and then, to ride with its next burst.
+                    for (const broadcast::Message& m : chat.messages())
+                    {
+                        if (m.from != r.header.callsign || m.seq != r.header.seq || !chat.canReact(m)) continue;
+                        if (uint8_t code = reactionFor(m.text, random)) chat.react(m.id, code, now);
+                        break;
+                    }
+                }
                 if (text != nullptr && text->to == profile.call)
                 {
                     replyTo = r.header.callsign;

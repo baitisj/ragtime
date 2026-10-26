@@ -8,6 +8,7 @@
 
 #include "Check.h"
 #include "ragtime/protocol/Fields.h"
+#include "ragtime/protocol/Reactions.h"
 #include "ragtime/protocol/Records.h"
 #include "ragtime/protocol/Stream.h"
 
@@ -677,6 +678,71 @@ void testNeverAllZero()
 
 } // namespace
 
+void testReactions()
+{
+    // A thumbs up from AG7EW (its 7th) on W1AW's item 0x123456: 21 bytes,
+    // an Ack and one.
+    Reaction thumbs;
+    thumbs.to = "W1AW";
+    thumbs.item = 0x123456;
+    thumbs.code = 1;
+    std::vector<uint8_t> bytes = encodeRecord(make(thumbs));
+    CHECK_EQ(hexOf(bytes), std::string("1413077a22d80000076ad9520094218fc012345601"));
+    CHECK_EQ(bytes.size(), (size_t)21);
+    Record back = roundTrip(make(thumbs));
+    const Reaction* r = back.as<Reaction>();
+    CHECK(r != nullptr && r->to == "W1AW" && r->item == 0x123456 && r->code == 1);
+    // Code 0 is never sent, nor read.
+    thumbs.code = 0;
+    CHECK(encodeRecord(make(thumbs)).empty());
+    bytes.back() = 0;
+    const uint8_t* at = bytes.data();
+    Record bad;
+    CHECK(decodeRecord(at, bytes.data() + bytes.size(), bad) == DecodeResult::Malformed);
+    // A later field on the end is skipped, as with any fixed record.
+    thumbs.code = 13;
+    Record grown = make(Unknown{(uint8_t)RecordType::Reaction, {}});
+    std::vector<uint8_t> body = encodeRecord(make(thumbs));
+    std::vector<uint8_t> tail(body.begin() + 2 + 11, body.end());
+    tail.push_back(0x55);
+    grown.body = Unknown{(uint8_t)RecordType::Reaction, tail};
+    back = roundTrip(grown);
+    CHECK(back.as<Reaction>() != nullptr && back.as<Reaction>()->code == 13);
+
+    // The palette is frozen: a code keeps its meaning.
+    const auto& palette = reactionPalette();
+    CHECK_EQ(palette.size(), (size_t)20);
+    std::string all;
+    for (const ReactionEntry& e : palette) all += std::to_string(e.code) + "=" + e.shown + " ";
+    CHECK_EQ(all, std::string("1=\xF0\x9F\x91\x8D 2=\xE2\x9D\xA4\xEF\xB8\x8F 3=\xF0\x9F\x98\x82 4=\xF0\x9F\x98\xAE "
+                              "5=\xF0\x9F\x98\xA2 6=\xF0\x9F\x8E\x89 7=\xF0\x9F\x91\x8F 8=\xF0\x9F\x99\x8F "
+                              "9=\xF0\x9F\x91\x8B 10=\xE2\x98\x95 11=\xF0\x9F\x93\xBB 12=\xE2\x9A\xA1 13=73 14=88 "
+                              "15=R 16=QSL 17=TU 18=FB 19=HI HI 20=QRZ? "));
+    CHECK_EQ(reactionShown(13), std::string("73"));
+    CHECK_EQ(reactionShown(99), std::string("?"));
+    CHECK(reactionEntry(0) == nullptr);
+
+    // One per station, a later one replacing it; chips in palette order,
+    // ours last among its stations, the waiting one shown over the sent.
+    std::vector<Reacted> list;
+    CHECK(setReaction(list, "W1AW", 13));
+    CHECK(setReaction(list, "KC2G", 1));
+    CHECK(!setReaction(list, "KC2G", 1));
+    CHECK(setReaction(list, "W1AW", 1));
+    CHECK_EQ(list.size(), (size_t)2);
+    CHECK(setReaction(list, "N0CALL", 99));
+    std::vector<ReactionChip> chips = reactionChips(list, 13, 1, "AG7EW");
+    CHECK_EQ(chips.size(), (size_t)2);
+    if (chips.size() == 2)
+    {
+        CHECK(chips[0].code == 1 && chips[0].mine && chips[0].waiting);
+        CHECK(chips[0].calls == std::vector<std::string>({"KC2G", "W1AW", "AG7EW"}));
+        CHECK(chips[1].code == 99 && !chips[1].mine && chips[1].calls.size() == 1);
+    }
+    chips = reactionChips({}, 13, 0, "AG7EW");
+    CHECK(chips.size() == 1 && chips[0].code == 13 && chips[0].mine && !chips[0].waiting);
+}
+
 int main()
 {
     testCallsigns();
@@ -690,5 +756,6 @@ int main()
     testNumbering();
     testTheSessionStream();
     testNeverAllZero();
+    testReactions();
     return ragtime_test::finish();
 }

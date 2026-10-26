@@ -19,6 +19,7 @@ add_library(ragtime_core STATIC
     src/link/HostLink.cpp
     src/link/Reconnect.cpp
     src/protocol/Fields.cpp
+    src/protocol/Reactions.cpp
     src/protocol/Records.cpp
     src/protocol/Stream.cpp
     src/text/HamText.cpp

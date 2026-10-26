@@ -16,6 +16,12 @@
 //   S/N we hear the Pong at from the host. The row shows both. A Ping to
 //   us is answered the same way, once the host has said how well it heard
 //   it. Never retried by itself: Ping again is the operator's.
+// - Reactions (react()): an emoji or ham word from the palette on a
+//   station's line. Ours waits up to REACTION_RIDE_MS to ride in our next
+//   burst (a message, Acks, a check-in, a ping), then goes alone, at most
+//   one lone burst every REACTION_LONE_GAP_MS. One per station per line, a
+//   later one replacing it. A reaction from the station an @message went
+//   to counts as its Ack.
 // - A Hello rides along in the first frame after the group opens, after
 //   the station's settings change, and at most every 10 minutes after
 //   that, so the station list learns locators without a burst of its own.
@@ -40,6 +46,7 @@
 #include <vector>
 
 #include "ragtime/link/HostLink.h"
+#include "ragtime/protocol/Reactions.h"
 #include "ragtime/protocol/Records.h"
 #include "ragtime/protocol/Stream.h"
 #include "ragtime/text/HamText.h"
@@ -102,6 +109,12 @@ struct Message
     uint64_t dueMs = 0;             // ours: when it counts as unanswered
     uint64_t answeredMs = 0;        // ours: when the Pong came
     bool unanswered = false;        // ours: no Pong by dueMs (a late one still counts)
+
+    // A text line's reactions (docs/PROTOCOL.md, "Reactions"): the
+    // stations', one each, and ours, on the air or waiting to go.
+    std::vector<protocol::Reacted> reactions;
+    uint8_t myReaction = 0;         // ours, sent
+    uint8_t myWaiting = 0;          // ours, chosen and not yet sent
 };
 
 // "Queued", "Sending", "Waiting for the session to go idle", "Sent",
@@ -125,6 +138,14 @@ constexpr uint64_t PONG_GAP_MS = 15 * 1000;
 // window in its mode, after the Pong's wait for its figure.
 constexpr uint64_t MIN_PONG_WAIT_MS = 20 * 1000;
 uint64_t pongWaitMs(const link::ModeInfo& mode);
+
+// A reaction waits this long to ride with our next burst, then goes alone;
+// lone ones go at most this often, all that wait in one burst.
+constexpr uint64_t REACTION_RIDE_MS = 30 * 1000;
+constexpr uint64_t REACTION_LONE_GAP_MS = 60 * 1000;
+// Reactions heard before their line (it may come later, repaired), kept
+// for so many lines.
+constexpr size_t MAX_EARLY_REACTIONS = 200;
 
 // How often a Hello rides along with our messages.
 constexpr uint64_t HELLO_EVERY_MS = 10 * 60 * 1000;
@@ -230,6 +251,30 @@ public:
     bool resend(uint64_t id, const std::string& mode, uint64_t nowMs);
     bool canResend(const Message& message) const;
 
+    // Reactions. A text line of another station's, with a number, takes
+    // one: of ours and the rule, pings and files, none.
+    bool canReact(const Message& message) const;
+    // Our reaction to the line: it waits to ride with our next burst
+    // (REACTION_RIDE_MS). A code not in the palette, or the one we gave
+    // already, does nothing (false). Choosing the one on the air while
+    // another waits takes the waiting one back.
+    bool react(uint64_t id, uint8_t code, uint64_t nowMs);
+    // Takes back our reaction still waiting to go; false once it has gone,
+    // as what is on the air has been said.
+    bool unreact(uint64_t id);
+    // Ours waiting to go, not yet given to the host: all of them, and the
+    // line's, which unreact() can take back.
+    size_t reactionsWaiting() const { return reactionsDue_.size(); }
+    bool reactionWaiting(uint64_t id) const { return reactionsDue_.count(id) != 0; }
+    // A station's reaction to one of our lines, for the status bar.
+    struct ReactionNote
+    {
+        std::string from;
+        uint8_t code = 0;
+        uint64_t message = 0;
+    };
+    std::vector<ReactionNote> takeReactionNotes();
+
     // Every HostLink event goes here: bursts settling, frames heard, the
     // group opening.
     // Returns the records heard in a frame (for the station list, and the
@@ -262,6 +307,15 @@ private:
     // sender's newest.
     std::deque<Message>::iterator placeFor(const Message& m);
     void flushAcks(const std::string& mode, uint64_t nowMs);
+    // Hands frames to HostLink as one burst, with our reactions waiting
+    // packed in after them.
+    uint64_t broadcast(std::vector<std::vector<uint8_t>> frames, const std::string& mode, uint64_t nowMs,
+                       const std::string& label);
+    // A burst of ours settled or was taken back: its reactions are on the
+    // air, or wait again.
+    void reactionsSettled(uint64_t burst, bool sent, uint64_t nowMs);
+    void onReaction(const std::string& from, const protocol::Reaction& reaction, uint64_t nowMs);
+    Message* findMessage(uint64_t id);
     void onPing(const protocol::Record& record, const protocol::Ping& ping, uint64_t nowMs);
     void onPong(const protocol::Record& record, const protocol::Pong& pong, uint64_t nowMs);
     void heardSnr(const std::string& call, double dB, uint64_t nowMs);
@@ -294,6 +348,14 @@ private:
     std::set<uint64_t> ackBursts_;
     std::vector<protocol::Record> acksDue_;
     std::map<uint64_t, uint64_t> ackHolds_;         // message id: until when its Ack (or Pong) holds files off
+
+    std::set<uint64_t> reactionsDue_;               // message ids whose myWaiting goes with our next burst
+    uint64_t reactionsSinceMs_ = 0;                 // when the oldest of them was chosen
+    uint64_t loneReactionsMs_ = 0;                  // when reactions last went alone
+    std::map<uint64_t, std::vector<std::pair<uint64_t, uint8_t>>> reactionBursts_;  // burst: (message, code)
+    std::map<uint64_t, uint8_t> reactionsOut_;      // message id: its code with the host
+    std::deque<std::pair<std::pair<std::string, uint32_t>, protocol::Reacted>> early_;  // (line's call, seq): reaction
+    std::vector<ReactionNote> reactionNotes_;
 
     uint16_t pingNumber_ = 0;
     std::vector<PongDue> pongsDue_;                 // waiting for the host's figure

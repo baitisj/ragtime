@@ -707,7 +707,7 @@ void testWhatElseRidesInASession()
     rig.chat.setTraffic(&traffic);
     Far far("W1AW");
     connect(rig, far);
-    CHECK(traffic.greetings.size() == 1 && traffic.greetings[0] == "W1AW 63");
+    CHECK(traffic.greetings.size() == 1 && traffic.greetings[0] == "W1AW 127");
 
     // It writes behind our Hello, and is told where.
     std::vector<protocol::Record> ours = rig.ours();
@@ -994,6 +994,105 @@ void testTheSessionModeCarriesOver()
 
 } // namespace
 
+size_t reactionsIn(const std::vector<protocol::Record>& records, uint8_t code)
+{
+    size_t n = 0;
+    for (const protocol::Record& r : records)
+    {
+        if (const protocol::Reaction* reaction = r.as<protocol::Reaction>())
+            if (reaction->code == code && reaction->to == "W1AW") n++;
+    }
+    return n;
+}
+
+void testReactionsInASession()
+{
+    std::filesystem::path dir = std::filesystem::temp_directory_path() / "ragtime-session-reactions-test";
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
+    session::SessionLog log(dir.string());
+    {
+        Rig rig;
+        rig.chat.setLog(&log);
+        Far far("W1AW");
+        connect(rig, far);
+        rig.from(far.text("Fine business, how copy?", rig.now));
+        const session::Message* line = &rig.chat.messages().back();
+        CHECK(rig.chat.canReact(*line));
+        CHECK(!rig.chat.react(line->id, 0, rig.now));
+        // Into the stream at once.
+        CHECK(rig.chat.react(line->id, 1, rig.now));
+        rig.pump();
+        CHECK_EQ(reactionsIn(rig.ours(), 1), (size_t)1);
+        CHECK_EQ(line->myReaction, (uint8_t)1);
+        CHECK(!rig.chat.react(line->id, 1, rig.now));
+        // Pause sending holds it, as it holds messages.
+        rig.chat.setPaused(true, rig.now);
+        CHECK(rig.chat.react(line->id, 13, rig.now));
+        rig.pump();
+        CHECK_EQ(reactionsIn(rig.ours(), 13), (size_t)0);
+        CHECK_EQ(line->myWaiting, (uint8_t)13);
+        rig.chat.setPaused(false, rig.now);
+        rig.pump();
+        CHECK_EQ(reactionsIn(rig.ours(), 13), (size_t)1);
+        CHECK(line->myReaction == 13 && line->myWaiting == 0);
+
+        // Not on our own message; the far end's on ours is told.
+        uint64_t mine = rig.chat.send("Solid copy, 73", rig.now);
+        rig.pump();
+        const session::Message* ours = rig.chat.find(mine);
+        CHECK(ours != nullptr && !rig.chat.canReact(*ours));
+        rig.events();
+        protocol::Reaction r;
+        r.to = "AG7EW";
+        r.item = ours->seq;
+        r.code = 13;
+        rig.from(far.record(r, rig.now));
+        CHECK(ours->reactions.size() == 1 && ours->reactions[0].call == "W1AW" && ours->reactions[0].code == 13);
+        bool told = false;
+        for (const SessionChat::Event& e : rig.events())
+            told = told || (e.type == SessionChat::Event::Type::Reacted && e.id == mine && e.code == 13);
+        CHECK(told);
+        rig.from(far.farewell(rig.now));
+        rig.say("DISCONNECTED\r");
+        // Ended: no more reactions.
+        CHECK(!rig.chat.canReact(*line));
+    }
+
+    // Kept in the log with their messages.
+    {
+        Rig rig(T0 + 3600 * 1000);
+        rig.chat.setLog(&log);
+        Far far("W1AW");
+        connect(rig, far);
+        bool theirs = false, ourOwn = false;
+        for (const session::Message& m : rig.chat.messages())
+        {
+            if (m.text == "Fine business, how copy?") theirs = m.past && m.myReaction == 13 && !rig.chat.canReact(m);
+            if (m.text == "Solid copy, 73") ourOwn = m.reactions.size() == 1 && m.reactions[0].code == 13;
+        }
+        CHECK(theirs);
+        CHECK(ourOwn);
+    }
+
+    // A far end from before reactions: none offered.
+    {
+        Rig rig;
+        Far far("W1AW");
+        CHECK(rig.chat.call("W1AW", rig.now));
+        rig.pump();
+        rig.say("OK\rCONNECTED AG7EW W1AW 2300\r");
+        protocol::Hello hello;
+        hello.acceptsSessions = true;
+        hello.takes = 0x3F;
+        rig.from(protocol::streamOpening(far.numbering.record(hello, (uint32_t)(rig.now / 1000))));
+        rig.from(far.text("Hello from 0.1.1", rig.now));
+        CHECK(!rig.chat.canReact(rig.chat.messages().back()));
+        CHECK(!rig.chat.react(rig.chat.messages().back().id, 1, rig.now));
+    }
+    std::filesystem::remove_all(dir, ec);
+}
+
 int main()
 {
     testTheStreamAccount();
@@ -1013,5 +1112,6 @@ int main()
     testTheLengths();
     testTheLogCarriesOn();
     testTheSessionModeCarriesOver();
+    testReactionsInASession();
     return ragtime_test::finish();
 }

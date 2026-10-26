@@ -48,6 +48,7 @@
 #include "HostConnection.h"
 #include "PathsDialog.h"
 #include "QuitSignal.h"
+#include "ReactionChips.h"
 #include "RecentWorkPane.h"
 #include "Report.h"
 #include "RigControl.h"
@@ -145,6 +146,8 @@ const int STATUS_FIELDS = canSwitchTheme() ? 5 : 4;
 
 constexpr int CLOCK_MS = 1000;
 constexpr int MIN_PANE = 200;
+// A reaction to our line shows in the status bar this long.
+constexpr uint64_t REACTION_NOTE_MS = 30 * 1000;
 
 wxString utf8(const std::string& text)
 {
@@ -676,6 +679,12 @@ void MainFrame::buildLayout()
         host_->flush();
         refreshMessages();
     });
+    broadcast_->onReact([this](uint64_t id, uint8_t code) {
+        uint64_t now = HostConnection::nowMs();
+        if (code == 0) chat_.unreact(id);
+        else chat_.react(id, code, now);
+        refreshMessages();
+    });
     broadcast_->onPing([this](const std::string& call) { pingStation(call); },
                        [this](const std::string& call) { return whyNoPing(call); });
     broadcast_->onBroadcastFile([this]() { broadcastFile(); });
@@ -694,6 +703,11 @@ void MainFrame::buildLayout()
     sessionPage_->onCallAgain([this]() { callStation(session_.peer()); });
     sessionPage_->onResend([this](uint64_t id) {
         if (session_.resend(id, HostConnection::nowMs()) == 0) return;
+        host_->flush();
+        refreshSession();
+    });
+    sessionPage_->onReact([this](uint64_t id, uint8_t code) {
+        if (!session_.react(id, code, HostConnection::nowMs())) return;
         host_->flush();
         refreshSession();
     });
@@ -1053,6 +1067,8 @@ void MainFrame::showStatus()
     // With a seal of ours waiting, how long until it goes (Jeff,
     // 2026-10-25).
     std::string transfers = transfersLine();
+    // A reaction to our line shows over it for a while.
+    if (!reactionNote_.empty() && HostConnection::nowMs() < reactionNoteUntilMs_) transfers = reactionNote_;
     if (std::optional<uint64_t> seal = seals_.nextSealMs())
     {
         uint64_t now = HostConnection::nowMs();
@@ -1067,6 +1083,12 @@ void MainFrame::showStatus()
 
 void MainFrame::refreshMessages()
 {
+    for (const broadcast::BroadcastChat::ReactionNote& n : chat_.takeReactionNotes())
+    {
+        const broadcast::Message* m = chat_.find(n.message);
+        noteReaction(n.from, n.code, m != nullptr ? m->text : std::string());
+        if (!(tabs_->GetSelection() == TAB_BROADCAST && IsActive())) reactionsUnread_++;
+    }
     broadcast_->refresh();
     updateTabLabels();
 }
@@ -1264,8 +1286,10 @@ void MainFrame::updateTabLabels()
     if (looking)
     {
         seenMessage_ = newest;
-        unread = 0;
+        reactionsUnread_ = 0;
     }
+    unread += reactionsUnread_;
+    if (looking) unread = 0;
     if (unread != unread_ || tabs_->GetPageText(TAB_BROADCAST) == wxEmptyString)
     {
         unread_ = unread;
@@ -1496,6 +1520,13 @@ void MainFrame::onSessionEvents()
             case Type::Heard:
                 if (!(tabs_->GetSelection() == TAB_SESSION && IsActive())) sessionUnread_++;
                 break;
+            case Type::Reacted:
+            {
+                const session::Message* m = session_.find(e.id);
+                noteReaction(e.peer, e.code, m != nullptr ? m->text : std::string());
+                if (!(tabs_->GetSelection() == TAB_SESSION && IsActive())) sessionUnread_++;
+                break;
+            }
         }
     }
 }
@@ -1560,6 +1591,14 @@ void MainFrame::refreshFiles()
     std::vector<files::FileRow> rows = fileTraffic_.rows(now);
     for (files::FileRow& r : broadcastFiles_.rows(now)) rows.push_back(std::move(r));
     filesPage_->setRows(std::move(rows), now, localOffsetSeconds());
+    showStatus();
+}
+
+void MainFrame::noteReaction(const std::string& from, uint8_t code, const std::string& line)
+{
+    reactionNote_ = reactionNote(from, code, line);
+    reactionNoteUntilMs_ = HostConnection::nowMs() + REACTION_NOTE_MS;
+    note_ = reactionNote_;
     showStatus();
 }
 

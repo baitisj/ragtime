@@ -4,6 +4,7 @@
 #include <optional>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include "ragtime/broadcast/Airtime.h"
 #include "ragtime/broadcast/BroadcastLog.h"
@@ -317,7 +318,7 @@ std::vector<uint64_t> BroadcastChat::send(const std::string& typed, const std::s
         helloSent_ = true;
         helloMs_ = nowMs;
     }
-    uint64_t burst = link_.broadcast(frames, mode, nowMs, link::snippet(typed));
+    uint64_t burst = broadcast(frames, mode, nowMs, link::snippet(typed));
     for (Message& m : messages_)
     {
         if (std::find(made.begin(), made.end(), m.id) == made.end()) continue;
@@ -337,7 +338,7 @@ bool BroadcastChat::checkIn(const std::string& mode, uint64_t nowMs)
     if (frame.empty()) return false;
     helloSent_ = true;
     helloMs_ = nowMs;
-    return link_.broadcast({frame}, mode, nowMs, "check-in") != 0;
+    return broadcast({frame}, mode, nowMs, "check-in") != 0;
 }
 
 bool BroadcastChat::announce(protocol::Status::State state, const std::string& partner, const std::string& mode,
@@ -391,7 +392,7 @@ uint64_t BroadcastChat::ping(const std::string& call, const std::string& mode, u
     m.state = State::Queued;
     m.mode = mode;
     m.pingNumber = p.number;
-    m.burst = link_.broadcast({frame}, mode, nowMs, "ping " + to);
+    m.burst = broadcast({frame}, mode, nowMs, "ping " + to);
     if (m.burst == 0) m.state = State::NotSent;
     messages_.push_back(std::move(m));
     trim();
@@ -422,6 +423,12 @@ void BroadcastChat::tick(uint64_t nowMs)
         PongDue due = pongsDue_[i];
         pongsDue_.erase(pongsDue_.begin() + (long)i);
         sendPong(due, std::nullopt, nowMs);
+    }
+    // Reactions that found nothing to ride with go alone.
+    if (!reactionsDue_.empty() && !settings_.callsign.empty() && nowMs >= reactionsSinceMs_ + REACTION_RIDE_MS
+        && (loneReactionsMs_ == 0 || nowMs >= loneReactionsMs_ + REACTION_LONE_GAP_MS))
+    {
+        if (broadcast({}, std::string(), nowMs, std::string()) != 0) loneReactionsMs_ = nowMs;
     }
     for (Message& m : messages_)
     {
@@ -486,7 +493,7 @@ void BroadcastChat::sendPong(const PongDue& due, std::optional<double> snr, uint
     // the group's when our host doesn't offer it.
     std::string mode = findMode(link_.modes(), due.mode).valid() ? due.mode : std::string();
     std::vector<uint8_t> frame = protocol::encodeFrame({numbering_.record(p, seconds(nowMs))});
-    uint64_t burst = frame.empty() ? 0 : link_.broadcast({frame}, mode, nowMs, "pong " + due.to);
+    uint64_t burst = frame.empty() ? 0 : broadcast({frame}, mode, nowMs, "pong " + due.to);
     for (Message& m : messages_)
     {
         if (m.id != due.row) continue;
@@ -560,6 +567,15 @@ Message* BroadcastChat::findMine(uint64_t id)
     return nullptr;
 }
 
+Message* BroadcastChat::findMessage(uint64_t id)
+{
+    for (Message& m : messages_)
+    {
+        if (m.id == id) return &m;
+    }
+    return nullptr;
+}
+
 const Message* BroadcastChat::find(uint64_t id) const
 {
     for (const Message& m : messages_)
@@ -575,6 +591,7 @@ bool BroadcastChat::cancel(uint64_t id)
     if (m == nullptr || m->state != State::Queued) return false;
     uint64_t burst = m->burst;
     if (!link_.cancel(burst)) return false;
+    reactionsSettled(burst, false, 0);
     for (Message& other : messages_)
     {
         if (!other.ours || other.burst != burst) continue;
@@ -619,7 +636,7 @@ bool BroadcastChat::resend(uint64_t id, const std::string& mode, uint64_t nowMs)
     if (frame.empty()) return false;
     m->state = State::Queued;
     m->mode = mode;
-    m->burst = link_.broadcast({frame}, mode, nowMs, link::snippet(m->to.empty() ? m->text : "@" + m->to + " " + m->text) + " again");
+    m->burst = broadcast({frame}, mode, nowMs, link::snippet(m->to.empty() ? m->text : "@" + m->to + " " + m->text) + " again");
     if (onItems_ && m->burst != 0) onItems_({record->second}, m->burst, mode, nowMs);
     if (m->past)
     {
@@ -680,6 +697,8 @@ std::vector<protocol::Record> BroadcastChat::onEvent(const Event& event, uint64_
             break;
         case Event::Type::Burst:
         {
+            if (event.burstState == BurstState::Sent || event.burstState == BurstState::NotSent)
+                reactionsSettled(event.id, event.burstState == BurstState::Sent, nowMs);
             if (ackBursts_.count(event.id) != 0)
             {
                 if (event.burstState == BurstState::Sent || event.burstState == BurstState::NotSent)
@@ -768,9 +787,25 @@ void BroadcastChat::onRecord(const protocol::Record& record, uint64_t nowMs)
         m.state = State::Heard;
         auto at = placeFor(m);
         if (log_ != nullptr) log_->added(m, at != messages_.end() ? at->id : 0);
-        messages_.insert(at, std::move(m));
+        Message& line = *messages_.insert(at, std::move(m));
+        // Reactions that came before it.
+        for (auto e = early_.begin(); e != early_.end();)
+        {
+            if (e->first.first != from || e->first.second != line.seq)
+            {
+                ++e;
+                continue;
+            }
+            if (protocol::setReaction(line.reactions, e->second.call, e->second.code) && log_ != nullptr)
+                log_->reacted(line, e->second.call, e->second.code);
+            e = early_.erase(e);
+        }
         trim();
         version_++;
+    }
+    else if (const protocol::Reaction* reaction = record.as<protocol::Reaction>())
+    {
+        onReaction(from, *reaction, nowMs);
     }
     else if (const protocol::Ping* ping = record.as<protocol::Ping>())
     {
@@ -796,6 +831,158 @@ void BroadcastChat::onRecord(const protocol::Record& record, uint64_t nowMs)
     }
 }
 
+bool BroadcastChat::canReact(const Message& m) const
+{
+    return m.kind == Message::Kind::Text && !m.ours && m.seq != 0 && !m.from.empty() && !settings_.callsign.empty()
+           && m.from != settings_.callsign;
+}
+
+bool BroadcastChat::react(uint64_t id, uint8_t code, uint64_t nowMs)
+{
+    Message* m = findMessage(id);
+    if (m == nullptr || !canReact(*m) || protocol::reactionEntry(code) == nullptr) return false;
+    if (code == (m->myWaiting != 0 ? m->myWaiting : m->myReaction)) return false;
+    auto out = reactionsOut_.find(id);
+    if (out != reactionsOut_.end() ? out->second == code : code == m->myReaction)
+    {
+        // Back to the one on the air, or going: nothing more need go.
+        reactionsDue_.erase(id);
+        m->myWaiting = out != reactionsOut_.end() ? code : 0;
+        version_++;
+        return true;
+    }
+    m->myWaiting = code;
+    if (reactionsDue_.empty()) reactionsSinceMs_ = nowMs;
+    reactionsDue_.insert(id);
+    version_++;
+    return true;
+}
+
+bool BroadcastChat::unreact(uint64_t id)
+{
+    Message* m = findMessage(id);
+    if (m == nullptr || reactionsDue_.erase(id) == 0) return false;
+    // One already with the host still goes.
+    auto out = reactionsOut_.find(id);
+    m->myWaiting = out != reactionsOut_.end() ? out->second : 0;
+    version_++;
+    return true;
+}
+
+std::vector<BroadcastChat::ReactionNote> BroadcastChat::takeReactionNotes()
+{
+    std::vector<ReactionNote> notes;
+    notes.swap(reactionNotes_);
+    return notes;
+}
+
+uint64_t BroadcastChat::broadcast(std::vector<std::vector<uint8_t>> frames, const std::string& mode, uint64_t nowMs,
+                                  const std::string& label)
+{
+    // Our reactions waiting, in frames of their own after the burst's: a
+    // frame is cut where a codeword ends anyway, so they cost what they
+    // weigh, about 21 bytes each.
+    std::vector<std::pair<uint64_t, uint8_t>> taken;
+    std::vector<protocol::Record> frame;
+    size_t bytes = 1;
+    uint32_t time = seconds(nowMs);
+    for (uint64_t id : reactionsDue_)
+    {
+        const Message* m = findMessage(id);
+        if (m == nullptr || m->myWaiting == 0) continue;
+        protocol::Reaction r;
+        r.to = m->from;
+        r.item = m->seq;
+        r.code = m->myWaiting;
+        protocol::Record record = numbering_.record(r, time);
+        size_t size = protocol::encodeRecord(record).size();
+        if (size == 0) continue;
+        if (!frame.empty() && bytes + size > protocol::MAX_BROADCAST_FRAME)
+        {
+            frames.push_back(protocol::encodeFrame(frame));
+            frame.clear();
+            bytes = 1;
+        }
+        frame.push_back(record);
+        bytes += size;
+        taken.emplace_back(id, r.code);
+    }
+    if (!frame.empty()) frames.push_back(protocol::encodeFrame(frame));
+    frames.erase(std::remove_if(frames.begin(), frames.end(), [](const std::vector<uint8_t>& f) { return f.empty(); }),
+                 frames.end());
+    // Any left were for lines gone from the list.
+    if (taken.empty()) reactionsDue_.clear();
+    if (frames.empty()) return 0;
+
+    std::string reactions = taken.size() == 1 ? std::string("reaction") : std::to_string(taken.size()) + " reactions";
+    std::string what = taken.empty() ? label : label.empty() ? reactions : label + " + " + reactions;
+    uint64_t burst = link_.broadcast(frames, mode, nowMs, what);
+    if (burst == 0 || taken.empty()) return burst;
+    reactionBursts_[burst] = taken;
+    for (const auto& t : taken) reactionsOut_[t.first] = t.second;
+    reactionsDue_.clear();
+    return burst;
+}
+
+void BroadcastChat::reactionsSettled(uint64_t burst, bool sent, uint64_t nowMs)
+{
+    auto it = reactionBursts_.find(burst);
+    if (it == reactionBursts_.end()) return;
+    std::vector<std::pair<uint64_t, uint8_t>> taken = std::move(it->second);
+    reactionBursts_.erase(it);
+    for (const auto& t : taken)
+    {
+        auto out = reactionsOut_.find(t.first);
+        if (out != reactionsOut_.end() && out->second == t.second) reactionsOut_.erase(out);
+        Message* m = findMessage(t.first);
+        if (m == nullptr) continue;
+        if (sent)
+        {
+            m->myReaction = t.second;
+            if (m->myWaiting == t.second && reactionsDue_.count(t.first) == 0) m->myWaiting = 0;
+            if (log_ != nullptr) log_->weReacted(*m, t.second);
+        }
+        else if (m->myWaiting == t.second && reactionsDue_.count(t.first) == 0)
+        {
+            // Not sent, or taken back with what it rode with: it waits
+            // again, to ride with the next or go alone.
+            if (reactionsDue_.empty()) reactionsSinceMs_ = nowMs;
+            reactionsDue_.insert(t.first);
+        }
+    }
+    version_++;
+}
+
+void BroadcastChat::onReaction(const std::string& from, const protocol::Reaction& reaction, uint64_t nowMs)
+{
+    for (auto it = messages_.rbegin(); it != messages_.rend(); ++it)
+    {
+        Message& m = *it;
+        if (m.kind != Message::Kind::Text || m.seq == 0 || m.from != reaction.to || m.seq != reaction.item) continue;
+        if (protocol::setReaction(m.reactions, from, reaction.code))
+        {
+            if (log_ != nullptr) log_->reacted(m, from, reaction.code);
+            if (!settings_.callsign.empty() && m.from == settings_.callsign)
+                reactionNotes_.push_back(ReactionNote{from, reaction.code, m.id});
+            version_++;
+        }
+        // The station an @message went to reacting to it: it has the line,
+        // as an Ack would say.
+        if (m.ours && !m.past && m.ackWanted && m.to == from && m.state != State::Acknowledged
+            && m.state != State::Cancelled)
+        {
+            m.state = State::Acknowledged;
+            ackHeard(m.id, nowMs);
+            logState(m);
+            version_++;
+        }
+        return;
+    }
+    // Its line not heard yet (it may come repaired): kept for it.
+    early_.push_back({{reaction.to, reaction.item}, protocol::Reacted{from, reaction.code}});
+    while (early_.size() > MAX_EARLY_REACTIONS) early_.pop_front();
+}
+
 void BroadcastChat::flushAcks(const std::string& mode, uint64_t nowMs)
 {
     if (acksDue_.empty()) return;
@@ -819,7 +1006,7 @@ void BroadcastChat::flushAcks(const std::string& mode, uint64_t nowMs)
     acksDue_.clear();
     frames.erase(std::remove_if(frames.begin(), frames.end(), [](const std::vector<uint8_t>& f) { return f.empty(); }),
                  frames.end());
-    uint64_t id = link_.broadcast(frames, mode, nowMs, label);
+    uint64_t id = broadcast(frames, mode, nowMs, label);
     if (id != 0) ackBursts_.insert(id);
 }
 

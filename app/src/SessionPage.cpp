@@ -21,6 +21,7 @@
 #include "DrawnIcon.h"
 #include "Html.h"
 #include "PhraseHighlight.h"
+#include "ReactionChips.h"
 #include "SealBadge.h"
 #include "Theme.h"
 
@@ -42,6 +43,7 @@ constexpr int BADGE_ROOM = SEAL_BADGE_PX + 4;
 
 const int ID_COPY = wxID_HIGHEST + 501;
 const int ID_RESEND = wxID_HIGHEST + 502;
+const int ID_REACT = wxID_HIGHEST + 520;    // and REACTION_MENU_IDS after it
 
 // "14:32" today, "22 Oct 14:32" on another day (an earlier session's).
 wxString clock(uint64_t ms)
@@ -128,9 +130,19 @@ public:
     }
 
 protected:
-    void OnLinkClicked(size_t, const wxHtmlLinkInfo& info) override
+    void OnLinkClicked(size_t n, const wxHtmlLinkInfo& info) override
     {
         wxString href = info.GetHref();
+        if (uint8_t code = reactionHref(href))
+        {
+            // A chip: ours added to it.
+            const Message* m = at(n);
+            if (m == nullptr || !owner_->onReact_) return;
+            uint64_t message = m->id;
+            SessionPage* owner = owner_;
+            owner_->CallAfter([owner, message, code]() { owner->onReact_(message, code); });
+            return;
+        }
         wxString action = href.BeforeFirst(':');
         unsigned long long id = 0;
         if (!href.AfterFirst(':').ToULongLong(&id) || !owner_->onFileAction_) return;
@@ -195,7 +207,13 @@ protected:
              << "<td valign=\"top\" nowrap><font" << colour(secondaryText()) << ">" << clock(m->atMs)
              << "</font></td>"
              << "<td valign=\"top\" width=\"100%\"><font" << body << "><b>" << htmlEscape(m->from) << "</b>&nbsp; "
-             << what << "</font></td>"
+             << what << "</font>";
+        // Its reactions, as chips under it.
+        wxString chips = reactionChipsHtml(m->reactions, m->myReaction, m->myWaiting,
+                                           owner_->session_.settings().callsign, owner_->session_.canReact(*m), false,
+                                           picked);
+        if (!chips.empty()) html << "<br>" << chips;
+        html << "</td>"
              << "</tr></table>";
         return html;
     }
@@ -611,6 +629,24 @@ void SessionPage::showMenu(int row)
     uint64_t id = m->id;
     wxString text = wxString::FromUTF8(m->text);
     wxMenu menu;
+    if (session_.canReact(*m))
+    {
+        uint8_t current = m->myWaiting != 0 ? m->myWaiting : m->myReaction;
+        menu.AppendSubMenu(reactionMenu(ID_REACT, current, false,
+                                        [this, id](uint8_t code) {
+                                            if (onReact_ && code != 0) onReact_(id, code);
+                                        }),
+                           "React");
+        menu.AppendSeparator();
+    }
+    else if (!m->ours && !m->past && m->kind == Message::Kind::Text
+             && session_.phase() == SessionChat::Phase::Connected && session_.greeted())
+    {
+        // Ragtime before 0.1.2 skips reactions: say so rather than send one.
+        menu.Append(ID_REACT, "React (" + wxString::FromUTF8(session_.peer()) + "'s Ragtime takes none)")
+            ->Enable(false);
+        menu.AppendSeparator();
+    }
     if (SessionChat::canResend(*m))
     {
         // Into the session that is up; greyed, saying why, when none is.
@@ -625,7 +661,7 @@ void SessionPage::showMenu(int row)
         {
             if (onResend_) onResend_(id);
         }
-        else if (wxTheClipboard->Open())
+        else if (e.GetId() == ID_COPY && wxTheClipboard->Open())
         {
             wxTheClipboard->SetData(new wxTextDataObject(text));
             wxTheClipboard->Close();

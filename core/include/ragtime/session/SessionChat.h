@@ -18,6 +18,9 @@
 // - Messages: typed text becomes a Text record in the stream. It is Sent
 //   once written, and Delivered once the host's BUFFER count shows the far
 //   end's modem has acknowledged its last byte (StreamAccount, below).
+// - Reactions (react()): an emoji or ham word from the palette on one of
+//   the far end's messages, written into the stream at once (it always
+//   arrives, and costs about 21 bytes), or when Pause sending lifts.
 // - Leave: a Status QRV goes into the stream first, so the far end can say
 //   "Session ended by AG7EW" rather than "Link lost"; once the host has
 //   read it, DISCONNECT, which waits for what is unacknowledged. Leave now
@@ -46,6 +49,7 @@
 #include <vector>
 
 #include "ragtime/link/HostLink.h"
+#include "ragtime/protocol/Reactions.h"
 #include "ragtime/protocol/Records.h"
 #include "ragtime/protocol/Stream.h"
 #include "ragtime/session/StreamLog.h"
@@ -139,6 +143,12 @@ struct Message
     uint64_t streamEnd = 0;     // ours, once written: where its record ends in our stream
     bool past = false;          // from an earlier session with the peer, read from the SessionLog
     uint64_t beganMs = 0;       // a rule: when that session began (atMs: when it ended); 0 if not known
+
+    // Reactions (docs/PROTOCOL.md, "Reactions"): the far end's, and ours,
+    // written or waiting for Pause sending to lift.
+    std::vector<protocol::Reacted> reactions;
+    uint8_t myReaction = 0;
+    uint8_t myWaiting = 0;
 };
 
 // "Queued", "Sent", "Delivered", "Not delivered"; "" for one heard.
@@ -230,11 +240,13 @@ public:
             Started,        // peer, incoming: the tab pops open
             Ended,          // peer, ending
             Heard,          // a message from the far end: id
+            Reacted,        // the far end reacted to one of our messages: id, code
         } type = Type::Started;
         std::string peer;
         bool incoming = false;
         Ending ending = Ending::LinkLost;
         uint64_t id = 0;
+        uint8_t code = 0;
     };
 
     struct Settings
@@ -318,6 +330,12 @@ public:
     {
         return message.kind == Message::Kind::Text && message.ours && message.state != Message::State::Queued;
     }
+    // Reactions: one of the far end's messages in this session takes one,
+    // once its Hello says it takes them.
+    bool canReact(const Message& message) const;
+    // Our reaction to the message: into the stream at once, or when Pause
+    // sending lifts. False for a code not in the palette, or the one given.
+    bool react(uint64_t id, uint8_t code, uint64_t nowMs);
     // Pause sending: new messages wait as Queued.
     void setPaused(bool paused, uint64_t nowMs);
     bool paused() const { return paused_; }
@@ -412,6 +430,8 @@ private:
     void mend(uint64_t nowMs);
     void endCut();
     void onRecord(const protocol::Record& record, uint64_t nowMs);
+    void onReaction(const protocol::Record& record, const protocol::Reaction& reaction);
+    void writeReactions(uint64_t nowMs);
     void settle();
     void checkFarewell(uint64_t nowMs);
     void heard(uint64_t nowMs);
@@ -486,6 +506,7 @@ private:
     int cuts_ = 0;
     uint64_t cutBytes_ = 0;
     std::deque<std::pair<uint64_t, std::vector<uint8_t>>> queued_;  // messages paused, by id, coded
+    std::vector<uint64_t> reactionsHeld_;   // messages whose myWaiting waits for Pause sending to lift
 
     std::deque<Message> messages_;
     std::vector<Event> events_;

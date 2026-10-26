@@ -86,6 +86,7 @@ length.
 | `0x11` | Ack | to, item | no |
 | `0x12` | Ping | to, number, mode | no |
 | `0x13` | Pong | to, number, S/N | no |
+| `0x14` | Reaction | to, item, reaction | no |
 | `0x20` | FileOffer | size, digest, name | **yes** |
 | `0x21` | FileAnswer | offer, answer, [from] | no |
 | `0x22` | FileData | offset, bytes | part of its offer |
@@ -113,7 +114,7 @@ frame as a check-in.
 | --- | --- | --- |
 | version | 1 | The protocol version the sender speaks: 0 |
 | flags | 1 | Bit 0: accepts sessions. Bit 1: automatic (nobody at the controls; Stage 2 gives it its rules). Other bits 0 |
-| takes | 1 | The records the sender takes. Bit 0: Text and Ack. Bit 1: Status. Bit 2: session files (FileOffer to FileCancel). Bit 3: broadcast files (FileAnnounce, FilePiece). Bit 4: Seal, RepairRequest, RepairRefused and ItemParity. Bit 5: Ping and Pong (0.1.2 on). Version 0 sends `0x3F`, and sent `0x1F` before 0.1.2 |
+| takes | 1 | The records the sender takes. Bit 0: Text and Ack. Bit 1: Status. Bit 2: session files (FileOffer to FileCancel). Bit 3: broadcast files (FileAnnounce, FilePiece). Bit 4: Seal, RepairRequest, RepairRefused and ItemParity. Bit 5: Ping and Pong (0.1.2 on). Bit 6: Reaction (0.1.2 on). Version 0 sends `0x7F`, and sent `0x1F` before 0.1.2 |
 | locator | 4, optional | Maidenhead, packed (Fields); 0 for none |
 | software | 1 + n, optional | A short string, at most 64 bytes, such as `Ragtime 0.1.0` |
 
@@ -153,6 +154,11 @@ Ping carries it.
 RepairRequest's S/N code, 0 for none; 128 to 255 read as none). With
 five-character calls each is 20 bytes, one or two codewords in most
 modes. Pings, below.
+
+**Reaction** (`0x14`): to (the line's sender, packed), item (3 bytes,
+the line's sequence number), then reaction (1 byte, an entry in the
+palette below; 0 is never sent, and a record with it is malformed). An
+Ack and one: with five-character calls, 21 bytes. Reactions, below.
 
 **FileOffer** (`0x20`), in a session: size (4 bytes, at most 307,200),
 digest (12 bytes, the whole file's: SHA-256, first 12 bytes), name (a
@@ -293,7 +299,7 @@ each session:
 - An **item** (Text, FileOffer, FileAnnounce) takes the next number. The
   first is 1; after `0xFFFFFF` it starts again at 1. 0 means no item yet.
 - A **part of an item** (FileData, FilePiece) carries its item's number.
-- **Anything else** (Hello, Status, Ack, the file answers, Seal,
+- **Anything else** (Hello, Status, Ack, Reaction, the file answers, Seal,
   RepairRequest) carries the newest item's number, so a listener can see
   what it has missed since.
 
@@ -354,7 +360,9 @@ host giving up the link. Nothing else opens or closes one.
 4. The far end's Hello can arrive before `CONNECTED` is read, since they
    come on different ports. Ready the stream reader when a session ends,
    not when one starts.
-5. **Leaving.** Before `DISCONNECT`, a station writes a **Status** QRV
+5. **Reactions** go into the stream as they are chosen (Reactions,
+   below), and only once the far end's Hello has takes bit 6.
+6. **Leaving.** Before `DISCONNECT`, a station writes a **Status** QRV
    into the session, its farewell, and sends `DISCONNECT` once the host
    has read it (or 10 s on). The far end, finding the farewell in the
    stream, says "Session ended by AG7EW"; a session that ends without one
@@ -363,7 +371,7 @@ host giving up the link. Nothing else opens or closes one.
    different ports, in either order, so a station still reads the stream
    for a second after a session ends without one. Leave now (`ABORT`)
    writes no farewell.
-6. **On the group,** each end sends a Status QRL naming its partner when
+7. **On the group,** each end sends a Status QRL naming its partner when
    a session starts, and a Status QRV when it ends (`docs/PLAN.md`, "Busy
    stations"). The host holds the QRL until the session goes idle; a QRL
    still unsent when the session ends is taken back, with no QRV after
@@ -527,6 +535,51 @@ ways (Jeff, 2026-10-25).
 - A station never pings one whose Hello lacks takes bit 5.
 - Pings and Pongs aren't items: they carry the newest item's number, no
   seal lists them, and they are never repaired.
+
+### Reactions
+
+A reaction is a station's emoji or ham word on another station's line
+(Jeff's idea, 2026-10-25), named by one byte from a published palette,
+never free text, so it stays one codeword or less. Like HamText's table,
+the palette is plain language under 97.113 and a protocol constant: a
+code keeps its meaning, and new entries go on the end
+(`protocol/Reactions.h`; `tests/ProtocolTest.cpp` checks it). A code a
+station doesn't know is kept and shown as `?`.
+
+| Code | Shown | Meaning | Code | Shown | Meaning |
+| --- | --- | --- | --- | --- | --- |
+| 1 | 👍 | thumbs up | 11 | 📻 | radio |
+| 2 | ❤️ | heart | 12 | ⚡ | lightning |
+| 3 | 😂 | laughing | 13 | 73 | best regards |
+| 4 | 😮 | wow | 14 | 88 | love and kisses |
+| 5 | 😢 | sad | 15 | R | roger, received |
+| 6 | 🎉 | hooray | 16 | QSL | I confirm |
+| 7 | 👏 | applause | 17 | TU | thank you |
+| 8 | 🙏 | thanks | 18 | FB | fine business |
+| 9 | 👋 | wave | 19 | HI HI | laughing, in CW |
+| 10 | ☕ | coffee | 20 | QRZ? | who is calling? |
+
+- **One per station per line.** A later reaction from the same station
+  replaces its earlier one. There is no taking one back once it is on
+  the air: it has been said.
+- **On the group, it rides.** A reaction is cheap in bytes and dear in
+  bursts: each burst alone is another key-up, preamble and wait for the
+  channel. So a reaction waits up to 30 s to ride in the station's next
+  burst (a message, its Acks, a check-in, a ping or a pong), in a frame
+  of its own after that burst's frames. If nothing goes in that time it
+  goes alone, but lone ones go at most once a minute, every reaction
+  waiting in the one burst. One cancelled with what it rode with waits
+  again.
+- **In a session** it goes into the stream at once, which delivers it
+  (Pause sending holds it, as it holds messages).
+- **It counts as an Ack.** A reaction to an addressed Text from the
+  station it was addressed to says that station has the line, so the
+  sender takes it as the Ack.
+- A reaction heard before its line (the line comes later, repaired) is
+  kept for it, for the last 200 such.
+- Reactions aren't items: they carry the newest item's number, no seal
+  lists them, they are never repaired, and when signing comes they stay
+  unsigned. A station before 0.1.2 skips them as a type it doesn't know.
 
 ### Seals and repair
 
@@ -815,7 +868,7 @@ two.
 - A receiver skips a record of a type it doesn't know, by its length, and
   keeps it as unknown. New record types need no new version.
 - A receiver ignores bytes after the fields it knows in records with a
-  fixed layout (Hello, Status, Ack, Ping, Pong, FileOffer, FileAnswer,
+  fixed layout (Hello, Status, Ack, Ping, Pong, Reaction, FileOffer, FileAnswer,
   FileSaved, FileCancel, FileAnnounce, Seal, RepairRefused), so new
   fields go on the end.
   Text, FileData, FilePiece, RepairRequest and ItemParity run to the end

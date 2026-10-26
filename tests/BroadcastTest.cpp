@@ -826,6 +826,177 @@ void testPingUnanswered()
     CHECK_EQ(broadcast::pingLine(*mine), "No pong from W1AW in " + std::to_string((wait + 500) / 1000) + " s");
 }
 
+// The line of from's with that text.
+const Message* lineOf(const End& end, const std::string& from, const std::string& text)
+{
+    for (const Message& m : end.chat.messages())
+    {
+        if (m.kind == Message::Kind::Text && m.from == from && m.text == text) return &m;
+    }
+    return nullptr;
+}
+
+uint8_t reactionBy(const Message* m, const std::string& call)
+{
+    if (m == nullptr) return 0;
+    for (const protocol::Reacted& r : m->reactions)
+    {
+        if (r.call == call) return r.code;
+    }
+    return 0;
+}
+
+void testReactions()
+{
+    std::filesystem::path dir = std::filesystem::temp_directory_path() / "ragtime-broadcast-reactions-test";
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
+    std::string path = (dir / "broadcast.log").string();
+
+    {
+        End a("TEST1", "CN87"), b("TEST2", "FN31");
+        broadcast::BroadcastLog log(path);
+        b.chat.setLog(&log, now);
+        a.link.commandUp(now);
+        b.link.commandUp(now);
+        settle(a, b);
+        a.chat.send("CQ CQ de TEST1", "", now);
+        settle(a, b);
+        const Message* line = lineOf(b, "TEST1", "CQ CQ de TEST1");
+        const Message* ours = lineOf(a, "TEST1", "CQ CQ de TEST1");
+        CHECK(line != nullptr && ours != nullptr);
+        if (line == nullptr || ours == nullptr) return;
+
+        // Not on our own line, nor with a code outside the palette.
+        CHECK(!a.chat.canReact(*ours));
+        CHECK(!a.chat.react(ours->id, 1, now));
+        CHECK(b.chat.canReact(*line));
+        CHECK(!b.chat.react(line->id, 0, now));
+        CHECK(!b.chat.react(line->id, 200, now));
+
+        // A thumbs up waits to ride with TEST2's next line.
+        CHECK(b.chat.react(line->id, 1, now));
+        CHECK(!b.chat.react(line->id, 1, now));     // the same again does nothing
+        CHECK_EQ(line->myWaiting, (uint8_t)1);
+        CHECK_EQ(b.chat.reactionsWaiting(), (size_t)1);
+        settle(a, b);
+        CHECK(ours->reactions.empty());
+        b.chat.send("gm all", "", now);
+        settle(a, b);
+        CHECK_EQ(reactionBy(ours, "TEST2"), (uint8_t)1);
+        CHECK_EQ(line->myReaction, (uint8_t)1);
+        CHECK_EQ(line->myWaiting, (uint8_t)0);
+        CHECK_EQ(b.chat.reactionsWaiting(), (size_t)0);
+        std::vector<BroadcastChat::ReactionNote> notes = a.chat.takeReactionNotes();
+        CHECK(notes.size() == 1 && notes[0].from == "TEST2" && notes[0].code == 1 && notes[0].message == ours->id);
+        CHECK(a.chat.takeReactionNotes().empty());
+
+        // A later one replaces it. With nothing to ride with, it goes alone
+        // after REACTION_RIDE_MS.
+        CHECK(b.chat.react(line->id, 13, now));
+        now += broadcast::REACTION_RIDE_MS - 2000;
+        settle(a, b);
+        CHECK_EQ(reactionBy(ours, "TEST2"), (uint8_t)1);
+        now += 2000;
+        settle(a, b);
+        CHECK_EQ(reactionBy(ours, "TEST2"), (uint8_t)13);
+        CHECK_EQ(ours->reactions.size(), (size_t)1);
+        CHECK_EQ(line->myReaction, (uint8_t)13);
+
+        // Lone bursts go at most every REACTION_LONE_GAP_MS.
+        CHECK(b.chat.react(line->id, 2, now));
+        now += broadcast::REACTION_RIDE_MS;
+        settle(a, b);
+        CHECK_EQ(reactionBy(ours, "TEST2"), (uint8_t)13);
+        now += broadcast::REACTION_LONE_GAP_MS - broadcast::REACTION_RIDE_MS;
+        settle(a, b);
+        CHECK_EQ(reactionBy(ours, "TEST2"), (uint8_t)2);
+
+        // One still waiting can be taken back; one on the air can't.
+        CHECK(b.chat.react(line->id, 3, now));
+        CHECK(b.chat.reactionWaiting(line->id));
+        CHECK(b.chat.unreact(line->id));
+        CHECK_EQ(line->myWaiting, (uint8_t)0);
+        CHECK_EQ(line->myReaction, (uint8_t)2);
+        CHECK(!b.chat.unreact(line->id));
+        // Choosing the one on the air while another waits takes that back.
+        CHECK(b.chat.react(line->id, 4, now));
+        CHECK(b.chat.react(line->id, 2, now));
+        CHECK(!b.chat.reactionWaiting(line->id));
+        CHECK_EQ(line->myWaiting, (uint8_t)0);
+
+        // A reaction rides with our Acks too. TEST1's @line to TEST2: its
+        // Ack is lost, and TEST2's reaction, riding with the next, counts
+        // as one.
+        a.chat.takeReactionNotes();
+        std::vector<uint64_t> ids = a.chat.send("@TEST2 are you there?", "", now);
+        b.dropNext = true;
+        settle(a, b);
+        const Message* asked = a.chat.find(ids[0]);
+        CHECK(asked != nullptr && asked->state == State::Sent);
+        const Message* there = lineOf(b, "TEST1", "are you there?");
+        CHECK(there != nullptr);
+        if (there != nullptr) CHECK(b.chat.react(there->id, 15, now));
+        b.chat.checkIn("", now);
+        settle(a, b);
+        CHECK(asked != nullptr && asked->state == State::Acknowledged);
+        CHECK_EQ(reactionBy(asked, "TEST2"), (uint8_t)15);
+
+        // Cancelled with the message it rode with, it waits again.
+        b.link.setPaused(true, now);
+        CHECK(b.chat.react(line->id, 6, now));
+        std::vector<uint64_t> held = b.chat.send("never mind", "", now);
+        settle(a, b);
+        CHECK_EQ(b.chat.reactionsWaiting(), (size_t)0);
+        CHECK(b.chat.cancel(held[0]));
+        CHECK(b.chat.reactionWaiting(line->id));
+        b.link.setPaused(false, now);
+        now += broadcast::REACTION_LONE_GAP_MS;
+        settle(a, b);
+        CHECK_EQ(reactionBy(ours, "TEST2"), (uint8_t)6);
+        CHECK_EQ(line->myReaction, (uint8_t)6);
+
+        now += 60000;
+        b.chat.closeLog(now);
+    }
+
+    // Ragtime opens again: the reactions are kept with their lines.
+    {
+        End b("TEST2", "FN31");
+        broadcast::BroadcastLog log(path);
+        b.chat.setLog(&log, now);
+        const Message* line = lineOf(b, "TEST1", "CQ CQ de TEST1");
+        CHECK(line != nullptr && line->past);
+        if (line != nullptr) CHECK_EQ(line->myReaction, (uint8_t)6);
+        const Message* there = lineOf(b, "TEST1", "are you there?");
+        if (there != nullptr) CHECK_EQ(there->myReaction, (uint8_t)15);
+        // A past line still takes one.
+        if (line != nullptr) CHECK(b.chat.canReact(*line));
+    }
+
+    // A reaction heard before its line (the line repaired later) waits for
+    // it.
+    {
+        End c("TEST3", "DM79");
+        protocol::Record reaction;
+        reaction.header.callsign = "TEST4";
+        reaction.header.seq = 3;
+        reaction.header.time = (uint32_t)(now / 1000);
+        reaction.body = protocol::Reaction{"TEST5", 9, 7};
+        c.chat.onRebuilt(reaction, now);
+        protocol::Record text;
+        text.header.callsign = "TEST5";
+        text.header.seq = 9;
+        text.header.time = (uint32_t)(now / 1000);
+        protocol::Text t;
+        t.text = "late but whole";
+        text.body = t;
+        c.chat.onRebuilt(text, now);
+        CHECK_EQ(reactionBy(lineOf(c, "TEST5", "late but whole"), "TEST4"), (uint8_t)7);
+    }
+    std::filesystem::remove_all(dir, ec);
+}
+
 int main()
 {
     testAddressee();
@@ -842,5 +1013,6 @@ int main()
     testHistory();
     testStations();
     testReconnect();
+    testReactions();
     return ragtime_test::finish();
 }
