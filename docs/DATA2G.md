@@ -109,22 +109,48 @@ are in `data2g/codes_data/mode_thresholds.json` (GEARBOX.md).
   in 18 bytes), then the data: `[length, 2 bytes][frame]` back to back,
   zero padded. The receiver checks the control, then the data, under the
   group's key.
+- **Broadcast v3** (Data2G PR #121, open at d7d2b80, not merged).
+  Header version 3, and a v2 burst is skipped as another kind: v2 and v3
+  hosts don't hear each other's broadcasts. Three changes:
+  - Each frame is COBS-encoded (no zero byte left in it) and ended by a
+    zero byte, back to back, zero padded. It takes at most
+    `framed_len(n) = n + 2 + n // 254` bytes: n + 2 up to 253, as the
+    length did, 258 for our 255-byte frames. Ragtime counts it so
+    (`link::framedBytes`) for v2 and v3 alike.
+  - `BCAST MODE n [AUTO] DUP mode` sends each control codeword twice,
+    RV 0 then RV 1, and a receiver combines the pair when the first copy
+    fails alone (about 3 dB on the control). Off by default; Ragtime
+    doesn't send it.
+  - Each data codeword's mask carries the slot the data began in, so a
+    burst whose control was lost is found whatever the control's length.
 
 ## Loss
 
 - The codeword is what's lost. A frame is lost if any codeword it touches
   fails.
-- **A lost length ends the burst.** The receiver walks the lengths. If
-  the codeword holding a frame's length fails, it can't find the next
-  frame, so every later frame in that burst is lost too, and `LOST`
-  counts them as one. Ragtime's file pieces fill whole codewords
+- **v2 (13807c6): a lost length ends the burst.** The receiver walks the
+  lengths. If the codeword holding a frame's length fails, it can't find
+  the next frame, so every later frame in that burst is lost too, and
+  `LOST` counts them as one. Ragtime's file pieces fill whole codewords
   (`Airtime`, `pieceFrameBytes`), so each frame's length opens a
-  codeword, and losing that codeword loses the rest of the burst. At
-  heavy loss, the first frames in a burst get through far more often than
-  the last.
-- **Control lost.** The receiver tries the first data codeword under each
-  open port's key and, if it passes, delivers the burst with no call on
-  `HEARD`.
+  codeword, and losing that codeword loses the rest of the burst.
+- **v3 (PR #121): a lost codeword loses the frames it touches.** A zero
+  byte in a good codeword always ends a frame, so the receiver picks up
+  at the next zero after a bad codeword. `LOST k` counts each run of
+  frames between good zeros as one, so at least k frames were lost
+  (broadcast.md words it the other way round). A frame's start is known
+  only from the zero before it, so a frame that starts a codeword is lost
+  with the codeword before it, all of it arrived or not. Ragtime's
+  pieces start codewords, so a piece of k codewords arrives with
+  probability (1 − q)^(k+1), not (1 − q)^k, every burst's first piece
+  aside. Run on #121's `unpack_frames`: four one-codeword frames, the
+  first codeword lost, and frames 2 and 3 arrive with `LOST 1`. A zero
+  written first in such a codeword (an empty frame, which the receiver
+  skips) would mend it; that is our ask (below).
+- **Control lost.** v2 tries the first data codeword under each open
+  port's key; v3 probes slots 1 to 8, and believes one slot alone only
+  where v2 would have. Either way the burst arrives with no call on
+  `HEARD`, and Ragtime then leaves its S/N out of the path's.
 - No resends at this layer. `docs/broadcast.md` lists incremental
   redundancy across broadcast bursts as not done: our parity (PROTOCOL.md,
   "Parity") is the repair.
@@ -173,11 +199,9 @@ are in `data2g/codes_data/mode_thresholds.json` (GEARBOX.md).
 - A dial report from the host's own rig control.
 - A 200 Hz session cap.
 - The Hand (`HAND SEND`, `HAND LISTEN`, Stage 2).
-- Lengths that survive a lost codeword (below).
-
-**Lengths that survive a lost codeword.** If a burst could say "every
-frame starts on a codeword", the receiver could pick up at the next
-codeword after a bad one, and only the frames that touch it would be
-lost. That is a change to the frame layout, so it's Andrew's call. Until
-then the sender can only put fewer frames in a burst when the path is
-poor.
+- In broadcast v3 (PR #121), a zero byte first in any codeword a frame
+  starts, so that frame doesn't depend on the codeword before it (Loss).
+  It costs a byte at those boundaries, and v3 receivers already read it.
+  Ragtime's pieces would then be 3 bytes short of whole codewords, not 2.
+- A note when a v2 broadcast is heard by a v3 host, so an operator knows
+  to update.

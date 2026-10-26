@@ -44,9 +44,9 @@ commands and reports, read from Data2G's source):
 many as fit. In version 0 a frame is at most 255 bytes. Data2G sizes
 every data mode's receiver for one 256-byte KISS frame; a longer one
 fits only some modes (`docs/DATA2G.md`, "A broadcast burst"). Frames
-aren't padded: Data2G carries
-each frame's length, so the frame ends at its last byte. A record never
-spans two frames.
+aren't padded: Data2G marks where each frame ends (a 2-byte length, or
+from broadcast v3 COBS and a zero byte), so the frame ends at its last
+byte. A record never spans two frames.
 
 **A session stream** is the byte `0xA0`, then a Hello, then any records,
 back to back, for as long as the session lasts. Each session starts a
@@ -734,7 +734,20 @@ two.
 
 - A file is at most 300 KB. Its pieces fill a frame: three codewords in
   the FSK modes, otherwise as much as the 255-byte frame takes, with the
-  sender's callsign in each piece's header.
+  sender's callsign in each piece's header. A frame fills whole codewords
+  once framed (`link::framedBytes`: n + 2 bytes up to 253, one more past
+  that), so a piece never spills into one more codeword.
+- **Bursts stay long.** A burst carries as many pieces as fit 12 s
+  and 8 frames (`MAX_BURST_SECONDS`, `MAX_FRAMES_PER_BURST`), whatever
+  the path. From Data2G's broadcast v3 (PR
+  #121), a lost codeword loses only the frames it touches, so a frame's
+  chance doesn't depend on where it sits in the burst, and a longer burst
+  pays its control codeword and the 4 s gap below once for more pieces.
+  Under v2, a lost codeword lost the rest of its burst, which was why
+  shorter bursts on fading paths were considered (ragtime #68), and then
+  dropped for v3. One cost remains in v3 as it stands: a piece that
+  starts a codeword is lost with the codeword before it, since its start
+  is known only from the zero there (docs/DATA2G.md, "Loss").
 - The first pass goes one burst at a time, so others can get a word
   in: the announce, then the pieces, with the announce again ahead of
   every 20 pieces. A burst Not sent goes once more.

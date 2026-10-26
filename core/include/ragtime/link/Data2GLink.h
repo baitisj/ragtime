@@ -70,6 +70,12 @@ private:
 // Modes
 //-------------------------------------------------------------------------
 
+// The most bytes an n-byte frame takes in a burst's data. Broadcast v3
+// (Data2G PR #121) COBS-encodes each frame and ends it with a zero: n + 2
+// up to 253 bytes, one more per 254. That is the 2-byte length of v2 up
+// to 253 bytes, so it counts both.
+constexpr int framedBytes(int n) { return n + 2 + n / 254; }
+
 // One line of the MODES list: "MODE name bandwidth-Hz bytes-per-codeword
 // max-codewords seconds-at-1 seconds-at-max".
 struct ModeInfo
@@ -84,7 +90,7 @@ struct ModeInfo
     bool valid() const { return !name.empty() && bytesPerCodeword > 0 && maxCodewords > 0; }
 
     // How long a burst carrying these frames takes: one control codeword,
-    // then the frames back to back behind a 2-byte length each.
+    // then the frames back to back, each framed (framedBytes).
     double burstSeconds(const std::vector<int>& frameBytes) const;
 };
 

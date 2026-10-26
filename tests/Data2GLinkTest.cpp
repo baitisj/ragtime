@@ -168,8 +168,15 @@ void testModes()
         for (const ModeInfo& mode : narrow) CHECK(mode.bandwidthHz <= NARROW_MODE_MAX_HZ);
     }
 
-    // A burst is one control codeword and the frames behind 2-byte
-    // lengths: qpsk-r1/3 carries 76 bytes a codeword.
+    // Framing: COBS and its zero (Data2G broadcast v3), the 2-byte length
+    // of v2 up to 253 bytes.
+    CHECK_EQ(framedBytes(74), 76);
+    CHECK_EQ(framedBytes(253), 255);
+    CHECK_EQ(framedBytes(254), 257);
+    CHECK_EQ(framedBytes(255), 258);
+
+    // A burst is one control codeword and the frames, each framed:
+    // qpsk-r1/3 carries 76 bytes a codeword.
     ModeInfo qpsk;
     for (const ModeInfo& mode : known)
     {
