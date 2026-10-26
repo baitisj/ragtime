@@ -1,8 +1,9 @@
 // ragtime_ear_probe: the Ear without the window, for the bench and for
 // checking a station by hand. It listens as the Ear does (alongside
 // data2g-host, or to --source NAME) for --seconds, and prints what it
-// finds in PipeWire's graph and the loudest part of each second's audio.
-// It only records; it never plays a sound. Not a test.
+// finds in PipeWire's graph, the loudest part of each second's audio, and
+// the filter edges the band's noise shows (ear::EdgeFinder, as the Ear
+// window draws them). It only records; it never plays a sound. Not a test.
 //
 //   ragtime_ear_probe [--seconds N] [--source NODE_NAME] [--port 8300]
 #include <atomic>
@@ -17,6 +18,7 @@
 #include <vector>
 
 #include "ragtime/audio/EarAudio.h"
+#include "ragtime/ear/Edges.h"
 #include "ragtime/ear/ProcNet.h"
 #include "ragtime/ear/Spectrum.h"
 
@@ -35,7 +37,10 @@ int main(int argc, char** argv)
     }
 
     std::mutex mutex;
-    ear::Spectrum spectrum(48000, 1.0);
+    // The Ear's normal speed, so the edges average as they do there.
+    constexpr double ROWS_PER_SECOND = 10.0;
+    ear::Spectrum spectrum(48000, ROWS_PER_SECOND);
+    ear::EdgeFinder edges(ROWS_PER_SECOND);
     std::vector<std::vector<float>> rows;
     std::atomic<long> samples{0};
     auto ear = audio::makeEarAudio();
@@ -70,6 +75,7 @@ int main(int argc, char** argv)
             std::snprintf(text, sizeof text, "loudest %.0f Hz at %.1f dB, mean %.1f dB", ear::Spectrum::binHz(peak),
                           r[peak], mean / (double)r.size());
             row = text;
+            for (const auto& each : rows) edges.addRow(each, false);
             rows.clear();
         }
         std::printf("%ds: %s\n", s + 1, !st.available ? st.problem.c_str() : "PipeWire connected");
@@ -82,6 +88,14 @@ int main(int argc, char** argv)
         std::printf("  listening to: %s, %s, %d Hz; %ld samples; %s\n",
                     st.listeningDescription.empty() ? "nothing" : st.listeningDescription.c_str(),
                     st.streaming ? "streaming" : "waiting", st.rate, (long)samples, row.c_str());
+        const std::optional<ear::Edges> e = edges.edges();
+        if (e)
+            std::printf("  edges: low %s, high %s; passband %.1f dB, stopband %.1f dB, %.0f s of quiet\n",
+                        e->lowHz ? std::to_string((int)*e->lowHz).c_str() : "none",
+                        e->highHz ? std::to_string((int)*e->highHz).c_str() : "none", e->passbandDb, e->stopbandDb,
+                        e->quietSeconds);
+        else
+            std::printf("  edges: none yet (%.0f s of quiet)\n", edges.quietSeconds());
     }
     ear->stop();
     return 0;
