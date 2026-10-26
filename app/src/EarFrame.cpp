@@ -290,7 +290,9 @@ void EarFrame::showFilter(const audio::EarStatus& s)
         shows = "The noise: no audio";
     else if (e && e->lowHz && e->highHz)
         shows = "The noise shows " + hz(*e->lowHz) + dash + hz(*e->highHz) + " Hz, " +
-                wxString::Format("%d", (int)std::lround((*e->highHz - *e->lowHz) / 10.0) * 10) + " Hz wide";
+                // The edges' difference as shown, so the numbers add up.
+                wxString::Format("%d", (int)(std::lround(*e->highHz / 10.0) - std::lround(*e->lowHz / 10.0)) * 10) +
+                " Hz wide";
     else if (e && e->lowHz)
         shows = "The noise shows a low edge at " + hz(*e->lowHz) + " Hz; the top is past 4 kHz";
     else if (e && e->highHz)

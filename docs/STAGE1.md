@@ -1112,14 +1112,16 @@ stopband isn't 10 dB under the passband (no filter shape to see), and an
 end past the picture's 0 or 4 kHz is given as none. On the pretend
 radio, whose skirts fall 0.28 dB a Hz from 300 and 2700 Hz (so -6 dB at
 279 and 2721 Hz), it read 270 to 2730 Hz; with 1200 to 1800 Hz, 1180 to
-1830 Hz.
+1830 Hz. On Jeff's IC-7100 (2026-10-26, PKTUSB with a 3000 Hz filter
+and the PBT centred, a quiet 40 m), it read 70 to 3050 Hz, with the
+stopband about 51 dB down (the codec's own floor, above the filter).
 
 The scope draws the edges the noise shows in orange, with the -6 dB line
 between them and the width, and the rig's width as a dashed purple
 bracket over the top, centred where the noise puts the passband (on
 Data2G's 1500 Hz until it does). Above the scope, two lines say the
 same in words: "The rig says USB · 2400 Hz filter · PBT centred" and
-"The noise shows 270–2730 Hz, 2450 Hz wide". Beside the sound card's
+"The noise shows 270–2730 Hz, 2460 Hz wide". Beside the sound card's
 rate the corner shows the band's noise from the S-meter, the gearshift's
 QRN ("48 kHz · QRN S2"), when the rig reports it. Each filter reading
 that differs from the last goes to the flight recorder, as

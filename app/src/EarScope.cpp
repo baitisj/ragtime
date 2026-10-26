@@ -250,7 +250,9 @@ void EarScope::paint()
         wxString label = wxString::FromUTF8("\xe2\x88\x92" "6 dB");
         if (edges_->lowHz && edges_->highHz)
             label += wxString::FromUTF8(" \xc2\xb7 ") +
-                     wxString::Format("%d Hz", (int)std::lround(*edges_->highHz - *edges_->lowHz));
+                     // The width of the edges as the Ear's words give them, to 10 Hz.
+                     wxString::Format("%d Hz", (int)(std::lround(*edges_->highHz / 10.0) -
+                                                     std::lround(*edges_->lowHz / 10.0)) * 10);
         gc->SetFont(small, orange);
         double w, h;
         gc->GetTextExtent(label, &w, &h);
