@@ -4,11 +4,14 @@
 // finds in PipeWire's graph, the loudest part of each second's audio, and
 // the filter edges the band's noise shows (ear::EdgeFinder, as the Ear
 // window draws them), from 0 to --span HZ (4000 by default; up to 12000,
-// for FM). It only records; it never plays a sound. Not a test.
+// for FM). With --average it ends with the whole run's spectrum, one
+// "Hz dB" line a bin, to find a notch's dip. It only records; it never
+// plays a sound. Not a test.
 //
-//   ragtime_ear_probe [--seconds N] [--source NODE_NAME] [--port 8300] [--span HZ]
+//   ragtime_ear_probe [--seconds N] [--source NODE_NAME] [--port 8300] [--span HZ] [--average]
 #include <atomic>
 #include <chrono>
+#include <cstddef>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -31,8 +34,16 @@ int main(int argc, char** argv)
     int port = 8300;
     double span = ear::Spectrum::DEFAULT_TOP_HZ;
     std::string source;
+    bool average = false;
+    for (int i = 1; i < argc; i++)
+        if (!std::strcmp(argv[i], "--average")) average = true;
     for (int i = 1; i + 1 < argc; i += 2)
     {
+        if (!std::strcmp(argv[i], "--average"))
+        {
+            i--;
+            continue;
+        }
         if (!std::strcmp(argv[i], "--seconds")) seconds = std::atoi(argv[i + 1]);
         else if (!std::strcmp(argv[i], "--source")) source = argv[i + 1];
         else if (!std::strcmp(argv[i], "--port")) port = std::atoi(argv[i + 1]);
@@ -47,6 +58,8 @@ int main(int argc, char** argv)
     spectrum.setTopHz(span);
     edges.setTopHz(spectrum.topHz());
     std::vector<std::vector<float>> rows;
+    std::vector<double> sum;
+    long summed = 0;
     std::atomic<long> samples{0};
     auto ear = audio::makeEarAudio();
     ear->setHostPid(ear::processListeningOn(port));
@@ -80,7 +93,17 @@ int main(int argc, char** argv)
             std::snprintf(text, sizeof text, "loudest %.0f Hz at %.1f dB, mean %.1f dB",
                           ear::Spectrum::binHz(peak, spectrum.topHz()), r[peak], mean / (double)r.size());
             row = text;
-            for (const auto& each : rows) edges.addRow(each, false);
+            for (const auto& each : rows)
+            {
+                edges.addRow(each, false);
+                if (sum.size() != each.size())
+                {
+                    sum.assign(each.size(), 0.0);
+                    summed = 0;
+                }
+                for (std::size_t i = 0; i < each.size(); i++) sum[i] += each[i];
+                summed++;
+            }
             rows.clear();
         }
         std::printf("%ds: %s\n", s + 1, !st.available ? st.problem.c_str() : "PipeWire connected");
@@ -103,5 +126,11 @@ int main(int argc, char** argv)
             std::printf("  edges: none yet (%.0f s of quiet)\n", edges.quietSeconds());
     }
     ear->stop();
+    if (average && summed > 0)
+    {
+        std::printf("average of %ld rows:\n", summed);
+        for (std::size_t i = 0; i < sum.size(); i++)
+            std::printf("%.0f %.1f\n", ear::Spectrum::binHz((int)i, spectrum.topHz()), sum[i] / (double)summed);
+    }
     return 0;
 }
