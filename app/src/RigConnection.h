@@ -68,6 +68,9 @@ public:
     bool readsPower() const { return up_ && reader_.readsPower(); }
     bool readsMeters() const { return up_ && reader_.readsAny(); }
     std::vector<ragtime::radio::MeterReading> takeReadings() { return reader_.takeReadings(); }
+    // The S-meter, read between bursts, in dB over S9.
+    bool readsStrength() const { return up_ && reader_.readsStrength(); }
+    std::vector<double> takeStrength() { return reader_.takeStrength(); }
     // The SWR trip is on: the SWR every other question while keyed.
     void setSwrWatch(bool on) { reader_.setSwrWatch(on); }
 

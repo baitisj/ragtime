@@ -4,6 +4,7 @@
 #include <utility>
 
 #include "HostConnection.h"
+#include "ragtime/radio/Bands.h"
 #include "RigConnection.h"
 
 using namespace ragtime;
@@ -59,7 +60,8 @@ void RigControl::apply(const radio::RigSettings& settings)
         rigctld_->stop();
         hamlib_.stop();
         seenFailures_ = 0;
-        seenAlc_ = seenSwr_ = seenPower_ = seenTrips_ = 0;
+        seenAlc_ = seenSwr_ = seenPower_ = seenTrips_ = seenStrength_ = 0;
+        noise_.clear();
         if (settings.source == radio::RigSource::Rigctld)
             rigctld_->start(settings.rigctldHost, settings.rigctldPort);
         else if (settings.source == radio::RigSource::Hamlib)
@@ -141,6 +143,33 @@ bool RigControl::readsSwr() const
     return s.open && s.readsSwr;
 }
 
+bool RigControl::readsNoise() const
+{
+    if (settings_.source == radio::RigSource::Rigctld) return rigctld_->readsStrength();
+    if (settings_.source != radio::RigSource::Hamlib) return false;
+    rig::HamlibRig::Status s = hamlib_.status();
+    return s.open && s.readsStrength;
+}
+
+std::optional<double> RigControl::noiseDb() const
+{
+    if (!readsNoise()) return std::nullopt;
+    return noise_.dbOverS9(HostConnection::nowMs());
+}
+
+void RigControl::noiseReading(double dbOverS9, uint64_t nowMs)
+{
+    // Another band, another noise.
+    std::optional<uint64_t> hz = dialHz();
+    std::string band = hz ? radio::bandOf(*hz) : std::string();
+    if (band != noiseBand_)
+    {
+        noiseBand_ = band;
+        noise_.clear();
+    }
+    noise_.reading(dbOverS9, nowMs);
+}
+
 void RigControl::clearSwrTrip()
 {
     if (!tripped_) return;
@@ -195,6 +224,7 @@ void RigControl::syncRigctld()
     bool tx = hostPtt_ && rigctld_->up();
     if (tx != meters_.transmitting()) rigctldTrip_.transmitting(tx);
     meters_.transmitting(tx, now);
+    for (double dB : rigctld_->takeStrength()) noiseReading(dB, now);
     bool trippedNow = false;
     for (const radio::MeterReading& reading : rigctld_->takeReadings())
     {
@@ -265,6 +295,11 @@ void RigControl::sync()
     seenSwr_ = s.swrReadings;
     seenPower_ = s.powerReadings;
     if (tx) meters_.reading(fresh, now);
+    if (s.strengthReadings != seenStrength_)
+    {
+        seenStrength_ = s.strengthReadings;
+        if (hamlib && s.strength) noiseReading(*s.strength, now);
+    }
     if (meters_.version() != metersBefore && metersChanged_) metersChanged_();
     if (trippedNow && trippedChanged_) trippedChanged_(tripText_);
 

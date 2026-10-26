@@ -10,6 +10,7 @@
 #include <wx/event.h>
 #include <wx/timer.h>
 
+#include "ragtime/radio/Noise.h"
 #include "ragtime/radio/PttFollower.h"
 #include "ragtime/radio/RigSettings.h"
 #include "ragtime/radio/TxMeters.h"
@@ -23,8 +24,9 @@ class RigConnection;
 // data2g-host keys" is ticked (radio::PttFollower: off by default, and
 // unkeyed if the host link drops, the rig fails, Ragtime closes, or after
 // 180 s keyed). The window asks it the dial, whichever way it is read,
-// and, from a Hamlib rig, the transmit meters (radio::TxMeters) read while
-// data2g-host transmits.
+// the transmit meters (radio::TxMeters) read while data2g-host transmits,
+// and the band's noise from the S-meter read between bursts
+// (radio::NoiseFloor), for the gearshift.
 class RigControl : public wxEvtHandler
 {
 public:
@@ -62,6 +64,10 @@ public:
     bool readsAlc() const;
     bool readsSwr() const;
     bool readsMeters() const;
+    // The rig reports its S-meter, and the band's noise from it: the
+    // quietest reading of the last minute on this band, in dB over S9.
+    bool readsNoise() const;
+    std::optional<double> noiseDb() const;
     // "Hamlib" or "rigctld": how the meters are read, for the tooltips.
     const char* meterPath() const;
 
@@ -78,6 +84,8 @@ private:
     void sync();
     // The meters and the SWR trip from rigctld.
     void syncRigctld();
+    // An S-meter reading between bursts; a new band starts afresh.
+    void noiseReading(double dbOverS9, uint64_t nowMs);
 
     std::function<void()> changed_;
     std::function<void()> metersChanged_;
@@ -86,6 +94,8 @@ private:
     ragtime::rig::HamlibRig hamlib_;
     ragtime::radio::PttFollower follower_;
     ragtime::radio::TxMeters meters_;
+    ragtime::radio::NoiseFloor noise_;
+    std::string noiseBand_;         // the band noise_ was read on
     // Through rigctld the trip only stops data2g-host: Ragtime sends a
     // shared rigctld no set commands, so it never unkeys or turns down.
     ragtime::radio::SwrTrip rigctldTrip_;
@@ -102,6 +112,7 @@ private:
     uint64_t seenSwr_ = 0;
     uint64_t seenPower_ = 0;
     uint64_t seenTrips_ = 0;
+    uint64_t seenStrength_ = 0;
 };
 
 #endif
