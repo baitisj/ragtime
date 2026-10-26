@@ -80,41 +80,58 @@ the recording, at the spacing the tester saw (docs/FLIGHT_RECORDER.md).
 
 ## Frequencies
 
-Where to try Ragtime from the US: places in the HF data segments clear
-of the busy weak-signal spots. Nobody owns these, and nothing here is a
-schedule. Listen first, and move if someone is there.
+Where to try Ragtime under Part 97: places in the US HF data segments
+clear of the busy weak-signal spots. Nobody owns these, and nothing here
+is a schedule. Listen first, and move if someone is there.
 
 In USB a Data2G burst sits about 0.3 to 2.7 kHz above the dial (less for
 narrow modes). So keep the dial at least 0.3 kHz above the low edge of a
-range and 2.7 kHz below its high edge.
+range and 2.7 kHz below its high edge. Figures are the signal, in MHz.
 
-| Band | Try (signal inside, MHz) | Avoid nearby (signals, MHz) |
+| Band | Try | Avoid nearby |
 | --- | --- | --- |
-| 80 m | 3.581 to 3.585 (tight, and shared with PSK31 near 3.580) | WSPR 3.5700–3.5702; FT8 3.573–3.576; FT4 3.5755–3.578; JS8Call 3.578–3.5805; Winlink and other automatic stations 3.585–3.600 |
-| 40 m | 7.051 to 7.066, or 7.081 to 7.099 | WSPR 7.0400–7.0402; FT4 7.0475–7.050; PSK31 7.070–7.073; FT8 7.074–7.077; JS8Call 7.078–7.0805; automatic stations 7.100–7.105 |
-| 20 m | 14.084 to 14.094, or 14.113 to 14.147 | PSK31 14.070–14.073; FT8 14.074–14.077; JS8Call 14.078–14.0805; FT4 14.080–14.083; WSPR 14.0970–14.0972; NCDXF beacons 14.100; automatic stations 14.095–14.112 |
-| 17 m | 18.088 to 18.097 | FT8 18.100–18.103; FT4 and JS8Call 18.104–18.107; WSPR 18.1060–18.1062; NCDXF beacons 18.110 |
-| 15 m | 21.081 to 21.089, or 21.101 to 21.139 | FT8 21.074–21.077; JS8Call 21.078–21.0805; automatic stations 21.090–21.100; WSPR 21.0960–21.0962; FT4 21.140–21.143; NCDXF beacons 21.150 |
-| 12 m | 24.895 to 24.910 | FT8 24.915–24.918; FT4 24.919–24.922; JS8Call 24.922–24.9245; automatic stations 24.925–24.930; WSPR 24.9260–24.9262; NCDXF beacons 24.930 |
-| 10 m | 28.081 to 28.119 | FT8 28.074–28.077; JS8Call 28.078–28.0805; automatic stations 28.120–28.189 (with WSPR 28.1260–28.1262 and FT4 28.180–28.183); beacons 28.190–28.300 |
+| 80 m | 3.581–3.585 (room for one wide burst) | WSPR 3.5700–3.5702; FT8 3.573–3.576; FT4 3.575–3.578; JS8Call 3.578–3.581; automatic stations 3.585–3.600, with VarAC at 3.595 |
+| 40 m | 7.081–7.099, 7.108–7.122 | WSPR 7.0400–7.0402; FT4 7.0475–7.0505; FT8 7.074–7.077; JS8Call 7.078–7.081; automatic stations 7.100–7.105; VarAC 7.105–7.108 |
+| 30 m | 10.143–10.149 | JS8Call 10.130–10.133; VarAC 10.133–10.136; FT8 10.136–10.139; FT4 10.140–10.143; WSPR 10.1400–10.1402 |
+| 20 m | 14.083–14.095, 14.112–14.147 | FT8 14.074–14.077; JS8Call 14.078–14.081; FT4 14.080–14.083; WSPR 14.0970–14.0972; NCDXF beacons 14.100; automatic stations 14.095–14.112, with VarAC at 14.105 |
+| 17 m | 18.085–18.097 | FT8 18.100–18.103; FT4 and JS8Call 18.104–18.107; WSPR 18.1060–18.1062; automatic stations 18.105–18.110, with VarAC at 18.106; NCDXF beacons 18.110 |
+| 15 m | 21.081–21.089, 21.108–21.139, 21.152–21.199 | FT8 21.074–21.077; JS8Call 21.078–21.081; automatic stations 21.090–21.100; WSPR 21.0960–21.0962; VarAC 21.105–21.108; FT4 21.140–21.143; NCDXF beacons 21.150 |
+| 12 m | 24.895–24.911 | FT8 24.915–24.918; FT4 24.919–24.922; JS8Call 24.922–24.925; automatic stations 24.925–24.930, with VarAC at 24.927 and WSPR 24.9260–24.9262; NCDXF beacons 24.930 |
+| 10 m | 28.081–28.104, 28.108–28.119 | FT8 28.074–28.077; JS8Call 28.078–28.081; VarAC 28.105–28.108; automatic stations 28.120–28.189, with WSPR 28.1260–28.1262 and FT4 28.180–28.183; beacons 28.190–28.300 |
 
-- The "avoid" figures are the usual WSJT-X and JS8Call dial frequencies
-  plus the audio those modes normally use. Glissando's presets (3.570,
-  7.067, 14.067, 18.097, 21.067, 24.911, 28.067 MHz dial) sit just below
-  FT8, and the ranges above leave them clear too.
-- Several "try" ranges are the band plan's RTTY and data areas. RTTY
-  contest weekends fill them; pick another band or time then.
-- 30 m is left out: the band plan keeps signals there under 500 Hz, and
-  FT8, FT4, JS8Call and WSPR fill most of it. 60 m is channelised, and
-  160 m is rarely worth a 2.4 kHz burst.
-- Data on these bands needs a General licence or higher, except on 10 m,
-  where Technicians may send data up to 28.300 MHz.
+How these were picked (2026-10-26):
+
+- **What's busy.** PSK Reporter's mode counts for the two hours before
+  21:40 UTC: FT8 3.2 million reports, FT4 148,000, WSPR 128,000, CW
+  14,000, JS8Call 8,900, VarAC 4,500, RTTY 95, PSK31 51. So the table
+  steers around FT8, FT4, WSPR, JS8Call and VarAC, and treats the old
+  PSK31 and Olivia spots as free. RTTY contesters don't report to PSK
+  Reporter, and they fill the RTTY areas on contest weekends.
+- **Where.** The "avoid" figures are the usual WSJT-X, JS8Call and
+  VarAC dial frequencies plus the audio those modes use. The ARRL band
+  plan's RTTY and data areas come first; the 17 m and 12 m ranges sit
+  just below them. The ranges also clear Glissando's presets (3.570,
+  7.067, 14.067, 18.097, 21.067, 24.911, 28.067 MHz dial).
+- **Other countries' band plans.** Part 97 allows 2.8 kHz data
+  throughout these segments, but IARU band plans ask for less in places,
+  and DX stations follow them. Region 1 (Europe, Africa) keeps all of
+  30 m to 500 Hz. Region 2 (the Americas) allows 2.7 kHz at 10.140–10.150,
+  and asks for 500 Hz at 3.580–3.600, 14.070–14.099, 21.070–21.090,
+  21.120–21.149 and 28.070–28.190 MHz. Use a narrow mode there when
+  working DX. In other Region 2 countries 7.060–7.100 and 14.112 MHz up
+  are SSB, so expect phone there.
+- **Licences.** Data on these bands needs a General licence or higher,
+  except on 10 m, where Technicians may send data up to 28.300 MHz.
 - Ragtime turns receive only when the dial is outside a US data
   segment, or less than 3 kHz inside its edge, and says so in the
   connection bar.
 - Unattended stations (automatic control) must stay in the narrower
-  segments of 97.221(b), which the table above avoids; see "Frequencies
-  and band plans" in [docs/PLAN.md](docs/PLAN.md#frequencies-and-band-plans).
+  segments of 97.221(b); see "Frequencies and band plans" in
+  [docs/PLAN.md](docs/PLAN.md#frequencies-and-band-plans).
+
+Sources: [ARRL band plan](https://www.arrl.org/band-plan),
+[IARU Region 2 band plan](https://www.iaru.org/wp-content/uploads/2020/10/IARU-Region-2-Band-plan.pdf),
+[PSK Reporter statistics](https://pskreporter.info/cgi-bin/pskstats.pl).
 
 ## The idea
 
