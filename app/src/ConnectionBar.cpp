@@ -53,9 +53,10 @@ ConnectionBar::ConnectionBar(wxWindow* parent)
     pause = new wxToggleButton(this, wxID_ANY, "Pause sending", wxDefaultPosition, wxDefaultSize, wxBU_EXACTFIT);
     pause->SetToolTip("Hold new broadcasts as Queued; a burst data2g-host already has still goes");
 
-    // Auto ALC needs data2g-host to take a TX level command (an ask for
-    // Andrew), so it waits, greyed, until then. The meter beside it shows
-    // the rig's ALC when Ragtime opens the rig with Hamlib (setAlc).
+    // Auto ALC turns data2g-host's TX level (TXPOWER) down to keep the
+    // rig's ALC under its target; the window enables it, and words its
+    // tooltip, once the host takes TXPOWER and the rig reports its ALC. The
+    // meter beside it shows the rig's ALC (setAlc).
     autoAlc = new wxCheckBox(this, wxID_ANY, "Auto ALC");
     alcMeter = new wxGauge(this, wxID_ANY, 100, wxDefaultPosition, wxSize(FromDIP(60), FromDIP(10)),
                            wxGA_HORIZONTAL | wxGA_SMOOTH);
@@ -70,8 +71,6 @@ ConnectionBar::ConnectionBar(wxWindow* parent)
         t->SetMinSize(wxSize(std::max(alcReading->GetBestSize().x, swrReading->GetBestSize().x) + FromDIP(4), -1));
         t->SetLabel(wxString::FromUTF8("\xe2\x80\x94"));
     }
-    autoAlc->SetToolTip("Keeps transmit drive just under the rig's ALC. It waits for data2g-host to take a TX "
-                        "level command, since data2g-host alone sets the transmit audio.");
     autoAlc->Disable();
     setAlc(false, 0, wxString::FromUTF8("\xe2\x80\x94"),
            "The rig's ALC while transmitting, when Ragtime opens the rig with Hamlib (Settings > Rig).", false);

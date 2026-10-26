@@ -55,6 +55,7 @@ add_library(ragtime_core STATIC
     src/radio/RigFilter.cpp
     src/radio/RigSettings.cpp
     src/radio/TxMeters.cpp
+    src/radio/AutoAlc.cpp
     # The flight recorder: the host link on disk, for reports and --replay.
     src/link/FlightRecorder.cpp
     # The Ear: the spectrum, and finding data2g-host's sound card in

@@ -27,7 +27,7 @@ it:
 | `kiss>`, `kiss<` | a KISS frame each way, the bytes between FENDs in hex, exactly as on the wire (command byte and escapes included) |
 | `data-up`, `data-down` | the session data port (command port + 1) |
 | `data>`, `data<` | session bytes each way: **the count only** |
-| `note` | Ragtime opened or closed, Help > Save a report pressed, the head of each file, and each burst's transmit meters, read through Hamlib or rigctld (`note rig TX 12 s: ALC peak 61%, mean 44%; SWR 1.3; 38 W`), an SWR trip and its clearing (`note rig SWR trip: ...`), and how rigctld is answering, when it changes: connected, the first dial reading, an error, or every address failed (`note rigctld 127.0.0.1:4532: no rigctld: 127.0.0.1:4532 refused, [::1]:4532 refused`) |
+| `note` | Ragtime opened or closed, Help > Save a report pressed, the head of each file, and each burst's transmit meters, read through Hamlib or rigctld (`note rig TX 12 s: ALC peak 61%, mean 44%; SWR 1.3; 38 W`), a change to data2g-host's TX level and why (`note TX level -2.0 dB: Auto ALC`, `set in Settings`, `Auto ALC off`, `Ragtime closed`), an SWR trip and its clearing (`note rig SWR trip: ...`), and how rigctld is answering, when it changes: connected, the first dial reading, an error, or every address failed (`note rigctld 127.0.0.1:4532: no rigctld: 127.0.0.1:4532 refused, [::1]:4532 refused`) |
 
 ```
 2026-10-25T16:38:10.875Z up 127.0.0.1 KISS 8100 commands 8300
