@@ -11,6 +11,7 @@
 #include <wx/timer.h>
 
 #include "Prefs.h"
+#include "RigConnection.h"
 #include "ragtime/rig/HamlibRig.h"
 
 class wxButton;
@@ -32,7 +33,8 @@ class wxTextCtrl;
 // repairs go (the slowest gear, the caps).
 //
 // Rig: how Ragtime knows the radio (radio::RigSettings). No rig; the dial
-// read from a rigctld already running; or the rig opened with Hamlib, any
+// read from a rigctld already running, with a Test button that asks it
+// the dial and says what happened; or the rig opened with Hamlib, any
 // rig Hamlib knows, with its port, the serial settings and the backend's
 // own, a Test button that reads the dial, and "Key the rig when
 // data2g-host keys" (off by default). Then receive only outside the US
@@ -70,6 +72,8 @@ private:
     void modelPicked();
     void test();
     void onTestTimer(wxTimerEvent& event);
+    void testRigctld();
+    void onRigctldTimer();
     bool TransferDataFromWindow() override;
     void check();
 
@@ -95,6 +99,8 @@ private:
     wxRadioButton* useHamlib_ = nullptr;
     wxTextCtrl* rigctldHost_ = nullptr;
     wxSpinCtrl* rigctldPort_ = nullptr;
+    wxButton* rigctldTest_ = nullptr;
+    wxStaticText* rigctldResult_ = nullptr;
     wxChoice* maker_ = nullptr;
     wxChoice* model_ = nullptr;
     std::vector<ragtime::rig::Model> models_;      // Hamlib's, by maker and name
@@ -127,6 +133,9 @@ private:
     std::unique_ptr<ragtime::rig::HamlibRig> testRig_;
     wxTimer testTimer_;
     int testTicks_ = 0;
+    std::unique_ptr<RigConnection> rigctldProbe_;
+    wxTimer rigctldTimer_;
+    int rigctldTicks_ = 0;
 };
 
 #endif

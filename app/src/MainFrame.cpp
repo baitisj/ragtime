@@ -262,6 +262,7 @@ MainFrame::MainFrame()
     host_->setDataSide(std::move(data));
     rig_ = std::make_unique<RigControl>([this]() { onDial(); }, [this]() { onMeters(); },
                                         [this](const std::string& what) { onSwrTrip(what); });
+    rig_->setNote([this](const std::string& line) { host_->recorder().note(line, HostConnection::nowMs()); });
 
     // Every broadcast item of ours is sealed once it has gone.
     chat_.onItems([this](const std::vector<protocol::Record>& items, uint64_t burst, const std::string& mode,
@@ -328,6 +329,18 @@ MainFrame::~MainFrame()
     clock_.Stop();
     rig_.reset();
     host_.reset();
+    // The panes go now, while the engines their callbacks read are still
+    // here. Left to wxFrame's own teardown, after our members have gone,
+    // GTK moves the focus as it destroys them, and a message list that had
+    // it redraws its rows through callbacks into a gearshift and seals
+    // already destroyed (a crash on quitting, 2026-10-26). The menu bar and
+    // the status bar are wxFrame's to delete.
+    wxWindowList children = GetChildren();
+    for (wxWindow* child : children)
+    {
+        if (child == GetMenuBar() || child == GetStatusBar()) continue;
+        delete child;
+    }
 }
 
 //-------------------------------------------------------------------------

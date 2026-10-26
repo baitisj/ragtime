@@ -4,8 +4,8 @@
 //
 //   - None: Ragtime doesn't know the band.
 //   - rigctld: Ragtime reads the dial from a rigctld already running
-//     (DialReader), asking "f" and nothing else, since the operator's
-//     rigctld is often shared (fldigi). Never keys.
+//     (DialReader), asking "\chk_vfo" and "f" and nothing else, since
+//     the operator's rigctld is often shared (fldigi). Never keys.
 //   - Hamlib: Ragtime opens the rig itself with Hamlib, as other ham
 //     programs do: any rig Hamlib knows, on a serial port or a network
 //     address, with the usual serial settings and the backend's own
