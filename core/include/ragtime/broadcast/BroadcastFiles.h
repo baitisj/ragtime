@@ -99,6 +99,18 @@ struct BroadcastFile
     uint64_t repairsUntilMs = 0;// ours: when repairs close, as things stand; 0 once closed
     bool keptOpen = false;      // ours: the operator moved repairsUntilMs
     size_t askers = 0;          // ours: stations that have asked for repairs
+    // Ours: the stations that asked for its pieces; the repair round going
+    // now, whom it answers and its repair pieces of this file gone of
+    // those in it (roundPieces 0: none in the round); and repair pieces
+    // of it sent since its repairs last opened (Seals::FileRepairs).
+    std::vector<std::string> askedBy;
+    std::vector<std::string> repairingFor;
+    uint32_t roundPieces = 0;
+    uint32_t roundSent = 0;
+    uint32_t repairPieces = 0;
+    // Theirs: repair (parity) pieces held, each standing in for a piece
+    // missing: once held and these make pieces, the missing are rebuilt.
+    uint16_t repairHeld = 0;
     // Ours: the operator's repair gear for it (empty: Auto), the airtime
     // its repairs have taken, and whether they closed at the cap.
     std::string repairGear;
@@ -108,7 +120,8 @@ struct BroadcastFile
     // one sent, so its repairs can open again (reopen).
     bool reopenable = false;
     uint64_t expiresAtMs = 0;   // theirs: when a kept or unanswered one is dropped
-    // Each piece: files::PIECE_WAITING, PIECE_HELD or PIECE_MISSED.
+    // Each piece: files::PIECE_WAITING, PIECE_HELD or PIECE_MISSED, and
+    // theirs PIECE_COVERED for as many missing as repairHeld.
     std::vector<uint8_t> pieceMap;
 
     bool live() const;
@@ -117,6 +130,13 @@ struct BroadcastFile
 // "Sending", "Repairing", "Sent", "Cancelled", "Heard", "Receiving",
 // "Ignored", "Saved", "Incomplete", "Failed", "Expired".
 const char* stateLabel(BroadcastFile::State state);
+
+// Ours, sealed: its repairs in a few words, for its card and row. A round
+// going: "sending repairs to KC2G, 12 of 39 pieces"; else who asked and
+// what has gone, "KC2G asked, 39 repair pieces sent", or "no requests yet".
+std::string repairText(const BroadcastFile& file);
+// "KC2G", "KC2G and W1AW", "KC2G, W1AW and 2 more".
+std::string callsText(const std::vector<std::string>& calls);
 
 class BroadcastFiles : public SealedFiles
 {
@@ -220,6 +240,8 @@ public:
             Sending,    // a file of ours has started: a card for it
             Saved,      // a file of theirs is saved
             Ended,      // ours or theirs is over (Sent, Failed, Ignored, ...)
+            Repairing,  // a repair round of ours has started to carry pieces of it
+            Reopened,   // ours: its repairs opened again; theirs: its sender's did, and we ask again
         } type = Type::Announced;
         uint64_t id = 0;
     };
@@ -266,6 +288,7 @@ private:
         uint64_t firstPassMs = 0;       // when the first pass ended, for the bps column
         bool finished = false;          // its FinishedFile is out
         bool capped = false;            // its repairs closed at the airtime cap
+        bool inRound = false;           // a repair round carrying it was told of (Event Repairing)
     };
 
     struct Incoming

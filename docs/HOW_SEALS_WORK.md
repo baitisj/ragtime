@@ -321,6 +321,14 @@ hours its seal is held, if the file on disk hasn't changed. The seal
 goes again, and a station that was receiving it asks once more. After
 that it can only be broadcast again.
 
+**Watching it happen.** While a round carries a file's repair pieces,
+the sender's card and Files row say to whom and how far it has got
+("Sending repairs to KC2G, 12 of 39 pieces"); between rounds, who asked
+and how many repair pieces have gone. A listener counts the repair
+pieces it holds toward the whole, since each stands in for any missing
+piece: its bar shades as many gaps as it holds repair pieces, and they
+turn solid when there are enough to rebuild them.
+
 ### When the sender says no
 
 Sometimes the sender won't repair what was asked for: its operator
