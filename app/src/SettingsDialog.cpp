@@ -1,6 +1,7 @@
 #include "SettingsDialog.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cstddef>
 #include <string>
 
@@ -98,6 +99,7 @@ SettingsDialog::SettingsDialog(wxWindow* parent, const StationPrefs& prefs,
     : wxDialog(parent, wxID_ANY, "Settings")
     , openRig_(std::move(openRig))
     , testTimer_(this)
+    , rigctldTimer_(this)
 {
     auto* book = new wxNotebook(this, wxID_ANY);
     book->AddPage(stationPage(book, prefs, gears), "Station");
@@ -135,6 +137,7 @@ SettingsDialog::SettingsDialog(wxWindow* parent, const StationPrefs& prefs,
     ptt_->Bind(wxEVT_CHOICE, changed);
     pttPort_->Bind(wxEVT_TEXT, changed);
     testButton_->Bind(wxEVT_BUTTON, [this](wxCommandEvent&) { test(); });
+    rigctldTest_->Bind(wxEVT_BUTTON, [this](wxCommandEvent&) { testRigctld(); });
     Bind(wxEVT_TIMER, &SettingsDialog::onTestTimer, this);
     modelPicked();
     if (page == Page::Station) callsign_->SetFocus();
@@ -143,6 +146,7 @@ SettingsDialog::SettingsDialog(wxWindow* parent, const StationPrefs& prefs,
 SettingsDialog::~SettingsDialog()
 {
     testTimer_.Stop();
+    rigctldTimer_.Stop();
 }
 
 //-------------------------------------------------------------------------
@@ -320,6 +324,10 @@ wxWindow* SettingsDialog::rigPage(wxNotebook* book, const StationPrefs& prefs)
     rigctldPort_ = new wxSpinCtrl(page, wxID_ANY, "", wxDefaultPosition, wxDefaultSize, wxSP_ARROW_KEYS, 1, 65535,
                                   r.rigctldPort);
     rigctldPort_->SetToolTip("rigctld's port, 4532 unless you started it with another");
+    rigctldTest_ = new wxButton(page, wxID_ANY, "Test");
+    rigctldTest_->SetToolTip("Connects to rigctld as Ragtime would, trying IPv4 and IPv6, and asks it the dial "
+                             "frequency once. It asks nothing else.");
+    rigctldResult_ = new wxStaticText(page, wxID_ANY, "", wxDefaultPosition, wxDefaultSize, wxST_ELLIPSIZE_END);
     useHamlib_ = new wxRadioButton(page, wxID_ANY, "Open the rig with Hamlib (" + utf8(rig::hamlibVersion()) + ")");
     useHamlib_->SetToolTip("Ragtime opens the rig itself, as other ham programs do, and reads its dial. It keys the "
                            "rig only if you tick Key the rig below. Nothing else may hold the rig's port meanwhile, "
@@ -338,7 +346,12 @@ wxWindow* SettingsDialog::rigPage(wxNotebook* book, const StationPrefs& prefs)
     rigctldRow->Add(new wxStaticText(page, wxID_ANY, "at"), 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 6);
     rigctldRow->Add(rigctldHost_, 1, wxALIGN_CENTER_VERTICAL | wxRIGHT, 6);
     rigctldRow->Add(new wxStaticText(page, wxID_ANY, "port"), 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 6);
-    rigctldRow->Add(rigctldPort_, 0, wxALIGN_CENTER_VERTICAL);
+    rigctldRow->Add(rigctldPort_, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 12);
+    rigctldRow->Add(rigctldTest_, 0, wxALIGN_CENTER_VERTICAL);
+    // The test's answer, under the row, lined up with the radio button's text.
+    auto* rigctldResultRow = new wxBoxSizer(wxHORIZONTAL);
+    rigctldResultRow->AddSpacer(FromDIP(22));
+    rigctldResultRow->Add(rigctldResult_, 1, wxALIGN_CENTER_VERTICAL | wxTOP, 4);
 
     // Hamlib: the rig, its port, the serial settings, the backend's own.
     auto* hamlib = new wxStaticBoxSizer(wxVERTICAL, page, "Hamlib");
@@ -486,6 +499,7 @@ wxWindow* SettingsDialog::rigPage(wxNotebook* book, const StationPrefs& prefs)
     auto* sizer = new wxBoxSizer(wxVERTICAL);
     sizer->Add(noRig_, 0, wxLEFT | wxRIGHT | wxTOP, 12);
     sizer->Add(rigctldRow, 0, wxEXPAND | wxLEFT | wxRIGHT | wxTOP, 12);
+    sizer->Add(rigctldResultRow, 0, wxEXPAND | wxLEFT | wxRIGHT, 12);
     sizer->Add(useHamlib_, 0, wxLEFT | wxRIGHT | wxTOP, 12);
     sizer->Add(hamlib, 0, wxEXPAND | wxLEFT | wxRIGHT | wxTOP, 12);
     sizer->Add(usSegmentsOnly_, 0, wxALL, 12);
@@ -599,8 +613,13 @@ void SettingsDialog::test()
     testTimer_.Start(200);
 }
 
-void SettingsDialog::onTestTimer(wxTimerEvent&)
+void SettingsDialog::onTestTimer(wxTimerEvent& event)
 {
+    if (&event.GetTimer() == &rigctldTimer_)
+    {
+        onRigctldTimer();
+        return;
+    }
     if (!testRig_) return;
     rig::HamlibRig::Status s = testRig_->status();
     bool done = false;
@@ -631,6 +650,60 @@ void SettingsDialog::onTestTimer(wxTimerEvent&)
     testResult_->SetLabel(result);
     testResult_->SetToolTip(result);
     testButton_->Enable(useHamlib_->GetValue());
+}
+
+void SettingsDialog::testRigctld()
+{
+    radio::RigSettings r = rig();
+    // A connection of its own, as the window's is: rigctld takes several.
+    rigctldProbe_ = std::make_unique<RigConnection>(nullptr);
+    rigctldProbe_->start(r.rigctldHost, r.rigctldPort);
+    rigctldTicks_ = 0;
+    rigctldResult_->SetForegroundColour(secondaryText());
+    rigctldResult_->SetLabel("Connecting to rigctld at " + utf8(rigctldProbe_->address()) + "...");
+    rigctldResult_->SetToolTip(wxString());
+    rigctldTest_->Disable();
+    rigctldTimer_.Start(200);
+}
+
+void SettingsDialog::onRigctldTimer()
+{
+    if (!rigctldProbe_) return;
+    RigConnection& probe = *rigctldProbe_;
+    std::string result;
+    bool good = false;
+    if (probe.up() && probe.dialHz())
+    {
+        uint64_t hz = *probe.dialHz();
+        std::string band = radio::bandOf(hz);
+        result = "rigctld at " + probe.connectedTo() + " answered: " + radio::formatMHz(hz)
+                 + (band.empty() ? "" : ", " + band) + (probe.vfoMode() ? " (started with --vfo)" : "");
+        good = true;
+    }
+    else if (probe.up() && !probe.problem().empty())
+    {
+        result = "Connected to " + probe.connectedTo() + ", but " + probe.problem();
+    }
+    else if (probe.failed())
+    {
+        result = probe.error();
+        if (!result.empty()) result[0] = (char)std::toupper((unsigned char)result[0]);
+    }
+    else if (++rigctldTicks_ > 50)
+    {
+        result = probe.up() ? "Connected to " + probe.connectedTo() + ", but rigctld didn't tell the frequency in 10 s"
+                            : "No answer from rigctld in 10 s";
+    }
+    else
+    {
+        return;
+    }
+    rigctldTimer_.Stop();
+    rigctldProbe_.reset();
+    rigctldResult_->SetForegroundColour(good ? goodText() : badText());
+    rigctldResult_->SetLabel(utf8(result));
+    rigctldResult_->SetToolTip(utf8(result));
+    rigctldTest_->Enable(useRigctld_->GetValue());
 }
 
 //-------------------------------------------------------------------------
@@ -673,6 +746,7 @@ void SettingsDialog::check()
     bool hamlib = useHamlib_->GetValue();
     rigctldHost_->Enable(rigctld);
     rigctldPort_->Enable(rigctld);
+    rigctldTest_->Enable(rigctld && !rigctldProbe_);
     const rig::Model* m = pickedModel();
     radio::PortType port = m != nullptr ? m->port : radio::PortType::Serial;
     maker_->Enable(hamlib);

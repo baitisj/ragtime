@@ -119,7 +119,7 @@ with the code when the seal rules change.
   (docs/DATA2G.md, "Loss").
 - The dial, the path log and the watch list (2026-10-25,
   `docs/STAGE1.md`): `core/src/radio/` (`DialReader`, which only ever
-  asks rigctld `f`; `Bands`, the US data segments; `PathLog`, a line a
+  asks rigctld `\chk_vfo` and `f`, or `f currVFO` for a `--vfo` one; `Bands`, the US data segments; `PathLog`, a line a
   burst heard, appended, and each station's 24-hour strip by band),
   `broadcast::WatchList` (bells, and Tell me when free), and in the app
   `RigConnection`, `PathStripView`, `PathsDialog` and `WatchDialog`.
@@ -233,8 +233,8 @@ with the code when the seal rules change.
   welcome. "Curmudgeons" and "lids" are flavour words for the docs and UI
   copy, never defined terms in the spec.
 - The radio is the source of truth for frequency: retune only when the
-  operator asks. Ragtime reads the dial from rigctld (`f` only, never a
-  set command: the operator's rigctld is shared), or from the rig it
+  operator asks. Ragtime reads the dial from rigctld (`\chk_vfo` and
+  `f` only, never a set command: the operator's rigctld is shared), or from the rig it
   opens with Hamlib, where PTT is the only thing it sets, and the SWR
   trip (off by default) the only thing that sets the power, to 0. It
   never keys through rigctld (NET rigctl is left out of the Hamlib
@@ -308,7 +308,8 @@ from host A or B is answered on its second try. The hosts report SNRs,
 each bot at its own strength; `--no-snr` plays a host from before Data2G
 PR #98. `--rig PORT` plays a rigctld for the dial (14.105 MHz, or
 `--dial HZ`; `--dial-hop` moves it outside the data segments one minute
-in three) and prints anything it is sent but `f`. For Hamlib with no
+in three; `--rig-vfo` plays a rigctld started with `--vfo`) and prints
+anything it is sent but `\chk_vfo` and `f`. For Hamlib with no
 radio, pick maker Hamlib, model Dummy in Settings > Rig: a pretend rig
 at 145 MHz, which "Key the rig" keys at the fake hosts' PTT. Headless:
 `Xvfb :91 &`, `DISPLAY=:91 ragtime ...`, `xdotool` to click and type,

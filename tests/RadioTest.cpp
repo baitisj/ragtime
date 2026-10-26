@@ -68,6 +68,10 @@ void dialReader()
     CHECK_EQ(dial.takeOutput(), std::string(""));
 
     dial.connected(t);
+    // First, whether rigctld was started with --vfo; this one wasn't.
+    CHECK_EQ(dial.takeOutput(), std::string("\\chk_vfo\n"));
+    dial.bytes("0\n", 2, t);
+    CHECK(!dial.vfoMode());
     CHECK_EQ(dial.takeOutput(), std::string("f\n"));
     // Not again until answered or ANSWER_MS.
     dial.tick(t + 500);
@@ -123,13 +127,70 @@ void dialReader()
     CHECK_EQ(dial.takeOutput(), std::string(""));
 }
 
-// Every line Ragtime could ever write to rigctld is a frequency query.
+// A rigctld started with --vfo wants the VFO named: "f currVFO".
+void vfoMode()
+{
+    uint64_t t = T0;
+    auto asked = [&](const char* answer) {
+        DialReader dial;
+        dial.connected(t);
+        CHECK_EQ(dial.takeOutput(), std::string("\\chk_vfo\n"));
+        std::string line = std::string(answer) + "\n";
+        dial.bytes(line.data(), line.size(), t + 50);
+        return dial.takeOutput();
+    };
+    CHECK_EQ(asked("1"), std::string("f currVFO\n"));
+    CHECK_EQ(asked("CHKVFO 1"), std::string("f currVFO\n"));
+    CHECK_EQ(asked("0"), std::string("f\n"));
+    CHECK_EQ(asked("CHKVFO 0"), std::string("f\n"));
+    // A rigctld that doesn't know \chk_vfo.
+    CHECK_EQ(asked("RPRT -4"), std::string("f\n"));
+
+    DialReader dial;
+    dial.connected(t);
+    dial.takeOutput();
+    dial.bytes("1\n", 2, t + 50);
+    CHECK(dial.vfoMode());
+    CHECK_EQ(dial.takeOutput(), std::string("f currVFO\n"));
+    dial.bytes("14105000\n", 9, t + 100);
+    CHECK(dial.dialHz(t + 100) == std::optional<uint64_t>(14105000));
+    dial.tick(t + 1100);
+    CHECK_EQ(dial.takeOutput(), std::string("f currVFO\n"));
+    // Asked afresh on the next connection.
+    dial.disconnected();
+    dial.connected(t + 2000);
+    CHECK(!dial.vfoMode());
+    CHECK_EQ(dial.takeOutput(), std::string("\\chk_vfo\n"));
+
+    // No answer to \chk_vfo at all: plain "f" after ANSWER_MS, and none
+    // before.
+    DialReader quiet;
+    quiet.connected(t);
+    quiet.takeOutput();
+    quiet.tick(t + DialReader::ANSWER_MS - 1);
+    CHECK_EQ(quiet.takeOutput(), std::string(""));
+    quiet.tick(t + DialReader::ANSWER_MS);
+    CHECK_EQ(quiet.takeOutput(), std::string("f\n"));
+
+    // Keyed while it asks: still nothing about the dial till unkeyed.
+    DialReader keyed;
+    keyed.connected(t);
+    keyed.setKeyed(true, t + 10);
+    keyed.bytes("0\n", 2, t + 20);
+    CHECK_EQ(keyed.takeOutput(), std::string("\\chk_vfo\n"));
+    keyed.setKeyed(false, t + 5000);
+    CHECK_EQ(keyed.takeOutput(), std::string("f\n"));
+}
+
+// Every line Ragtime could ever write to rigctld is a question: whether
+// rigctld wants VFOs named, and then the frequency.
 void onlyAsksFrequency()
 {
     DialReader dial;
     std::string all;
     uint64_t t = T0;
     dial.connected(t);
+    CHECK_EQ(dial.takeOutput(), std::string("\\chk_vfo\n"));
     for (int i = 0; i < 200; i++)
     {
         t += 250;
@@ -317,6 +378,7 @@ int main()
 {
     bands();
     dialReader();
+    vfoMode();
     onlyAsksFrequency();
     lines();
     strip();

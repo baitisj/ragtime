@@ -4,12 +4,14 @@
 // the radio is the source of truth, and the operator's rigctld is often
 // shared with other programs (fldigi), so Ragtime never sets anything.
 //
-// The only line it ever writes is "f" (get frequency). rigctld answers
-// with the frequency in Hz on a line of its own, or "RPRT -n" for an
-// error. A rigctld started with --vfo wants a VFO named after every
-// command; Ragtime doesn't name one (a VFO name sent to a rigctld
-// without --vfo would be read as more commands), so it reads nothing
-// from such a rigctld, and says so.
+// It writes two lines, both questions. On connecting it asks "\chk_vfo",
+// as Hamlib's own rigctl -m 2 does: a rigctld started with --vfo answers
+// 1 and wants a VFO named after every command, any other 0 (a VFO name
+// sent to a rigctld without --vfo would be read as more commands). Then,
+// once a second, "f" (get frequency), or "f currVFO" for a --vfo rigctld.
+// rigctld answers with the frequency in Hz on a line of its own, or
+// "RPRT -n" for an error. A rigctld too old to know \chk_vfo answers it
+// with an RPRT, and gets plain "f".
 //
 // It doesn't ask while our transmitter is keyed (some radios answer CAT
 // slowly then), and the last reading stands meanwhile.
@@ -58,17 +60,28 @@ public:
     std::optional<uint64_t> dialHz(uint64_t nowMs) const;
     // Why there is no reading, for a tooltip: "rigctld answered RPRT -11".
     const std::string& problem() const { return problem_; }
+    // rigctld was started with --vfo (it answered \chk_vfo with 1).
+    bool vfoMode() const { return vfo_ == Vfo::Yes; }
 
     // Goes up whenever the reading or its state changes.
     uint64_t version() const { return version_; }
 
 private:
+    enum class Vfo
+    {
+        Asking,     // \chk_vfo is out
+        No,
+        Yes,
+    };
+
     void ask(uint64_t nowMs);
     void onLine(const std::string& line, uint64_t nowMs);
+    void vfoAnswer(const std::string& line, uint64_t nowMs);
 
     bool connected_ = false;
+    Vfo vfo_ = Vfo::Asking;
     bool keyed_ = false;
-    bool waiting_ = false;          // an "f" is out
+    bool waiting_ = false;          // a question is out
     uint64_t askedMs_ = 0;
     uint64_t readMs_ = 0;           // the last answer (or the end of keying)
     std::optional<uint64_t> hz_;

@@ -40,6 +40,9 @@ public:
     void apply(const ragtime::radio::RigSettings& settings);
     // Unkeys and closes, for quitting.
     void stop();
+    // A line for the flight recorder: rigctld connected, failed, or
+    // answered with an error.
+    void setNote(std::function<void(const std::string&)> note);
 
     // data2g-host's PTT ON or OFF.
     void hostPtt(bool on);

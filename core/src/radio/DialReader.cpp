@@ -50,7 +50,12 @@ void DialReader::connected(uint64_t nowMs)
     out_.clear();
     problem_.clear();
     version_++;
-    ask(nowMs);
+    // First: was rigctld started with --vfo? Asked even while keyed, as
+    // it touches nothing but rigctld itself.
+    vfo_ = Vfo::Asking;
+    out_ += "\\chk_vfo\n";
+    waiting_ = true;
+    askedMs_ = nowMs;
 }
 
 void DialReader::disconnected()
@@ -65,9 +70,9 @@ void DialReader::disconnected()
 
 void DialReader::ask(uint64_t nowMs)
 {
-    if (!connected_ || keyed_) return;
+    if (!connected_ || keyed_ || vfo_ == Vfo::Asking) return;
     // Frequency queries only: nothing here sets the radio.
-    out_ += "f\n";
+    out_ += vfo_ == Vfo::Yes ? "f currVFO\n" : "f\n";
     waiting_ = true;
     askedMs_ = nowMs;
 }
@@ -81,7 +86,14 @@ std::string DialReader::takeOutput()
 
 void DialReader::tick(uint64_t nowMs)
 {
-    if (!connected_ || keyed_) return;
+    if (!connected_) return;
+    if (vfo_ == Vfo::Asking)
+    {
+        // No answer to \chk_vfo: plain "f" it is.
+        if (nowMs >= askedMs_ + ANSWER_MS) vfoAnswer(std::string(), nowMs);
+        return;
+    }
+    if (keyed_) return;
     if (hz_ && nowMs > readMs_ + STALE_MS)
     {
         hz_.reset();
@@ -100,6 +112,7 @@ void DialReader::setKeyed(bool keyed, uint64_t nowMs)
     if (!keyed_)
     {
         if (hz_) readMs_ = nowMs;
+        if (vfo_ == Vfo::Asking) return;
         waiting_ = false;
         ask(nowMs);
     }
@@ -124,9 +137,25 @@ void DialReader::bytes(const char* bytes, size_t length, uint64_t nowMs)
     }
 }
 
+void DialReader::vfoAnswer(const std::string& line, uint64_t nowMs)
+{
+    // "1" or "0"; "CHKVFO 1" from Hamlib 3; an RPRT, or nothing, from a
+    // rigctld that doesn't know the question.
+    std::string answer = line.compare(0, 7, "CHKVFO ") == 0 ? line.substr(7) : line;
+    vfo_ = answer == "1" ? Vfo::Yes : Vfo::No;
+    waiting_ = false;
+    version_++;
+    ask(nowMs);
+}
+
 void DialReader::onLine(const std::string& line, uint64_t nowMs)
 {
     if (line.empty()) return;
+    if (vfo_ == Vfo::Asking)
+    {
+        vfoAnswer(line, nowMs);
+        return;
+    }
     uint64_t hz = 0;
     if (frequencyLine(line, hz))
     {

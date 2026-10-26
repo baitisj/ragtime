@@ -34,7 +34,13 @@ RigControl::~RigControl()
     changed_ = nullptr;
     metersChanged_ = nullptr;
     trippedChanged_ = nullptr;
+    rigctld_->setNote(nullptr);
     stop();
+}
+
+void RigControl::setNote(std::function<void(const std::string&)> note)
+{
+    rigctld_->setNote(std::move(note));
 }
 
 void RigControl::apply(const radio::RigSettings& settings)

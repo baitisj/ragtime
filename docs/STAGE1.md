@@ -641,17 +641,35 @@ repair and the flight recorder). Nothing here goes on the air.
 **The dial.** With **Read the dial from rigctld** picked (Settings >
 Rig; off by default, `127.0.0.1:4532`), Ragtime asks rigctld
 the radio's frequency once a second, and only that: `radio::DialReader`
-writes `f` and nothing else, ever (a test drives it through errors,
-keying and silence and checks every byte it wrote). It never tunes or
+writes `\chk_vfo` once on connecting and then `f` (or `f currVFO`), and
+nothing else, ever (a test drives it through errors, keying and silence
+and checks every byte it wrote). It never tunes or
 sets anything, since the radio is the source of truth and the
 operator's rigctld is often shared (fldigi). It doesn't ask while the
 host reports PTT, and the last reading stands through a burst.
 `RigConnection` is the socket, beside `HostConnection`, trying again 2,
 4, 8, 15 and then every 30 s. A rigctld started with `--vfo` wants a
-VFO named after each command; Ragtime doesn't name one (a VFO name sent
-to a rigctld without `--vfo` would be read as more commands), so such a
-rigctld reads as an error. The connection bar shows the dial and band,
-"18.104 MHz · 17 m", and its tooltip how rigctld is answering.
+VFO named after each command, and a VFO name sent to one without would
+be read as more commands, so Ragtime first asks `\chk_vfo`, as Hamlib's
+own `rigctl -m 2` does: 1 means `--vfo`, and the dial is asked as
+`f currVFO`; 0, an RPRT from a rigctld too old to know the question, or
+no answer in 3 s, plain `f`. A rigctld may listen on IPv4 or IPv6 alone
+(`rigctld -T ::1`, or a `localhost` that means `::1` while `rigctl -m 2`
+finds it), so each try goes through every address the host name has,
+IPv4 first, and for `127.0.0.1`, `::1` or `localhost` both loopback
+addresses, 3 s each; the one that answered goes first next time. The
+connection bar shows the dial and band, "18.104 MHz · 17 m", and its
+tooltip how rigctld is answering, or why each address failed ("no
+rigctld: 127.0.0.1:4532 refused, [::1]:4532 refused").
+
+**Test** beside the port (Settings > Rig, 2026-10-26, after Jeff's
+rigctld didn't connect and nothing said why) connects as Ragtime would,
+with a connection of its own, asks the dial once, and says what
+happened under the row: "rigctld at [::1]:4532 answered: 14.105 MHz,
+20 m (started with --vfo)", "Connected to 127.0.0.1:4532, but rigctld
+answered RPRT -11", the refusals above, "Can't find" a host name, or no
+answer in 10 s. The flight recorder notes how rigctld is answering
+whenever that changes (docs/FLIGHT_RECORDER.md), so a report shows it.
 
 **Receive only outside the US data segments** (the last box in PLAN.md's
 parity list). Ticked (off by default, and only with the dial read),
@@ -776,7 +794,7 @@ one of three, `radio::RigSettings`:
 
 - **No rig.** Ragtime doesn't know the band.
 - **Read the dial from rigctld, already running**: as before (above),
-  `f` and nothing else. It never keys, so a shared rigctld (fldigi's)
+  `\chk_vfo` and `f` and nothing else, with its own Test. It never keys, so a shared rigctld (fldigi's)
   is safe.
 - **Open the rig with Hamlib**: Ragtime opens the rig itself, as fldigi
   and WSJT-X do. The rig is picked by maker and model from Hamlib's own
