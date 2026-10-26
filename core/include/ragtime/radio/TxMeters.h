@@ -1,6 +1,6 @@
-// TxMeters: the rig's transmit meters, read through Hamlib while
-// data2g-host transmits (Settings > Rig, "Hamlib"), gathered burst by
-// burst for the connection bar's ALC meter and the flight recorder.
+// TxMeters: the rig's transmit meters, read through Hamlib or rigctld
+// while data2g-host transmits (Settings > Rig), gathered burst by burst
+// for the connection bar's ALC meter and the flight recorder.
 //
 // A reading has whichever of ALC, SWR and RF power the rig reports. ALC
 // is Hamlib's float, a share of the rig's own ALC scale (an Icom's 1.0 is
@@ -115,11 +115,12 @@ enum class SwrBand
 };
 SwrBand swrBand(double swr);
 
-// SwrTrip: Settings > Rig's "Over 3:1 SWR, turn the rig's power to 0 and
-// unkey". It trips on READINGS readings in a row over TRIP_SWR within a
-// burst, so one noisy reading doesn't, and stays tripped until clear():
-// the rig's thread then unkeys, sets the power to 0 and keys no more, and
-// the power is never put back by itself.
+// SwrTrip: Settings > Rig's "Over 3:1 SWR, stop data2g-host; with Hamlib
+// also unkey the rig and turn its power to 0". It trips on READINGS
+// readings in a row over TRIP_SWR within a burst, so one noisy reading
+// doesn't, and stays tripped until clear(): a Hamlib rig's thread then
+// unkeys, sets the power to 0 and keys no more, and the power is never put
+// back by itself; through rigctld only data2g-host is stopped.
 class SwrTrip
 {
 public:

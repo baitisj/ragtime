@@ -2516,17 +2516,22 @@ void MainFrame::showMeters()
     {
         std::string when = prefs_.rig.source == radio::RigSource::Hamlib
                                ? " while transmitting, once Ragtime has the rig open with Hamlib."
-                               : " while transmitting, when Ragtime opens the rig with Hamlib (Settings > Rig).";
+                           : prefs_.rig.source == radio::RigSource::Rigctld
+                               ? " while transmitting, once rigctld has answered for it (not every rig reports "
+                                 "its meters)."
+                               : " while transmitting, when Ragtime reads the rig through rigctld or Hamlib "
+                                 "(Settings > Rig).";
         bar_->setAlc(false, 0, none, utf8("The rig's ALC" + when + "\n\n" + waits), false);
         bar_->setSwr(false, std::nullopt, none, utf8("The rig's SWR" + when), false, false);
         return;
     }
     const radio::TxMeters& meters = rig_->meters();
     const std::optional<radio::TxMeters::Burst>& last = meters.last();
-    std::string tip = rig_->readsAlc() ? "The rig's ALC, read through Hamlib while data2g-host transmits, as a "
-                                         "share of the rig's ALC scale."
-                                       : "This rig doesn't report its ALC through Hamlib; its other transmit "
-                                         "meters are read while data2g-host transmits.";
+    const std::string path = rig_->meterPath();
+    std::string tip = rig_->readsAlc() ? "The rig's ALC, read through " + path
+                                             + " while data2g-host transmits, as a share of the rig's ALC scale."
+                                       : "This rig doesn't report its ALC through " + path
+                                             + "; its other transmit meters are read while data2g-host transmits.";
     int percent = 0;
     wxString text = none;
     bool warn = false;
@@ -2564,10 +2569,10 @@ void MainFrame::showMeters()
     // transmitting, Hamlib's dummy rig).
     auto ratio = [](double swr) { return wxString::Format("%.1f:1", swr); };
     bool tripped = rig_->swrTripped();
-    std::string swrTip = rig_->readsSwr() ? "The rig's SWR, read through Hamlib while data2g-host transmits. The "
-                                            "marks are at 1, 1.5, 2 and 3: green under 1.5, yellow to 2, orange "
-                                            "to 3, red over 3."
-                                          : "This rig doesn't report its SWR through Hamlib.";
+    std::string swrTip = rig_->readsSwr() ? "The rig's SWR, read through " + path
+                                                + " while data2g-host transmits. The marks are at 1, 1.5, 2 and 3: "
+                                                  "green under 1.5, yellow to 2, orange to 3, red over 3."
+                                          : "This rig doesn't report its SWR through " + path + ".";
     std::optional<double> swr;
     wxString swrText = none;
     bool swrWarn = false;
@@ -2590,8 +2595,15 @@ void MainFrame::showMeters()
         swrWarn = true;
         swrTip += "\n\nSWR trip: " + rig_->tripText()
                   + ". Ragtime told data2g-host to stop (ABORT), holds sending, and won't key the rig until you "
-                    "clear the trip: click this bar, or Settings > Clear the SWR trip. Turn the power back up on "
-                    "the rig yourself; Ragtime never puts it back.";
+                    "clear the trip: click this bar, or Settings > Clear the SWR trip."
+                  + (prefs_.rig.source == radio::RigSource::Rigctld
+                         ? " Check the antenna before you do."
+                         : " Turn the power back up on the rig yourself; Ragtime never puts it back.");
+    }
+    else if (prefs_.rig.swrTrip && prefs_.rig.source == radio::RigSource::Rigctld)
+    {
+        swrTip += "\n\nThe SWR trip is on (Settings > Rig): two readings in a row over 3:1, and Ragtime tells "
+                  "data2g-host to stop. Through rigctld it never unkeys the rig or turns its power down.";
     }
     else if (prefs_.rig.swrTrip)
     {
@@ -2621,7 +2633,10 @@ void MainFrame::clearSwrTrip()
     wxMessageDialog ask(this,
                         utf8("Clear the SWR trip?\n\n" + rig_->tripText()
                              + ".\n\nCheck the antenna and the tuner first. Ragtime will send and key the rig "
-                               "again. The rig's power stays where the trip put it: turn it back up on the rig."),
+                               "again."
+                             + (prefs_.rig.source == radio::RigSource::Hamlib
+                                    ? " The rig's power stays where the trip put it: turn it back up on the rig."
+                                    : "")),
                         "SWR trip", wxYES_NO | wxNO_DEFAULT | wxICON_WARNING);
     ask.SetYesNoLabels("Clear the trip", "Keep it");
     if (ask.ShowModal() != wxID_YES) return;

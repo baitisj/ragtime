@@ -59,6 +59,29 @@ void bands()
     CHECK(!usDataRefusal(0).empty());
 }
 
+// Answers the meter probe rigctld gets on connecting: the levels named in
+// reports answer 0, the rest RPRT -11 (not available). Returns what was
+// asked after the probe.
+std::string probe(DialReader& dial, uint64_t t, const std::string& reports = "")
+{
+    std::string out = dial.takeOutput();
+    while (out.compare(0, 3, "+l ") == 0)
+    {
+        std::string level = out.substr(out.rfind(' ') + 1);
+        level.pop_back();
+        bool known = ("," + reports + ",").find("," + level + ",") != std::string::npos;
+        std::string answer = "get_level: " + level + "\n" + (known ? "0.000000\nRPRT 0\n" : "RPRT -11\n");
+        dial.bytes(answer.data(), answer.size(), t);
+        out = dial.takeOutput();
+    }
+    return out;
+}
+
+void say(DialReader& dial, const std::string& text, uint64_t t)
+{
+    dial.bytes(text.data(), text.size(), t);
+}
+
 void dialReader()
 {
     DialReader dial;
@@ -72,7 +95,9 @@ void dialReader()
     CHECK_EQ(dial.takeOutput(), std::string("\\chk_vfo\n"));
     dial.bytes("0\n", 2, t);
     CHECK(!dial.vfoMode());
-    CHECK_EQ(dial.takeOutput(), std::string("f\n"));
+    // Then which meters it reports (none, here), then the dial.
+    CHECK_EQ(probe(dial, t), std::string("f\n"));
+    CHECK(!dial.readsAny());
     // Not again until answered or ANSWER_MS.
     dial.tick(t + 500);
     CHECK_EQ(dial.takeOutput(), std::string(""));
@@ -103,7 +128,8 @@ void dialReader()
     CHECK(!dial.dialHz(t + 1100 + DialReader::STALE_MS + 1));
     CHECK(!dial.problem().empty());
 
-    // Keyed: no asking, and the reading stands however long the burst.
+    // Keyed: no asking (no meters here), and the reading stands however
+    // long the burst.
     t += 10000;
     dial.bytes("14105000\n", 9, t);
     CHECK(dial.problem().empty());
@@ -117,8 +143,9 @@ void dialReader()
     CHECK_EQ(dial.takeOutput(), std::string("f\n"));
     CHECK(dial.dialHz(t + 31000) == std::optional<uint64_t>(14105000));
 
-    // Lines that aren't frequencies are ignored.
-    dial.bytes("garbage\n1e9\n.\n0\n", 17, t + 31100);
+    // Lines that aren't frequencies are ignored, and so is anything under
+    // 1 kHz (a late "1" from \chk_vfo).
+    dial.bytes("garbage\n1e9\n.\n0\n1\n", 19, t + 31100);
     CHECK(dial.dialHz(t + 31100) == std::optional<uint64_t>(14105000));
 
     dial.disconnected();
@@ -137,7 +164,7 @@ void vfoMode()
         CHECK_EQ(dial.takeOutput(), std::string("\\chk_vfo\n"));
         std::string line = std::string(answer) + "\n";
         dial.bytes(line.data(), line.size(), t + 50);
-        return dial.takeOutput();
+        return probe(dial, t + 50);
     };
     CHECK_EQ(asked("1"), std::string("f currVFO\n"));
     CHECK_EQ(asked("CHKVFO 1"), std::string("f currVFO\n"));
@@ -151,7 +178,11 @@ void vfoMode()
     dial.takeOutput();
     dial.bytes("1\n", 2, t + 50);
     CHECK(dial.vfoMode());
-    CHECK_EQ(dial.takeOutput(), std::string("f currVFO\n"));
+    // The meters name the VFO too.
+    CHECK_EQ(dial.takeOutput(), std::string("+l currVFO ALC\n"));
+    say(dial, "get_level: currVFO ALC\n0.000000\nRPRT 0\n", t + 60);
+    CHECK(dial.reads(DialReader::Meter::Alc));
+    CHECK_EQ(probe(dial, t + 60), std::string("f currVFO\n"));
     dial.bytes("14105000\n", 9, t + 100);
     CHECK(dial.dialHz(t + 100) == std::optional<uint64_t>(14105000));
     dial.tick(t + 1100);
@@ -160,48 +191,190 @@ void vfoMode()
     dial.disconnected();
     dial.connected(t + 2000);
     CHECK(!dial.vfoMode());
+    CHECK(!dial.readsAny());
     CHECK_EQ(dial.takeOutput(), std::string("\\chk_vfo\n"));
 
-    // No answer to \chk_vfo at all: plain "f" after ANSWER_MS, and none
-    // before.
+    // No answer to \chk_vfo at all: no VFO names after ANSWER_MS, and
+    // nothing before.
     DialReader quiet;
     quiet.connected(t);
     quiet.takeOutput();
     quiet.tick(t + DialReader::ANSWER_MS - 1);
     CHECK_EQ(quiet.takeOutput(), std::string(""));
     quiet.tick(t + DialReader::ANSWER_MS);
-    CHECK_EQ(quiet.takeOutput(), std::string("f\n"));
+    CHECK_EQ(probe(quiet, t + DialReader::ANSWER_MS), std::string("f\n"));
 
-    // Keyed while it asks: still nothing about the dial till unkeyed.
+    // Keyed while it asks: the meters, never the dial.
     DialReader keyed;
     keyed.connected(t);
     keyed.setKeyed(true, t + 10);
     keyed.bytes("0\n", 2, t + 20);
-    CHECK_EQ(keyed.takeOutput(), std::string("\\chk_vfo\n"));
-    keyed.setKeyed(false, t + 5000);
-    CHECK_EQ(keyed.takeOutput(), std::string("f\n"));
+    CHECK_EQ(keyed.takeOutput(), std::string("\\chk_vfo\n+l ALC\n"));
+}
+
+// The transmit meters while keyed.
+void meters()
+{
+    using Meter = DialReader::Meter;
+    uint64_t t = T0;
+    DialReader dial;
+    dial.connected(t);
+    dial.takeOutput();
+    dial.bytes("0\n", 2, t);
+    CHECK_EQ(probe(dial, t, "ALC,SWR,RFPOWER_METER_WATTS"), std::string("f\n"));
+    CHECK(dial.reads(Meter::Alc));
+    CHECK(dial.reads(Meter::Swr));
+    CHECK(dial.reads(Meter::Watts));
+    CHECK(!dial.reads(Meter::Power));
+    // The probe's readings (not keyed) aren't kept.
+    CHECK(dial.takeReadings().empty());
+    say(dial, "7065000\n", t + 10);
+
+    // Keyed: each meter in turn, METER_MS after the last answer.
+    t += 2000;
+    dial.setKeyed(true, t);
+    CHECK_EQ(dial.takeOutput(), std::string("+l ALC\n"));
+    say(dial, "get_level: ALC\n0.420000\nRPRT 0\n", t + 30);
+    dial.tick(t + 30 + DialReader::METER_MS - 1);
+    CHECK_EQ(dial.takeOutput(), std::string(""));
+    dial.tick(t + 30 + DialReader::METER_MS);
+    CHECK_EQ(dial.takeOutput(), std::string("+l SWR\n"));
+    say(dial, "get_level: SWR\n1.300000\nRPRT 0\n", t + 300);
+    dial.tick(t + 600);
+    CHECK_EQ(dial.takeOutput(), std::string("+l RFPOWER_METER_WATTS\n"));
+    say(dial, "get_level: RFPOWER_METER_WATTS\n38.000000\nRPRT 0\n", t + 650);
+    std::vector<MeterReading> got = dial.takeReadings();
+    CHECK_EQ(got.size(), (size_t)3);
+    CHECK(got[0].alc && *got[0].alc > 0.41 && *got[0].alc < 0.43 && !got[0].swr);
+    CHECK(got[1].swr && *got[1].swr > 1.29 && *got[1].swr < 1.31);
+    CHECK(got[2].watts && *got[2].watts > 37.9 && !got[2].power);
+    // The dial stands through the burst.
+    CHECK(dial.dialHz(t + 20000) == std::optional<uint64_t>(7065000));
+
+    // A long answer that comes late is still read for the meter it names,
+    // and the question out waits for its own.
+    dial.tick(t + 1000);
+    CHECK_EQ(dial.takeOutput(), std::string("+l ALC\n"));
+    say(dial, "get_level: SWR\n5.000000\nRPRT 0\n", t + 1010);
+    got = dial.takeReadings();
+    CHECK_EQ(got.size(), (size_t)1);
+    CHECK(got[0].swr && *got[0].swr > 4.9);
+    dial.tick(t + 1500);
+    CHECK_EQ(dial.takeOutput(), std::string(""));
+    say(dial, "get_level: ALC\n0.100000\nRPRT 0\n", t + 1520);
+
+    // With the SWR trip on, every other question is the SWR.
+    dial.setSwrWatch(true);
+    std::string swrs;
+    uint64_t at = t + 2000;
+    for (int i = 0; i < 8; i++, at += 300)
+    {
+        dial.tick(at);
+        std::string q = dial.takeOutput();
+        std::string level = q.substr(3, q.size() - 4);
+        swrs += level == "SWR" ? "S" : "o";
+        say(dial, "get_level: " + level + "\n1.0\nRPRT 0\n", at + 10);
+    }
+    CHECK_EQ(swrs, std::string("SoSoSoSo"));
+    dial.setSwrWatch(false);
+    dial.takeReadings();
+
+    // A meter that fails twice in a row while keyed is asked no more.
+    for (int i = 0; i < 12; i++, at += 300)
+    {
+        dial.tick(at);
+        std::string q = dial.takeOutput();
+        if (q.empty()) continue;
+        std::string level = q.substr(3, q.size() - 4);
+        say(dial, "get_level: " + level + "\n" + (level == "SWR" ? "RPRT -9\n" : "0.5\nRPRT 0\n"), at + 10);
+    }
+    CHECK(!dial.reads(Meter::Swr));
+    for (int i = 0; i < 12; i++, at += 300)
+    {
+        dial.tick(at);
+        std::string q = dial.takeOutput();
+        CHECK(q.find("SWR") == std::string::npos);
+        if (!q.empty()) say(dial, "get_level: " + q.substr(3, q.size() - 4) + "\n0.5\nRPRT 0\n", at + 10);
+    }
+
+    // No answer at all: given up after ANSWER_MS, and the next asked.
+    dial.tick(at);
+    std::string q = dial.takeOutput();
+    CHECK(!q.empty());
+    dial.tick(at + DialReader::ANSWER_MS - 1);
+    CHECK_EQ(dial.takeOutput(), std::string(""));
+    dial.tick(at + DialReader::ANSWER_MS);
+    CHECK(!dial.takeOutput().empty());
+    say(dial, "get_level: ALC\n0.5\nRPRT 0\n", at + DialReader::ANSWER_MS + 10);
+    // Late answers to the one given up are read, and end nothing.
+    say(dial, "get_level: RFPOWER_METER_WATTS\n0.5\nRPRT 0\n", at + DialReader::ANSWER_MS + 20);
+
+    // Unkeyed: the dial again, at once.
+    at += 10000;
+    dial.tick(at);
+    dial.takeOutput();
+    say(dial, "get_level: ALC\n0.5\nRPRT 0\nget_level: RFPOWER_METER_WATTS\n9\nRPRT 0\n", at);
+    dial.setKeyed(false, at + 100);
+    CHECK_EQ(dial.takeOutput(), std::string("f\n"));
+
+    // A rig that knows no watts: a share of full power instead.
+    DialReader share;
+    share.connected(t);
+    share.takeOutput();
+    share.bytes("0\n", 2, t);
+    CHECK_EQ(probe(share, t, "ALC,RFPOWER_METER"), std::string("f\n"));
+    CHECK(share.reads(Meter::Power));
+    CHECK(!share.reads(Meter::Swr));
+    CHECK(share.readsPower());
+    // A probe error that may only mean "not transmitting" is asked again
+    // when keyed.
+    DialReader later;
+    later.connected(t);
+    later.takeOutput();
+    later.bytes("0\n", 2, t);
+    CHECK_EQ(later.takeOutput(), std::string("+l ALC\n"));
+    say(later, "get_level: ALC\nRPRT -9\n", t + 10);
+    CHECK_EQ(probe(later, t + 10), std::string("f\n"));
+    say(later, "7065000\n", t + 20);
+    CHECK(!later.reads(Meter::Alc));
+    later.setKeyed(true, t + 2000);
+    CHECK_EQ(later.takeOutput(), std::string("+l ALC\n"));
+    say(later, "get_level: ALC\n0.3\nRPRT 0\n", t + 2010);
+    CHECK(later.reads(Meter::Alc));
 }
 
 // Every line Ragtime could ever write to rigctld is a question: whether
-// rigctld wants VFOs named, and then the frequency.
-void onlyAsksFrequency()
+// rigctld wants VFOs named, the frequency, and the meters.
+void onlyAsks()
 {
+    const std::vector<std::string> allowed = {"\\chk_vfo", "f", "+l ALC", "+l SWR", "+l RFPOWER_METER_WATTS",
+                                              "+l RFPOWER_METER"};
     DialReader dial;
     std::string all;
     uint64_t t = T0;
     dial.connected(t);
-    CHECK_EQ(dial.takeOutput(), std::string("\\chk_vfo\n"));
-    for (int i = 0; i < 200; i++)
+    for (int i = 0; i < 400; i++)
     {
         t += 250;
         dial.tick(t);
         if (i % 7 == 0) dial.bytes("RPRT -1\n", 8, t);
         if (i % 5 == 0) dial.bytes("14070000\n", 9, t);
+        if (i % 3 == 0) say(dial, "get_level: SWR\n1.2\nRPRT 0\n", t);
+        if (i % 11 == 0) say(dial, "get_level: ALC\nRPRT -9\n", t);
         if (i % 40 == 0) dial.setKeyed(i % 80 == 0, t);
+        dial.setSwrWatch(i % 120 < 60);
         all += dial.takeOutput();
     }
     CHECK(!all.empty());
-    for (size_t at = 0; at < all.size(); at += 2) CHECK_EQ(all.substr(at, 2), std::string("f\n"));
+    size_t from = 0;
+    for (size_t eol; (eol = all.find('\n', from)) != std::string::npos; from = eol + 1)
+    {
+        std::string line = all.substr(from, eol - from);
+        bool ok = false;
+        for (const std::string& a : allowed) ok = ok || line == a;
+        CHECK(ok);
+    }
+    CHECK_EQ(from, all.size());
 }
 
 PathEntry entry(uint64_t at, const std::string& call, std::optional<double> snr, const std::string& band)
@@ -379,7 +552,8 @@ int main()
     bands();
     dialReader();
     vfoMode();
-    onlyAsksFrequency();
+    meters();
+    onlyAsks();
     lines();
     strip();
     file();

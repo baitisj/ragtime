@@ -1,5 +1,6 @@
 #include "RigControl.h"
 
+#include <cstdio>
 #include <utility>
 
 #include "HostConnection.h"
@@ -21,6 +22,7 @@ RigControl::RigControl(std::function<void()> changed, std::function<void()> mete
     , metersChanged_(std::move(meters))
     , trippedChanged_(std::move(tripped))
     , rigctld_(std::make_unique<RigConnection>([this]() {
+        syncRigctld();
         if (changed_) changed_();
     }))
     , timer_(this)
@@ -49,6 +51,9 @@ void RigControl::apply(const radio::RigSettings& settings)
     settings_ = settings;
     started_ = true;
     follower_.setEnabled(settings.source == radio::RigSource::Hamlib && settings.keyRig);
+    bool rigctldTrip = settings.source == radio::RigSource::Rigctld && settings.swrTrip;
+    if (rigctldTrip != rigctldTrip_.enabled()) rigctldTrip_.setEnabled(rigctldTrip);
+    rigctld_->setSwrWatch(rigctldTrip);
     if (reopen)
     {
         rigctld_->stop();
@@ -92,13 +97,16 @@ void RigControl::hostPtt(bool on)
     rigctld_->setKeyed(on);
     follower_.host(on, HostConnection::nowMs());
     sync();
+    syncRigctld();
 }
 
 void RigControl::hostLost()
 {
     hostPtt_ = false;
+    rigctld_->setKeyed(false);
     follower_.hostLost();
     sync();
+    syncRigctld();
 }
 
 std::optional<uint64_t> RigControl::dialHz() const
@@ -112,8 +120,14 @@ std::optional<uint64_t> RigControl::dialHz() const
     return std::nullopt;
 }
 
+const char* RigControl::meterPath() const
+{
+    return settings_.source == radio::RigSource::Rigctld ? "rigctld" : "Hamlib";
+}
+
 bool RigControl::readsAlc() const
 {
+    if (settings_.source == radio::RigSource::Rigctld) return rigctld_->readsAlc();
     if (settings_.source != radio::RigSource::Hamlib) return false;
     rig::HamlibRig::Status s = hamlib_.status();
     return s.open && s.readsAlc;
@@ -121,6 +135,7 @@ bool RigControl::readsAlc() const
 
 bool RigControl::readsSwr() const
 {
+    if (settings_.source == radio::RigSource::Rigctld) return rigctld_->readsSwr();
     if (settings_.source != radio::RigSource::Hamlib) return false;
     rig::HamlibRig::Status s = hamlib_.status();
     return s.open && s.readsSwr;
@@ -132,6 +147,7 @@ void RigControl::clearSwrTrip()
     tripped_ = false;
     tripText_.clear();
     hamlib_.clearSwrTrip();
+    rigctldTrip_.clear();
     follower_.clearLockOut();
     sync();
     if (changed_) changed_();
@@ -139,6 +155,7 @@ void RigControl::clearSwrTrip()
 
 bool RigControl::readsMeters() const
 {
+    if (settings_.source == radio::RigSource::Rigctld) return rigctld_->readsMeters();
     if (settings_.source != radio::RigSource::Hamlib) return false;
     rig::HamlibRig::Status s = hamlib_.status();
     return s.open && (s.readsAlc || s.readsSwr || s.readsPower);
@@ -168,6 +185,33 @@ std::string RigControl::describe() const
     }
     if (tripped_) text += "\nSWR trip: " + tripText_ + ".";
     return text;
+}
+
+void RigControl::syncRigctld()
+{
+    if (settings_.source != radio::RigSource::Rigctld || !started_) return;
+    uint64_t now = HostConnection::nowMs();
+    uint64_t metersBefore = meters_.version();
+    bool tx = hostPtt_ && rigctld_->up();
+    if (tx != meters_.transmitting()) rigctldTrip_.transmitting(tx);
+    meters_.transmitting(tx, now);
+    bool trippedNow = false;
+    for (const radio::MeterReading& reading : rigctld_->takeReadings())
+    {
+        if (!tx) continue;
+        meters_.reading(reading, now);
+        if (reading.swr && rigctldTrip_.reading(*reading.swr, now) && !tripped_)
+        {
+            char ratio[32];
+            std::snprintf(ratio, sizeof ratio, "SWR %.1f", *reading.swr);
+            tripped_ = true;
+            // Ragtime sets nothing through a shared rigctld.
+            tripText_ = std::string(ratio) + " through rigctld; the rig itself was left alone";
+            trippedNow = true;
+        }
+    }
+    if (meters_.version() != metersBefore && metersChanged_) metersChanged_();
+    if (trippedNow && trippedChanged_) trippedChanged_(tripText_);
 }
 
 void RigControl::onTimer(wxTimerEvent&)

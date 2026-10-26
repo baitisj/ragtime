@@ -119,7 +119,9 @@ with the code when the seal rules change.
   (docs/DATA2G.md, "Loss").
 - The dial, the path log and the watch list (2026-10-25,
   `docs/STAGE1.md`): `core/src/radio/` (`DialReader`, which only ever
-  asks rigctld `\chk_vfo` and `f`, or `f currVFO` for a `--vfo` one; `Bands`, the US data segments; `PathLog`, a line a
+  asks rigctld `\chk_vfo`, `f` and, while transmitting, the meters
+  `+l ALC`, `+l SWR` and `+l RFPOWER_METER_WATTS`, naming `currVFO` for
+  a `--vfo` one; `Bands`, the US data segments; `PathLog`, a line a
   burst heard, appended, and each station's 24-hour strip by band),
   `broadcast::WatchList` (bells, and Tell me when free), and in the app
   `RigConnection`, `PathStripView`, `PathsDialog` and `WatchDialog`.
@@ -138,14 +140,14 @@ with the code when the seal rules change.
   data2g-host keys" (`radio::PttFollower`, off by default) following
   the host's PTT ON/OFF. `app/src/RigControl` holds whichever is
   picked; Settings is now two tabs, Station and Rig. While the host
-  transmits, a Hamlib rig's ALC, SWR and RF power are read
-  (`radio::TxMeters`, burst by burst) for the Auto ALC meter and the
+  transmits, the rig's ALC, SWR and RF power are read, through Hamlib or
+  rigctld (`radio::TxMeters`, burst by burst) for the Auto ALC meter and the
   flight recorder; Auto ALC itself still waits for a host TX level
   command, but each burst works out what it would do. The SWR bar sits
   under the ALC meter (`app/src/SwrBar`), and the SWR trip (Settings >
-  Rig, off by default, `radio::SwrTrip`) unkeys the rig, sets its power
-  to 0, sends the host ABORT and holds sending until the operator clears
-  it.
+  Rig, off by default, `radio::SwrTrip`) sends the host ABORT and holds
+  sending until the operator clears it; with Hamlib it also unkeys the
+  rig and sets its power to 0 (through rigctld it sets nothing).
 - The flight recorder (2026-10-25, idea 2 of "Ideas before
   signatures"): `link::FlightRecorder` keeps every command line, KISS
   frame and session byte count to and from the host, with millisecond
@@ -191,8 +193,8 @@ with the code when the seal rules change.
   default), following the host's PTT ON/OFF and unkeying by itself on
   a dropped link, a rig failure, quitting and after 180 s (Andrew's
   suggestion, 2026-10-26, for rigs whose drivers can't be opened twice).
-  With the SWR trip ticked it unkeys the rig, whoever keyed it, on two
-  readings over 3:1, and sends the host ABORT.
+  With the SWR trip ticked, on two readings over 3:1 it sends the host
+  ABORT, and with Hamlib also unkeys the rig, whoever keyed it.
 - Glissando dropped its own Data2G mode on 2026-10-22 (glissando PR
   #113), so Ragtime is the only Data2G client. Never change Glissando's
   chirp modem behaviour from this project.
@@ -233,8 +235,9 @@ with the code when the seal rules change.
   welcome. "Curmudgeons" and "lids" are flavour words for the docs and UI
   copy, never defined terms in the spec.
 - The radio is the source of truth for frequency: retune only when the
-  operator asks. Ragtime reads the dial from rigctld (`\chk_vfo` and
-  `f` only, never a set command: the operator's rigctld is shared), or from the rig it
+  operator asks. Ragtime reads the dial and the transmit meters from
+  rigctld (`\chk_vfo`, `f` and `+l` levels only, never a set command:
+  the operator's rigctld is shared), or from the rig it
   opens with Hamlib, where PTT is the only thing it sets, and the SWR
   trip (off by default) the only thing that sets the power, to 0. It
   never keys through rigctld (NET rigctl is left out of the Hamlib
@@ -308,8 +311,9 @@ from host A or B is answered on its second try. The hosts report SNRs,
 each bot at its own strength; `--no-snr` plays a host from before Data2G
 PR #98. `--rig PORT` plays a rigctld for the dial (14.105 MHz, or
 `--dial HZ`; `--dial-hop` moves it outside the data segments one minute
-in three; `--rig-vfo` plays a rigctld started with `--vfo`) and prints
-anything it is sent but `\chk_vfo` and `f`. For Hamlib with no
+in three; `--rig-vfo` plays a rigctld started with `--vfo`; it answers
+the meters too, its SWR 1.3 or `--rig-swr X`) and prints anything it is
+sent but `\chk_vfo`, `f` and the meters. For Hamlib with no
 radio, pick maker Hamlib, model Dummy in Settings > Rig: a pretend rig
 at 145 MHz, which "Key the rig" keys at the fake hosts' PTT. Headless:
 `Xvfb :91 &`, `DISPLAY=:91 ragtime ...`, `xdotool` to click and type,

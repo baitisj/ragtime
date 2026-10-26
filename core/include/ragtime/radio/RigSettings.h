@@ -4,8 +4,9 @@
 //
 //   - None: Ragtime doesn't know the band.
 //   - rigctld: Ragtime reads the dial from a rigctld already running
-//     (DialReader), asking "\chk_vfo" and "f" and nothing else, since
-//     the operator's rigctld is often shared (fldigi). Never keys.
+//     (DialReader), asking "\chk_vfo", "f" and the meters ("+l SWR")
+//     and nothing else, since the operator's rigctld is often shared
+//     (fldigi). Never keys.
 //   - Hamlib: Ragtime opens the rig itself with Hamlib, as other ham
 //     programs do: any rig Hamlib knows, on a serial port or a network
 //     address, with the usual serial settings and the backend's own
@@ -99,8 +100,8 @@ struct RigSettings
     PttMethod ptt = PttMethod::CatData;
     std::string pttPort;            // DTR or RTS on another port; empty: the rig's port
 
-    // Over 3:1 SWR, turn the rig's power to 0 and unkey (radio::SwrTrip).
-    // Hamlib only, off by default.
+    // Over 3:1 SWR, stop data2g-host, and with Hamlib turn the rig's power
+    // to 0 and unkey (radio::SwrTrip). Off by default.
     bool swrTrip = false;
 };
 
