@@ -139,7 +139,24 @@ bench"). Choices made there, for Jeff to keep or change:
   message after the group opens, after the callsign, locator or Accept
   sessions changes, and every 10 minutes after that; Station > Check in
   sends one alone. Ragtime never transmits on its own except to answer an
-  `@` message with an Ack.
+  `@` message with an Ack, or a ping with a Pong.
+- **Ping (Jeff, 2026-10-25).** **Ping W1AW** on a station's right-click
+  menu asks how well it hears us (PLAN.md, "Broadcast mode";
+  PROTOCOL.md, "Pings"). The Pong comes back in the Ping's gear with the
+  S/N W1AW's host heard us at, and our host's S/N for the Pong goes
+  beside it on the ping's line in the Broadcast tab. Choices made:
+  - The answering Ragtime waits up to 3 s for its host's `BCAST HEARD`
+    figure, since that line and the frame come on different sockets in
+    either order (Data2G's `kisslink.py` and `host.py` write both at
+    the burst's end); a figure under 2 s old is the same burst's. With
+    no figure the Pong goes without one.
+  - "No pong" after twice the mode's listening window plus those 3 s,
+    at least 20 s (`pongWaitMs`). A late Pong still fills the line.
+    Our file bursts hold off for the Pong as they do for an Ack.
+  - Pings and their lines aren't kept in the broadcast log, aren't
+    items (no seal lists them) and don't count as unread messages.
+  - Hello's takes gains bit 5 for Ping and Pong, so 0.1.1 and older
+    stations show the item greyed rather than an unanswered ping.
 - **Long messages** split between words into several Texts, one frame
   each, all in one burst (`PROTOCOL.md`, "Broadcast").
 - **Pause sending** holds new bursts as Queued and survives a restart; a

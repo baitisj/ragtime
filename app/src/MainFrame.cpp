@@ -111,6 +111,7 @@ enum
     ID_STATION_WATCH,
     ID_STATION_WHEN_FREE,
     ID_STATION_PATHS,
+    ID_STATION_PING,
     ID_SAVE_REPORT,
     ID_OPEN_FLIGHT,
 };
@@ -630,6 +631,8 @@ void MainFrame::buildLayout()
         host_->flush();
         refreshMessages();
     });
+    broadcast_->onPing([this](const std::string& call) { pingStation(call); },
+                       [this](const std::string& call) { return whyNoPing(call); });
     broadcast_->onBroadcastFile([this]() { broadcastFile(); });
     broadcast_->fileCards([this](uint64_t id, FileCard& card) { return fileCard(id, card); });
     broadcast_->onFileAction([this](uint64_t id, const std::string& action) { broadcastFileAction(id, action); });
@@ -869,6 +872,7 @@ void MainFrame::onClock()
     broadcastFiles_.tick(now);
     onBroadcastFiles();
     session_.tick(now);
+    chat_.tick(now);
     fileTraffic_.setMode(broadcast::findMode(link_.modes(), session_.mode()));
     fileTraffic_.setCuts(link_.data2g());
     fileTraffic_.tick(now);
@@ -878,6 +882,8 @@ void MainFrame::onClock()
     refreshFiles();
     saveFilesLog(false);
     refreshSession();
+    // A ping gone unanswered.
+    refreshMessages();
     showConnection();
     showStatus();
     stationList_->refresh(HostConnection::nowMs());
@@ -1087,6 +1093,12 @@ void MainFrame::stationMenu(const std::string& call)
         menu.Enable(ID_STATION_CALL, canCall() || session_.active());
     }
     menu.Append(ID_STATION_MESSAGE, "Message @" + utf8(call) + "\tCtrl+M");
+    // Ping: its S/N for us, and ours for it (Jeff, 2026-10-25). Greyed,
+    // with the reason, when it can't go or wouldn't be answered.
+    std::string noPing = whyNoPing(call);
+    menu.Append(ID_STATION_PING, "Ping " + utf8(call) + (noPing.empty() ? wxString() : " (" + utf8(noPing) + ")"),
+                "Asks it how well it hears us; it answers by itself, in this gear");
+    menu.Enable(ID_STATION_PING, noPing.empty());
     menu.Append(ID_STATION_SEND_FILE, "Send a file to " + utf8(call) + "...");
     menu.Enable(ID_STATION_SEND_FILE, canCall() || (session_.phase() == session::SessionChat::Phase::Connected));
     menu.Append(ID_STATION_COPY, "Copy callsign");
@@ -1129,6 +1141,7 @@ void MainFrame::stationMenu(const std::string& call)
         }
         if (e.GetId() == ID_STATION_PATHS) CallAfter([this, call]() { showPaths(call); });
         if (e.GetId() == ID_STATION_CALL) callStation(call);
+        if (e.GetId() == ID_STATION_PING) pingStation(call);
         if (e.GetId() == ID_STATION_SEND_FILE) CallAfter([this, call]() { sendFilePrompt(call); });
         if (e.GetId() == ID_STATION_LEAVE) leaveSession();
         if (e.GetId() == ID_STATION_MESSAGE)
@@ -1154,7 +1167,8 @@ void MainFrame::updateTabLabels()
     for (const broadcast::Message& m : chat_.messages())
     {
         newest = std::max(newest, m.id);
-        if (!m.ours && m.id > seenMessage_) unread++;
+        // A station's ping to us is answered by itself: not a message.
+        if (!m.ours && m.kind != broadcast::Message::Kind::Ping && m.id > seenMessage_) unread++;
     }
     if (looking)
     {
@@ -1819,6 +1833,30 @@ bool MainFrame::sendTyped(const std::string& typed)
     host_->flush();
     refreshMessages();
     return true;
+}
+
+std::string MainFrame::whyNoPing(const std::string& call) const
+{
+    if (prefs_.callsign.empty() || !link_.groupOpen()) return "not on D2G";
+    if (held_) return "receive only";
+    // A session holds the group, ours or theirs.
+    if (session_.active()) return "our session holds D2G";
+    if (const broadcast::Station* s = stations_.find(call))
+    {
+        if (busyWord(stations_.status(*s, HostConnection::nowMs()).word)) return "in a session";
+        if (s->helloHeard && (s->takes & protocol::TAKES_PINGS) == 0) return "its Ragtime doesn't answer pings";
+    }
+    if (chat_.pinging(call)) return "waiting for its pong";
+    return std::string();
+}
+
+void MainFrame::pingStation(const std::string& call)
+{
+    if (!whyNoPing(call).empty()) return;
+    if (chat_.ping(call, broadcastMode(), HostConnection::nowMs()) == 0) return;
+    host_->flush();
+    tabs_->SetSelection(TAB_BROADCAST);
+    refreshMessages();
 }
 
 void MainFrame::checkIn()

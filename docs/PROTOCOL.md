@@ -84,6 +84,8 @@ length.
 | `0x02` | Status | state, [partner] | no |
 | `0x10` | Text | flags, [to], text | **yes** |
 | `0x11` | Ack | to, item | no |
+| `0x12` | Ping | to, number, mode | no |
+| `0x13` | Pong | to, number, S/N | no |
 | `0x20` | FileOffer | size, digest, name | **yes** |
 | `0x21` | FileAnswer | offer, answer, [from] | no |
 | `0x22` | FileData | offset, bytes | part of its offer |
@@ -111,7 +113,7 @@ frame as a check-in.
 | --- | --- | --- |
 | version | 1 | The protocol version the sender speaks: 0 |
 | flags | 1 | Bit 0: accepts sessions. Bit 1: automatic (nobody at the controls; Stage 2 gives it its rules). Other bits 0 |
-| takes | 1 | The records the sender takes. Bit 0: Text and Ack. Bit 1: Status. Bit 2: session files (FileOffer to FileCancel). Bit 3: broadcast files (FileAnnounce, FilePiece). Bit 4: Seal, RepairRequest, RepairRefused and ItemParity. Version 0 sends `0x1F` |
+| takes | 1 | The records the sender takes. Bit 0: Text and Ack. Bit 1: Status. Bit 2: session files (FileOffer to FileCancel). Bit 3: broadcast files (FileAnnounce, FilePiece). Bit 4: Seal, RepairRequest, RepairRefused and ItemParity. Bit 5: Ping and Pong (0.1.2 on). Version 0 sends `0x3F`, and sent `0x1F` before 0.1.2 |
 | locator | 4, optional | Maidenhead, packed (Fields); 0 for none |
 | software | 1 + n, optional | A short string, at most 64 bytes, such as `Ragtime 0.1.0` |
 
@@ -139,6 +141,18 @@ record.
 **Ack** (`0x11`): to (the Text's sender, packed), then item (3 bytes,
 the Text's sequence number). It answers an addressed Text that asked for
 one.
+
+**Ping** (`0x12`), on the group: to (the station asked, packed), number
+(2 bytes, the sender's own count, so a Pong names its Ping), mode (a
+short string: the Data2G mode the Ping goes in, as `MODES` names it;
+empty for the group's). `BCAST HEARD` doesn't say a burst's mode, so the
+Ping carries it.
+
+**Pong** (`0x13`): to (the Ping's sender), number (2, the Ping's), S/N
+(1 byte: the S/N the answering host gave for the Ping's burst, in
+RepairRequest's S/N code, 0 for none; 128 to 255 read as none). With
+five-character calls each is 20 bytes, one or two codewords in most
+modes. Pings, below.
 
 **FileOffer** (`0x20`), in a session: size (4 bytes, at most 307,200),
 digest (12 bytes, the whole file's: SHA-256, first 12 bytes), name (a
@@ -493,6 +507,26 @@ Broadcasts go on the `D2G` group, opened with `BCAST OPEN D2G FROM
   same callsign, seq and time) is shown once but acknowledged again, since
   the sender is asking because the first Ack went missing.
 
+### Pings
+
+A Ping asks one station how well it hears us, and tries a gear both
+ways (Jeff, 2026-10-25).
+
+- The pinged station answers with a Pong, by itself, as it answers an
+  Ack: in the mode the Ping names when its host offers it, else in the
+  group's mode. Its S/N is the figure its host's `BCAST HEARD` gave for
+  the Ping's burst; that line and the frame come on different ports in
+  either order, so it waits up to 3 s for the figure (one under 2 s old
+  counts), then answers without one.
+- At most one Pong to a station every 15 s, however often it pings.
+- The pinger reads the S/N it hears the Pong at from its own host, the
+  same way. A Pong that doesn't come within twice the mode's listening
+  window plus 3 s (at least 20 s) shows as no answer; a late one still
+  counts. Nothing is retried by itself.
+- A station never pings one whose Hello lacks takes bit 5.
+- Pings and Pongs aren't items: they carry the newest item's number, no
+  seal lists them, and they are never repaired.
+
 ### Seals and repair
 
 `docs/PLAN.md` ("Seals, receipts and repairs") has the reasoning, and
@@ -767,8 +801,9 @@ two.
 - A receiver skips a record of a type it doesn't know, by its length, and
   keeps it as unknown. New record types need no new version.
 - A receiver ignores bytes after the fields it knows in records with a
-  fixed layout (Hello, Status, Ack, FileOffer, FileAnswer, FileSaved,
-  FileCancel, FileAnnounce, Seal, RepairRefused), so new fields go on the end.
+  fixed layout (Hello, Status, Ack, Ping, Pong, FileOffer, FileAnswer,
+  FileSaved, FileCancel, FileAnnounce, Seal, RepairRefused), so new
+  fields go on the end.
   Text, FileData, FilePiece, RepairRequest and ItemParity run to the end
   of the record and can't grow that way.
 - A new text table takes a new coding number in Text's flags.

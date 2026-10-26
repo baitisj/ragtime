@@ -40,6 +40,8 @@ enum class RecordType : uint8_t
     Status = 0x02,
     Text = 0x10,
     Ack = 0x11,
+    Ping = 0x12,
+    Pong = 0x13,
     FileOffer = 0x20,
     FileAnswer = 0x21,
     FileData = 0x22,
@@ -76,7 +78,8 @@ enum Takes : uint8_t
     TAKES_SESSION_FILES = 0x04,     // FileOffer .. FileCancel
     TAKES_BROADCAST_FILES = 0x08,   // FileAnnounce, FilePiece
     TAKES_SEALS = 0x10,             // Seal, RepairRequest, RepairRefused, ItemParity
-    TAKES_ALL_V0 = 0x1F,
+    TAKES_PINGS = 0x20,             // Ping and Pong (Ragtime 0.1.2 on)
+    TAKES_ALL_V0 = 0x3F,
 };
 
 struct Hello
@@ -119,6 +122,23 @@ struct Ack
 {
     std::string to;             // who sent the Text
     uint32_t item = 0;          // its sequence number
+};
+
+// A station asking another how well it hears us: the station answers with
+// a Pong, by itself, in the mode named (docs/PROTOCOL.md, "Pings").
+struct Ping
+{
+    std::string to;
+    uint16_t number = 0;        // the sender's own count, so a Pong names its Ping
+    std::string mode;           // the Data2G mode it went in; empty for the group's
+};
+
+// The answer to a Ping: the S/N the Ping was heard at.
+struct Pong
+{
+    std::string to;             // who sent the Ping
+    uint16_t number = 0;        // the Ping's
+    std::optional<double> snr;  // as repairSnrCode codes it, in a byte of its own; none without a figure
 };
 
 constexpr size_t MAX_FILE_NAME = 200;
@@ -265,7 +285,8 @@ struct Unknown
 };
 
 using Body = std::variant<Unknown, Hello, Status, Text, Ack, FileOffer, FileAnswer, FileData, FileSaved,
-                          FileCancel, FileAnnounce, FilePiece, Seal, RepairRequest, RepairRefused, ItemParity>;
+                          FileCancel, FileAnnounce, FilePiece, Seal, RepairRequest, RepairRefused, ItemParity,
+                          Ping, Pong>;
 
 struct Record
 {

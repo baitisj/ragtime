@@ -436,6 +436,8 @@ struct Bot
         if (!in.empty()) session.dataBytes(in.data(), in.size(), now);
         link.tick(now);
         session.tick(now);
+        // Pongs to the pings it hears.
+        chat.tick(now);
         seals.tick(now);
         broadcasts.tick(now);
         broadcasts.takeEvents();

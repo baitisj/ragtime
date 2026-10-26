@@ -613,7 +613,7 @@ void testWhatElseRidesInASession()
     rig.chat.setTraffic(&traffic);
     Far far("W1AW");
     connect(rig, far);
-    CHECK(traffic.greetings.size() == 1 && traffic.greetings[0] == "W1AW 31");
+    CHECK(traffic.greetings.size() == 1 && traffic.greetings[0] == "W1AW 63");
 
     // It writes behind our Hello, and is told where.
     std::vector<protocol::Record> ours = rig.ours();
