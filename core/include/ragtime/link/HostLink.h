@@ -233,6 +233,11 @@ public:
     // never says DISCONNECTED. While calling, either stops the call.
     bool leave(uint64_t nowMs);
     bool leaveNow(uint64_t nowMs);
+    // The SWR trip: ABORT, which stops the host's transmitter at once and
+    // drops the bursts it has queued (Data2G's Transmitter::abort), and
+    // ends a session as Leave now does. The host answers DISCONNECTED even
+    // with no session; that is let pass.
+    bool abortTransmit(uint64_t nowMs);
 
     SessionState sessionState() const { return session_; }
     const std::string& sessionPeer() const { return peer_; }

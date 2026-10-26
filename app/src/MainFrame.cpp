@@ -39,6 +39,7 @@
 #include "AppIcon.h"
 #include "BroadcastPage.h"
 #include "ConnectionBar.h"
+#include "SwrBar.h"
 #include "DrawnIcon.h"
 #include "FilesPage.h"
 #include "GearshiftDialog.h"
@@ -74,6 +75,7 @@ enum
     ID_GEARSHIFT = wxID_HIGHEST + 1,
     ID_STATION_SETTINGS,
     ID_RIG_SETTINGS,
+    ID_CLEAR_SWR_TRIP,
     ID_NARROW,
     ID_GLOBUS,
     ID_MESSAGE_STATION,
@@ -258,7 +260,8 @@ MainFrame::MainFrame()
         refreshSession();
     };
     host_->setDataSide(std::move(data));
-    rig_ = std::make_unique<RigControl>([this]() { onDial(); }, [this]() { onMeters(); });
+    rig_ = std::make_unique<RigControl>([this]() { onDial(); }, [this]() { onMeters(); },
+                                        [this](const std::string& what) { onSwrTrip(what); });
 
     // Every broadcast item of ours is sealed once it has gone.
     chat_.onItems([this](const std::vector<protocol::Record>& items, uint64_t burst, const std::string& mode,
@@ -381,6 +384,8 @@ void MainFrame::buildMenus()
     auto* settings = new wxMenu;
     settings->Append(ID_STATION_SETTINGS, "&Station...\tCtrl+,");
     settings->Append(ID_RIG_SETTINGS, "&Rig...");
+    settings->Append(ID_CLEAR_SWR_TRIP, "&Clear the SWR trip...",
+                     "Lets Ragtime send and key the rig again after the SWR went over 3:1");
     settings->Append(ID_GEARSHIFT, "&Gearshift...\tCtrl+G");
     settings->AppendCheckItem(ID_NARROW, "&500 Hz only\tCtrl+5");
 
@@ -407,6 +412,8 @@ void MainFrame::buildMenus()
     Bind(wxEVT_MENU, [this](wxCommandEvent&) { showGearshift(); }, ID_GEARSHIFT);
     Bind(wxEVT_MENU, [this](wxCommandEvent&) { showSettings(); }, ID_STATION_SETTINGS);
     Bind(wxEVT_MENU, [this](wxCommandEvent&) { showSettings(SettingsDialog::Page::Rig); }, ID_RIG_SETTINGS);
+    Bind(wxEVT_MENU, [this](wxCommandEvent&) { clearSwrTrip(); }, ID_CLEAR_SWR_TRIP);
+    Bind(wxEVT_UPDATE_UI, [this](wxUpdateUIEvent& e) { e.Enable(rig_ && rig_->swrTripped()); }, ID_CLEAR_SWR_TRIP);
     Bind(wxEVT_MENU, [this](wxCommandEvent& e) { setNarrow(e.IsChecked()); }, ID_NARROW);
     Bind(wxEVT_MENU, [this](wxCommandEvent& e) { setGlobus(e.IsChecked()); }, ID_GLOBUS);
     Bind(wxEVT_MENU, [this](wxCommandEvent& e) { setPaused(e.IsChecked()); }, ID_PAUSE);
@@ -581,6 +588,7 @@ void MainFrame::buildLayout()
     // The connection bar.
     bar_->narrow->Bind(wxEVT_TOGGLEBUTTON, [this](wxCommandEvent& e) { setNarrow(e.IsChecked()); });
     bar_->pause->Bind(wxEVT_TOGGLEBUTTON, [this](wxCommandEvent& e) { setPaused(e.IsChecked()); });
+    bar_->swrBar->onClear([this]() { clearSwrTrip(); });
     bar_->acceptSessions->Bind(wxEVT_CHECKBOX, [this](wxCommandEvent& e) {
         acceptWanted_ = e.IsChecked();
         saveBool(keys::ACCEPT_SESSIONS, e.IsChecked());
@@ -1895,7 +1903,9 @@ void MainFrame::applySending()
     link_.setAcceptSessions(acceptWanted_ && !held_, now);
     // The pages say why: Pause sending's own line, or receive only's.
     wxString why;
-    if (held_ && !paused_) why = "Receive only until the dial is inside a US data segment: messages wait as Queued.";
+    if (held_ && !paused_)
+        why = rig_->swrTripped() ? "Receive only until the SWR trip is cleared: messages wait as Queued."
+                                 : "Receive only until the dial is inside a US data segment: messages wait as Queued.";
     sessionPage_->setPaused(hold, why);
     broadcast_->setPaused(hold, why);
     if (host_) host_->flush();
@@ -2489,13 +2499,13 @@ void MainFrame::showMeters()
     const wxString none = wxString::FromUTF8("\xe2\x80\x94");
     const std::string waits = "Auto ALC waits for data2g-host to take a transmit level command, since Ragtime never "
                               "touches the sound card.";
-    if (!rig_->readsMeters())
+    if (!rig_->readsMeters() && !rig_->swrTripped())
     {
-        std::string tip = prefs_.rig.source == radio::RigSource::Hamlib
-                              ? "The rig's ALC while transmitting, once Ragtime has the rig open with Hamlib."
-                              : "The rig's ALC while transmitting, when Ragtime opens the rig with Hamlib "
-                                "(Settings > Rig).";
-        bar_->setAlc(false, 0, none, utf8(tip + "\n\n" + waits), false);
+        std::string when = prefs_.rig.source == radio::RigSource::Hamlib
+                               ? " while transmitting, once Ragtime has the rig open with Hamlib."
+                               : " while transmitting, when Ragtime opens the rig with Hamlib (Settings > Rig).";
+        bar_->setAlc(false, 0, none, utf8("The rig's ALC" + when + "\n\n" + waits), false);
+        bar_->setSwr(false, std::nullopt, none, utf8("The rig's SWR" + when), false, false);
         return;
     }
     const radio::TxMeters& meters = rig_->meters();
@@ -2521,7 +2531,7 @@ void MainFrame::showMeters()
     else if (last && last->alcPeak)
     {
         text = wxString::Format("%d%%", (int)std::lround(*last->alcPeak * 100));
-        warn = last->overTarget() || last->swrHigh();
+        warn = last->overTarget();
     }
     if (last)
     {
@@ -2534,9 +2544,80 @@ void MainFrame::showMeters()
                    + " dB. Until it can, turn data2g-host's --output-volume down.";
         else if (last->overTarget())
             tip += "\nIt peaked over the " + std::to_string(target) + "% target.";
-        if (last->swrHigh()) tip += "\nThe SWR went over 3: check the antenna and the tuner.";
     }
-    bar_->setAlc(true, percent, text, utf8(tip + "\n\n" + waits), warn);
+    bar_->setAlc(rig_->readsMeters(), percent, text, utf8(tip + "\n\n" + waits), warn);
+
+    // The SWR bar. A reading under 1:1 is no reading (a rig not yet
+    // transmitting, Hamlib's dummy rig).
+    auto ratio = [](double swr) { return wxString::Format("%.1f:1", swr); };
+    bool tripped = rig_->swrTripped();
+    std::string swrTip = rig_->readsSwr() ? "The rig's SWR, read through Hamlib while data2g-host transmits. The "
+                                            "marks are at 1, 1.5, 2 and 3: green under 1.5, yellow to 2, orange "
+                                            "to 3, red over 3."
+                                          : "This rig doesn't report its SWR through Hamlib.";
+    std::optional<double> swr;
+    wxString swrText = none;
+    bool swrWarn = false;
+    if (meters.transmitting() && meters.latest().swr && *meters.latest().swr >= 1.0)
+    {
+        swr = *meters.latest().swr;
+        swrText = ratio(*swr);
+        swrWarn = *swr > radio::SwrTrip::TRIP_SWR;
+        swrTip += "\n\nNow: " + swrText.ToStdString() + ".";
+    }
+    else if (last && last->swrPeak && *last->swrPeak >= 1.0)
+    {
+        swrText = ratio(*last->swrPeak);
+        swrWarn = last->swrHigh();
+        swrTip += "\n\nThe last burst's peak, beside the bar: " + swrText.ToStdString() + ".";
+    }
+    if (tripped)
+    {
+        swrText = "TRIP";
+        swrWarn = true;
+        swrTip += "\n\nSWR trip: " + rig_->tripText()
+                  + ". Ragtime told data2g-host to stop (ABORT), holds sending, and won't key the rig until you "
+                    "clear the trip: click this bar, or Settings > Clear the SWR trip. Turn the power back up on "
+                    "the rig yourself; Ragtime never puts it back.";
+    }
+    else if (prefs_.rig.swrTrip)
+    {
+        swrTip += "\n\nThe SWR trip is on (Settings > Rig): two readings in a row over 3:1, and Ragtime unkeys "
+                  "the rig, turns its power to 0 and tells data2g-host to stop.";
+    }
+    bar_->setSwr(rig_->readsSwr() || tripped, swr, swrText, utf8(swrTip), swrWarn, tripped);
+}
+
+void MainFrame::onSwrTrip(const std::string& what)
+{
+    uint64_t now = HostConnection::nowMs();
+    // The host keyed for itself, or holds more to send: stop it.
+    bool aborted = link_.abortTransmit(now);
+    if (host_) host_->flush();
+    host_->recorder().note("rig SWR trip: " + what + (aborted ? "; ABORT sent to data2g-host" : ""), now);
+    applySendGuard();
+    note_ = "SWR trip: " + what + ". Sending is held until you clear the trip.";
+    showStatus();
+    showMeters();
+    RequestUserAttention(wxUSER_ATTENTION_ERROR);
+}
+
+void MainFrame::clearSwrTrip()
+{
+    if (!rig_->swrTripped()) return;
+    wxMessageDialog ask(this,
+                        utf8("Clear the SWR trip?\n\n" + rig_->tripText()
+                             + ".\n\nCheck the antenna and the tuner first. Ragtime will send and key the rig "
+                               "again. The rig's power stays where the trip put it: turn it back up on the rig."),
+                        "SWR trip", wxYES_NO | wxNO_DEFAULT | wxICON_WARNING);
+    ask.SetYesNoLabels("Clear the trip", "Keep it");
+    if (ask.ShowModal() != wxID_YES) return;
+    rig_->clearSwrTrip();
+    host_->recorder().note("rig SWR trip cleared", HostConnection::nowMs());
+    applySendGuard();
+    note_ = "SWR trip cleared: sending allowed again";
+    showStatus();
+    showMeters();
 }
 
 void MainFrame::showDial()
@@ -2569,6 +2650,9 @@ void MainFrame::showDial()
 
 std::string MainFrame::sendRefusal() const
 {
+    if (rig_ && rig_->swrTripped())
+        return "the SWR went over 3:1 (" + rig_->tripText()
+               + "). Clear the trip once the antenna is fixed: click the SWR bar, or Settings > Clear the SWR trip";
     if (!prefs_.readsDial() || !prefs_.usSegmentsOnly) return std::string();
     std::optional<uint64_t> hz = rig_->dialHz();
     if (!hz) return "Ragtime doesn't know the dial frequency, so it can't tell whether a burst would be inside a "
@@ -2586,8 +2670,10 @@ void MainFrame::applySendGuard()
     heldWhy_ = why;
     if (changed)
     {
-        note_ = held_ ? "Receive only: " + heldWhy_ : std::string("Sending allowed: the dial is inside a US data "
-                                                                  "segment");
+        note_ = held_ ? "Receive only: " + heldWhy_
+                : prefs_.readsDial() && prefs_.usSegmentsOnly
+                    ? std::string("Sending allowed: the dial is inside a US data segment")
+                    : std::string("Sending allowed again");
         applySending();
         showStatus();
     }

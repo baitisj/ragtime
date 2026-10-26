@@ -96,6 +96,56 @@ private:
     uint64_t version_ = 0;
 };
 
+// Where an SWR sits on the connection bar's SWR bar, 0 to 1. The bar is
+// drawn on the reflection coefficient, |Γ| = (SWR - 1) / (SWR + 1), as a
+// rig's own SWR meter is: 1:1 at the left end, 1.5 a third of the way
+// (0.3), 2 at half way, 3 at three quarters, and 5 (Γ = 2/3) at the right
+// end. An SWR under 1 (a rig not transmitting, Hamlib's dummy rig) is 0.
+constexpr double SWR_FULL_SCALE = 5.0;
+double swrScale(double swr);
+
+// The bar's colour: green under 1.5, yellow to 2, orange to 3, red over 3
+// (Jeff, 2026-10-26).
+enum class SwrBand
+{
+    Good,
+    Fair,
+    Poor,
+    Bad,
+};
+SwrBand swrBand(double swr);
+
+// SwrTrip: Settings > Rig's "Over 3:1 SWR, turn the rig's power to 0 and
+// unkey". It trips on READINGS readings in a row over TRIP_SWR within a
+// burst, so one noisy reading doesn't, and stays tripped until clear():
+// the rig's thread then unkeys, sets the power to 0 and keys no more, and
+// the power is never put back by itself.
+class SwrTrip
+{
+public:
+    static constexpr double TRIP_SWR = 3.0;
+    static constexpr int READINGS = 2;
+
+    void setEnabled(bool enabled);
+    bool enabled() const { return enabled_; }
+    // A burst begins or ends: the count starts afresh.
+    void transmitting(bool on);
+    // An SWR reading while transmitting; true when it trips now.
+    bool reading(double swr, uint64_t nowMs);
+    void clear();
+
+    bool tripped() const { return tripped_; }
+    double trippedSwr() const { return trippedSwr_; }
+    uint64_t trippedMs() const { return trippedMs_; }
+
+private:
+    bool enabled_ = false;
+    bool tripped_ = false;
+    int over_ = 0;
+    double trippedSwr_ = 0;
+    uint64_t trippedMs_ = 0;
+};
+
 // "ALC 42%", "SWR 1.3", "38 W", or "31% power", joined with " · ".
 std::string readingText(const MeterReading& reading);
 // "12 s: ALC peak 61%, mean 44% · SWR 1.3 · 38 W", for the tooltip; the

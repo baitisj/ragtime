@@ -455,6 +455,28 @@ void testCallingAndLeaving()
     CHECK(!lines.empty() && lines.back() == "ABORT");
 }
 
+void testAbortTransmit()
+{
+    // The SWR trip with no session: ABORT, and the DISCONNECTED the host
+    // answers it with ends nothing.
+    HostLink link = opened(0);
+    link.takeEvents();
+    CHECK(link.abortTransmit(100));
+    CHECK(linesOf(link.takeCommandOutput()) == std::vector<std::string>({"ABORT"}));
+    say(link, "OK\rDISCONNECTED\r", 200);
+    CHECK(link.sessionState() == HostLink::SessionState::None);
+    CHECK(!hasEvent(link.takeEvents(), Type::SessionEnded));
+    // In a session: Leave now.
+    CHECK(link.call("W1AW", 300));
+    say(link, "OK\rCONNECTED AG7EW W1AW 500\r", 400);
+    link.takeCommandOutput();
+    CHECK(link.abortTransmit(500));
+    CHECK(linesOf(link.takeCommandOutput()) == std::vector<std::string>({"ABORT"}));
+    CHECK(link.sessionState() == HostLink::SessionState::Leaving);
+    say(link, "OK\rDISCONNECTED\r", 600);
+    CHECK(link.sessionState() == HostLink::SessionState::None);
+}
+
 void testCuts()
 {
     // A host from before Data2G PR #118 answers DATA2G ON with WRONG: not
@@ -665,6 +687,7 @@ int main()
     testPauseSending();
     testBurstsThatYield();
     testCallingAndLeaving();
+    testAbortTransmit();
     testCuts();
     testTheLastModeReported();
     testAnUnansweredCommandIsNotWaitedOnForEver();

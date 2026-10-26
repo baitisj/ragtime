@@ -47,6 +47,7 @@ add_executable(ragtime WIN32
     src/Thresholds.cpp
     src/ToggleSwitch.cpp
     src/Theme.cpp
+    src/SwrBar.cpp
     src/TxLamp.cpp
     src/WatchDialog.cpp
     src/globus/GlobusPanel.cpp

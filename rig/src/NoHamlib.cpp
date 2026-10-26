@@ -70,6 +70,12 @@ void HamlibRig::setPtt(bool) {}
 
 void HamlibRig::setTransmitting(bool) {}
 
+void HamlibRig::setSwrTrip(bool) {}
+
+void HamlibRig::clearSwrTrip() {}
+
+void HamlibRig::setDummyLevelForTest(const std::string&, double) {}
+
 HamlibRig::Status HamlibRig::status() const
 {
     return shared_ ? shared_->status : Status();

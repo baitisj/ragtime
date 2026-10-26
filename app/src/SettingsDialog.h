@@ -115,6 +115,7 @@ private:
     wxButton* testButton_ = nullptr;
     wxStaticText* testResult_ = nullptr;
     wxCheckBox* keyRig_ = nullptr;
+    wxCheckBox* swrTrip_ = nullptr;
     wxChoice* ptt_ = nullptr;
     wxComboBox* pttPort_ = nullptr;
     std::vector<wxWindow*> keying_;                // what keyRig_ enables

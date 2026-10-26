@@ -11,6 +11,7 @@
 #include <wx/tglbtn.h>
 
 #include "Html.h"
+#include "SwrBar.h"
 #include "ToggleSwitch.h"
 #include "TxLamp.h"
 
@@ -48,14 +49,24 @@ ConnectionBar::ConnectionBar(wxWindow* parent)
     autoAlc = new wxCheckBox(this, wxID_ANY, "Auto ALC");
     alcMeter = new wxGauge(this, wxID_ANY, 100, wxDefaultPosition, wxSize(FromDIP(60), FromDIP(10)),
                            wxGA_HORIZONTAL | wxGA_SMOOTH);
+    swrBar = new SwrBar(this);
+    // The two readings, small, one beside each bar.
+    wxFont small = GetFont().Smaller();
     alcReading = new wxStaticText(this, wxID_ANY, "100%", wxDefaultPosition, wxDefaultSize, wxST_NO_AUTORESIZE);
-    alcReading->SetMinSize(alcReading->GetBestSize());
-    alcReading->SetLabel(wxString::FromUTF8("\xe2\x80\x94"));
+    swrReading = new wxStaticText(this, wxID_ANY, "TRIP", wxDefaultPosition, wxDefaultSize, wxST_NO_AUTORESIZE);
+    for (wxStaticText* t : {alcReading, swrReading})
+    {
+        t->SetFont(small);
+        t->SetMinSize(wxSize(std::max(alcReading->GetBestSize().x, swrReading->GetBestSize().x) + FromDIP(4), -1));
+        t->SetLabel(wxString::FromUTF8("\xe2\x80\x94"));
+    }
     autoAlc->SetToolTip("Keeps transmit drive just under the rig's ALC. It waits for data2g-host to take a TX "
                         "level command, since Ragtime never touches the sound card.");
     autoAlc->Disable();
     setAlc(false, 0, wxString::FromUTF8("\xe2\x80\x94"),
            "The rig's ALC while transmitting, when Ragtime opens the rig with Hamlib (Settings > Rig).", false);
+    setSwr(false, std::nullopt, wxString::FromUTF8("\xe2\x80\x94"),
+           "The rig's SWR while transmitting, when Ragtime opens the rig with Hamlib (Settings > Rig).", false, false);
     tx = new TxLamp(this);
 
     left_ = new wxBoxSizer(wxHORIZONTAL);
@@ -72,8 +83,16 @@ ConnectionBar::ConnectionBar(wxWindow* parent)
 
     right_ = new wxBoxSizer(wxHORIZONTAL);
     add(right_, autoAlc, 8);
-    add(right_, alcMeter, 6);
-    add(right_, alcReading, 6);
+    // The ALC meter with the SWR bar under it, and their readings.
+    auto* bars = new wxBoxSizer(wxVERTICAL);
+    bars->Add(alcMeter, 0, wxEXPAND);
+    bars->AddSpacer(FromDIP(3));
+    bars->Add(swrBar, 0, wxEXPAND);
+    auto* readings = new wxBoxSizer(wxVERTICAL);
+    readings->Add(alcReading, 0);
+    readings->Add(swrReading, 0);
+    right_->Add(bars, 0, wxALIGN_CENTER_VERTICAL | wxLEFT, FromDIP(6));
+    right_->Add(readings, 0, wxALIGN_CENTER_VERTICAL | wxLEFT, FromDIP(6));
     add(right_, tx, 12);
     right_->AddSpacer(FromDIP(8));
 
@@ -144,6 +163,29 @@ void ConnectionBar::setAlc(bool readable, int percent, const wxString& text, con
         alcWarn_ = warn;
         alcReading->SetForegroundColour(warn ? badText() : wxNullColour);
         alcReading->Refresh();
+    }
+}
+
+void ConnectionBar::setSwr(bool readable, std::optional<double> swr, const wxString& text, const wxString& tip,
+                           bool warn, bool tripped)
+{
+    for (wxWindow* w : {(wxWindow*)swrBar, (wxWindow*)swrReading})
+    {
+        if (w->IsEnabled() != readable)
+        {
+            w->Enable(readable);
+            w->Refresh();
+        }
+        if (w->GetToolTipText() != tip) w->SetToolTip(tip);
+    }
+    swrBar->setSwr(swr);
+    swrBar->setTripped(tripped);
+    if (swrReading->GetLabel() != text) swrReading->SetLabel(text);
+    if (warn != swrWarn_)
+    {
+        swrWarn_ = warn;
+        swrReading->SetForegroundColour(warn ? badText() : wxNullColour);
+        swrReading->Refresh();
     }
 }
 

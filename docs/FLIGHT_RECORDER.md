@@ -27,7 +27,7 @@ it:
 | `kiss>`, `kiss<` | a KISS frame each way, the bytes between FENDs in hex, exactly as on the wire (command byte and escapes included) |
 | `data-up`, `data-down` | the session data port (command port + 1) |
 | `data>`, `data<` | session bytes each way: **the count only** |
-| `note` | Ragtime opened or closed, Help > Save a report pressed, the head of each file, and each burst's transmit meters from a Hamlib rig (`note rig TX 12 s: ALC peak 61%, mean 44%; SWR 1.3; 38 W`) |
+| `note` | Ragtime opened or closed, Help > Save a report pressed, the head of each file, and each burst's transmit meters from a Hamlib rig (`note rig TX 12 s: ALC peak 61%, mean 44%; SWR 1.3; 38 W`), and an SWR trip and its clearing (`note rig SWR trip: ...`) |
 
 ```
 2026-10-25T16:38:10.875Z up 127.0.0.1 KISS 8100 commands 8300

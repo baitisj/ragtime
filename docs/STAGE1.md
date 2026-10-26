@@ -865,6 +865,45 @@ flight recorder line say "Auto ALC would turn the drive down 2.5 dB",
 which until then is advice for `--output-volume`; when the command
 comes, it is what to send.
 
+**The SWR bar** (Jeff, 2026-10-26) sits under the ALC meter: the rig's
+SWR while transmitting, with small marks at 1, 1.5, 2 and 3, green
+under 1.5, yellow to 2, orange to 3 and red over 3, and the reading
+beside it (`1.3:1`; between bursts, the last burst's peak). It is drawn
+on the reflection coefficient, |Γ| = (SWR − 1) / (SWR + 1), as a rig's
+own SWR meter is, so the marks spread out where they matter: 1:1 at the
+left end, 1.5 at 0.3 of the way, 2 at half way, 3 at three quarters and
+5 at the right end (`radio::swrScale`). A reading under 1 is no reading
+(Hamlib's dummy rig reads 0).
+
+**The SWR trip** (Settings > Rig, "Over 3:1 SWR, turn the rig's power
+to 0 and unkey", Hamlib only, off by default). With it ticked the rig's
+thread reads SWR every other meter, so every 400 ms, and two readings in
+a row over 3:1 within a burst trip it (`radio::SwrTrip`: one noisy
+reading doesn't). The rig's thread then, at once and on its own:
+
+1. unkeys the rig with Hamlib, whoever keyed it (a rig whose driver
+   data2g-host also has open takes the PTT OFF);
+2. reads the power setting (`RFPOWER`) and sets it to 0;
+3. keys the rig no more, whatever it is told, until the trip is
+   cleared.
+
+Then the window sends data2g-host `ABORT`, which stops its transmitter
+at once and drops the bursts it has queued (Data2G's
+`Transmitter::abort`; read in its `native/app/transmitter.cpp` and
+`native/core/host/host.cpp`). ABORT also drops a session, without the
+disconnect handshake: a fault ends a ragchew, as a lost link does. That
+matters most when Ragtime doesn't key the rig itself: data2g-host keys
+it then, and ABORT is the one way to stop it. Frames the host's KISS
+link already holds may still go, at the power the trip left. Sending is
+held, as receive only is, until the operator clears the trip (click the
+SWR bar, or Settings > Clear the SWR trip, which asks first). Clearing
+lets Ragtime send and key again; it never puts the power back, which
+the operator turns up on the rig once the antenna is fixed. The flight
+recorder gets `note rig SWR trip: SWR 3.6: Ragtime unkeyed the rig and
+set its power to 0 (it was 50%); ABORT sent to data2g-host`, and the
+cleared trip. Glissando's "Abort transmitting when SWR goes over 3:1"
+(its PR #50) is the same idea, read for behaviour only.
+
 **Building.** Hamlib is LGPL and linked as a library: `libhamlib-dev`
 on Linux (pkg-config `hamlib`), and on Windows a static Hamlib 4.5.5
 cloned and built with autotools for MinGW-w64
@@ -873,13 +912,15 @@ cloned and built with autotools for MinGW-w64
 Rig page then greys its Hamlib choice. The AppImage carries the
 system's `libhamlib.so.4` and what it needs. `ragtime_hamlib_test`
 opens Hamlib's dummy rig (model 1, no port, no radio), reads its dial,
-keys and unkeys it, reads its meters while transmitting, and checks the reasons a rig
-can't be opened; `ragtime_rig_test` covers the settings, the follower
-and `TxMeters`.
+keys and unkeys it, reads its meters while transmitting, trips on an
+SWR set over 3:1 in the backend, and checks the reasons a rig can't be
+opened; `ragtime_rig_test` covers the settings, the follower,
+`TxMeters`, the SWR bar's scale and the trip.
 
 Settings keys: `/Radio/Source` (`none`, `rigctld`, `hamlib`; a file
 from before has only `/Radio/ReadDial`, which still reads, and is still
-written for an older Ragtime), and `/Hamlib/...`.
+written for an older Ragtime), and `/Hamlib/...` (the trip is
+`/Hamlib/SwrTrip`).
 
 On Linux the operator needs to be in the `dialout` group to open a
 serial port.

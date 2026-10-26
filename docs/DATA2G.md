@@ -50,7 +50,7 @@ Python host needs only numpy and scipy; torch is for training.
 | `BW500`, `BW1200`, `BW2300`, `BW2750` | `OK` | The **session** width cap only: 500, 1200 or 2400 Hz (`BW2750` is 2400). Broadcast width is `--kiss-bw`. There is no 200 Hz cap; the 200 Hz modes sit inside 500 Hz |
 | `CHAT ON` | `OK` | Sessions favour latency over throughput (`docs/arq.md`, "CHAT ON") |
 | `DATA2G ON` | `OK` | `BUFFER` counts plainly, `CLEANTXBUFFER` reports host byte offsets, bytes written before `CONNECTED` are dropped. Off again when the client goes |
-| `CONNECT from to`, `DISCONNECT`, `ABORT` | `OK` / `WRONG` | |
+| `CONNECT from to`, `DISCONNECT`, `ABORT` | `OK` / `WRONG` | `ABORT` drops a session without the handshake, and also stops the transmitter at once and clears its queue (`Transmitter::abort`, broadcast bursts too); it answers `DISCONNECTED` even with no session (read at v0.3.0, 6f0e72f). Ragtime's SWR trip uses it |
 | `CLEANTXBUFFER [n]` | `CLEANTXBUFFER OK a b c` / `LATE` / `BUFFEREMPTY` / `FAILED` | Then `CLEANTXBUFFER SETTLED a b c [UNKNOWN]` (PROTOCOL.md, "Cuts") |
 | `SN` | `SN snr` | The session partner's last burst, pilot S/N in 2500 Hz. `WRONG` before one |
 | `VERSION` | `VERSION Data2G x.y.z` | |
