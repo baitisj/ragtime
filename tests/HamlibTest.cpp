@@ -1,7 +1,7 @@
 // The rig library against Hamlib itself: the rig list, a backend's own
 // settings, and HamlibRig opening Hamlib's dummy rig (model 1, no port, no
 // radio) on its thread, reading the dial, keying and unkeying, reading
-// the transmit meters while transmitting, and saying why when a rig can't
+// the transmit meters while transmitting and the S-meter between bursts, and saying why when a rig can't
 // be opened.
 #include <chrono>
 #include <functional>
@@ -81,6 +81,11 @@ void dummyRig()
     CHECK_EQ(s.rig, std::string("Hamlib Dummy"));
     // The dummy rig starts at 145 MHz.
     CHECK(s.hz && *s.hz == 145000000);
+    // Its S-meter, between bursts, for the band's noise.
+    CHECK(s.readsStrength);
+    CHECK(waitFor(r, [](const HamlibRig::Status& st) { return st.strengthReadings > 0 && st.strength; }));
+    s = r.status();
+    CHECK(*s.strength >= -100 && *s.strength <= 100);
 
     r.setPtt(true);
     CHECK(waitFor(r, [](const HamlibRig::Status& st) { return st.keyed; }));

@@ -2370,7 +2370,12 @@ void MainFrame::loadGearshift()
 
 void MainFrame::showGearshift()
 {
-    GearshiftDialog dialog(this, gearshift_, [this]() { gearChanged(); });
+    GearshiftDialog dialog(this, gearshift_, [this]() { gearChanged(); }, [this]() {
+        BandNoise noise;
+        noise.reads = rig_->readsNoise();
+        noise.dbOverS9 = rig_->noiseDb();
+        return noise;
+    });
     dialog.ShowModal();
 }
 

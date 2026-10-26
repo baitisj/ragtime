@@ -26,6 +26,7 @@
 #include "DrawnIcon.h"
 #include "Html.h"
 #include "Thresholds.h"
+#include "ragtime/radio/Noise.h"
 
 using namespace ragtime::gearbox;
 
@@ -59,6 +60,7 @@ constexpr double MAX_BPS = 10000.0;
 constexpr double DOT_RADIUS = 4.5;
 constexpr double KNOB_RADIUS = 9.5;       // half a gear knob's height
 constexpr double KNOB_HALF_WIDTH = 19.0;  // wide enough for a short name, "E2C"
+constexpr double S_AXIS_WIDTH = 64.0;     // the S-meter axis, right of the plot
 
 // Why there are no gears to draw, or empty when there are: no thresholds
 // found at all, or thresholds with no widths and speeds yet (data2g-host's
@@ -122,6 +124,8 @@ public:
             Refresh();
         });
         Bind(wxEVT_LEFT_DOWN, [this](wxMouseEvent& e) {
+            if (qrnBox_.Contains(e.GetPosition().x, e.GetPosition().y))
+                return;
             const int gear = gearAt(e.GetPosition());
             if (gear > 0)
             {
@@ -144,7 +148,7 @@ private:
     Plot plot() const
     {
         const wxSize size = GetClientSize();
-        Plot p {58.0, 34.0, size.x - 16.0, size.y - 42.0, -15.0, 30.0};
+        Plot p {58.0, 34.0, size.x - (noise_.reads ? S_AXIS_WIDTH : 16.0), size.y - 42.0, -15.0, 30.0};
         // One S/N range for every path, so the dots move when the path
         // changes but the scale doesn't.
         double lo = 1e9, hi = -1e9;
@@ -167,6 +171,17 @@ private:
         return p;
     }
 
+public:
+    // The band's noise, for the QRN line and the S-meter axis.
+    void setNoise(const BandNoise& noise)
+    {
+        if (noise.reads == noise_.reads && noise.dbOverS9 == noise_.dbOverS9)
+            return;
+        noise_ = noise;
+        Refresh();
+    }
+
+private:
     static double xFor(const Plot& p, double bps)
     {
         const double t = (std::log10(bps) - std::log10(MIN_BPS))
@@ -315,6 +330,8 @@ private:
                 gc->DrawText(margin, p.left + 6, p.bottom - h - 4);
         }
 
+        drawNoise(*gc, p, small, soft);
+
         // Every other best mode on a thin dashed line.
         const int cap = widthCapHz(shift_.effectiveWidth());
         const std::vector<const Submode*> best = bestModes(shift_.usable(), shift_.path(), cap);
@@ -424,23 +441,27 @@ private:
             gc->DrawText(wider, x + 13, y + 6.5 - h / 2);
         }
 
-        // Hovering a dot shows its name, width, speed and threshold.
+        // Hovering a dot shows its name, width, speed and threshold, and
+        // hovering the QRN label what it is.
         if (hovering_)
         {
             const Submode* hovered = dotAt(all, mouse_);
-            if (hovered)
+            const bool onQrn = !hovered && noise_.dbOverS9 && qrnBox_.Contains(mouse_.x, mouse_.y);
+            if (hovered || onQrn)
             {
                 const wxString text
-                    = utf8(shift_.shortName(hovered->name)) + "   " + utf8(hovered->name) + "\n"
-                      + wxString::Format("%d Hz", hovered->widthHz) + wxString::FromUTF8(" \xC2\xB7 ")
-                      + modulationLabel(hovered->modulation) + "\n" + utf8(formatSpeed(hovered->bitsPerSecond))
-                      + "\n" + utf8(formatDb(*hovered->thresholdOn(shift_.path()))) + " on a "
-                      + pathLabel(shift_.path()) + " path";
+                    = onQrn ? qrnTip(*noise_.dbOverS9)
+                            : utf8(shift_.shortName(hovered->name)) + "   " + utf8(hovered->name) + "\n"
+                                  + wxString::Format("%d Hz", hovered->widthHz) + wxString::FromUTF8(" \xC2\xB7 ")
+                                  + modulationLabel(hovered->modulation) + "\n"
+                                  + utf8(formatSpeed(hovered->bitsPerSecond)) + "\n"
+                                  + utf8(formatDb(*hovered->thresholdOn(shift_.path()))) + " on a "
+                                  + pathLabel(shift_.path()) + " path";
                 gc->SetFont(small, ink);
                 double w = 0, h = 0;
                 gc->GetTextExtent(text, &w, &h);
                 double bx = mouse_.x + 14, by = mouse_.y + 14;
-                if (bx + w + 12 > p.right)
+                if (bx + w + 12 > GetClientSize().x)
                     bx = mouse_.x - w - 26;
                 if (by + h + 10 > p.bottom)
                     by = mouse_.y - h - 24;
@@ -452,18 +473,95 @@ private:
         }
     }
 
+    // The band's noise from the S-meter: a blue dashed line at 0 dB S/N
+    // labelled with the rig's own reading, "QRN: -40" (dB over S9), and an
+    // axis on the right saying how strong a signal at each S/N reads on the
+    // S-meter (S/N 0 is the noise itself; 6 dB an S-unit).
+    void drawNoise(wxGraphicsContext& gc, const Plot& p, const wxFont& small, const wxColour& soft)
+    {
+        qrnBox_ = wxRect();
+        if (!noise_.reads)
+            return;
+        const wxColour ink = wxSystemSettings::GetColour(wxSYS_COLOUR_WINDOWTEXT);
+        double w = 0, h = 0;
+        const wxString title = "On your S-meter";
+        gc.SetFont(small, soft);
+        gc.GetTextExtent(title, &w, &h);
+        gc.DrawText(title, GetClientSize().x - h - 2, (p.top + p.bottom + w) / 2, PI / 2);
+        if (!noise_.dbOverS9)
+        {
+            const wxString waiting = "QRN: reading";
+            gc.GetTextExtent(waiting, &w, &h);
+            gc.DrawText(waiting, p.right + 6, p.top - h - 4);
+            return;
+        }
+        const double noise = *noise_.dbOverS9;
+
+        // The axis: S1 to S9 a unit at a time, then S9+10 and up.
+        setPen(gc, soft, 1);
+        gc.SetFont(small, ink);
+        auto tick = [&](double dbOverS9) {
+            const double y = yFor(p, dbOverS9 - noise);
+            if (y < p.top - 0.5 || y > p.bottom + 0.5)
+                return;
+            gc.StrokeLine(p.right, y, p.right + 4, y);
+            const wxString label = utf8(ragtime::radio::sUnitText(dbOverS9));
+            gc.GetTextExtent(label, &w, &h);
+            gc.DrawText(label, p.right + 7, y - h / 2);
+        };
+        for (int s = 1; s <= 9; s++)
+            tick((s - 9) * ragtime::radio::DB_PER_S_UNIT);
+        for (int over = 10; over <= 60; over += 10)
+            tick(over);
+
+        // The noise itself: S/N 0.
+        const double y = yFor(p, 0.0);
+        if (y < p.top || y > p.bottom)
+            return;
+        setPen(gc, ACCENT, 2, wxPENSTYLE_SHORT_DASH);
+        gc.StrokeLine(p.left, y, p.right, y);
+        const wxString label = "QRN: " + utf8(ragtime::radio::levelText(noise));
+        const wxFont bold = small.Bold();
+        gc.SetFont(bold, *wxWHITE);
+        gc.GetTextExtent(label, &w, &h);
+        const double bw = w + 16, bh = h + 6;
+        // At the right, unless the path S/N's label is there.
+        const std::optional<double> snr = shift_.pathSnr();
+        const bool clash = snr && std::fabs(yFor(p, *snr) - y) < bh + 14;
+        const double bx = clash ? p.left + 8 : p.right - bw - 8, by = y - bh / 2;
+        gc.SetPen(*wxTRANSPARENT_PEN);
+        gc.SetBrush(wxBrush(ACCENT));
+        gc.DrawRoundedRectangle(bx, by, bw, bh, bh / 2);
+        gc.DrawText(label, bx + 8, by + 3);
+        qrnBox_ = wxRect((int)bx, (int)by, (int)bw + 1, (int)bh + 1);
+    }
+
+    static wxString qrnTip(double noise)
+    {
+        return wxString::Format("QRN: %s, the band's noise on your S-meter (%s): the quietest\n"
+                                "reading between bursts in the last minute, in dB over S9.\n"
+                                "The S-meter axis says how strong a station must read\n"
+                                "for each gear: the noise and that gear's S/N, 6 dB an S-unit.",
+                                utf8(ragtime::radio::levelText(noise)), utf8(ragtime::radio::sUnitText(noise)));
+    }
+
     const Gearshift& shift_;
+    BandNoise noise_;
+    wxRect qrnBox_;
     std::function<void(int)> onPickGear_;
     std::function<void(const std::string&)> onPickMode_;
     wxPoint mouse_;
     bool hovering_ = false;
 };
 
-GearshiftDialog::GearshiftDialog(wxWindow* parent, Gearshift& shift, std::function<void()> onChange)
+GearshiftDialog::GearshiftDialog(wxWindow* parent, Gearshift& shift, std::function<void()> onChange,
+                                 std::function<BandNoise()> noise)
     : wxDialog(parent, wxID_ANY, "Gearshift", wxDefaultPosition, wxDefaultSize,
                wxDEFAULT_DIALOG_STYLE | wxRESIZE_BORDER)
     , shift_(shift)
     , onChange_(std::move(onChange))
+    , noise_(std::move(noise))
+    , noiseTimer_(this)
 {
     auto* top = new wxBoxSizer(wxVERTICAL);
 
@@ -586,6 +684,14 @@ GearshiftDialog::GearshiftDialog(wxWindow* parent, Gearshift& shift, std::functi
     SetMinSize(wxSize(1004, 520));
     refresh();
     CentreOnParent();
+
+    // The band's noise, as the rig reads it.
+    if (noise_)
+    {
+        map_->setNoise(noise_());
+        Bind(wxEVT_TIMER, [this](wxTimerEvent&) { map_->setNoise(noise_()); });
+        noiseTimer_.Start(1000);
+    }
 }
 
 void GearshiftDialog::changed()

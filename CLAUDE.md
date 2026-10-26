@@ -119,9 +119,10 @@ with the code when the seal rules change.
   (docs/DATA2G.md, "Loss").
 - The dial, the path log and the watch list (2026-10-25,
   `docs/STAGE1.md`): `core/src/radio/` (`DialReader`, which only ever
-  asks rigctld `\chk_vfo`, `f` and, while transmitting, the meters
-  `+l ALC`, `+l SWR` and `+l RFPOWER_METER_WATTS`, naming `currVFO` for
-  a `--vfo` one; `Bands`, the US data segments; `PathLog`, a line a
+  asks rigctld `\chk_vfo`, `f`, while transmitting the meters
+  `+l ALC`, `+l SWR` and `+l RFPOWER_METER_WATTS`, and between bursts
+  the S-meter `+l STRENGTH` for the band's noise (`radio::NoiseFloor`,
+  the gearshift's QRN line), naming `currVFO` for a `--vfo` one; `Bands`, the US data segments; `PathLog`, a line a
   burst heard, appended, and each station's 24-hour strip by band),
   `broadcast::WatchList` (bells, and Tell me when free), and in the app
   `RigConnection`, `PathStripView`, `PathsDialog` and `WatchDialog`.
@@ -324,7 +325,8 @@ each bot at its own strength; `--no-snr` plays a host from before Data2G
 PR #98. `--rig PORT` plays a rigctld for the dial (14.105 MHz, or
 `--dial HZ`; `--dial-hop` moves it outside the data segments one minute
 in three; `--rig-vfo` plays a rigctld started with `--vfo`; it answers
-the meters too, its SWR 1.3 or `--rig-swr X`) and prints anything it is
+the meters too, its SWR 1.3 or `--rig-swr X`, and the S-meter, -40 dB
+over S9 or `--rig-noise DB`) and prints anything it is
 sent but `\chk_vfo`, `f` and the meters. For Hamlib with no
 radio, pick maker Hamlib, model Dummy in Settings > Rig: a pretend rig
 at 145 MHz, which "Key the rig" keys at the fake hosts' PTT. Headless:

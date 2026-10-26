@@ -10,7 +10,10 @@
 // place of the dial. With the SWR trip on (radio::SwrTrip, Settings >
 // Rig), SWR is every other reading, and on a trip the thread itself
 // unkeys the rig, whoever keyed it, sets its power (RFPOWER) to 0, and
-// keys it no more until clearSwrTrip(). The power is never put back. A rig that fails to open, or stops answering, is closed and
+// keys it no more until clearSwrTrip(). The power is never put back.
+// Between bursts it reads the S-meter (STRENGTH, dB over S9) every
+// radio::NoiseFloor::READ_MS, but not in the first SETTLE_MS after one, for
+// the band's noise. A rig that fails to open, or stops answering, is closed and
 // tried again 2, 4, 8, 15 and then every 30 s (link::Reconnect). Stopping
 // unkeys the rig, if keyed, before closing it.
 //
@@ -105,6 +108,11 @@ public:
         uint64_t swrReadings = 0;
         uint64_t powerReadings = 0;
         uint64_t meterReadings = 0;     // any of them
+
+        // The S-meter, in dB over S9, read between bursts.
+        bool readsStrength = false;
+        std::optional<double> strength;
+        uint64_t strengthReadings = 0;  // goes up as it is read
 
         // The SWR trip, from the trip until clearSwrTrip().
         bool swrTripped = false;
