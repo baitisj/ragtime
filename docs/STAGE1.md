@@ -657,7 +657,8 @@ Rig; off by default, `127.0.0.1:4532`), Ragtime asks rigctld
 the radio's frequency once a second, and while data2g-host transmits
 the rig's meters (below), and only that: `radio::DialReader` writes
 `\chk_vfo` once on connecting, then `f` (or `f currVFO`) and the meter
-questions, and nothing else, ever (a test drives it through errors,
+questions, and while the Ear is open the filter's (below, "The Ear"),
+and nothing else, ever (a test drives it through errors,
 keying and silence and checks every byte it wrote). It never tunes or
 sets anything, since the radio is the source of truth and the
 operator's rigctld is often shared (fldigi). It doesn't ask the dial
@@ -812,7 +813,8 @@ one of three, `radio::RigSettings`:
 
 - **No rig.** Ragtime doesn't know the band.
 - **Read the dial from rigctld, already running**: as before (above),
-  `\chk_vfo`, `f` and the meters and nothing else, with its own Test.
+  `\chk_vfo`, `f` and the meters (and the filter while the Ear is
+  open) and nothing else, with its own Test.
   It never keys, so a shared rigctld (fldigi's) is safe.
 - **Open the rig with Hamlib**: Ragtime opens the rig itself, as fldigi
   and WSJT-X do. The rig is picked by maker and model from Hamlib's own
@@ -1082,6 +1084,48 @@ transmits are greyed. Data2G's passbands are drawn in green, from its
 1750 Hz for the 500 Hz ones (`ear/Passbands.h`); the one in use (the
 500 Hz switch) is darker. A hairline follows the mouse with its
 frequency.
+
+**The filter, read only** (step 2). Jeff said yes to reading the rig's
+mode and passband tuning through his shared rigctld (2026-10-26). While
+the Ear is open, between bursts, every 2 s, Ragtime asks the rig's mode
+and the width Hamlib gives with it, and PBT_IN and PBT_OUT where the rig
+has them: through rigctld `+m`, `+l PBT_IN` and `+l PBT_OUT` (with
+`currVFO` for a `--vfo` one; a question the rig can't answer is dropped),
+or through Hamlib `rig_get_mode` and `rig_get_level`. Nothing is set.
+Closing the Ear stops the questions. `radio::RigFilter` holds the answer:
+"USB · 2400 Hz filter · PBT centred". An Icom's PBT (the IC-7100's
+among them) is the knob's position, 0 to 1 with 0.5 in the middle, not
+Hz, so it is shown as it comes; step 3's Calibrate turns it into Hz.
+
+The noise shows where the filter really cuts (`ear::EdgeFinder`).
+Between signals the receiver's audio is the band's noise through the
+filter: flat across the passband, falling away at its edges. The Ear
+averages the quiet rows, about 10 s of them (a row is left out when its
+90th percentile stands more than 3 dB over the quieter rows of the last
+half minute: a burst or a strong station; rows heard while transmitting
+are left out too), and finds the widest run of bins within 6 dB of the
+passband's level (the median of the bins within 10 dB of the 90th
+percentile, so a 500 Hz filter is found as readily as a 3 kHz one). Its
+ends, interpolated between bins, are the -6 dB points, as filter widths
+are quoted. There are no edges until 3 s of quiet are in, nor when the
+stopband isn't 10 dB under the passband (no filter shape to see), and an
+end past the picture's 0 or 4 kHz is given as none. On the pretend
+radio, whose skirts fall 0.28 dB a Hz from 300 and 2700 Hz (so -6 dB at
+279 and 2721 Hz), it read 270 to 2730 Hz; with 1200 to 1800 Hz, 1180 to
+1830 Hz.
+
+The scope draws the edges the noise shows in orange, with the -6 dB line
+between them and the width, and the rig's width as a dashed purple
+bracket over the top, centred where the noise puts the passband (on
+Data2G's 1500 Hz until it does). Above the scope, two lines say the
+same in words: "The rig says USB · 2400 Hz filter · PBT centred" and
+"The noise shows 270–2730 Hz, 2450 Hz wide". Beside the sound card's
+rate the corner shows the band's noise from the S-meter, the gearshift's
+QRN ("48 kHz · QRN S2"), when the rig reports it. Each filter reading
+that differs from the last goes to the flight recorder, as
+`rig filter USB 2400 Hz PBT_IN 0.50 PBT_OUT 0.50`.
+
+![The Ear with a 500 Hz filter that the rig calls 2400 Hz](images/ear-edges.png)
 
 "Listen to" and Speed are kept (`/Ear/Source`, `/Ear/RowsPerSecond`).
 Windows has no Ear yet: a stand-in says it needs PipeWire.

@@ -12,6 +12,7 @@
 
 #include "ragtime/radio/Noise.h"
 #include "ragtime/radio/PttFollower.h"
+#include "ragtime/radio/RigFilter.h"
 #include "ragtime/radio/RigSettings.h"
 #include "ragtime/radio/TxMeters.h"
 #include "ragtime/rig/HamlibRig.h"
@@ -68,6 +69,11 @@ public:
     // quietest reading of the last minute on this band, in dB over S9.
     bool readsNoise() const;
     std::optional<double> noiseDb() const;
+    // The Ear is open: read the rig's receive filter between bursts, its
+    // mode, width and PBT (radio::RigFilter), through rigctld or Hamlib.
+    // Read only.
+    void setFilterWatch(bool on);
+    std::optional<ragtime::radio::RigFilter> filter() const;
     // "Hamlib" or "rigctld": how the meters are read, for the tooltips.
     const char* meterPath() const;
 
@@ -102,6 +108,7 @@ private:
     ragtime::radio::RigSettings settings_;
     bool started_ = false;
     bool hostPtt_ = false;
+    bool filterWatch_ = false;
     bool tripped_ = false;
     std::string tripText_;
     wxTimer timer_;

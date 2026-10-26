@@ -26,6 +26,12 @@
 // every STRENGTH_MS but not in the first SETTLE_MS after a burst (the
 // receiver's AGC recovering), for the band's noise (radio::NoiseFloor).
 //
+// While the Ear is open (setFilterWatch), between bursts it also reads the
+// rig's receive filter every FILTER_MS: "+m" (the mode and its passband
+// width), then "+l PBT_IN" and "+l PBT_OUT" (radio::RigFilter). Jeff
+// agreed to these reads on his shared rigctld (2026-10-26); they set
+// nothing either.
+//
 // While our transmitter is keyed (the host's PTT report) it asks no dial,
 // and the last reading stands; it asks the meters instead, one every
 // METER_MS, each as soon as the last is answered or given up. A meter the
@@ -43,6 +49,7 @@
 #include <vector>
 
 #include "ragtime/radio/Noise.h"
+#include "ragtime/radio/RigFilter.h"
 #include "ragtime/radio/TxMeters.h"
 
 namespace ragtime
@@ -64,6 +71,8 @@ public:
     // Between bursts, the S-meter this often, and not this soon after one.
     static constexpr uint64_t STRENGTH_MS = NoiseFloor::READ_MS;
     static constexpr uint64_t SETTLE_MS = NoiseFloor::SETTLE_MS;
+    // While the Ear is open, the filter this often between bursts.
+    static constexpr uint64_t FILTER_MS = 2000;
 
     enum class Meter
     {
@@ -72,8 +81,12 @@ public:
         Watts,      // RFPOWER_METER_WATTS
         Power,      // RFPOWER_METER, asked only when the rig knows no watts
         Strength,   // STRENGTH, the S-meter, asked between bursts
+        PbtIn,      // PBT_IN and PBT_OUT, asked only while the Ear is open
+        PbtOut,
     };
-    static constexpr int METERS = 5;
+    static constexpr int METERS = 7;
+    // Probed on connecting: all but the PBT.
+    static constexpr int PROBED = 5;
 
     // The socket to rigctld has connected or closed.
     void connected(uint64_t nowMs);
@@ -92,6 +105,13 @@ public:
     void setKeyed(bool keyed, uint64_t nowMs);
     // The SWR trip is on: while keyed, every other question is the SWR.
     void setSwrWatch(bool on) { swrWatch_ = on; }
+    // The Ear is open: read the filter between bursts. Off forgets it.
+    void setFilterWatch(bool on, uint64_t nowMs);
+
+    // The rig's filter, once "+m" has been answered while watching.
+    const std::optional<RigFilter>& filter() const { return filter_; }
+    // rigctld can't say the mode (it answered "+m" with an error).
+    bool modeDropped() const { return modeDropped_; }
 
     // The dial in Hz; none until rigctld has answered, or once a reading
     // has gone stale.
@@ -128,6 +148,7 @@ private:
         Vfo,
         Freq,
         Meter,
+        Mode,
     };
     enum class State
     {
@@ -139,7 +160,9 @@ private:
     void askNext(uint64_t nowMs);
     void askMeter(int meter, uint64_t nowMs);
     bool askable(int meter) const;
-    bool transmitMeter(int meter) const { return meter != (int)Meter::Strength && askable(meter); }
+    bool transmitMeter(int meter) const { return meter < (int)Meter::Strength && askable(meter); }
+    bool askFilter(uint64_t nowMs);
+    void modeLine(const std::string& line, uint64_t nowMs);
     int pickMeter();
     void answered(uint64_t nowMs);
     void onLine(const std::string& line, uint64_t nowMs);
@@ -169,6 +192,15 @@ private:
     bool swrTurn_ = false;
     std::vector<MeterReading> readings_;
     std::vector<double> strength_;
+    bool filterWatch_ = false;
+    uint64_t filterDueMs_ = 0;
+    int filterStep_ = 0;            // 0 the mode, 1 PBT_IN, 2 PBT_OUT
+    bool inMode_ = false;           // "get_mode:" came: its long answer follows
+    int modeWidth_ = 0;
+    bool modeDropped_ = false;
+    int modeFailures_ = 0;
+    std::string modeName_;          // the answer coming in
+    std::optional<RigFilter> filter_;
     std::string partial_;
     std::string out_;
     std::string problem_;

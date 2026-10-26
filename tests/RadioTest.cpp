@@ -14,6 +14,7 @@
 #include "ragtime/radio/DialReader.h"
 #include "ragtime/radio/Noise.h"
 #include "ragtime/radio/PathLog.h"
+#include "ragtime/radio/RigFilter.h"
 
 using namespace ragtime;
 using namespace ragtime::radio;
@@ -457,12 +458,160 @@ void strength()
     CHECK(!floor.dbOverS9(T0 + 66000));
 }
 
+// While the Ear is open: the mode and its width, and the PBT, between
+// bursts, in the long answers and the short.
+void filter()
+{
+    uint64_t t = T0;
+    DialReader dial;
+    dial.connected(t);
+    dial.takeOutput();
+    say(dial, "0\n", t);
+    CHECK_EQ(probe(dial, t), std::string("f\n"));
+    say(dial, "14105000\n", t);
+    // Not asked until the Ear opens.
+    std::string all;
+    for (uint64_t ms = t; ms < t + 5000; ms += 100)
+    {
+        dial.tick(ms);
+        std::string out = dial.takeOutput();
+        if (out == "f\n") say(dial, "14105000\n", ms);
+        all += out;
+    }
+    CHECK(all.find("+m") == std::string::npos);
+    CHECK(all.find("PBT") == std::string::npos);
+    CHECK(!dial.filter());
+
+    t += 5000;
+    dial.setFilterWatch(true, t);
+    all.clear();
+    int modes = 0;
+    for (uint64_t ms = t; ms < t + 5000; ms += 100)
+    {
+        dial.tick(ms);
+        std::string out = dial.takeOutput();
+        if (out == "f\n") say(dial, "14105000\n", ms);
+        if (out == "+m\n")
+        {
+            modes++;
+            say(dial, "get_mode:\nMode: USB\nPassband: 2400\nRPRT 0\n", ms);
+        }
+        if (out == "+l PBT_IN\n") say(dial, "get_level: PBT_IN\n0.501961\nRPRT 0\n", ms);
+        if (out == "+l PBT_OUT\n") say(dial, "get_level: PBT_OUT\n0.623529\nRPRT 0\n", ms);
+        all += out;
+    }
+    // Every FILTER_MS, with the dial still once a second.
+    CHECK(modes >= 2 && modes <= 3);
+    CHECK(all.find("+l PBT_IN\n") != std::string::npos);
+    CHECK(dial.dialHz(t + 5000) == std::optional<uint64_t>(14105000));
+    CHECK(dial.filter().has_value());
+    if (dial.filter())
+    {
+        CHECK_EQ(dial.filter()->mode, std::string("USB"));
+        CHECK_EQ(dial.filter()->widthHz, 2400);
+        CHECK(dial.filter()->pbtIn && pbtCentred(*dial.filter()->pbtIn));
+        CHECK(dial.filter()->pbtOut && !pbtCentred(*dial.filter()->pbtOut));
+        CHECK_EQ(describe(*dial.filter()),
+                 std::string("USB \xc2\xb7 2400 Hz filter \xc2\xb7 PBT in 0.50, out 0.62"));
+    }
+
+    // Keyed: none of it.
+    t += 5000;
+    dial.setKeyed(true, t);
+    all.clear();
+    for (uint64_t ms = t; ms < t + 6000; ms += 100)
+    {
+        dial.tick(ms);
+        all += dial.takeOutput();
+    }
+    CHECK(all.find("+m") == std::string::npos);
+    CHECK(all.find("PBT") == std::string::npos);
+    dial.setKeyed(false, t + 6000);
+
+    // The Ear closed: not asked, and forgotten.
+    t += 10000;
+    dial.setFilterWatch(false, t);
+    CHECK(!dial.filter());
+    all.clear();
+    for (uint64_t ms = t; ms < t + 6000; ms += 100)
+    {
+        dial.tick(ms);
+        std::string out = dial.takeOutput();
+        if (out == "f\n") say(dial, "14105000\n", ms);
+        all += out;
+    }
+    CHECK(all.find("+m") == std::string::npos);
+
+    // A rigctld started with --vfo, giving short answers; a rig with no PBT.
+    DialReader vfo;
+    vfo.connected(T0);
+    vfo.takeOutput();
+    say(vfo, "1\n", T0);
+    CHECK_EQ(probe(vfo, T0), std::string("f currVFO\n"));
+    say(vfo, "7074000\n", T0);
+    vfo.setFilterWatch(true, T0);
+    CHECK_EQ(vfo.takeOutput(), std::string("+m currVFO\n"));
+    say(vfo, "PKTUSB\n3000\n", T0 + 10);
+    CHECK_EQ(vfo.takeOutput(), std::string("+l currVFO PBT_IN\n"));
+    say(vfo, "get_level: currVFO PBT_IN\nRPRT -11\n", T0 + 20);
+    CHECK_EQ(vfo.takeOutput(), std::string("+l currVFO PBT_OUT\n"));
+    say(vfo, "get_level: currVFO PBT_OUT\nRPRT -11\n", T0 + 30);
+    CHECK(vfo.filter().has_value());
+    if (vfo.filter())
+    {
+        CHECK_EQ(describe(*vfo.filter()), std::string("PKTUSB \xc2\xb7 3000 Hz filter"));
+        CHECK(!vfo.filter()->pbtIn);
+    }
+    // PBT not asked again; the mode is.
+    all.clear();
+    for (uint64_t ms = T0 + 100; ms < T0 + 5000; ms += 100)
+    {
+        vfo.tick(ms);
+        std::string out = vfo.takeOutput();
+        if (out == "f currVFO\n") say(vfo, "7074000\n", ms);
+        if (out == "+m currVFO\n") say(vfo, "get_mode: currVFO\nMode: PKTUSB\nPassband: 2400\nRPRT 0\n", ms);
+        all += out;
+    }
+    CHECK(all.find("PBT") == std::string::npos);
+    CHECK(all.find("+m currVFO\n") != std::string::npos);
+    CHECK(vfo.filter() && vfo.filter()->widthHz == 2400);
+
+    // A rig that can't say its mode: dropped, the dial unharmed.
+    DialReader mute;
+    mute.connected(T0);
+    mute.takeOutput();
+    say(mute, "0\n", T0);
+    probe(mute, T0);
+    say(mute, "7074000\n", T0);
+    mute.setFilterWatch(true, T0);
+    CHECK_EQ(mute.takeOutput(), std::string("+m\n"));
+    say(mute, "get_mode:\nRPRT -11\n", T0 + 10);
+    CHECK(mute.modeDropped());
+    CHECK(!mute.filter());
+
+    // The words.
+    CHECK(pbtCentred(128.0 / 255.0));
+    CHECK(pbtCentred(0.5));
+    CHECK(!pbtCentred(0.52));
+    CHECK(pbtCentred(0.5 + 1.0 / 255.0));
+    CHECK(!pbtCentred(0.0));
+    CHECK(!pbtCentred(0.4));
+    CHECK_EQ(pbtText(120), std::string("+120 Hz"));
+    CHECK_EQ(pbtText(-1280), std::string("-1280 Hz"));
+    RigFilter f;
+    f.mode = "USB";
+    f.widthHz = 2400;
+    f.pbtIn = 0.5;
+    f.pbtOut = 0.5;
+    CHECK_EQ(describe(f), std::string("USB \xc2\xb7 2400 Hz filter \xc2\xb7 PBT centred"));
+}
+
 // Every line Ragtime could ever write to rigctld is a question: whether
 // rigctld wants VFOs named, the frequency, and the meters.
 void onlyAsks()
 {
     const std::vector<std::string> allowed = {"\\chk_vfo", "f", "+l ALC", "+l SWR", "+l RFPOWER_METER_WATTS",
-                                              "+l RFPOWER_METER", "+l STRENGTH"};
+                                              "+l RFPOWER_METER", "+l STRENGTH", "+m", "+l PBT_IN", "+l PBT_OUT"};
     DialReader dial;
     std::string all;
     uint64_t t = T0;
@@ -477,6 +626,8 @@ void onlyAsks()
         if (i % 11 == 0) say(dial, "get_level: ALC\nRPRT -9\n", t);
         if (i % 40 == 0) dial.setKeyed(i % 80 == 0, t);
         dial.setSwrWatch(i % 120 < 60);
+        dial.setFilterWatch(i % 90 < 45, t);
+        if (i % 13 == 0) say(dial, "get_mode:\nMode: USB\nPassband: 2400\nRPRT 0\n", t);
         all += dial.takeOutput();
     }
     CHECK(!all.empty());
@@ -668,6 +819,7 @@ int main()
     vfoMode();
     meters();
     strength();
+    filter();
     onlyAsks();
     lines();
     strip();

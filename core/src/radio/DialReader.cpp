@@ -1,5 +1,7 @@
 #include "ragtime/radio/DialReader.h"
 
+#include <algorithm>
+#include <cmath>
 #include <cstdlib>
 #include <string>
 
@@ -12,7 +14,8 @@ namespace
 {
 
 // Hamlib's names for the meters, in Meter's order.
-const char* const LEVELS[DialReader::METERS] = {"ALC", "SWR", "RFPOWER_METER_WATTS", "RFPOWER_METER", "STRENGTH"};
+const char* const LEVELS[DialReader::METERS] = {"ALC",      "SWR",    "RFPOWER_METER_WATTS", "RFPOWER_METER",
+                                                 "STRENGTH", "PBT_IN", "PBT_OUT"};
 
 // A number on a line of its own: digits, perhaps signed, perhaps with a
 // decimal part ("14074000", "14074000.000000", "0.593750").
@@ -61,6 +64,13 @@ bool rprt(const std::string& line, int& code)
     return true;
 }
 
+// Hamlib's answers to a question it doesn't know or the rig can't answer:
+// RIG_EINVAL, RIG_ENIMPL, RIG_ENAVAIL.
+bool unknownCode(int code)
+{
+    return code == -1 || code == -4 || code == -11;
+}
+
 } // namespace
 
 void DialReader::connected(uint64_t nowMs)
@@ -80,6 +90,12 @@ void DialReader::connected(uint64_t nowMs)
         failures_[m] = 0;
     }
     probe_ = 0;
+    filterStep_ = 0;
+    filterDueMs_ = 0;
+    inMode_ = false;
+    modeDropped_ = false;
+    modeFailures_ = 0;
+    filter_.reset();
     version_++;
     // First: was rigctld started with --vfo? Asked even while keyed, as
     // it touches nothing but rigctld itself.
@@ -97,6 +113,8 @@ void DialReader::disconnected()
     partial_.clear();
     out_.clear();
     hz_.reset();
+    filter_.reset();
+    inMode_ = false;
     for (int m = 0; m < METERS; m++) state_[m] = State::Unknown;
     version_++;
 }
@@ -149,7 +167,7 @@ void DialReader::askNext(uint64_t nowMs)
         return;
     }
     // Which meters the rig reports, once, before the dial.
-    while (probe_ < METERS)
+    while (probe_ < PROBED)
     {
         int meter = probe_++;
         if (askable(meter) && state_[meter] == State::Unknown)
@@ -164,7 +182,12 @@ void DialReader::askNext(uint64_t nowMs)
         // settled after a burst.
         int strength = (int)Meter::Strength;
         if (askable(strength) && nowMs >= strengthDueMs_ && nowMs >= unkeyedMs_ + SETTLE_MS)
+        {
             askMeter(strength, nowMs);
+            return;
+        }
+        // The filter, while the Ear is open.
+        askFilter(nowMs);
         return;
     }
     // Frequency queries only: nothing here sets the radio.
@@ -172,6 +195,48 @@ void DialReader::askNext(uint64_t nowMs)
     asking_ = Ask::Freq;
     askedMs_ = freqAskedMs_ = nowMs;
     freqAsked_ = true;
+}
+
+bool DialReader::askFilter(uint64_t nowMs)
+{
+    if (!filterWatch_ || nowMs < filterDueMs_) return false;
+    while (filterStep_ < 3)
+    {
+        const int step = filterStep_++;
+        if (step == 0)
+        {
+            if (modeDropped_) continue;
+            // Questions only: "m" gets the mode, and nothing here sets it.
+            out_ += vfo_ == Vfo::Yes ? "+m currVFO\n" : "+m\n";
+            asking_ = Ask::Mode;
+            askedMs_ = nowMs;
+            modeName_.clear();
+            return true;
+        }
+        const int meter = step == 1 ? (int)Meter::PbtIn : (int)Meter::PbtOut;
+        if (askable(meter))
+        {
+            askMeter(meter, nowMs);
+            return true;
+        }
+    }
+    filterStep_ = 0;
+    filterDueMs_ = nowMs + FILTER_MS;
+    return false;
+}
+
+void DialReader::setFilterWatch(bool on, uint64_t nowMs)
+{
+    if (filterWatch_ == on) return;
+    filterWatch_ = on;
+    filterStep_ = 0;
+    filterDueMs_ = nowMs;
+    if (!on && filter_)
+    {
+        filter_.reset();
+        version_++;
+    }
+    askNext(nowMs);
 }
 
 std::string DialReader::takeOutput()
@@ -203,6 +268,7 @@ void DialReader::tick(uint64_t nowMs)
         // No answer: given up. No answer to \chk_vfo: no VFO names. A
         // late answer is still read for what it says.
         if (asking_ == Ask::Vfo) vfoAnswer(std::string());
+        if (asking_ == Ask::Mode) inMode_ = false;
         asking_ = Ask::None;
         meterDueMs_ = nowMs;
     }
@@ -271,12 +337,27 @@ void DialReader::meterValue(int meter, double value)
 {
     // Nonsense (a negative SWR) is no reading.
     bool strength = meter == (int)Meter::Strength;
-    if (strength ? (value < -100 || value > 100) : (value < 0 || (meter == (int)Meter::Alc && value > 2.0))) return;
+    bool pbt = meter == (int)Meter::PbtIn || meter == (int)Meter::PbtOut;
+    if (pbt ? std::fabs(value) > 10000
+            : strength ? (value < -100 || value > 100) : (value < 0 || (meter == (int)Meter::Alc && value > 2.0)))
+        return;
     failures_[meter] = 0;
     if (state_[meter] != State::Answers)
     {
         state_[meter] = State::Answers;
         version_++;
+    }
+    if (pbt)
+    {
+        if (!filterWatch_) return;
+        RigFilter f = filter_.value_or(RigFilter{});
+        (meter == (int)Meter::PbtIn ? f.pbtIn : f.pbtOut) = value;
+        if (filter_ != f)
+        {
+            filter_ = f;
+            version_++;
+        }
+        return;
     }
     if (strength)
     {
@@ -292,7 +373,9 @@ void DialReader::meterValue(int meter, double value)
     case Meter::Swr: reading.swr = value; break;
     case Meter::Watts: reading.watts = value; break;
     case Meter::Power: reading.power = value; break;
-    case Meter::Strength: break;
+    case Meter::Strength:
+    case Meter::PbtIn:
+    case Meter::PbtOut: break;
     }
     readings_.push_back(reading);
 }
@@ -303,8 +386,9 @@ void DialReader::meterFailed(int meter, int code)
     // (RIG_EINVAL, RIG_ENIMPL, RIG_ENAVAIL). Anything else may be the rig
     // not transmitting, so it is asked again when keyed.
     // The S-meter is asked between bursts, so its failures count then.
-    bool unknown = code == -1 || code == -4 || code == -11;
-    bool counts = keyed_ || meter == (int)Meter::Strength;
+    // So are the PBT.
+    bool unknown = unknownCode(code);
+    bool counts = keyed_ || meter >= (int)Meter::Strength;
     if ((!keyed_ && unknown) || (counts && ++failures_[meter] >= 2))
     {
         if (state_[meter] != State::Dropped)
@@ -321,6 +405,21 @@ void DialReader::onLine(const std::string& line, uint64_t nowMs)
 {
     if (line.empty()) return;
     int code = 0;
+
+    // The mode's long answer: "get_mode:" (or "get_mode: currVFO"),
+    // "Mode: USB", "Passband: 2400", then RPRT; its short one the mode
+    // and the width on lines of their own.
+    if (line.compare(0, 9, "get_mode:") == 0)
+    {
+        inMode_ = true;
+        modeName_.clear();
+        return;
+    }
+    if (inMode_ || (asking_ == Ask::Mode && answering_ < 0 && line.compare(0, 11, "get_level: ") != 0))
+    {
+        modeLine(line, nowMs);
+        return;
+    }
 
     // A long answer: "get_level: SWR" (or "get_level: currVFO SWR"), the
     // value, then RPRT.
@@ -389,6 +488,58 @@ void DialReader::onLine(const std::string& line, uint64_t nowMs)
         }
         if (asking_ == Ask::Freq) answered(nowMs);
     }
+}
+
+void DialReader::modeLine(const std::string& line, uint64_t nowMs)
+{
+    int code = 0;
+    double width = 0;
+    bool done = false;
+    bool ok = false;
+    if (rprt(line, code))
+    {
+        done = true;
+        ok = code == 0 && !modeName_.empty();
+        if (code != 0 && (unknownCode(code) || ++modeFailures_ >= 3)) modeDropped_ = true;
+    }
+    else if (inMode_ && line.compare(0, 6, "Mode: ") == 0)
+    {
+        modeName_ = line.substr(6);
+        modeWidth_ = 0;
+    }
+    else if (inMode_ && line.compare(0, 10, "Passband: ") == 0)
+    {
+        modeWidth_ = std::atoi(line.c_str() + 10);
+    }
+    else if (!inMode_ && modeName_.empty())
+    {
+        // A late dial isn't a mode.
+        if (numberLine(line, width)) return;
+        modeName_ = line;
+        modeWidth_ = 0;
+    }
+    else if (!inMode_ && numberLine(line, width))
+    {
+        modeWidth_ = (int)width;
+        done = ok = true;
+    }
+    if (!done) return;
+
+    inMode_ = false;
+    if (ok && filterWatch_)
+    {
+        modeFailures_ = 0;
+        RigFilter f = filter_.value_or(RigFilter{});
+        f.mode = modeName_;
+        f.widthHz = std::max(0, modeWidth_);
+        if (filter_ != f)
+        {
+            filter_ = f;
+            version_++;
+        }
+    }
+    modeName_.clear();
+    if (asking_ == Ask::Mode) answered(nowMs);
 }
 
 std::optional<uint64_t> DialReader::dialHz(uint64_t nowMs) const

@@ -67,6 +67,12 @@ void RigConnection::setKeyed(bool keyed)
     write();
 }
 
+void RigConnection::setFilterWatch(bool on)
+{
+    reader_.setFilterWatch(on, HostConnection::nowMs());
+    write();
+}
+
 std::optional<uint64_t> RigConnection::dialHz() const
 {
     return reader_.dialHz(HostConnection::nowMs());
