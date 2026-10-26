@@ -12,6 +12,7 @@
 #include "Check.h"
 #include "ragtime/radio/Bands.h"
 #include "ragtime/radio/DialReader.h"
+#include "ragtime/radio/Noise.h"
 #include "ragtime/radio/PathLog.h"
 
 using namespace ragtime;
@@ -343,12 +344,125 @@ void meters()
     CHECK(later.reads(Meter::Alc));
 }
 
+// The S-meter, between bursts, every STRENGTH_MS, and not straight after
+// one; and the noise floor made of it.
+void strength()
+{
+    using Meter = DialReader::Meter;
+    uint64_t t = T0;
+    DialReader dial;
+    dial.connected(t);
+    dial.takeOutput();
+    dial.bytes("0\n", 2, t);
+    CHECK_EQ(probe(dial, t, "SWR,STRENGTH"), std::string("f\n"));
+    CHECK(dial.readsStrength());
+    CHECK(dial.reads(Meter::Swr));
+    // The probe's 0 is a reading too.
+    CHECK_EQ(dial.takeStrength().size(), (size_t)1);
+    say(dial, "7065000\n", t + 10);
+    // The probe asked it just now, so not again until STRENGTH_MS.
+    dial.tick(t + 500);
+    CHECK_EQ(dial.takeOutput(), std::string(""));
+
+    // Between dial readings once STRENGTH_MS is up.
+    std::string all;
+    for (uint64_t ms = t + 100; ms <= t + DialReader::STRENGTH_MS + 900; ms += 100)
+    {
+        dial.tick(ms);
+        std::string out = dial.takeOutput();
+        if (out == "f\n") say(dial, "7065000\n", ms);
+        if (out == "+l STRENGTH\n") say(dial, "get_level: STRENGTH\n-40\nRPRT 0\n", ms);
+        all += out;
+    }
+    CHECK(all.find("+l STRENGTH\n") != std::string::npos);
+    CHECK_EQ(all.find("+l STRENGTH\n"), all.rfind("+l STRENGTH\n"));
+    std::vector<double> got = dial.takeStrength();
+    CHECK_EQ(got.size(), (size_t)1);
+    CHECK(got[0] == -40.0);
+
+    // Keyed: never the S-meter (it would read our own signal), and an
+    // answer that comes then isn't kept.
+    t += 20000;
+    dial.setKeyed(true, t);
+    all.clear();
+    for (uint64_t ms = t; ms < t + 15000; ms += 100)
+    {
+        dial.tick(ms);
+        std::string out = dial.takeOutput();
+        if (out == "+l SWR\n") say(dial, "get_level: SWR\n1.2\nRPRT 0\n", ms);
+        all += out;
+    }
+    CHECK(all.find("STRENGTH") == std::string::npos);
+    say(dial, "get_level: STRENGTH\n10\nRPRT 0\n", t + 15000);
+    CHECK(dial.takeStrength().empty());
+
+    // Unkeyed: not in the first SETTLE_MS, while the receiver recovers.
+    t += 15000;
+    dial.setKeyed(false, t);
+    all.clear();
+    uint64_t first = 0;
+    for (uint64_t ms = t; ms < t + 4000; ms += 100)
+    {
+        dial.tick(ms);
+        std::string out = dial.takeOutput();
+        if (out == "f\n") say(dial, "7065000\n", ms);
+        if (out == "+l STRENGTH\n")
+        {
+            if (!first) first = ms;
+            say(dial, "get_level: STRENGTH\n-38\nRPRT 0\n", ms);
+        }
+    }
+    CHECK(first >= t + DialReader::SETTLE_MS);
+    CHECK(first < t + DialReader::SETTLE_MS + 1100);
+
+    // A rig whose S-meter fails twice between bursts: dropped.
+    DialReader failing;
+    failing.connected(T0);
+    failing.takeOutput();
+    failing.bytes("0\n", 2, T0);
+    probe(failing, T0, "STRENGTH");
+    for (uint64_t ms = T0; ms < T0 + 30000; ms += 100)
+    {
+        failing.tick(ms);
+        std::string out = failing.takeOutput();
+        if (out == "f\n") say(failing, "7065000\n", ms);
+        if (out == "+l STRENGTH\n") say(failing, "get_level: STRENGTH\nRPRT -5\n", ms);
+    }
+    CHECK(!failing.readsStrength());
+
+    // S-units: S9 is 0 dB, 6 dB each.
+    CHECK_EQ(sUnitText(-36), std::string("S3"));
+    CHECK_EQ(sUnitText(-40), std::string("S2"));
+    CHECK_EQ(sUnitText(0), std::string("S9"));
+    CHECK_EQ(sUnitText(11), std::string("S9+10"));
+    CHECK_EQ(sUnitText(-80), std::string("S0"));
+    CHECK(sUnits(-36) == 3.0);
+    CHECK_EQ(levelText(-40), std::string("-40"));
+    CHECK_EQ(levelText(-39.6), std::string("-40"));
+    CHECK_EQ(levelText(12), std::string("+12"));
+    CHECK_EQ(levelText(0), std::string("0"));
+
+    // The floor: the quietest reading of the last minute, gone when stale.
+    NoiseFloor floor;
+    CHECK(!floor.dbOverS9(T0));
+    floor.reading(-30, T0);
+    floor.reading(-42, T0 + 5000);
+    floor.reading(-20, T0 + 10000);     // a station's burst
+    CHECK(floor.dbOverS9(T0 + 10000) == std::optional<double>(-42));
+    floor.reading(-35, T0 + 64000);
+    floor.reading(-36, T0 + 66000);
+    CHECK(floor.dbOverS9(T0 + 66000) == std::optional<double>(-36));
+    CHECK(!floor.dbOverS9(T0 + 66000 + NoiseFloor::STALE_MS + 1));
+    floor.clear();
+    CHECK(!floor.dbOverS9(T0 + 66000));
+}
+
 // Every line Ragtime could ever write to rigctld is a question: whether
 // rigctld wants VFOs named, the frequency, and the meters.
 void onlyAsks()
 {
     const std::vector<std::string> allowed = {"\\chk_vfo", "f", "+l ALC", "+l SWR", "+l RFPOWER_METER_WATTS",
-                                              "+l RFPOWER_METER"};
+                                              "+l RFPOWER_METER", "+l STRENGTH"};
     DialReader dial;
     std::string all;
     uint64_t t = T0;
@@ -553,6 +667,7 @@ int main()
     dialReader();
     vfoMode();
     meters();
+    strength();
     onlyAsks();
     lines();
     strip();

@@ -12,6 +12,7 @@
 #include <hamlib/rig.h>
 
 #include "ragtime/link/Reconnect.h"
+#include "ragtime/radio/Noise.h"
 
 namespace ragtime
 {
@@ -454,6 +455,10 @@ void HamlibRig::run()
     size_t nextMeter = 0;
     uint64_t nextMeterMs = 0;
     bool wasTx = false;
+    bool readsStrength = false;
+    int strengthFailures = 0;
+    uint64_t nextStrength = 0;
+    uint64_t unkeyedMs = 0;
     radio::SwrTrip trip;
     bool swrTurn = true;
 
@@ -520,6 +525,7 @@ void HamlibRig::run()
         shared->status.keyed = false;
         shared->status.hz.reset();
         shared->status.meters = radio::MeterReading();
+        shared->status.strength.reset();
         shared->status.problem = why;
         if (wasKeyed) shared->status.pttFailures++;
         shared->status.version++;
@@ -557,9 +563,12 @@ void HamlibRig::run()
             for (const auto& [name, value] : pokes)
             {
                 value_t v;
-                v.f = (float)value;
-                if (rig->caps->set_level != nullptr)
-                    rig->caps->set_level(rig, RIG_VFO_CURR, rig_parse_level(name.c_str()), v);
+                setting_t level = rig_parse_level(name.c_str());
+                if (RIG_LEVEL_IS_FLOAT(level))
+                    v.f = (float)value;
+                else
+                    v.i = (int)std::lround(value);
+                if (rig->caps->set_level != nullptr) rig->caps->set_level(rig, RIG_VFO_CURR, level, v);
             }
         }
         if (tx != wasTx)
@@ -570,7 +579,12 @@ void HamlibRig::run()
             wasTx = tx;
             nextMeter = 0;
             nextMeterMs = now;
-            if (!tx) shared->update([](Status& s) { s.meters = radio::MeterReading(); });
+            if (!tx)
+            {
+                // The S-meter once the receiver has settled.
+                unkeyedMs = now;
+                shared->update([](Status& s) { s.meters = radio::MeterReading(); });
+            }
         }
 
         if (rig == nullptr)
@@ -591,12 +605,16 @@ void HamlibRig::run()
                     nextPoll = 0;
                     meters = metersOf(rig);
                     nextMeter = 0;
+                    readsStrength = rig_has_get_level(rig, RIG_LEVEL_STRENGTH) != 0;
+                    strengthFailures = 0;
+                    nextStrength = 0;
                     std::string name = std::string(rig->caps->mfg_name) + " " + rig->caps->model_name;
                     shared->update([&](Status& s) {
                         s.open = true;
                         s.rig = name;
                         s.problem.clear();
                         showMeters(s, meters);
+                        s.readsStrength = readsStrength;
                     });
                     std::lock_guard<std::mutex> lock(shared->mutex);
                     shared->retryAtMs = 0;
@@ -688,9 +706,34 @@ void HamlibRig::run()
                 shared->update([&](Status& s) { s.problem = "Reading the dial failed: " + errorText(r); });
             }
         }
+        else if (!tx && readsStrength && now >= nextStrength && now >= unkeyedMs + radio::NoiseFloor::SETTLE_MS)
+        {
+            // The band's noise, between dial readings.
+            value_t value;
+            value.i = 0;
+            int r = rig_get_level(rig, RIG_VFO_CURR, RIG_LEVEL_STRENGTH, &value);
+            nextStrength = now + radio::NoiseFloor::READ_MS;
+            if (r == RIG_OK && value.i >= -100 && value.i <= 100)
+            {
+                strengthFailures = 0;
+                std::lock_guard<std::mutex> lock(shared->mutex);
+                shared->status.strength = (double)value.i;
+                shared->status.strengthReadings++;
+            }
+            else if (++strengthFailures >= 2)
+            {
+                readsStrength = false;
+                shared->update([](Status& s) {
+                    s.readsStrength = false;
+                    s.strength.reset();
+                });
+            }
+        }
 
         // Sleep until the next reading or try, or until woken.
         uint64_t until = rig == nullptr ? now + 250 : !tx ? nextPoll : meters.empty() ? now + 1000 : nextMeterMs;
+        if (rig != nullptr && !tx && readsStrength)
+            until = std::min(until, std::max(nextStrength, unkeyedMs + radio::NoiseFloor::SETTLE_MS));
         std::unique_lock<std::mutex> lock(shared->mutex);
         shared->wake.wait_for(lock, std::chrono::milliseconds(until > now ? until - now : 1), [&]() {
             return shared->stopping || (rig != nullptr && (shared->wantPtt && !trip.tripped()) != keyed)
@@ -706,6 +749,7 @@ void HamlibRig::run()
         s.keyed = false;
         s.hz.reset();
         s.meters = radio::MeterReading();
+        s.strength.reset();
     });
 }
 

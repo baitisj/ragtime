@@ -703,8 +703,10 @@ file, so a long log opens quickly) for the strips.
 
 **The strip.** The picked station's details under Globus gain a 24-hour
 strip by band, a cell for each UTC hour, darker for hours it was heard
-on more of the 14 days, the hour now marked, and hovering a cell gives
-its bursts, days and median S/N; and a line, "Heard most on 17 m: 11
+on more of the 14 days, the hour now marked, the UTC hours along the
+foot with local time under them (Jeff, 2026-10-26; left out where local
+time is UTC), and hovering a cell gives its hours in both, its bursts,
+days and median S/N; and a line, "Heard most on 17 m: 11
 days, median −6.0 dB". **Paths heard from KC2G...** on the station's
 right-click menu shows the strip bigger with a line a band, "17 m:
 2000–0000Z on 5 days, median −6.0 dB", and opens the log itself.
@@ -883,6 +885,19 @@ a row while keyed isn't asked again on that connection. The readings
 feed the same `TxMeters`, ALC meter, SWR bar and flight recorder line as
 Hamlib's. The bench's `--rig` answers them; Hamlib's own `rigctld -m 1`
 does too (ALC and SWR 0, the watts wandering).
+
+**Band noise** (Jeff, 2026-10-26: "Now that we have rigctld wired, we
+can poll 'l strength'"). Between bursts, through rigctld or Hamlib,
+Ragtime reads the S-meter, `+l STRENGTH` (an integer, dB over S9), every
+5 s, never while the host has PTT on (it would read our own signal) and
+not in the first 1.5 s after a burst, while the receiver's AGC
+recovers. Through rigctld it goes between dial readings, one question
+at a time as ever; a rig that fails it twice is not asked again on that
+connection. `radio::NoiseFloor` keeps the quietest reading of the last
+minute, and forgets it after 30 s with none or on a new band. The
+gearshift shows it (docs/GEARBOX.md, "QRN"). The bench's `--rig`
+answers `-40`, or `--rig-noise DB`, a few dB more now and then and a
+station at -10 one reading in six; Hamlib's dummy rig jiggles its own.
 
 `radio::TxMeters` gathers them burst by burst: the newest of each, and
 for the burst its ALC peak and mean, SWR peak and mean power. The

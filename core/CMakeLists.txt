@@ -47,6 +47,7 @@ add_library(ragtime_core STATIC
     # the path log: src/radio/.
     src/radio/Bands.cpp
     src/radio/DialReader.cpp
+    src/radio/Noise.cpp
     src/radio/PathLog.cpp
     src/radio/RecentWork.cpp
     # Rig control: the Rig page's settings, and keying at data2g-host's PTT.

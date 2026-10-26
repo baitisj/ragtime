@@ -12,7 +12,7 @@ namespace
 {
 
 // Hamlib's names for the meters, in Meter's order.
-const char* const LEVELS[DialReader::METERS] = {"ALC", "SWR", "RFPOWER_METER_WATTS", "RFPOWER_METER"};
+const char* const LEVELS[DialReader::METERS] = {"ALC", "SWR", "RFPOWER_METER_WATTS", "RFPOWER_METER", "STRENGTH"};
 
 // A number on a line of its own: digits, perhaps signed, perhaps with a
 // decimal part ("14074000", "14074000.000000", "0.593750").
@@ -70,6 +70,8 @@ void DialReader::connected(uint64_t nowMs)
     out_.clear();
     problem_.clear();
     readings_.clear();
+    strength_.clear();
+    strengthDueMs_ = 0;
     freqAsked_ = false;
     answering_ = -1;
     for (int m = 0; m < METERS; m++)
@@ -111,9 +113,9 @@ int DialReader::pickMeter()
 {
     int swr = (int)Meter::Swr;
     int count = 0;
-    for (int m = 0; m < METERS; m++) count += askable(m) ? 1 : 0;
+    for (int m = 0; m < METERS; m++) count += transmitMeter(m) ? 1 : 0;
     if (count == 0) return -1;
-    if (swrWatch_ && askable(swr) && count > 1)
+    if (swrWatch_ && transmitMeter(swr) && count > 1)
     {
         swrTurn_ = !swrTurn_;
         if (swrTurn_) return swr;
@@ -121,7 +123,7 @@ int DialReader::pickMeter()
     for (int i = 0; i < METERS; i++)
     {
         int m = turn_++ % METERS;
-        if (askable(m) && !(swrWatch_ && m == swr && count > 1)) return m;
+        if (transmitMeter(m) && !(swrWatch_ && m == swr && count > 1)) return m;
     }
     return swr;
 }
@@ -133,6 +135,7 @@ void DialReader::askMeter(int meter, uint64_t nowMs)
     asking_ = Ask::Meter;
     askedMeter_ = meter;
     askedMs_ = nowMs;
+    if (meter == (int)Meter::Strength) strengthDueMs_ = nowMs + STRENGTH_MS;
 }
 
 void DialReader::askNext(uint64_t nowMs)
@@ -155,7 +158,15 @@ void DialReader::askNext(uint64_t nowMs)
             return;
         }
     }
-    if (freqAsked_ && nowMs < freqAskedMs_ + ASK_MS) return;
+    if (freqAsked_ && nowMs < freqAskedMs_ + ASK_MS)
+    {
+        // The band's noise, between dial readings, once the receiver has
+        // settled after a burst.
+        int strength = (int)Meter::Strength;
+        if (askable(strength) && nowMs >= strengthDueMs_ && nowMs >= unkeyedMs_ + SETTLE_MS)
+            askMeter(strength, nowMs);
+        return;
+    }
     // Frequency queries only: nothing here sets the radio.
     out_ += vfo_ == Vfo::Yes ? "f currVFO\n" : "f\n";
     asking_ = Ask::Freq;
@@ -167,6 +178,13 @@ std::string DialReader::takeOutput()
 {
     std::string out;
     out.swap(out_);
+    return out;
+}
+
+std::vector<double> DialReader::takeStrength()
+{
+    std::vector<double> out;
+    out.swap(strength_);
     return out;
 }
 
@@ -208,6 +226,7 @@ void DialReader::setKeyed(bool keyed, uint64_t nowMs)
     {
         if (hz_) readMs_ = nowMs;
         freqAsked_ = false;
+        unkeyedMs_ = nowMs;
     }
     askNext(nowMs);
 }
@@ -251,12 +270,19 @@ void DialReader::answered(uint64_t nowMs)
 void DialReader::meterValue(int meter, double value)
 {
     // Nonsense (a negative SWR) is no reading.
-    if (value < 0 || (meter == (int)Meter::Alc && value > 2.0)) return;
+    bool strength = meter == (int)Meter::Strength;
+    if (strength ? (value < -100 || value > 100) : (value < 0 || (meter == (int)Meter::Alc && value > 2.0))) return;
     failures_[meter] = 0;
     if (state_[meter] != State::Answers)
     {
         state_[meter] = State::Answers;
         version_++;
+    }
+    if (strength)
+    {
+        // Taken while transmitting it would be our own signal.
+        if (!keyed_) strength_.push_back(value);
+        return;
     }
     if (!keyed_) return;
     MeterReading reading;
@@ -266,6 +292,7 @@ void DialReader::meterValue(int meter, double value)
     case Meter::Swr: reading.swr = value; break;
     case Meter::Watts: reading.watts = value; break;
     case Meter::Power: reading.power = value; break;
+    case Meter::Strength: break;
     }
     readings_.push_back(reading);
 }
@@ -275,8 +302,10 @@ void DialReader::meterFailed(int meter, int code)
     // The probe, not keyed: a level this Hamlib or this rig doesn't know
     // (RIG_EINVAL, RIG_ENIMPL, RIG_ENAVAIL). Anything else may be the rig
     // not transmitting, so it is asked again when keyed.
+    // The S-meter is asked between bursts, so its failures count then.
     bool unknown = code == -1 || code == -4 || code == -11;
-    if ((!keyed_ && unknown) || (keyed_ && ++failures_[meter] >= 2))
+    bool counts = keyed_ || meter == (int)Meter::Strength;
+    if ((!keyed_ && unknown) || (counts && ++failures_[meter] >= 2))
     {
         if (state_[meter] != State::Dropped)
         {

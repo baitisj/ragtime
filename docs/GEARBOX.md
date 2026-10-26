@@ -43,6 +43,20 @@ the Submode Map:
   reach every station; everything needing more than that, less a 3 dB margin, is
   shaded. Auto takes the fastest gear above the shading (ringed in green
   when Auto is off, as a suggestion).
+- **QRN** (Jeff, 2026-10-26): with a rig whose S-meter Ragtime can read
+  (Settings > Rig, rigctld or Hamlib), a blue dashed line at S/N 0 is
+  the band's noise, labelled with the radio's own number, `QRN: -40`
+  (Hamlib's `STRENGTH`, dB over S9). The noise is the quietest reading
+  of the last minute, read every 5 s between bursts and not in the
+  1.5 s after one (`radio::NoiseFloor`), so a station's burst doesn't
+  lift it; a new band starts afresh. An axis on the right, "On your
+  S-meter", says how strong a station must read for each gear: the
+  noise and the gear's S/N, 6 dB an S-unit (S9 is 0 dB, S3 is -36),
+  then S9+10 and up. Few S-meters are that exact, so the axis is a
+  guide, and so is the 2500 Hz S/N against the receiver's passband.
+  Hovering the label says so. The map keeps its S/N scale: the noise
+  moves the S-units, not the gears (Jeff chose this over the whole
+  chart riding the noise).
 - The gear list beside the map: the gear (its short name), Data2G mode,
   speed, S/N on this path, and how long 1 KB takes. Gears go by their
   names, not numbers (Jeff, 2026-10-22). Once the path's S/N is known,

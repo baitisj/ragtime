@@ -22,6 +22,10 @@
 // late is never taken for another meter's. With a VFO named they are
 // "f currVFO" and "+l currVFO ALC".
 //
+// Between bursts it also asks "+l STRENGTH", the S-meter in dB over S9,
+// every STRENGTH_MS but not in the first SETTLE_MS after a burst (the
+// receiver's AGC recovering), for the band's noise (radio::NoiseFloor).
+//
 // While our transmitter is keyed (the host's PTT report) it asks no dial,
 // and the last reading stands; it asks the meters instead, one every
 // METER_MS, each as soon as the last is answered or given up. A meter the
@@ -38,6 +42,7 @@
 #include <string>
 #include <vector>
 
+#include "ragtime/radio/Noise.h"
 #include "ragtime/radio/TxMeters.h"
 
 namespace ragtime
@@ -56,6 +61,9 @@ public:
     static constexpr uint64_t STALE_MS = 5000;
     // While keyed, a meter is asked this long after the last answer.
     static constexpr uint64_t METER_MS = 250;
+    // Between bursts, the S-meter this often, and not this soon after one.
+    static constexpr uint64_t STRENGTH_MS = NoiseFloor::READ_MS;
+    static constexpr uint64_t SETTLE_MS = NoiseFloor::SETTLE_MS;
 
     enum class Meter
     {
@@ -63,8 +71,9 @@ public:
         Swr,
         Watts,      // RFPOWER_METER_WATTS
         Power,      // RFPOWER_METER, asked only when the rig knows no watts
+        Strength,   // STRENGTH, the S-meter, asked between bursts
     };
-    static constexpr int METERS = 4;
+    static constexpr int METERS = 5;
 
     // The socket to rigctld has connected or closed.
     void connected(uint64_t nowMs);
@@ -96,9 +105,12 @@ public:
     bool reads(Meter meter) const { return state_[(int)meter] == State::Answers; }
     bool readsPower() const { return reads(Meter::Watts) || reads(Meter::Power); }
     bool readsAny() const { return reads(Meter::Alc) || reads(Meter::Swr) || readsPower(); }
+    bool readsStrength() const { return reads(Meter::Strength); }
     // The meter readings taken while keyed, oldest first, each with one
     // meter in it.
     std::vector<MeterReading> takeReadings();
+    // The S-meter readings taken between bursts, in dB over S9.
+    std::vector<double> takeStrength();
 
     // Goes up whenever the reading or its state changes.
     uint64_t version() const { return version_; }
@@ -127,6 +139,7 @@ private:
     void askNext(uint64_t nowMs);
     void askMeter(int meter, uint64_t nowMs);
     bool askable(int meter) const;
+    bool transmitMeter(int meter) const { return meter != (int)Meter::Strength && askable(meter); }
     int pickMeter();
     void answered(uint64_t nowMs);
     void onLine(const std::string& line, uint64_t nowMs);
@@ -143,6 +156,8 @@ private:
     uint64_t freqAskedMs_ = 0;      // the last "f"
     bool freqAsked_ = false;
     uint64_t meterDueMs_ = 0;
+    uint64_t strengthDueMs_ = 0;
+    uint64_t unkeyedMs_ = 0;
     uint64_t readMs_ = 0;           // the last answer (or the end of keying)
     std::optional<uint64_t> hz_;
     State state_[METERS] = {};
@@ -153,6 +168,7 @@ private:
     int turn_ = 0;
     bool swrTurn_ = false;
     std::vector<MeterReading> readings_;
+    std::vector<double> strength_;
     std::string partial_;
     std::string out_;
     std::string problem_;
