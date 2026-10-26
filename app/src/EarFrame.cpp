@@ -188,6 +188,11 @@ void EarFrame::setTransmitting(bool on)
     transmitting_ = on;
 }
 
+void EarFrame::setHostBusy(std::function<std::optional<bool>()> busy)
+{
+    hostBusy_ = std::move(busy);
+}
+
 void EarFrame::setRig(std::function<EarRig()> rig)
 {
     rig_ = std::move(rig);
@@ -216,10 +221,18 @@ void EarFrame::tick()
         for (const auto& row : rows) edges_.addRow(row, transmitting_);
     }
 
-    // The filter bar: the rig asked every other tick; quiet means not keyed
-    // and no burst in the last half second.
+    // The filter bar: the rig asked every other tick. Quiet means not keyed
+    // and no burst coming in, as data2g-host's BUSY says: its own carrier
+    // sense (a burst's header, held while its pilots or its energy are
+    // there), which the AGC's swell after each write doesn't fool (Jeff,
+    // 2026-10-26: waiting that out sent a second drag or Undo seconds
+    // late). With no command link the noise says it: no burst in the last
+    // half second, and the swell after our own write, made in a quiet
+    // moment, taken for quiet too.
     if (ticks_ % 2 == 0 && rig_) rigNow_ = rig_();
-    const bool quiet = !transmitting_ && edges_.quietRunSeconds() >= 0.5;
+    const std::optional<bool> busy = hostBusy_ ? hostBusy_() : std::nullopt;
+    const bool quiet =
+        !transmitting_ && (busy ? !*busy : edges_.settling() || edges_.quietRunSeconds() >= 0.5);
     filterBar_->tick(nowMs(), quiet, edges_, rigNow_, narrow_);
 
     if (++ticks_ % HOST_LOOK_TICKS == 0)

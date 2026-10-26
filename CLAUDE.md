@@ -366,7 +366,8 @@ and take broadcast files without asking; `--loss PCT` has hosts A and B
 lose that share of the group frames they hear, so repairs happen, and
 `--files` has the first bot broadcast a bulletin file a minute in and
 every 6 minutes. A call
-from host A or B is answered on its second try. The hosts report SNRs,
+from host A or B is answered on its second try, and each host says
+`BUSY ON` and `BUSY OFF` around the others' group bursts. The hosts report SNRs,
 each bot at its own strength; `--no-snr` plays a host from before Data2G
 PR #98. `--rig PORT` plays a rigctld for the dial (14.105 MHz, or
 `--dial HZ`; `--dial-hop` moves it outside the data segments one minute

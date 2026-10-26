@@ -1239,20 +1239,32 @@ words and the scope.
   (`EdgeFinder::restart`), so the swell is neither measured as the
   passband nor taken for a burst-free moment, and Calibrate's measures
   start after it.
-- **Between bursts, then on trial** (`ear::FilterEdit`). A change waits
-  for a quiet moment: data2g-host not keyed and no burst in the last half
-  second, and `HamlibRig` itself never writes while it is keying or a
-  PTT change is pending. Once written, the change is on trial for 15 s,
+- **At once, greyed while on the air** (`ear::FilterEdit`). A drag, a
+  notch move, a preset, Disable, Undo or Revert goes to the rig at once.
+  While data2g-host is keyed or says `BUSY` (its own carrier sense: a
+  burst's header, held while the burst's pilots or energy are there),
+  the handles, the notch's bar, the presets, Disable, Revert, Calibrate
+  and Undo are greyed and the line says "On the air: the filter holds
+  still until the burst ends" (Jeff, 2026-10-26: "Rather than holding
+  back, just grey everything out when the modem is BUSY"). Keep, which
+  writes nothing, stays. A change dropped just as a burst begins, or a
+  trial running out during one, waits for it to end. With no command
+  link the noise says when a burst is on: none in the last half second,
+  and the AGC's swell after our own write, made in a quiet moment,
+  counts as quiet. Before, every change waited for the noise to be
+  quiet, and the noise is left out for 7 s after each write (the AGC
+  swell, below), so a second drag, an Undo or a notch move went seconds
+  late and looked like a snap back. `HamlibRig` itself never writes
+  while it is keying or a PTT change is pending.
+- **On trial.** Once written, the change is on trial for 15 s,
   with a kitchen-timer clock running down beside **Undo** and **Keep**,
   and it goes back when the clock runs out unless kept. More drags during
   a trial carry on from it; Undo goes back past all of them. The clock
   stands still while the pointer is on Undo or Keep (Hamlet: 15 s went
   quickly while reading the line), and runs on from where it stood when
-  the pointer leaves. Keep works while a change still waits for its
-  quiet moment too (Jeff, 2026-10-26: a second drag during a trial
-  waited out the AGC swell with Keep greyed, then went back when its
-  own trial ran out): the line says "kept: written at the next quiet
-  moment", and it is written with no trial. After a
+  the pointer leaves. Keep works while a change still waits for a burst
+  to end too: the line says "kept: written when the burst ends", and it
+  is written with no trial. After a
   write the noise's average starts afresh, and once 3 s of quiet are in
   the line says what it shows: "noise shows 580–2740 Hz", or "missed by
   N Hz" when an edge is more than 100 Hz from what was dragged. Until
@@ -1264,12 +1276,16 @@ words and the scope.
   2026-10-26), so a write counts as read back within four of them.
   While the Ear is open it alone hands the rig's readings to the trial,
   so a reading from before a write can't stand in for the filter after
-  it.
+  it. Through rigctld each part is sent only when it differs from what
+  was last written, until a whole reading comes back after it, so a
+  second write before the first is read back (an Undo at once) still
+  turns the knob back.
 - **Cutting into Data2G.** A change that cuts more than 10 Hz into
   Data2G's passband (the wide one, or the 500 Hz one with the 500 Hz
   switch on) turns the line red, and Keep needs a second press ("Keep
-  anyway"). The warning leads the line ("Cuts into Data2G's 350–2650 Hz:
-  press Keep twice"), so a narrow window can't cut it off. So does a notch anywhere in Data2G's passband.
+  anyway"). So does a notch anywhere in Data2G's passband. The warning
+  leads the line ("Cuts into Data2G's 350–2650 Hz: press Keep twice"),
+  so a narrow window can't cut it off.
 - **Presets** (Jeff, 2026-10-26). Four along the top. A tap recalls one
   (a change like a drag: on trial); press and hold stores the filter the
   rig has now, with a quick clock running down in the button's corner

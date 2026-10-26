@@ -69,7 +69,8 @@ public:
     void setRigWidth(int widthHz);
     // The handles: where they sit, or none to hide them. together: both
     // edges move about the centre. shift: the middle can be dragged too.
-    void setHandles(const std::optional<ragtime::ear::Span>& at, bool together, bool shift);
+    // movable false: drawn grey and held still (a burst on the air).
+    void setHandles(const std::optional<ragtime::ear::Span>& at, bool together, bool shift, bool movable = true);
     void onDrag(std::function<void(const ragtime::ear::Span& from, const ragtime::ear::Span& to)> done)
     {
         dragged_ = std::move(done);
@@ -121,6 +122,7 @@ private:
     std::optional<ragtime::ear::Span> handles_;
     bool together_ = false;
     bool shift_ = false;
+    bool movable_ = true;
     std::optional<ragtime::ear::Span> wanted_;
     std::function<void(const ragtime::ear::Span&, const ragtime::ear::Span&)> dragged_;
     Grip grip_ = Grip::None;        // being dragged

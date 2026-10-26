@@ -758,8 +758,59 @@ void filterSet()
     vfo.setFilter(f, T0 + 20);
     CHECK_EQ(vfo.takeOutput(), std::string(""));
     vfo.flushFilter();
-    CHECK_EQ(vfo.takeOutput(),
-             std::string("M currVFO PKTUSB 3000\nL currVFO PBT_IN 0.6510\nL currVFO PBT_OUT 0.5000\n"));
+    // PBT_IN went already, though not yet read back.
+    CHECK_EQ(vfo.takeOutput(), std::string("M currVFO PKTUSB 3000\nL currVFO PBT_OUT 0.5000\n"));
+}
+
+// A second write before the first is read back (an Undo at once): each
+// part goes against what was written, not the reading from before it.
+void filterSetTwice()
+{
+    uint64_t t = T0;
+    DialReader dial;
+    dial.connected(t);
+    dial.takeOutput();
+    say(dial, "0\n", t);
+    CHECK_EQ(probe(dial, t), std::string("f\n"));
+    say(dial, "14105000\n", t);
+    dial.setFilterWatch(true, t);
+    CHECK_EQ(dial.takeOutput(), std::string("+m\n"));
+    say(dial, "get_mode:\nMode: USB\nPassband: 2400\nRPRT 0\n", t);
+    say(dial, dial.takeOutput() == "+l PBT_IN\n" ? "get_level: PBT_IN\n0.501961\nRPRT 0\n" : "", t);
+    say(dial, dial.takeOutput() == "+l PBT_OUT\n" ? "get_level: PBT_OUT\n0.501961\nRPRT 0\n" : "", t);
+    say(dial, dial.takeOutput() == "+u MN\n" ? "get_func: MN\n0\nRPRT 0\n" : "", t);
+    say(dial, dial.takeOutput() == "+l NOTCHF_RAW\n" ? "get_level: NOTCHF_RAW\n0.682353\nRPRT 0\n" : "", t);
+    CHECK(dial.filter().has_value());
+    CHECK_EQ(dial.takeOutput(), std::string(""));
+
+    RigFilter was = *dial.filter();
+    RigFilter f = was;
+    f.pbtIn = 0.65098;
+    t += 100;
+    dial.setFilter(f, t);
+    CHECK_EQ(dial.takeOutput(), std::string("L PBT_IN 0.6510\n"));
+    say(dial, "RPRT 0\n", t);
+    // Read back at once; Undo before the reading is whole.
+    CHECK_EQ(dial.takeOutput(), std::string("+m\n"));
+    say(dial, "get_mode:\nMode: USB\nPassband: 2400\nRPRT 0\n", t);
+    dial.setFilter(was, t);
+    CHECK_EQ(dial.takeOutput(), std::string("+l PBT_IN\n"));
+    say(dial, "get_level: PBT_IN\n0.650980\nRPRT 0\n", t);
+    // The stale reading said 0.50: the knob still goes back.
+    CHECK_EQ(dial.takeOutput(), std::string("L PBT_IN 0.5020\n"));
+    say(dial, "RPRT 0\n", t);
+    CHECK_EQ(dial.takeOutput(), std::string("+m\n"));
+    say(dial, "get_mode:\nMode: USB\nPassband: 2400\nRPRT 0\n", t);
+    say(dial, dial.takeOutput() == "+l PBT_IN\n" ? "get_level: PBT_IN\n0.501961\nRPRT 0\n" : "", t);
+    say(dial, dial.takeOutput() == "+l PBT_OUT\n" ? "get_level: PBT_OUT\n0.501961\nRPRT 0\n" : "", t);
+    say(dial, dial.takeOutput() == "+u MN\n" ? "get_func: MN\n0\nRPRT 0\n" : "", t);
+    say(dial, dial.takeOutput() == "+l NOTCHF_RAW\n" ? "get_level: NOTCHF_RAW\n0.682353\nRPRT 0\n" : "", t);
+    CHECK(dial.filter() && *dial.filter() == was);
+    // Read back whole: the rig's word again, so the same write sends nothing.
+    t += 100;
+    dial.setFilter(was, t);
+    CHECK(dial.takeOutput().find("L ") == std::string::npos);
+    CHECK_EQ(dial.filterWrites(), (uint64_t)2);
 }
 
 // Every line Ragtime could ever write to rigctld is a question: whether
@@ -979,6 +1030,7 @@ int main()
     strength();
     filter();
     filterSet();
+    filterSetTwice();
     onlyAsks();
     lines();
     strip();

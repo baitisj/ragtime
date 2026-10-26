@@ -102,6 +102,7 @@ void DialReader::connected(uint64_t nowMs)
     modeDropped_ = false;
     modeFailures_ = 0;
     filter_.reset();
+    sent_.reset();
     reading_.reset();
     setLines_.clear();
     setLine_.clear();
@@ -123,6 +124,7 @@ void DialReader::disconnected()
     out_.clear();
     hz_.reset();
     filter_.reset();
+    sent_.reset();
     reading_.reset();
     inMode_ = false;
     for (int m = 0; m < METERS; m++) state_[m] = State::Unknown;
@@ -261,6 +263,8 @@ void DialReader::publishFilter()
         filter_ = reading_;
         version_++;
     }
+    // A whole reading begun after the last write: the rig's word again.
+    if (reading_) sent_.reset();
     reading_.reset();
 }
 
@@ -284,8 +288,11 @@ void DialReader::queueFilter()
     if (setLines_.empty() && filterWrite_)
     {
         // The commands, worked out when it goes: each part only when it
-        // differs from what the rig said last.
+        // differs from what the rig said last, or from what went since (a
+        // second write before the first is read back, an Undo say, must
+        // not be taken for what the rig already has).
         const RigFilter& f = *filterWrite_;
+        const std::optional<RigFilter>& had = sent_ ? sent_ : filter_;
         const std::string vfo = vfo_ == Vfo::Yes ? "currVFO " : "";
         auto number = [](double v) {
             std::ostringstream out;
@@ -296,14 +303,14 @@ void DialReader::queueFilter()
             return out.str();
         };
         if (!f.mode.empty() && f.widthHz > 0 &&
-            (!filter_ || filter_->mode != f.mode || filter_->widthHz != f.widthHz))
+            (!had || had->mode != f.mode || had->widthHz != f.widthHz))
             setLines_.push_back("M " + vfo + f.mode + " " + std::to_string(f.widthHz));
         // The knobs too only when they differ: a notch moved alone turns no
         // knob (each turn sets the IC-7100's AGC swelling for seconds).
         // Within a step of the rig's 0 to 255 is the same.
-        auto differs = [this](const std::optional<double> RigFilter::*part, double want) {
-            const std::optional<double>& had = filter_ ? (*filter_).*part : std::optional<double>();
-            return !had || std::fabs(*had - want) > 0.75 / 255.0;
+        auto differs = [&had](const std::optional<double> RigFilter::*part, double want) {
+            const std::optional<double>& was = had ? (*had).*part : std::optional<double>();
+            return !was || std::fabs(*was - want) > 0.75 / 255.0;
         };
         if (f.pbtIn && differs(&RigFilter::pbtIn, *f.pbtIn))
             setLines_.push_back("L " + vfo + "PBT_IN " + number(*f.pbtIn));
@@ -313,12 +320,23 @@ void DialReader::queueFilter()
         // last: moved before it goes on, and off before it moves, so it
         // never notches anywhere but where it is wanted.
         const bool moves = f.notchRaw && differs(&RigFilter::notchRaw, *f.notchRaw);
-        const bool switches = f.notchOn && (!filter_ || filter_->notchOn != f.notchOn);
+        const bool switches = f.notchOn && (!had || had->notchOn != f.notchOn);
         const std::string raw = moves ? "L " + vfo + "NOTCHF_RAW " + number(*f.notchRaw) : "";
         const std::string mn = switches ? "U " + vfo + "MN " + (*f.notchOn ? "1" : "0") : "";
         for (const std::string& line : f.notchOn && *f.notchOn ? std::vector<std::string>{raw, mn}
                                                                  : std::vector<std::string>{mn, raw})
             if (!line.empty()) setLines_.push_back(line);
+        // What the rig should have once these go.
+        RigFilter next = had.value_or(RigFilter{});
+        if (!f.mode.empty() && f.widthHz > 0)
+        {
+            next.mode = f.mode;
+            next.widthHz = f.widthHz;
+        }
+        for (auto part : {&RigFilter::pbtIn, &RigFilter::pbtOut, &RigFilter::notchRaw})
+            if (f.*part) next.*part = f.*part;
+        if (f.notchOn) next.notchOn = f.notchOn;
+        sent_ = next;
         filterWrite_.reset();
         filterProblem_.clear();
         // A reading begun before is of the old setting: start afresh after.
@@ -354,6 +372,7 @@ void DialReader::setFilterWatch(bool on, uint64_t nowMs)
     filterStep_ = 0;
     filterDueMs_ = nowMs;
     reading_.reset();
+    sent_.reset();
     if (!on && filter_)
     {
         filter_.reset();
@@ -607,6 +626,7 @@ void DialReader::onLine(const std::string& line, uint64_t nowMs)
             // what the rig has now.
             filterProblem_ = "rigctld refused " + setLine_ + ": " + line;
             setLines_.clear();
+            sent_.reset();
             filterStep_ = 0;
             filterDueMs_ = nowMs;
             version_++;
