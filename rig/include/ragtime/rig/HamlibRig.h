@@ -7,13 +7,17 @@
 // told to, putting a PTT change ahead of any reading. While the rig
 // transmits (data2g-host's PTT ON, whoever keys it) it reads the transmit
 // meters the rig reports, ALC, SWR and RF power, one every METER_MS, in
-// place of the dial. A rig that fails to open, or stops answering, is closed and
+// place of the dial. With the SWR trip on (radio::SwrTrip, Settings >
+// Rig), SWR is every other reading, and on a trip the thread itself
+// unkeys the rig, whoever keyed it, sets its power (RFPOWER) to 0, and
+// keys it no more until clearSwrTrip(). The power is never put back. A rig that fails to open, or stops answering, is closed and
 // tried again 2, 4, 8, 15 and then every 30 s (link::Reconnect). Stopping
 // unkeys the rig, if keyed, before closing it.
 //
 // It never tunes the rig or sets its mode: the radio is the source of
-// truth for frequency. PTT is the only thing it sets, and only when told
-// to (PttFollower, with "Key the rig when data2g-host keys" ticked).
+// truth for frequency. PTT is the only thing it sets when told to
+// (PttFollower, with "Key the rig when data2g-host keys" ticked), and the
+// SWR trip the only thing that sets the power.
 //
 // Built without Hamlib (-DRAGTIME_HAMLIB=OFF), available() is false and a
 // HamlibRig only says so.
@@ -101,6 +105,13 @@ public:
         uint64_t swrReadings = 0;
         uint64_t powerReadings = 0;
         uint64_t meterReadings = 0;     // any of them
+
+        // The SWR trip, from the trip until clearSwrTrip().
+        bool swrTripped = false;
+        // What was done: "SWR 3.6: Ragtime unkeyed the rig and set its
+        // power to 0 (it was 50%)".
+        std::string tripText;
+        uint64_t swrTrips = 0;          // goes up with each trip
     };
 
     // One meter is read this often while transmitting.
@@ -124,6 +135,15 @@ public:
     // The rig is transmitting, keyed by us or not: read its meters, not
     // its dial.
     void setTransmitting(bool on);
+    // Settings > Rig's SWR trip, on or off, from now.
+    void setSwrTrip(bool on);
+    // The operator cleared a trip: the rig may be keyed again. Its power
+    // stays where the trip put it.
+    void clearSwrTrip();
+
+    // For tests on Hamlib's dummy rig: sets a level ("SWR", "RFPOWER")
+    // straight in the backend, read-only meters included.
+    void setDummyLevelForTest(const std::string& level, double value);
 
     Status status() const;
 

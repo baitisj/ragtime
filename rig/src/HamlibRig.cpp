@@ -4,6 +4,7 @@
 #include <chrono>
 #include <cctype>
 #include <cmath>
+#include <cstdio>
 #include <optional>
 #include <utility>
 #include <vector>
@@ -322,6 +323,9 @@ struct HamlibRig::Shared
     bool stopping = false;
     bool wantPtt = false;
     bool transmitting = false;
+    bool swrTrip = false;
+    bool clearTrip = false;
+    std::vector<std::pair<std::string, double>> pokes;   // tests on the dummy rig
     int pollSeconds = 1;
     Status status;
     uint64_t retryAtMs = 0;     // when the next try to open is, while one waits
@@ -349,6 +353,7 @@ void HamlibRig::start(const radio::RigSettings& settings)
     shared_ = std::make_shared<Shared>();
     shared_->settings = settings;
     shared_->pollSeconds = std::max(radio::POLL_MIN_SECONDS, settings.pollSeconds);
+    shared_->swrTrip = settings.swrTrip;
     shared_->status.running = true;
     thread_ = std::thread([this]() { run(); });
 }
@@ -395,6 +400,33 @@ void HamlibRig::setTransmitting(bool on)
     shared_->wake.notify_all();
 }
 
+void HamlibRig::setSwrTrip(bool on)
+{
+    if (!shared_) return;
+    std::lock_guard<std::mutex> lock(shared_->mutex);
+    shared_->swrTrip = on;
+}
+
+void HamlibRig::clearSwrTrip()
+{
+    if (!shared_) return;
+    {
+        std::lock_guard<std::mutex> lock(shared_->mutex);
+        shared_->clearTrip = true;
+    }
+    shared_->wake.notify_all();
+}
+
+void HamlibRig::setDummyLevelForTest(const std::string& level, double value)
+{
+    if (!shared_) return;
+    {
+        std::lock_guard<std::mutex> lock(shared_->mutex);
+        shared_->pokes.emplace_back(level, value);
+    }
+    shared_->wake.notify_all();
+}
+
 HamlibRig::Status HamlibRig::status() const
 {
     if (!shared_) return Status();
@@ -422,6 +454,56 @@ void HamlibRig::run()
     size_t nextMeter = 0;
     uint64_t nextMeterMs = 0;
     bool wasTx = false;
+    radio::SwrTrip trip;
+    bool swrTurn = true;
+
+    // The next meter to read. With the trip on, SWR is every other one.
+    auto pickMeter = [&]() -> size_t {
+        size_t swr = meters.size();
+        for (size_t i = 0; i < meters.size(); i++)
+        {
+            if (meters[i].level == RIG_LEVEL_SWR) swr = i;
+        }
+        if (!trip.enabled() || swr == meters.size() || meters.size() == 1) return nextMeter++ % meters.size();
+        swrTurn = !swrTurn;
+        if (!swrTurn) return swr;
+        size_t i = nextMeter++ % meters.size();
+        return i != swr ? i : nextMeter++ % meters.size();
+    };
+
+    // Over 3:1: unkey, whoever keyed the rig, and turn its power to 0.
+    auto tripped = [&](double swr) {
+        int r = rig_set_ptt(rig, RIG_VFO_CURR, RIG_PTT_OFF);
+        keyed = false;
+        char was[32] = "";
+        value_t power;
+        power.f = -1;
+        if (rig_has_get_level(rig, RIG_LEVEL_RFPOWER) != 0
+            && rig_get_level(rig, RIG_VFO_CURR, RIG_LEVEL_RFPOWER, &power) == RIG_OK && power.f >= 0)
+            std::snprintf(was, sizeof was, " (it was %d%%)", (int)std::lround(power.f * 100));
+        char ratio[32];
+        std::snprintf(ratio, sizeof ratio, "SWR %.1f", swr);
+        std::string text = ratio + (r == RIG_OK ? std::string(": Ragtime unkeyed the rig")
+                                                : ": unkeying failed (" + errorText(r) + ")");
+        if (rig_has_set_level(rig, RIG_LEVEL_RFPOWER) == 0)
+        {
+            text += "; this rig can't have its power set through Hamlib";
+        }
+        else
+        {
+            value_t zero;
+            zero.f = 0.0f;
+            int p = rig_set_level(rig, RIG_VFO_CURR, RIG_LEVEL_RFPOWER, zero);
+            text += p == RIG_OK ? std::string(" and set its power to 0") + was
+                                : "; setting its power to 0 failed (" + errorText(p) + ")";
+        }
+        shared->update([&](Status& s) {
+            s.keyed = false;
+            s.swrTripped = true;
+            s.tripText = text;
+            s.swrTrips++;
+        });
+    };
     const radio::RigSettings settings = shared->settings;
 
     // Closes the rig after a failure; tries again later.
@@ -445,18 +527,44 @@ void HamlibRig::run()
 
     for (;;)
     {
-        bool want, tx;
+        bool want, tx, clear;
         int poll;
+        std::vector<std::pair<std::string, double>> pokes;
         {
             std::unique_lock<std::mutex> lock(shared->mutex);
             if (shared->stopping) break;
-            want = shared->wantPtt;
+            // Tripped, the rig is keyed no more until the trip is cleared.
+            want = shared->wantPtt && !trip.tripped();
             tx = shared->transmitting || keyed;
             poll = shared->pollSeconds;
+            if (shared->swrTrip != trip.enabled()) trip.setEnabled(shared->swrTrip);
+            clear = shared->clearTrip;
+            shared->clearTrip = false;
+            pokes.swap(shared->pokes);
         }
         uint64_t now = nowMs();
+        if (clear && trip.tripped())
+        {
+            trip.clear();
+            shared->update([](Status& s) {
+                s.swrTripped = false;
+                s.tripText.clear();
+            });
+            continue;
+        }
+        if (rig != nullptr)
+        {
+            for (const auto& [name, value] : pokes)
+            {
+                value_t v;
+                v.f = (float)value;
+                if (rig->caps->set_level != nullptr)
+                    rig->caps->set_level(rig, RIG_VFO_CURR, rig_parse_level(name.c_str()), v);
+            }
+        }
         if (tx != wasTx)
         {
+            trip.transmitting(tx);
             // A new burst reads its meters from the first; between bursts
             // there are none.
             wasTx = tx;
@@ -527,7 +635,7 @@ void HamlibRig::run()
         {
             // One meter at a time, so a PTT change never waits on more
             // than one reading.
-            size_t i = nextMeter++ % meters.size();
+            size_t i = pickMeter();
             Meter& meter = meters[i];
             nextMeterMs = now + METER_MS;
             value_t value;
@@ -536,10 +644,13 @@ void HamlibRig::run()
             if (r == RIG_OK)
             {
                 meter.failures = 0;
-                std::lock_guard<std::mutex> lock(shared->mutex);
-                shared->status.meters.*meter.field = (double)value.f;
-                shared->status.*meter.count += 1;
-                shared->status.meterReadings++;
+                {
+                    std::lock_guard<std::mutex> lock(shared->mutex);
+                    shared->status.meters.*meter.field = (double)value.f;
+                    shared->status.*meter.count += 1;
+                    shared->status.meterReadings++;
+                }
+                if (meter.level == RIG_LEVEL_SWR && trip.reading((double)value.f, now)) tripped((double)value.f);
             }
             else if (++meter.failures >= 2)
             {
@@ -582,8 +693,8 @@ void HamlibRig::run()
         uint64_t until = rig == nullptr ? now + 250 : !tx ? nextPoll : meters.empty() ? now + 1000 : nextMeterMs;
         std::unique_lock<std::mutex> lock(shared->mutex);
         shared->wake.wait_for(lock, std::chrono::milliseconds(until > now ? until - now : 1), [&]() {
-            return shared->stopping || (rig != nullptr && shared->wantPtt != keyed)
-                   || (shared->transmitting || keyed) != tx;
+            return shared->stopping || (rig != nullptr && (shared->wantPtt && !trip.tripped()) != keyed)
+                   || (shared->transmitting || keyed) != tx || shared->clearTrip || !shared->pokes.empty();
         });
     }
 

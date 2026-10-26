@@ -98,6 +98,10 @@ struct RigSettings
     bool keyRig = false;
     PttMethod ptt = PttMethod::CatData;
     std::string pttPort;            // DTR or RTS on another port; empty: the rig's port
+
+    // Over 3:1 SWR, turn the rig's power to 0 and unkey (radio::SwrTrip).
+    // Hamlib only, off by default.
+    bool swrTrip = false;
 };
 
 constexpr int POLL_MIN_SECONDS = 1;
@@ -144,8 +148,9 @@ enum class PortType
 std::vector<std::pair<std::string, std::string>> hamlibConf(const RigSettings& settings, PortType port,
                                                             std::string& problem);
 
-// The same rig, opened the same way: the poll interval aside, which
-// applies to an open rig, and the PTT method and port while not keying.
+// The same rig, opened the same way: the poll interval and the SWR trip
+// aside, which apply to an open rig, and the PTT method and port while
+// not keying.
 bool sameRig(const RigSettings& a, const RigSettings& b);
 
 } // namespace radio

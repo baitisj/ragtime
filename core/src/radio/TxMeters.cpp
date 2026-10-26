@@ -112,6 +112,54 @@ void TxMeters::reading(const MeterReading& reading, uint64_t nowMs)
     version_++;
 }
 
+double swrScale(double swr)
+{
+    if (!(swr > 1.0)) return 0.0;
+    double gamma = (swr - 1.0) / (swr + 1.0);
+    double full = (SWR_FULL_SCALE - 1.0) / (SWR_FULL_SCALE + 1.0);
+    return std::min(1.0, gamma / full);
+}
+
+SwrBand swrBand(double swr)
+{
+    if (swr < 1.5) return SwrBand::Good;
+    if (swr < 2.0) return SwrBand::Fair;
+    if (swr <= SwrTrip::TRIP_SWR) return SwrBand::Poor;
+    return SwrBand::Bad;
+}
+
+void SwrTrip::setEnabled(bool enabled)
+{
+    enabled_ = enabled;
+    over_ = 0;
+}
+
+void SwrTrip::transmitting(bool)
+{
+    over_ = 0;
+}
+
+bool SwrTrip::reading(double swr, uint64_t nowMs)
+{
+    if (!enabled_ || tripped_) return false;
+    if (!(swr > TRIP_SWR))
+    {
+        over_ = 0;
+        return false;
+    }
+    if (++over_ < READINGS) return false;
+    tripped_ = true;
+    trippedSwr_ = swr;
+    trippedMs_ = nowMs;
+    return true;
+}
+
+void SwrTrip::clear()
+{
+    tripped_ = false;
+    over_ = 0;
+}
+
 std::string readingText(const MeterReading& reading)
 {
     std::string text;

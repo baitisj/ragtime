@@ -307,6 +307,78 @@ void meters()
     CHECK_EQ(m.last()->turnDownDb, 0.0);
 }
 
+void swr()
+{
+    // The bar, drawn on the reflection coefficient.
+    CHECK_EQ(swrScale(0.0), 0.0);
+    CHECK_EQ(swrScale(1.0), 0.0);
+    CHECK(std::fabs(swrScale(1.5) - 0.3) < 1e-9);
+    CHECK(std::fabs(swrScale(2.0) - 0.5) < 1e-9);
+    CHECK(std::fabs(swrScale(3.0) - 0.75) < 1e-9);
+    CHECK_EQ(swrScale(5.0), 1.0);
+    CHECK_EQ(swrScale(9.0), 1.0);
+    CHECK(swrBand(1.0) == SwrBand::Good && swrBand(1.49) == SwrBand::Good);
+    CHECK(swrBand(1.5) == SwrBand::Fair && swrBand(1.99) == SwrBand::Fair);
+    CHECK(swrBand(2.0) == SwrBand::Poor && swrBand(3.0) == SwrBand::Poor);
+    CHECK(swrBand(3.01) == SwrBand::Bad);
+
+    // The trip: off, nothing trips.
+    SwrTrip trip;
+    CHECK(!trip.reading(4.0, 100) && !trip.reading(4.0, 200));
+    trip.setEnabled(true);
+    trip.transmitting(true);
+    // One noisy reading doesn't; one at 3.0 isn't over.
+    CHECK(!trip.reading(3.5, 300));
+    CHECK(!trip.reading(2.0, 400));
+    CHECK(!trip.reading(3.5, 500));
+    CHECK(!trip.reading(3.0, 600));
+    // A burst's end starts the count afresh.
+    CHECK(!trip.reading(3.5, 700));
+    trip.transmitting(false);
+    trip.transmitting(true);
+    CHECK(!trip.reading(3.5, 800));
+    // Two in a row do, once, and it stays tripped.
+    CHECK(trip.reading(3.6, 900));
+    CHECK(trip.tripped() && trip.trippedSwr() == 3.6 && trip.trippedMs() == 900);
+    CHECK(!trip.reading(4.0, 1000) && !trip.reading(4.0, 1100));
+    trip.transmitting(false);
+    CHECK(trip.tripped());
+    trip.clear();
+    CHECK(!trip.tripped());
+    CHECK(!trip.reading(4.0, 1200));
+    CHECK(trip.reading(4.0, 1300));
+
+    // The follower, locked out: unkeyed, and no PTT ON keys it until it is
+    // cleared; PTT OFF doesn't clear it.
+    PttFollower f;
+    f.setEnabled(true);
+    f.host(true, 0);
+    CHECK(f.keyed());
+    f.lockOut("the SWR went over 3:1");
+    CHECK(!f.keyed() && f.lockedOut());
+    f.host(false, 100);
+    f.host(true, 200);
+    CHECK(!f.keyed());
+    CHECK_EQ(f.why(), std::string("the SWR went over 3:1"));
+    f.hostLost();
+    f.setEnabled(false);
+    f.setEnabled(true);
+    f.host(true, 300);
+    CHECK(!f.keyed() && f.lockedOut());
+    f.clearLockOut();
+    CHECK(f.why().empty());
+    // The host is still keyed: the next PTT ON keys.
+    f.host(false, 400);
+    f.host(true, 500);
+    CHECK(f.keyed());
+
+    // The trip box changes nothing about how the rig is opened.
+    RigSettings a, b;
+    a.source = b.source = RigSource::Hamlib;
+    b.swrTrip = true;
+    CHECK(sameRig(a, b));
+}
+
 } // namespace
 
 int main()
@@ -318,5 +390,6 @@ int main()
     follows();
     safety();
     meters();
+    swr();
     return ragtime_test::finish();
 }

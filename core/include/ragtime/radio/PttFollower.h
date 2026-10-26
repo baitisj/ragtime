@@ -15,7 +15,8 @@
 //     usual transmit time-out), whatever the host says.
 //
 // After the time-out or a rig failure it stays unkeyed until the host
-// says PTT OFF: the next PTT ON keys again.
+// says PTT OFF: the next PTT ON keys again. After the SWR trip (lockOut)
+// it stays unkeyed, whatever the host says, until the operator clears it.
 //
 // The time is always passed in, so tests run it on a simulated clock.
 #ifndef RAGTIME_RADIO_PTT_FOLLOWER_H
@@ -45,6 +46,10 @@ public:
     void rigFailed(const std::string& why);
     // Unkeys after MAX_KEYED_MS.
     void tick(uint64_t nowMs);
+    // The SWR trip: unkeyed, and kept unkeyed until clearLockOut().
+    void lockOut(const std::string& why);
+    void clearLockOut();
+    bool lockedOut() const { return locked_; }
 
     // What the rig should be.
     bool keyed() const { return keyed_; }
@@ -61,6 +66,7 @@ private:
     bool enabled_ = false;
     bool keyed_ = false;
     bool held_ = false;         // unkeyed by us: waiting for PTT OFF
+    bool locked_ = false;       // the SWR trip: waiting for the operator
     uint64_t keyedMs_ = 0;
     std::string why_;
     uint64_t version_ = 0;

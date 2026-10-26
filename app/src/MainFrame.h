@@ -161,6 +161,10 @@ private:
     // a line in the flight recorder for each burst.
     void onMeters();
     void showMeters();
+    // The SWR trip (Settings > Rig): ABORT to the host and sending held
+    // until the operator clears it (the SWR bar, or the Settings menu).
+    void onSwrTrip(const std::string& what);
+    void clearSwrTrip();
     // Why sending is held (receive only), or "" when it isn't.
     std::string sendRefusal() const;
     void applySendGuard();

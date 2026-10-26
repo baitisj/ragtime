@@ -462,6 +462,17 @@ wxWindow* SettingsDialog::rigPage(wxNotebook* book, const StationPrefs& prefs)
     hamlib->Add(pttRow, 0, wxEXPAND | wxLEFT | wxRIGHT, 30);
     hamlib->AddSpacer(4);
     hamlib->Add(hint, 0, wxLEFT | wxRIGHT, 30);
+
+    // The SWR trip, off by default (Jeff, 2026-10-26).
+    swrTrip_ = new wxCheckBox(box, wxID_ANY, "Over 3:1 SWR, turn the rig's power to 0 and unkey");
+    swrTrip_->SetValue(r.swrTrip);
+    swrTrip_->SetToolTip("While data2g-host transmits, Ragtime reads the rig's SWR. With this ticked, two "
+                         "readings in a row over 3:1 and Ragtime unkeys the rig, whoever keyed it, sets its "
+                         "power to 0, tells data2g-host to stop (ABORT, which also ends a session), and holds "
+                         "sending until you clear the trip (Settings > Clear the SWR trip, or click the SWR "
+                         "bar). It never puts the power back: turn it up on the rig. For rigs that report SWR "
+                         "through Hamlib.");
+    hamlib->Add(swrTrip_, 0, wxLEFT | wxRIGHT | wxTOP, 10);
     hamlib->AddSpacer(6);
 
     usSegmentsOnly_ = new wxCheckBox(page, wxID_ANY, "Receive only outside the US data segments");
@@ -560,6 +571,7 @@ radio::RigSettings SettingsDialog::rig() const
     r.backendConf = std::string(backend_->GetValue().Strip(wxString::both).utf8_str());
     r.pollSeconds = poll_->GetValue();
     r.keyRig = keyRig_->GetValue();
+    r.swrTrip = swrTrip_->GetValue();
     r.ptt = valueAt(PTTS, ptt_);
     r.pttPort = typed(pttPort_);
     return r;
@@ -672,6 +684,7 @@ void SettingsDialog::check()
     poll_->Enable(hamlib);
     testButton_->Enable(hamlib && !testRig_);
     keyRig_->Enable(hamlib);
+    swrTrip_->Enable(hamlib);
     bool keying = hamlib && keyRig_->GetValue();
     for (wxWindow* w : keying_) w->Enable(keying);
     radio::PttMethod ptt = valueAt(PTTS, ptt_);

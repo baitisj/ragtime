@@ -141,7 +141,11 @@ with the code when the seal rules change.
   transmits, a Hamlib rig's ALC, SWR and RF power are read
   (`radio::TxMeters`, burst by burst) for the Auto ALC meter and the
   flight recorder; Auto ALC itself still waits for a host TX level
-  command, but each burst works out what it would do.
+  command, but each burst works out what it would do. The SWR bar sits
+  under the ALC meter (`app/src/SwrBar`), and the SWR trip (Settings >
+  Rig, off by default, `radio::SwrTrip`) unkeys the rig, sets its power
+  to 0, sends the host ABORT and holds sending until the operator clears
+  it.
 - The flight recorder (2026-10-25, idea 2 of "Ideas before
   signatures"): `link::FlightRecorder` keeps every command line, KISS
   frame and session byte count to and from the host, with millisecond
@@ -187,6 +191,8 @@ with the code when the seal rules change.
   default), following the host's PTT ON/OFF and unkeying by itself on
   a dropped link, a rig failure, quitting and after 180 s (Andrew's
   suggestion, 2026-10-26, for rigs whose drivers can't be opened twice).
+  With the SWR trip ticked it unkeys the rig, whoever keyed it, on two
+  readings over 3:1, and sends the host ABORT.
 - Glissando dropped its own Data2G mode on 2026-10-22 (glissando PR
   #113), so Ragtime is the only Data2G client. Never change Glissando's
   chirp modem behaviour from this project.
@@ -229,8 +235,10 @@ with the code when the seal rules change.
 - The radio is the source of truth for frequency: retune only when the
   operator asks. Ragtime reads the dial from rigctld (`f` only, never a
   set command: the operator's rigctld is shared), or from the rig it
-  opens with Hamlib, where PTT is the only thing it ever sets. It never
-  keys through rigctld (NET rigctl is left out of the Hamlib list).
+  opens with Hamlib, where PTT is the only thing it sets, and the SWR
+  trip (off by default) the only thing that sets the power, to 0. It
+  never keys through rigctld (NET rigctl is left out of the Hamlib
+  list).
 
 ## Layout
 

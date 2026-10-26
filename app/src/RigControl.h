@@ -30,7 +30,9 @@ class RigControl : public wxEvtHandler
 public:
     // changed: the reading, the connection or the keying changed.
     // meters: a transmit meter reading came in, or a burst began or ended.
-    RigControl(std::function<void()> changed, std::function<void()> meters);
+    // tripped: the SWR trip tripped, with what the rig's thread did.
+    RigControl(std::function<void()> changed, std::function<void()> meters,
+               std::function<void(const std::string&)> tripped);
     ~RigControl() override;
 
     // Starts, restarts or stops what the settings name; a rig already open
@@ -55,7 +57,16 @@ public:
     const ragtime::radio::TxMeters& meters() const { return meters_; }
     // What the open Hamlib rig reports: ALC, SWR, RF power.
     bool readsAlc() const;
+    bool readsSwr() const;
     bool readsMeters() const;
+
+    // The SWR trip (Settings > Rig): tripped until the operator clears it,
+    // and what was done, "SWR 3.6: Ragtime unkeyed the rig and set its
+    // power to 0 (it was 50%)". Clearing lets the rig be keyed again; its
+    // power stays where the trip put it.
+    bool swrTripped() const { return tripped_; }
+    const std::string& tripText() const { return tripText_; }
+    void clearSwrTrip();
 
 private:
     void onTimer(wxTimerEvent& event);
@@ -63,6 +74,7 @@ private:
 
     std::function<void()> changed_;
     std::function<void()> metersChanged_;
+    std::function<void(const std::string&)> trippedChanged_;
     std::unique_ptr<RigConnection> rigctld_;
     ragtime::rig::HamlibRig hamlib_;
     ragtime::radio::PttFollower follower_;
@@ -70,6 +82,8 @@ private:
     ragtime::radio::RigSettings settings_;
     bool started_ = false;
     bool hostPtt_ = false;
+    bool tripped_ = false;
+    std::string tripText_;
     wxTimer timer_;
     uint64_t seenVersion_ = 0;
     uint64_t seenFailures_ = 0;
@@ -77,6 +91,7 @@ private:
     uint64_t seenAlc_ = 0;
     uint64_t seenSwr_ = 0;
     uint64_t seenPower_ = 0;
+    uint64_t seenTrips_ = 0;
 };
 
 #endif

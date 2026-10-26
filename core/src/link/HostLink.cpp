@@ -664,6 +664,14 @@ bool HostLink::leaveNow(uint64_t nowMs)
     return true;
 }
 
+bool HostLink::abortTransmit(uint64_t nowMs)
+{
+    if (!commandUp_) return false;
+    if (session_ != SessionState::None) return leaveNow(nowMs);
+    sendLine("ABORT", OK, nowMs);
+    return true;
+}
+
 void HostLink::sessionHeard(uint64_t nowMs)
 {
     if (session_ != SessionState::Connected && session_ != SessionState::Leaving) return;

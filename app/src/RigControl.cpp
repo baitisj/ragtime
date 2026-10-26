@@ -15,9 +15,11 @@ constexpr int TICK_MS = 100;
 
 } // namespace
 
-RigControl::RigControl(std::function<void()> changed, std::function<void()> meters)
+RigControl::RigControl(std::function<void()> changed, std::function<void()> meters,
+                       std::function<void(const std::string&)> tripped)
     : changed_(std::move(changed))
     , metersChanged_(std::move(meters))
+    , trippedChanged_(std::move(tripped))
     , rigctld_(std::make_unique<RigConnection>([this]() {
         if (changed_) changed_();
     }))
@@ -31,6 +33,7 @@ RigControl::~RigControl()
     // The window is going: no more news for it.
     changed_ = nullptr;
     metersChanged_ = nullptr;
+    trippedChanged_ = nullptr;
     stop();
 }
 
@@ -45,7 +48,7 @@ void RigControl::apply(const radio::RigSettings& settings)
         rigctld_->stop();
         hamlib_.stop();
         seenFailures_ = 0;
-        seenAlc_ = seenSwr_ = seenPower_ = 0;
+        seenAlc_ = seenSwr_ = seenPower_ = seenTrips_ = 0;
         if (settings.source == radio::RigSource::Rigctld)
             rigctld_->start(settings.rigctldHost, settings.rigctldPort);
         else if (settings.source == radio::RigSource::Hamlib)
@@ -54,6 +57,7 @@ void RigControl::apply(const radio::RigSettings& settings)
     else
     {
         hamlib_.setPollSeconds(settings.pollSeconds);
+        hamlib_.setSwrTrip(settings.swrTrip);
     }
     if (settings.source == radio::RigSource::Hamlib)
         timer_.Start(TICK_MS);
@@ -109,6 +113,24 @@ bool RigControl::readsAlc() const
     return s.open && s.readsAlc;
 }
 
+bool RigControl::readsSwr() const
+{
+    if (settings_.source != radio::RigSource::Hamlib) return false;
+    rig::HamlibRig::Status s = hamlib_.status();
+    return s.open && s.readsSwr;
+}
+
+void RigControl::clearSwrTrip()
+{
+    if (!tripped_) return;
+    tripped_ = false;
+    tripText_.clear();
+    hamlib_.clearSwrTrip();
+    follower_.clearLockOut();
+    sync();
+    if (changed_) changed_();
+}
+
 bool RigControl::readsMeters() const
 {
     if (settings_.source != radio::RigSource::Hamlib) return false;
@@ -138,6 +160,7 @@ std::string RigControl::describe() const
                                   : "\nRagtime keys the rig when data2g-host says PTT ON.";
         if (!follower_.why().empty()) text += "\nUnkeyed by Ragtime: " + follower_.why() + ".";
     }
+    if (tripped_) text += "\nSWR trip: " + tripText_ + ".";
     return text;
 }
 
@@ -155,6 +178,20 @@ void RigControl::sync()
     {
         seenFailures_ = s.pttFailures;
         follower_.rigFailed(s.problem);
+    }
+    // The SWR trip: the rig's thread has unkeyed it and turned its power
+    // down; keep it unkeyed until the operator clears the trip.
+    bool trippedNow = false;
+    if (s.swrTrips != seenTrips_)
+    {
+        seenTrips_ = s.swrTrips;
+        if (s.swrTripped && !tripped_)
+        {
+            tripped_ = true;
+            tripText_ = s.tripText;
+            follower_.lockOut("the SWR went over 3:1");
+            trippedNow = true;
+        }
     }
     hamlib_.setPtt(follower_.keyed());
 
@@ -179,6 +216,7 @@ void RigControl::sync()
     seenPower_ = s.powerReadings;
     if (tx) meters_.reading(fresh, now);
     if (meters_.version() != metersBefore && metersChanged_) metersChanged_();
+    if (trippedNow && trippedChanged_) trippedChanged_(tripText_);
 
     if (s.version != seenVersion_ || follower_.version() != seenFollower_)
     {

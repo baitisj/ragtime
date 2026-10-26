@@ -60,6 +60,7 @@ ragtime::radio::RigSettings loadRig()
     r.pollSeconds = (int)config().ReadLong("/Hamlib/PollSeconds", r.pollSeconds);
     r.pollSeconds = std::min(std::max(r.pollSeconds, POLL_MIN_SECONDS), POLL_MAX_SECONDS);
     r.keyRig = config().ReadBool("/Hamlib/KeyRig", r.keyRig);
+    r.swrTrip = config().ReadBool("/Hamlib/SwrTrip", r.swrTrip);
     r.ptt = pttFromWord(word("/Hamlib/Ptt"));
     r.pttPort = readString("/Hamlib/PttPort", r.pttPort);
     return r;
@@ -85,6 +86,7 @@ void saveRig(const ragtime::radio::RigSettings& r)
     config().Write("/Hamlib/Backend", wxString::FromUTF8(r.backendConf));
     config().Write("/Hamlib/PollSeconds", (long)r.pollSeconds);
     config().Write("/Hamlib/KeyRig", r.keyRig);
+    config().Write("/Hamlib/SwrTrip", r.swrTrip);
     config().Write("/Hamlib/Ptt", wxString(pttWord(r.ptt)));
     config().Write("/Hamlib/PttPort", wxString::FromUTF8(r.pttPort));
 }

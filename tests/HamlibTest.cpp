@@ -112,6 +112,28 @@ void dummyRig()
     std::this_thread::sleep_for(std::chrono::milliseconds(3 * HamlibRig::METER_MS));
     CHECK_EQ(r.status().meterReadings, before);
 
+    // The SWR trip: two readings over 3:1 unkey the rig and set its power
+    // to 0, and it isn't keyed again, whatever it is told, until cleared.
+    r.setDummyLevelForTest("RFPOWER", 0.5);
+    r.setDummyLevelForTest("SWR", 3.5);
+    r.setSwrTrip(true);
+    r.setTransmitting(true);
+    r.setPtt(true);
+    CHECK(waitFor(r, [](const HamlibRig::Status& st) { return st.swrTripped; }));
+    s = r.status();
+    CHECK(!s.keyed && s.swrTrips == 1);
+    CHECK_EQ(s.tripText, std::string("SWR 3.5: Ragtime unkeyed the rig and set its power to 0 (it was 50%)"));
+    std::this_thread::sleep_for(std::chrono::milliseconds(3 * HamlibRig::METER_MS));
+    CHECK(!r.status().keyed && r.status().swrTrips == 1);
+    // Cleared, with the antenna fixed: keyed again, as it is still told.
+    r.setDummyLevelForTest("SWR", 1.2);
+    r.clearSwrTrip();
+    CHECK(waitFor(r, [](const HamlibRig::Status& st) { return !st.swrTripped && st.keyed; }));
+    r.setPtt(false);
+    r.setTransmitting(false);
+    CHECK(waitFor(r, [](const HamlibRig::Status& st) { return !st.keyed; }));
+    r.setSwrTrip(false);
+
     // Keyed when stopped: unkeyed, and closed.
     r.setPtt(true);
     CHECK(waitFor(r, [](const HamlibRig::Status& st) { return st.keyed; }));

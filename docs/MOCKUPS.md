@@ -36,7 +36,8 @@ Left to right: my callsign, group `D2G`, the
 Accept sessions, Pause sending, **Auto ALC** (checkbox, a small level
 meter, its reading such as `−4 dB`), and the TX light (`TX Off` / `TX`).
 As built, the reading is the rig's ALC as a share of its ALC scale,
-such as `42%` (STAGE1.md, "Rig control").
+such as `42%`, with the SWR bar under the meter and its reading, such
+as `1.3:1`, under the ALC's (STAGE1.md, "Rig control").
 
 ## Station list
 
