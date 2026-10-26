@@ -34,6 +34,7 @@ add_executable(ragtime WIN32
     src/PathStripView.cpp
     src/PathsDialog.cpp
     src/RigConnection.cpp
+    src/RigControl.cpp
     src/Html.cpp
     src/PhraseHighlight.cpp
     src/SealBadge.cpp
@@ -79,7 +80,7 @@ else()
         target_compile_options(ragtime PRIVATE ${RAGTIME_WX_CXX_FLAGS})
     endif()
 endif()
-target_link_libraries(ragtime PRIVATE ragtime_core ${RAGTIME_WX_LIBS})
+target_link_libraries(ragtime PRIVATE ragtime_core ragtime_rig ${RAGTIME_WX_LIBS})
 ragtime_warnings(ragtime)
 
 if(RAGTIME_TESTS AND NOT WIN32)

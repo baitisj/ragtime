@@ -22,7 +22,7 @@ What the client is:
 
 What it is not:
 
-- Not a modem. It never starts `data2g-host` and never touches the sound card or PTT for data.
+- Not a modem. It never starts `data2g-host` and never touches the sound card. It keys the rig only when the operator asks it to follow data2g-host's PTT (Settings > Rig, off by default: docs/STAGE1.md, "Rig control").
 - Not a Glissando fork. The chirp modem, tempos, chords and the console stay in Glissando.
 
 Jeff said go for Stage 1 on 2026-10-22. The decisions only he can make are collected under **Questions for Jeff** near the end, with his answers where he has given them.
@@ -757,7 +757,7 @@ Functionally equivalent means the client does all of this (tick as each lands):
 - [x] Pause sending (Glissando's Woah!) (package E)
 - [x] Ham phrases highlighted as they are typed, faint red on the ones that go as one symbol, on the Broadcast and Session entry lines
 - [x] Re-send on a message's right-click menu, Broadcast and Session
-- [x] No sending outside the US data segments when receive only is set (Settings > Station, Radio: the dial read from rigctld, docs/STAGE1.md "The dial, the path log and the watch list")
+- [x] No sending outside the US data segments when receive only is set (Settings > Rig: the dial read from rigctld or Hamlib, docs/STAGE1.md "The dial, the path log and the watch list")
 
 The Data2G TV scene and the BONKing cat are Glissando art, so they go with the mode rather than to the client. You may want to keep the cat somewhere; that's your call.
 

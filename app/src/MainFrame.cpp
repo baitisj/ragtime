@@ -45,7 +45,7 @@
 #include "PathsDialog.h"
 #include "RecentWorkPane.h"
 #include "Report.h"
-#include "RigConnection.h"
+#include "RigControl.h"
 #include "SessionPage.h"
 #include "SettingsDialog.h"
 #include "StationList.h"
@@ -72,6 +72,7 @@ enum
 {
     ID_GEARSHIFT = wxID_HIGHEST + 1,
     ID_STATION_SETTINGS,
+    ID_RIG_SETTINGS,
     ID_NARROW,
     ID_GLOBUS,
     ID_MESSAGE_STATION,
@@ -256,7 +257,7 @@ MainFrame::MainFrame()
         refreshSession();
     };
     host_->setDataSide(std::move(data));
-    rig_ = std::make_unique<RigConnection>([this]() { onDial(); });
+    rig_ = std::make_unique<RigControl>([this]() { onDial(); });
 
     // Every broadcast item of ours is sealed once it has gone.
     chat_.onItems([this](const std::vector<protocol::Record>& items, uint64_t burst, const std::string& mode,
@@ -291,6 +292,8 @@ MainFrame::MainFrame()
         // What is under way ends here; a part received is kept, and the
         // log keeps it for next time.
         sessionFiles_.stopAll("Ragtime was closed");
+        // Unkeyed and closed before anything else.
+        rig_->stop();
         host_->recorder().note("Ragtime closed", HostConnection::nowMs());
         fileTraffic_.update(HostConnection::nowMs());
         saveFilesLog(true);
@@ -376,6 +379,7 @@ void MainFrame::buildMenus()
 
     auto* settings = new wxMenu;
     settings->Append(ID_STATION_SETTINGS, "&Station...\tCtrl+,");
+    settings->Append(ID_RIG_SETTINGS, "&Rig...");
     settings->Append(ID_GEARSHIFT, "&Gearshift...\tCtrl+G");
     settings->AppendCheckItem(ID_NARROW, "&500 Hz only\tCtrl+5");
 
@@ -401,6 +405,7 @@ void MainFrame::buildMenus()
     Bind(wxEVT_UPDATE_UI, [this](wxUpdateUIEvent& e) { e.Enable(!prefs_.callsign.empty()); }, ID_BROADCAST_FILE);
     Bind(wxEVT_MENU, [this](wxCommandEvent&) { showGearshift(); }, ID_GEARSHIFT);
     Bind(wxEVT_MENU, [this](wxCommandEvent&) { showSettings(); }, ID_STATION_SETTINGS);
+    Bind(wxEVT_MENU, [this](wxCommandEvent&) { showSettings(SettingsDialog::Page::Rig); }, ID_RIG_SETTINGS);
     Bind(wxEVT_MENU, [this](wxCommandEvent& e) { setNarrow(e.IsChecked()); }, ID_NARROW);
     Bind(wxEVT_MENU, [this](wxCommandEvent& e) { setGlobus(e.IsChecked()); }, ID_GLOBUS);
     Bind(wxEVT_MENU, [this](wxCommandEvent& e) { setPaused(e.IsChecked()); }, ID_PAUSE);
@@ -734,22 +739,27 @@ void MainFrame::applyPrefs(bool reconnect)
     refreshStations();
 }
 
-void MainFrame::showSettings()
+void MainFrame::showSettings(SettingsDialog::Page page)
 {
     std::vector<std::pair<std::string, std::string>> gears;
     for (const gearbox::Gear& gear : gearshift_.ladder())
         gears.push_back({gear.mode, gear.name.empty() ? gear.mode : gear.name + "  (" + gear.mode + ")"});
-    SettingsDialog dialog(this, prefs_, gears);
+    // Test reports the rig Ragtime has open with the same settings, whose
+    // port is taken.
+    auto openRig = [this](const radio::RigSettings& rig) {
+        bool same = prefs_.rig.source == radio::RigSource::Hamlib && radio::sameRig(rig, prefs_.rig);
+        return same ? rig_->describe() : std::string();
+    };
+    SettingsDialog dialog(this, prefs_, gears, openRig, page);
     if (dialog.ShowModal() != wxID_OK) return;
     StationPrefs next = dialog.prefs();
     bool reconnect = next.callsign != prefs_.callsign || next.host != prefs_.host || next.kissPort != prefs_.kissPort
                      || next.commandPort != prefs_.commandPort || host_->state() == HostConnection::State::Off;
-    bool radio = next.readDial != prefs_.readDial || next.rigHost != prefs_.rigHost || next.rigPort != prefs_.rigPort
-                 || next.usSegmentsOnly != prefs_.usSegmentsOnly;
     prefs_ = next;
     saveStationPrefs(prefs_);
     applyPrefs(reconnect);
-    if (radio) applyRadioPrefs();
+    // A rig already open the same way stays open.
+    applyRadioPrefs();
 }
 
 //-------------------------------------------------------------------------
@@ -768,7 +778,7 @@ void MainFrame::onHostEvents(const std::vector<Event>& events)
         {
             case Event::Type::Ptt:
                 bar_->tx->setOn(e.on);
-                rig_->setKeyed(e.on);
+                rig_->hostPtt(e.on);
                 break;
             case Event::Type::ModeUsed:
                 modeUsed_ = e.text;
@@ -859,6 +869,8 @@ void MainFrame::onHostEvents(const std::vector<Event>& events)
 void MainFrame::onClock()
 {
     uint64_t now = HostConnection::nowMs();
+    // Never keyed with no host to say PTT OFF.
+    if (host_->state() != HostConnection::State::Connected) rig_->hostLost();
     applySendGuard();
     if (now > trimmedMs_ + 60 * 60 * 1000)
     {
@@ -2443,10 +2455,7 @@ void MainFrame::placeTabToggle()
 
 void MainFrame::applyRadioPrefs()
 {
-    if (prefs_.readDial)
-        rig_->start(prefs_.rigHost, prefs_.rigPort);
-    else
-        rig_->stop();
+    rig_->apply(prefs_.rig);
     applySendGuard();
     showDial();
 }
@@ -2459,7 +2468,7 @@ void MainFrame::onDial()
 
 void MainFrame::showDial()
 {
-    if (!prefs_.readDial)
+    if (!prefs_.readsDial())
     {
         bar_->setDial(wxString(), wxString(), false);
         return;
@@ -2487,7 +2496,7 @@ void MainFrame::showDial()
 
 std::string MainFrame::sendRefusal() const
 {
-    if (!prefs_.readDial || !prefs_.usSegmentsOnly) return std::string();
+    if (!prefs_.readsDial() || !prefs_.usSegmentsOnly) return std::string();
     std::optional<uint64_t> hz = rig_->dialHz();
     if (!hz) return "Ragtime doesn't know the dial frequency, so it can't tell whether a burst would be inside a "
                     "US data segment. " + rig_->describe() + ".";

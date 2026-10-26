@@ -17,7 +17,7 @@ jobs:
     - name: Install packages
       run: |
         sudo apt-get update
-        sudo apt-get install -y build-essential cmake libwxgtk3.2-dev libgtk-3-dev
+        sudo apt-get install -y build-essential cmake pkg-config libwxgtk3.2-dev libgtk-3-dev libhamlib-dev
     - name: Build
       run: |
         cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
@@ -41,7 +41,8 @@ jobs:
     - name: Install packages
       run: |
         apt-get update
-        apt-get install -y --no-install-recommends cmake make libwxgtk3.2-dev libgtk-3-dev
+        apt-get install -y --no-install-recommends cmake make pkg-config libwxgtk3.2-dev libgtk-3-dev \
+          libhamlib-dev
     - name: Build
       run: |
         # The image's GCC 16 is in /usr/local/bin; never let Debian's g++ in.
@@ -54,7 +55,8 @@ jobs:
 
   windows:
     # The portable Windows zip, cross-compiled with MinGW-w64 against a
-    # static wxWidgets, and the unit tests run as Windows programs under Wine.
+    # static wxWidgets and Hamlib, and the unit tests run as Windows programs
+    # under Wine.
     name: Windows (MinGW-w64 cross build, tests under Wine)
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04
@@ -64,7 +66,7 @@ jobs:
       run: |
         sudo apt-get update
         sudo apt-get install -y --no-install-recommends cmake make git zip \
-          g++-mingw-w64-x86-64-posix wine wine64
+          g++-mingw-w64-x86-64-posix wine wine64 autoconf automake libtool
     - name: Build and zip
       run: packaging/windows/make-zip.sh
     - name: Test under Wine
@@ -90,7 +92,7 @@ jobs:
     - name: Install packages
       run: |
         sudo apt-get update
-        sudo apt-get install -y build-essential cmake curl file libwxgtk3.2-dev libgtk-3-dev
+        sudo apt-get install -y build-essential cmake curl file pkg-config libwxgtk3.2-dev libgtk-3-dev libhamlib-dev
     - name: Build the AppImage
       run: packaging/linux/make-appimage.sh
     - name: Checksum

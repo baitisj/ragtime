@@ -75,7 +75,16 @@ void HostLink::commandDown(uint64_t nowMs)
         emit(e);
     }
     groupMode_.clear();
-    ptt_ = false;
+    // The host may have been keyed: whatever keys with it (the TX lamp,
+    // Ragtime keying the rig) hears that it no longer is.
+    if (ptt_)
+    {
+        ptt_ = false;
+        Event e;
+        e.type = Event::Type::Ptt;
+        e.on = false;
+        emit(e);
+    }
     busy_ = false;
     data2g_ = false;
     lastMode_.clear();

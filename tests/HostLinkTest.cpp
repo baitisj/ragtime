@@ -148,6 +148,20 @@ void testReports()
     say(link, "PTT ON\r", 20);
     CHECK(!hasEvent(link.takeEvents(), Type::Ptt));
 
+    // The host drops while keyed: PTT is off.
+    {
+        HostLink keyed = opened(0);
+        say(keyed, "PTT ON\r", 10);
+        keyed.takeEvents();
+        keyed.commandDown(20);
+        bool off = false;
+        for (const auto& e : keyed.takeEvents()) off = off || (e.type == Type::Ptt && !e.on);
+        CHECK(off && !keyed.ptt());
+        keyed.commandUp(30);
+        keyed.commandDown(40);
+        CHECK(!hasEvent(keyed.takeEvents(), Type::Ptt));
+    }
+
     // Frames heard on the group port come up; other ports' don't.
     std::vector<uint8_t> in = kissEncode(2, {0xA0, 1, 2});
     std::vector<uint8_t> other = kissEncode(5, {0xA0, 9});

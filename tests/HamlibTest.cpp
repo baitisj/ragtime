@@ -1,0 +1,148 @@
+// The rig library against Hamlib itself: the rig list, a backend's own
+// settings, and HamlibRig opening Hamlib's dummy rig (model 1, no port, no
+// radio) on its thread, reading the dial, keying and unkeying, and saying
+// why when a rig can't be opened.
+#include <chrono>
+#include <functional>
+#include <string>
+#include <thread>
+#include <vector>
+
+#include "Check.h"
+#include "ragtime/rig/HamlibRig.h"
+
+using namespace ragtime;
+using rig::HamlibRig;
+
+namespace
+{
+
+// Waits up to five seconds for the status to pass.
+bool waitFor(const HamlibRig& r, const std::function<bool(const HamlibRig::Status&)>& ok)
+{
+    for (int i = 0; i < 500; i++)
+    {
+        if (ok(r.status())) return true;
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    return false;
+}
+
+radio::RigSettings dummy()
+{
+    radio::RigSettings s;
+    s.source = radio::RigSource::Hamlib;
+    s.model = 1;
+    s.keyRig = true;
+    return s;
+}
+
+void list()
+{
+    CHECK(rig::available());
+    CHECK(rig::hamlibVersion().rfind("Hamlib 4", 0) == 0);
+    bool sawDummy = false, sawIc7100 = false, sawNet = false;
+    for (const rig::Model& m : rig::models())
+    {
+        sawDummy = sawDummy || (m.id == 1 && m.maker == "Hamlib" && m.port == radio::PortType::None);
+        sawIc7100 = sawIc7100 || (m.id == 3070 && m.maker == "Icom" && m.name == "IC-7100"
+                                  && m.port == radio::PortType::Serial);
+        sawNet = sawNet || m.id == 2;
+    }
+    CHECK(sawDummy && sawIc7100);
+    // As a person reads them: IC-703 before IC-7000, Kachina before KTH.
+    std::vector<rig::Model> all = rig::models();
+    auto at = [&](int id) {
+        for (size_t i = 0; i < all.size(); i++)
+        {
+            if (all[i].id == id) return (int)i;
+        }
+        return -1;
+    };
+    CHECK(at(3055) >= 0 && at(3060) >= 0 && at(3055) < at(3060));
+    // NET rigctl is the Rig page's rigctld choice, read only.
+    CHECK(!sawNet);
+    CHECK(!rig::model(2));
+    CHECK(rig::model(3070) && rig::model(3070)->name == "IC-7100");
+    bool civ = false;
+    for (const rig::BackendParam& p : rig::backendParams(3070)) civ = civ || p.name == "civaddr";
+    CHECK(civ);
+}
+
+void dummyRig()
+{
+    HamlibRig r;
+    CHECK(!r.status().running);
+    r.start(dummy());
+    CHECK(waitFor(r, [](const HamlibRig::Status& s) { return s.open && s.hz; }));
+    HamlibRig::Status s = r.status();
+    CHECK(s.running && !s.keyed && s.problem.empty());
+    CHECK_EQ(s.rig, std::string("Hamlib Dummy"));
+    // The dummy rig starts at 145 MHz.
+    CHECK(s.hz && *s.hz == 145000000);
+
+    r.setPtt(true);
+    CHECK(waitFor(r, [](const HamlibRig::Status& st) { return st.keyed; }));
+    r.setPtt(false);
+    CHECK(waitFor(r, [](const HamlibRig::Status& st) { return !st.keyed; }));
+    CHECK_EQ(r.status().pttFailures, (uint64_t)0);
+
+    // Keyed when stopped: unkeyed, and closed.
+    r.setPtt(true);
+    CHECK(waitFor(r, [](const HamlibRig::Status& st) { return st.keyed; }));
+    r.stop();
+    CHECK(!r.status().running && !r.status().open);
+
+    // Started again, with other settings.
+    radio::RigSettings mic = dummy();
+    mic.ptt = radio::PttMethod::CatMic;
+    mic.pollSeconds = 2;
+    r.start(mic);
+    CHECK(waitFor(r, [](const HamlibRig::Status& st) { return st.open; }));
+    r.setPtt(true);
+    CHECK(waitFor(r, [](const HamlibRig::Status& st) { return st.keyed; }));
+    r.setPtt(false);
+    CHECK(waitFor(r, [](const HamlibRig::Status& st) { return !st.keyed; }));
+}
+
+void cantOpen()
+{
+    HamlibRig r;
+    radio::RigSettings s = dummy();
+    s.model = 999999;
+    r.start(s);
+    CHECK(waitFor(r, [](const HamlibRig::Status& st) { return !st.problem.empty(); }));
+    CHECK(r.status().problem.find("no rig model 999999") != std::string::npos);
+    CHECK(r.status().problem.find("trying again") != std::string::npos);
+    // Keying a rig that isn't open does nothing.
+    r.setPtt(true);
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    CHECK(!r.status().keyed && !r.status().open);
+    r.stop();
+
+    s = dummy();
+    s.backendConf = "nosuch=1";
+    r.start(s);
+    CHECK(waitFor(r, [](const HamlibRig::Status& st) { return !st.problem.empty(); }));
+    CHECK(r.status().problem.find("no setting \"nosuch\"") != std::string::npos);
+    r.stop();
+
+    s = dummy();
+    s.model = 3070;
+    s.port = "/dev/ragtime-no-such-port";
+    r.start(s);
+    CHECK(waitFor(r, [](const HamlibRig::Status& st) { return !st.problem.empty(); }));
+    CHECK(r.status().problem.find("Couldn't open the IC-7100 on /dev/ragtime-no-such-port") != std::string::npos);
+    CHECK(!r.status().open);
+    r.stop();
+}
+
+} // namespace
+
+int main()
+{
+    list();
+    dummyRig();
+    cantOpen();
+    return ragtime_test::finish();
+}

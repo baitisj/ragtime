@@ -636,8 +636,8 @@ adds VARA's `SN` for the session partner (`docs/PROTOCOL.md`).
 Ideas 3 and 7 from the 2026-10-25 list (Jeff picked them with parity
 repair and the flight recorder). Nothing here goes on the air.
 
-**The dial.** With **Read the dial from rigctld** ticked (Settings >
-Station, Radio; off by default, `127.0.0.1:4532`), Ragtime asks rigctld
+**The dial.** With **Read the dial from rigctld** picked (Settings >
+Rig; off by default, `127.0.0.1:4532`), Ragtime asks rigctld
 the radio's frequency once a second, and only that: `radio::DialReader`
 writes `f` and nothing else, ever (a test drives it through errors,
 keying and silence and checks every byte it wrote). It never tunes or
@@ -756,6 +756,100 @@ Choices made here, for Jeff to keep or change: the hour either side;
 the multiplied score; contacts counted by day, not by message; every
 station heard in 14 days listed, including those in the station list
 now.
+
+## Rig control
+
+Andrew's suggestion (2026-10-26), which Jeff took up: "do what other
+people do and support rig control on your own, and have an option (off
+by default) to drive PTT according to data2g's PTT ON / PTT OFF
+responses, for people who don't have multi-open rig drivers". Jeff
+wanted it as its own Rig section of the settings, rigctld at the top,
+and otherwise the standard Hamlib choices for everything Hamlib
+supports.
+
+**Settings > Rig** (a tab beside Station, and its own menu item) picks
+one of three, `radio::RigSettings`:
+
+![Settings > Rig, set up for an IC-7100](images/rig-settings.png)
+
+- **No rig.** Ragtime doesn't know the band.
+- **Read the dial from rigctld, already running**: as before (above),
+  `f` and nothing else. It never keys, so a shared rigctld (fldigi's)
+  is safe.
+- **Open the rig with Hamlib**: Ragtime opens the rig itself, as fldigi
+  and WSJT-X do. The rig is picked by maker and model from Hamlib's own
+  list (every rig the linked Hamlib knows, in reading order, IC-703
+  before IC-7000; NET rigctl is left out, since reading rigctld is the
+  choice above and keying through a shared rigctld is what Ragtime never
+  does). Then the port (a combo of `/dev/serial/by-id/*`,
+  `/dev/ttyUSB*`, `/dev/ttyACM*`, or COM ports on Windows; host:port for
+  a network rig), the serial settings (baud, data and stop bits,
+  parity, handshake, DTR and RTS held on or off, each "Rig's own" by
+  default), the backend's own settings as `name=value` words, as `rigctl
+  -C` takes them (the tooltip lists the picked rig's, such as an Icom's
+  `civaddr`), and how often to read the dial (1 s). **Test** opens the
+  rig with what is on the page and reads its dial, "Icom IC-7100
+  answered: 14.105.000 MHz, 20 m", or says why it couldn't; it never
+  keys. If Ragtime already has the rig open the same way, Test reports
+  that instead, since the port is taken.
+
+`radio::hamlibConf` turns the page into Hamlib's configuration words
+(`rig_pathname`, `serial_speed`, `serial_parity`, `ptt_type` and so on),
+set with `rig_set_conf` before `rig_open`; serial words only for a rig
+on a serial port, which is what Hamlib accepts. `rig::HamlibRig` (the
+`rig/` library, kept out of core, which has no ports) runs the rig on a
+thread of its own: it opens it, reads the dial every poll, never while
+keyed, puts a PTT change ahead of any reading, and closes and tries
+again 2, 4, 8, 15 and every 30 s when the rig fails to open or stops
+answering (three failed readings in a row). Errors are in plain words
+("the rig didn't answer (is it on, and at that speed?)"): Hamlib's own
+`rigerror()` carries its debug trail. It never tunes the rig or sets
+its mode.
+
+**Key the rig when data2g-host keys** (off by default, Hamlib only).
+data2g-host says `PTT ON` on its command port as its keyer starts a
+burst's lead-in and `PTT OFF` once the audio has drained and its off
+delay passed (Data2G's `Station::announce_ptt`), and it says so even
+when started with `--no-rig`, keying nothing itself. With the box
+ticked, `radio::PttFollower` keys the rig at `PTT ON` and unkeys it at
+`PTT OFF`, by CAT with the data audio (Hamlib's `RIGMICDATA` and
+`RIG_PTT_ON_DATA`), by CAT with the radio's usual audio (`RIG` and
+`RIG_PTT_ON`), or by the DTR or RTS line of the rig's port or another.
+It unkeys on its own, so a lost line never leaves a transmitter on:
+when the command link to data2g-host drops (HostLink now reports PTT
+off then too, which also puts out the TX light), when keying fails or
+the rig closes while keyed, when Ragtime closes or the box is
+unticked, and after 180 s keyed whatever the host says. After the time
+limit or a rig failure it waits for `PTT OFF` before keying again.
+
+Run data2g-host with `--no-rig` so it leaves the rig to Ragtime, and
+`--ptt-on-delay-ms 300` (100 by default) so the rig is keyed before
+the audio starts: the report goes over TCP to Ragtime, then to the
+rig's thread and the rig. On the bench, with Hamlib's dummy rig and
+`ragtime_fake_air`, the rig keyed at the host's `PTT ON` and unkeyed at
+`PTT OFF`.
+
+This is the one exception to "Ragtime never touches the sound card or
+PTT for data": PTT, when the operator ticks the box. The sound card
+stays data2g-host's.
+
+**Building.** Hamlib is LGPL and linked as a library: `libhamlib-dev`
+on Linux (pkg-config `hamlib`), and on Windows a static Hamlib 4.5.5
+cloned and built with autotools for MinGW-w64
+(`cmake/BuildHamlib.cmake`, `-DRAGTIME_BUILD_HAMLIB=ON`, which
+`make-zip.sh` passes). `-DRAGTIME_HAMLIB=OFF` builds without it; the
+Rig page then greys its Hamlib choice. The AppImage carries the
+system's `libhamlib.so.4` and what it needs. `ragtime_hamlib_test`
+opens Hamlib's dummy rig (model 1, no port, no radio), reads its dial,
+keys and unkeys it, and checks the reasons a rig can't be opened;
+`ragtime_rig_test` covers the settings and the follower.
+
+Settings keys: `/Radio/Source` (`none`, `rigctld`, `hamlib`; a file
+from before has only `/Radio/ReadDial`, which still reads, and is still
+written for an older Ragtime), and `/Hamlib/...`.
+
+On Linux the operator needs to be in the `dialout` group to open a
+serial port.
 
 ## The flight recorder
 

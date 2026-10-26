@@ -131,6 +131,13 @@ with the code when the seal rules change.
   either way) are `work` lines in the path log. The pane is
   `app/src/RecentWorkPane`, under the station list in the `left_`
   splitter.
+- Rig control (2026-10-26, Andrew's suggestion, `docs/STAGE1.md`):
+  Settings > Rig picks no rig, the dial from rigctld (read only), or
+  the rig opened with Hamlib (`radio::RigSettings`, `radio::hamlibConf`;
+  `rig::HamlibRig` in `rig/`, on its own thread), with "Key the rig when
+  data2g-host keys" (`radio::PttFollower`, off by default) following
+  the host's PTT ON/OFF. `app/src/RigControl` holds whichever is
+  picked; Settings is now two tabs, Station and Rig.
 - The flight recorder (2026-10-25, idea 2 of "Ideas before
   signatures"): `link::FlightRecorder` keeps every command line, KISS
   frame and session byte count to and from the host, with millisecond
@@ -171,7 +178,11 @@ with the code when the seal rules change.
   `docs/DATA2G.md`, or Data2G has moved past its commit, read the source
   and update that page in the same PR.
 - Never start `data2g-host`; the operator runs it. Ragtime never touches
-  the sound card or PTT for data.
+  the sound card. It keys the rig only with "Key the rig when
+  data2g-host keys" ticked (Settings > Rig, Hamlib only, off by
+  default), following the host's PTT ON/OFF and unkeying by itself on
+  a dropped link, a rig failure, quitting and after 180 s (Andrew's
+  suggestion, 2026-10-26, for rigs whose drivers can't be opened twice).
 - Glissando dropped its own Data2G mode on 2026-10-22 (glissando PR
   #113), so Ragtime is the only Data2G client. Never change Glissando's
   chirp modem behaviour from this project.
@@ -213,17 +224,20 @@ with the code when the seal rules change.
   copy, never defined terms in the spec.
 - The radio is the source of truth for frequency: retune only when the
   operator asks. Ragtime reads the dial from rigctld (`f` only, never a
-  set command: the operator's rigctld is shared).
+  set command: the operator's rigctld is shared), or from the rig it
+  opens with Hamlib, where PTT is the only thing it ever sets. It never
+  keys through rigctld (NET rigctl is left out of the Hamlib list).
 
 ## Layout
 
 | Path | What |
 | --- | --- |
-| `core/` | `ragtime_core`, the socket-free library: no wx, no sockets in the engines, all unit-tested. Headers in `core/include/ragtime/`, sources in `core/src/`, one subfolder per area: `protocol/`, `link/`, `text/`, `files/` (package B; G adds `FileRows`, `FileTraffic`), `globus/` (C), `gearbox/` (D), `broadcast/` (E, with `BroadcastLog`; H adds `Airtime`, `Seals`, `BroadcastFiles`), `session/` (F, and `SessionLog`; `StreamLog` for cuts), `radio/` (the dial from rigctld, the US data segments, the path log, Recent work). Add sources to `core/CMakeLists.txt` |
-| `app/` | The wxWidgets app (`app/src/`). It draws and wires; logic goes in core. `MainFrame` is the one main window and owns the engines; `HostConnection` (data2g-host) and `RigConnection` (rigctld, read only) are the only code with sockets; `Prefs` holds every wxConfig key, and `appDataDir()` is where Ragtime keeps its own files (never wx's `GetUserDataDir()`: on Linux that is `~/.Ragtime`, the settings file); `app/src/globus/` is the Globus pane (`GlobusPanel`, `GlobusView`, `GlobusToggle`) |
+| `core/` | `ragtime_core`, the socket-free library: no wx, no sockets in the engines, all unit-tested. Headers in `core/include/ragtime/`, sources in `core/src/`, one subfolder per area: `protocol/`, `link/`, `text/`, `files/` (package B; G adds `FileRows`, `FileTraffic`), `globus/` (C), `gearbox/` (D), `broadcast/` (E, with `BroadcastLog`; H adds `Airtime`, `Seals`, `BroadcastFiles`), `session/` (F, and `SessionLog`; `StreamLog` for cuts), `radio/` (the dial from rigctld, the US data segments, the path log, Recent work, the rig settings and the PTT follower). Add sources to `core/CMakeLists.txt` |
+| `rig/` | `ragtime_rig`: `rig::HamlibRig`, the rig opened with Hamlib on a thread of its own, Hamlib's rig list and the serial ports. Kept out of core (no ports there); with `-DRAGTIME_HAMLIB=OFF` a stand-in that says Hamlib is missing |
+| `app/` | The wxWidgets app (`app/src/`). It draws and wires; logic goes in core. `MainFrame` is the one main window and owns the engines; `HostConnection` (data2g-host) and `RigConnection` (rigctld, read only) are the only code with sockets, and `RigControl` holds the rig as Settings > Rig has it; `Prefs` holds every wxConfig key, and `appDataDir()` is where Ragtime keeps its own files (never wx's `GetUserDataDir()`: on Linux that is `~/.Ragtime`, the settings file); `app/src/globus/` is the Globus pane (`GlobusPanel`, `GlobusView`, `GlobusToggle`) |
 | `tests/` | ctest unit tests for core, plain executables on `tests/Check.h` (`CHECK`, `CHECK_EQ`). Add one with `ragtime_test(<name> <source>)` in `tests/CMakeLists.txt`. `FakeHost.*` is a fake data2g-host on loopback sockets (POSIX, so its test and the bench build only `if(UNIX)`); `FakeAirMain.cpp` is the bench `ragtime_fake_air`, and `ReplayHost.*` its `--replay` |
 | `tools/` | Reference scripts: `icon/` (`make_leaf_svg.py` draws the icon, the Maple Leaf Rag's leaf going digital, as `app/res/ragtime.svg`; `make_icons.sh` renders its PNG and ICO), `globe/` (sunlit globe renderer, and the generators of the map tables in `core/src/globus/`: coasts and borders from Natural Earth, the big lakes from `ne_110m_lakes.geojson`, state and province lines from Natural Earth's 1:10m admin-1 lines, fetched for the run, for the countries in `gen_admin1_lines.py`), `gearbox/` (ladders), `ham_table/` (text table 0 generator and corpus: `gen_table.py --check`), `gcc16/check.py` (GCC 16 check) |
-| `cmake/` | CMake helpers. `ragtime_warnings(<target>)` gives every target `-Wall -Wextra` and, with `RAGTIME_WERROR` (on by default), `-Werror`; `Toolchain-mingw64.cmake` (the Windows cross build), `BuildWxWidgets.cmake` (wxWidgets 3.2.9 cloned and built statically with `-DRAGTIME_BUILD_WX=ON`), `EmbedFile.cmake` (the window icon built in) |
+| `cmake/` | CMake helpers. `ragtime_warnings(<target>)` gives every target `-Wall -Wextra` and, with `RAGTIME_WERROR` (on by default), `-Werror`; `Toolchain-mingw64.cmake` (the Windows cross build), `BuildWxWidgets.cmake` (wxWidgets 3.2.9 cloned and built statically with `-DRAGTIME_BUILD_WX=ON`), `BuildHamlib.cmake` (Hamlib 4.5.5 cloned and built statically with autotools, `-DRAGTIME_BUILD_HAMLIB=ON`), `EmbedFile.cmake` (the window icon built in) |
 | `packaging/` | Release recipes: `linux/make-appimage.sh` (with `ragtime.desktop`), `windows/make-zip.sh` (with the zip's `README.txt`). Both write to `dist/`, named by `release-name.sh` |
 | `docs/` | The plan and specs. Change them in the same PR as the code they describe |
 
@@ -232,8 +246,10 @@ The version is `project(ragtime VERSION ...)` in the top-level
 
 ## Build and test
 
-Ubuntu 24.04 needs `build-essential cmake libwxgtk3.2-dev libgtk-3-dev`
-(GTK for the ham phrase highlight in the entry lines, `PhraseHighlight`).
+Ubuntu 24.04 needs `build-essential cmake pkg-config libwxgtk3.2-dev
+libgtk-3-dev libhamlib-dev` (GTK for the ham phrase highlight in the
+entry lines, `PhraseHighlight`; Hamlib for Settings > Rig, or
+`-DRAGTIME_HAMLIB=OFF` to build without it).
 
     cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
     cmake --build build -j$(nproc)
@@ -241,7 +257,9 @@ Ubuntu 24.04 needs `build-essential cmake libwxgtk3.2-dev libgtk-3-dev`
 
 Tests are on by default (`-DRAGTIME_TESTS=OFF` turns them off), and
 every test runs headless, the app included (`ragtime --version`).
-`-DRAGTIME_APP=OFF` builds only core and its tests, with no wx needed.
+`-DRAGTIME_APP=OFF` builds only core, the rig library and their tests,
+with no wx needed. Rig tests use Hamlib's dummy rig (model 1), never a
+real radio.
 
 CI (`.github/workflows/build.yml`) runs only the Ubuntu 24.04 build with
 tests on each PR (Jeff's choice, 2026-10-22: threads already build and
@@ -278,14 +296,18 @@ from host A or B is answered on its second try. The hosts report SNRs,
 each bot at its own strength; `--no-snr` plays a host from before Data2G
 PR #98. `--rig PORT` plays a rigctld for the dial (14.105 MHz, or
 `--dial HZ`; `--dial-hop` moves it outside the data segments one minute
-in three) and prints anything it is sent but `f`. Headless:
+in three) and prints anything it is sent but `f`. For Hamlib with no
+radio, pick maker Hamlib, model Dummy in Settings > Rig: a pretend rig
+at 145 MHz, which "Key the rig" keys at the fake hosts' PTT. Headless:
 `Xvfb :91 &`, `DISPLAY=:91 ragtime ...`, `xdotool` to click and type,
 `import -window root` for a screenshot. Never point the bench at Jeff's
 radio PC's real host ports while his data2g-host runs.
 
 **Windows.** `packaging/windows/make-zip.sh` cross-compiles with Ubuntu's
-`g++-mingw-w64-x86-64-posix`, cloning wxWidgets into `build-win` the
-first time (or set `RAGTIME_WX_SOURCE` to a checkout), and
+`g++-mingw-w64-x86-64-posix`, cloning wxWidgets and Hamlib into
+`build-win` the first time (or set `RAGTIME_WX_SOURCE` and
+`RAGTIME_HAMLIB_SOURCE` to checkouts; Hamlib needs `autoconf automake
+libtool`), and
 `ctest --test-dir build-win` runs the tests under Wine (`wine64`). The exe
 links everything in, so it needs no DLLs beside it. Windows file names
 ignore case: a test that saves `two.bin` beside `TWO.BIN` overwrites it.
@@ -317,7 +339,7 @@ The bench's fake hosts are POSIX, but `wine ragtime.exe` talks to a Linux
 
 - C++17, wxWidgets, CMake, the same toolchain as Glissando. The AppImage
   and the Windows zip follow Glissando's recipes (its `docs/APP.md`),
-  simpler for having no audio, Hamlib or codec2. There is no Mac or ARM
+  simpler for having no audio or codec2. There is no Mac or ARM
   build yet.
 - Engines worth porting from Glissando (logic and tests, adapted to the
   new records): `Data2GLink` (KISS, command lines, `MODES`, session
