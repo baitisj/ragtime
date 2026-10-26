@@ -60,13 +60,14 @@ wxString spanText(const Span& s)
     return wxString::Format("%d", tens(s.lowHz)) + DASH + wxString::Format("%d Hz", tens(s.highHz));
 }
 
-// The rig reads back what was written: the knobs come back as the rig's
-// own steps, so within one and a half of them.
+// The rig reads back what was written: the knobs come back in the rig's
+// own steps, which can be coarser than Hamlib's 1/255 (Jeff's IC-7100
+// reads 0.43 back as 0.44), so within four of those.
 bool readsBack(const RigFilter& got, const RigFilter& want)
 {
     auto knob = [](const std::optional<double>& a, const std::optional<double>& b) {
         if (!b) return true;
-        return a && std::fabs(*a - *b) <= 1.5 / 255.0;
+        return a && std::fabs(*a - *b) <= 4.0 / 255.0;
     };
     const bool notch = !want.notchOn || (got.notchOn == want.notchOn && (!*want.notchOn || knob(got.notchRaw, want.notchRaw)));
     return got.mode == want.mode && got.widthHz == want.widthHz && knob(got.pbtIn, want.pbtIn) &&
@@ -166,7 +167,8 @@ EarFilterBar::EarFilterBar(wxWindow* parent, EarScope* scope, FilterEdit& edit, 
         }
         edit_.keep();
         keepArmed_ = false;
-        wanted_.reset();
+        // Kept ahead of its write, it still shows what is coming.
+        if (!edit_.keptAhead()) wanted_.reset();
         if (edges_) show(nowMs_, *edges_);
     });
     scope_->onDrag([this](const Span& from, const Span& to) { dragged(from, to); });
@@ -224,6 +226,10 @@ std::optional<Span> EarFilterBar::spanNow() const
 {
     if (edges_)
         if (auto m = measured(*edges_)) return m;
+    // Just written, until the noise shows it: where it was dropped, not
+    // where the model puts it, so the edges don't jump to the model and
+    // then again to the noise.
+    if (landing_) return landing_;
     if (auto f = setting()) return spanOfFilter(*f);
     return std::nullopt;
 }
@@ -268,8 +274,17 @@ void EarFilterBar::tick(uint64_t nowMs, bool quiet, ear::EdgeFinder& edges, cons
     }
     else if (rig.canSet)
     {
+        // A change going on (not one going back), and what going back
+        // returns to.
+        const std::optional<RigFilter> forward =
+            edit_.state() == FilterEdit::State::Waiting && !edit_.reverting() ? edit_.pending() : std::nullopt;
+        const std::optional<RigFilter> back = edit_.before();
         if (auto f = edit_.due(nowMs, quiet))
-            write(*f, edit_.state() == FilterEdit::State::Trial ? "on trial" : "put back", edges);
+        {
+            const bool on = forward && *f == *forward;
+            landing_ = on ? wanted_ : back && *f == *back ? from_ : std::nullopt;
+            write(*f, edit_.state() == FilterEdit::State::Trial ? "on trial" : on ? "kept" : "put back", edges);
+        }
     }
     else if (edit_.state() != FilterEdit::State::Idle)
     {
@@ -306,6 +321,9 @@ void EarFilterBar::tick(uint64_t nowMs, bool quiet, ear::EdgeFinder& edges, cons
                nowMs);
 
     showNotch(edges);
+
+    // The noise shows the edges again: they are the truth.
+    if (landing_ && measured(edges)) landing_.reset();
 
     // The handles, while the operator may drag.
     const bool canDrag = settable() && setting() && !calibration_.running() && !restore_ &&
@@ -659,16 +677,20 @@ void EarFilterBar::show(uint64_t nowMs, const ear::EdgeFinder&)
             text = utf8(edges);
         else
             text = "Changing the filter";
-        if (state == FilterEdit::State::Waiting)
+        if (edit_.keptAhead())
+            text += DOT + "kept: written at the next quiet moment";
+        else if (state == FilterEdit::State::Waiting)
             text += DOT + "waiting for a quiet moment";
         else if (!miss_.empty())
             text += DOT + utf8(miss_);
         if (cutsData2G())
         {
+            // First, so the line never cuts it off (Jeff, 2026-10-26: the
+            // end of a long line, "Keep twice", went unseen).
             warn = true;
-            // Short, so the line keeps it in sight beside the clock.
-            text += DOT + "cuts into Data2G's " + spanText(Span{d.lowHz, d.highHz}) +
-                    (keepArmed_ ? ": Keep again" : ": Keep twice");
+            const wxString cut = "Cuts into Data2G's " + spanText(Span{d.lowHz, d.highHz});
+            text = edit_.keptAhead() ? cut + DOT + text
+                                     : cut + (keepArmed_ ? ": press Keep again" : ": press Keep twice") + DOT + text;
         }
     }
     else if (!rig_.problem.empty())
@@ -736,7 +758,8 @@ void EarFilterBar::show(uint64_t nowMs, const ear::EdgeFinder&)
     {
         clock_->setLeft(trial ? edit_.secondsLeft(nowMs) / (FilterEdit::KEEP_MS / 1000.0) : 1.0);
         clock_->setColour(warn ? warningColour() : wxSystemSettings::GetColour(wxSYS_COLOUR_HIGHLIGHT));
-        keep_->Enable(trial);
+        // While waiting too: kept as it is written (Jeff, 2026-10-26).
+        keep_->Enable(trial || (state == FilterEdit::State::Waiting && !edit_.keptAhead()));
         keep_->SetLabel(keepArmed_ ? "Keep anyway" : "Keep");
         undo_->SetToolTip(trial ? "Put the filter back as it was before the change"
                                 : "Forget the change before it is written");

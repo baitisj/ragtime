@@ -202,8 +202,13 @@ public:
     // What Undo goes back to stays what the rig had before the first
     // change since the last Keep.
     void change(const RigFilter& to, uint64_t nowMs);
-    // Keep the trial; the clock stops.
+    // Keep the trial; the clock stops. Pressed while a change still waits
+    // for a quiet moment, it is kept as it is written, with no trial (Jeff,
+    // 2026-10-26: Keep pressed then, greyed, did nothing, and the change
+    // went back 15 s after it was written).
     void keep();
+    // Keep was pressed for the change waiting.
+    bool keptAhead() const { return state_ == State::Waiting && !revert_ && keepAhead_; }
     // Back to what the rig had before the change (once quiet).
     void undo();
     // Back to what the rig had when the Ear first read it.
@@ -244,6 +249,7 @@ private:
     std::optional<RigFilter> before_;
     std::optional<RigFilter> pending_;
     bool revert_ = false;       // the waiting setting goes back, no trial
+    bool keepAhead_ = false;    // the waiting setting is kept once written
     bool dirty_ = false;        // written since before_
     bool everWritten_ = false;
     uint64_t deadlineMs_ = 0;

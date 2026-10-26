@@ -124,6 +124,7 @@ private:
     std::optional<double> centre_;          // the passband's, knobs centred
     std::optional<ragtime::ear::Span> from_;    // before the change
     std::optional<ragtime::ear::Span> wanted_;  // what the change was for
+    std::optional<ragtime::ear::Span> landing_; // just written: shown until the noise shows it
     bool keepArmed_ = false;                // a cut into Data2G: Keep again
     std::string miss_;                      // where the edges really went
     uint64_t writtenMs_ = 0;

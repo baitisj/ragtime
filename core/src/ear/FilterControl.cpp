@@ -329,11 +329,17 @@ void FilterEdit::change(const RigFilter& to, uint64_t)
     if (state_ == State::Idle || (state_ == State::Waiting && revert_ && !dirty_)) before_ = current_;
     pending_ = to;
     revert_ = false;
+    keepAhead_ = false;
     state_ = State::Waiting;
 }
 
 void FilterEdit::keep()
 {
+    if (state_ == State::Waiting && !revert_)
+    {
+        keepAhead_ = true;
+        return;
+    }
     if (state_ != State::Trial) return;
     state_ = State::Idle;
     dirty_ = false;
@@ -348,12 +354,14 @@ void FilterEdit::undo()
     {
         // Nothing written yet: nothing to go back from.
         state_ = State::Idle;
+        keepAhead_ = false;
         pending_.reset();
         before_.reset();
         return;
     }
     pending_ = before_;
     revert_ = true;
+    keepAhead_ = false;
     state_ = State::Waiting;
 }
 
@@ -362,6 +370,7 @@ void FilterEdit::putBack()
     if (!found_) return;
     pending_ = found_;
     revert_ = true;
+    keepAhead_ = false;
     state_ = State::Waiting;
 }
 
@@ -371,10 +380,12 @@ std::optional<RigFilter> FilterEdit::due(uint64_t nowMs, bool quiet)
     if (state_ != State::Waiting || !quiet || !pending_) return std::nullopt;
     RigFilter write = *pending_;
     everWritten_ = true;
-    if (revert_)
+    if (revert_ || keepAhead_)
     {
+        // Put back, or kept already: no trial.
         state_ = State::Idle;
         revert_ = false;
+        keepAhead_ = false;
         dirty_ = false;
         before_.reset();
         pending_.reset();
@@ -399,7 +410,7 @@ std::optional<RigFilter> FilterEdit::close()
         write = before_;
     if (write) everWritten_ = true;
     state_ = State::Idle;
-    revert_ = dirty_ = false;
+    revert_ = dirty_ = keepAhead_ = false;
     before_.reset();
     pending_.reset();
     return write;
