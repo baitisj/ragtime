@@ -8,6 +8,7 @@
 #include "ragtime/broadcast/Seals.h"
 #include "ragtime/broadcast/Stations.h"
 #include "ragtime/gearbox/Gearbox.h"
+#include "ragtime/radio/RigSettings.h"
 
 // What Ragtime remembers between runs, in wxConfig (~/.Ragtime on Linux,
 // the registry on Windows, or the file given with --config). One place for
@@ -31,14 +32,15 @@ struct StationPrefs
     std::string repairFloor;
     bool repairCap = true;
     int repairCapMinutes = 30;
-    // The radio's dial, read (never set) from rigctld once a second: for
-    // the path log's bands, and the data segment check below.
-    bool readDial = false;
-    std::string rigHost = "127.0.0.1";
-    int rigPort = 4532;
+    // Settings > Rig: the dial, read (never set) from rigctld or from the
+    // rig opened with Hamlib, for the path log's bands and the data
+    // segment check below; and keying the rig at data2g-host's PTT.
+    ragtime::radio::RigSettings rig;
     // Receive only outside the US data segments, and while the dial isn't
-    // known (needs readDial).
+    // known (needs a rig).
     bool usSegmentsOnly = false;
+
+    bool readsDial() const { return rig.source != ragtime::radio::RigSource::None; }
 };
 
 constexpr int SLOW_REPAIR_MIN_MINUTES = 1;

@@ -2,12 +2,13 @@
 #
 # Cross-compiles Ragtime for 64-bit Windows and zips it as
 # dist/Ragtime-<version>-beta-<hash>-windows-x86_64.zip: ragtime.exe (one
-# file, with wxWidgets and the C++ runtime linked in), README.txt and
+# file, with wxWidgets, Hamlib and the C++ runtime linked in), README.txt and
 # LICENSE.txt. There is no installer.
 #
-# Needs Ubuntu 24.04's g++-mingw-w64-x86-64-posix, cmake, git and zip. The
-# build clones wxWidgets into build-win (set RAGTIME_WX_SOURCE to a
-# checkout to use that instead) and takes a while the first time. Set
+# Needs Ubuntu 24.04's g++-mingw-w64-x86-64-posix, cmake, git, zip, and
+# autoconf, automake and libtool for Hamlib. The build clones wxWidgets
+# and Hamlib into build-win (set RAGTIME_WX_SOURCE or RAGTIME_HAMLIB_SOURCE
+# to a checkout to use that instead) and takes a while the first time. Set
 # BUILD_DIR to use another build tree. With Wine installed,
 # `ctest --test-dir build-win` runs the unit tests as Windows programs.
 
@@ -18,7 +19,8 @@ NAME="Ragtime-$RAGTIME_RELEASE-windows-x86_64"
 BUILD_DIR=${BUILD_DIR:-$ROOT/build-win}
 
 cmake -S . -B "$BUILD_DIR" -DCMAKE_TOOLCHAIN_FILE="$ROOT/cmake/Toolchain-mingw64.cmake" \
-    -DCMAKE_BUILD_TYPE=Release -DRAGTIME_BUILD_WX=ON ${RAGTIME_WX_SOURCE:+-DRAGTIME_WX_SOURCE="$RAGTIME_WX_SOURCE"}
+    -DCMAKE_BUILD_TYPE=Release -DRAGTIME_BUILD_WX=ON ${RAGTIME_WX_SOURCE:+-DRAGTIME_WX_SOURCE="$RAGTIME_WX_SOURCE"} \
+    -DRAGTIME_BUILD_HAMLIB=ON ${RAGTIME_HAMLIB_SOURCE:+-DRAGTIME_HAMLIB_SOURCE="$RAGTIME_HAMLIB_SOURCE"}
 cmake --build "$BUILD_DIR" -j"$(nproc)"
 
 WORK=$(mktemp -d)

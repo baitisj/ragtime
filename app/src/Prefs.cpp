@@ -31,6 +31,64 @@ std::string readString(const char* key, const std::string& fallback)
 
 std::string configPath;
 
+std::string word(const char* key)
+{
+    return std::string(config().Read(key, wxString()).utf8_str());
+}
+
+// Settings > Rig. A file from before the Rig page has only ReadDial.
+ragtime::radio::RigSettings loadRig()
+{
+    using namespace ragtime::radio;
+    RigSettings r;
+    if (config().HasEntry("/Radio/Source"))
+        r.source = sourceFromWord(word("/Radio/Source"));
+    else
+        r.source = config().ReadBool("/Radio/ReadDial", false) ? RigSource::Rigctld : RigSource::None;
+    r.rigctldHost = readString("/Radio/RigctldHost", r.rigctldHost);
+    r.rigctldPort = (int)config().ReadLong("/Radio/RigctldPort", r.rigctldPort);
+    r.model = (int)config().ReadLong("/Hamlib/Model", r.model);
+    r.port = readString("/Hamlib/Port", r.port);
+    r.baud = (int)config().ReadLong("/Hamlib/Baud", r.baud);
+    r.dataBits = (int)config().ReadLong("/Hamlib/DataBits", r.dataBits);
+    r.stopBits = (int)config().ReadLong("/Hamlib/StopBits", r.stopBits);
+    r.parity = parityFromWord(word("/Hamlib/Parity"));
+    r.handshake = handshakeFromWord(word("/Hamlib/Handshake"));
+    r.dtr = lineFromWord(word("/Hamlib/Dtr"));
+    r.rts = lineFromWord(word("/Hamlib/Rts"));
+    r.backendConf = readString("/Hamlib/Backend", r.backendConf);
+    r.pollSeconds = (int)config().ReadLong("/Hamlib/PollSeconds", r.pollSeconds);
+    r.pollSeconds = std::min(std::max(r.pollSeconds, POLL_MIN_SECONDS), POLL_MAX_SECONDS);
+    r.keyRig = config().ReadBool("/Hamlib/KeyRig", r.keyRig);
+    r.ptt = pttFromWord(word("/Hamlib/Ptt"));
+    r.pttPort = readString("/Hamlib/PttPort", r.pttPort);
+    return r;
+}
+
+void saveRig(const ragtime::radio::RigSettings& r)
+{
+    using namespace ragtime::radio;
+    config().Write("/Radio/Source", wxString(sourceWord(r.source)));
+    // For a Ragtime from before the Rig page.
+    config().Write("/Radio/ReadDial", r.source == RigSource::Rigctld);
+    config().Write("/Radio/RigctldHost", wxString::FromUTF8(r.rigctldHost));
+    config().Write("/Radio/RigctldPort", (long)r.rigctldPort);
+    config().Write("/Hamlib/Model", (long)r.model);
+    config().Write("/Hamlib/Port", wxString::FromUTF8(r.port));
+    config().Write("/Hamlib/Baud", (long)r.baud);
+    config().Write("/Hamlib/DataBits", (long)r.dataBits);
+    config().Write("/Hamlib/StopBits", (long)r.stopBits);
+    config().Write("/Hamlib/Parity", wxString(parityWord(r.parity)));
+    config().Write("/Hamlib/Handshake", wxString(handshakeWord(r.handshake)));
+    config().Write("/Hamlib/Dtr", wxString(lineWord(r.dtr)));
+    config().Write("/Hamlib/Rts", wxString(lineWord(r.rts)));
+    config().Write("/Hamlib/Backend", wxString::FromUTF8(r.backendConf));
+    config().Write("/Hamlib/PollSeconds", (long)r.pollSeconds);
+    config().Write("/Hamlib/KeyRig", r.keyRig);
+    config().Write("/Hamlib/Ptt", wxString(pttWord(r.ptt)));
+    config().Write("/Hamlib/PttPort", wxString::FromUTF8(r.pttPort));
+}
+
 } // namespace
 
 StationPrefs loadStationPrefs()
@@ -50,9 +108,7 @@ StationPrefs loadStationPrefs()
     p.repairCap = config().ReadBool("/Broadcast/RepairCap", p.repairCap);
     p.repairCapMinutes = (int)config().ReadLong("/Broadcast/RepairCapMinutes", p.repairCapMinutes);
     p.repairCapMinutes = std::min(std::max(p.repairCapMinutes, REPAIR_CAP_MIN_MINUTES), REPAIR_CAP_MAX_MINUTES);
-    p.readDial = config().ReadBool("/Radio/ReadDial", p.readDial);
-    p.rigHost = readString("/Radio/RigctldHost", p.rigHost);
-    p.rigPort = (int)config().ReadLong("/Radio/RigctldPort", p.rigPort);
+    p.rig = loadRig();
     p.usSegmentsOnly = config().ReadBool("/Radio/UsSegmentsOnly", p.usSegmentsOnly);
     return p;
 }
@@ -72,9 +128,7 @@ void saveStationPrefs(const StationPrefs& p)
     config().Write("/Broadcast/RepairFloor", wxString::FromUTF8(p.repairFloor));
     config().Write("/Broadcast/RepairCap", p.repairCap);
     config().Write("/Broadcast/RepairCapMinutes", (long)p.repairCapMinutes);
-    config().Write("/Radio/ReadDial", p.readDial);
-    config().Write("/Radio/RigctldHost", wxString::FromUTF8(p.rigHost));
-    config().Write("/Radio/RigctldPort", (long)p.rigPort);
+    saveRig(p.rig);
     config().Write("/Radio/UsSegmentsOnly", p.usSegmentsOnly);
     config().Flush();
 }

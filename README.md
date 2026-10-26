@@ -45,7 +45,7 @@ thresholds...** in the gearshift. See [docs/GEARBOX.md](docs/GEARBOX.md).
 
 On Ubuntu 24.04:
 
-    sudo apt-get install build-essential cmake libwxgtk3.2-dev libgtk-3-dev
+    sudo apt-get install build-essential cmake pkg-config libwxgtk3.2-dev libgtk-3-dev libhamlib-dev
     cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
     cmake --build build -j$(nproc)
     ctest --test-dir build --output-on-failure
@@ -57,7 +57,8 @@ On Ubuntu 24.04:
     packaging/windows/make-zip.sh         # dist/Ragtime-<version>-...-windows-x86_64.zip
 
 The Windows build cross-compiles on Ubuntu 24.04 with
-`g++-mingw-w64-x86-64-posix` and builds its own static wxWidgets; with
+`g++-mingw-w64-x86-64-posix` and builds its own static wxWidgets and
+Hamlib (which needs `autoconf automake libtool`); with
 Wine installed, `ctest --test-dir build-win` runs the unit tests as
 Windows programs.
 
@@ -87,6 +88,9 @@ the recording, at the spacing the tester saw (docs/FLIGHT_RECORDER.md).
 
 Ragtime is a front end for a separately running `data2g-host`, reached
 over TCP. It never starts the modem and never touches the sound card.
+It reads the radio's dial from rigctld, or opens the rig itself with
+Hamlib (Settings > Rig), and can key it when data2g-host does, for rigs
+whose drivers can't be opened twice (off by default).
 Messages are signed, never encrypted, as Part 97 requires.
 
 ## Plan

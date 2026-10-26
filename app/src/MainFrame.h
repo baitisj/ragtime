@@ -12,6 +12,7 @@
 #include <wx/timer.h>
 
 #include "Prefs.h"
+#include "SettingsDialog.h"
 #include "ragtime/broadcast/BroadcastChat.h"
 #include "ragtime/broadcast/BroadcastLog.h"
 #include "ragtime/broadcast/BroadcastFiles.h"
@@ -36,7 +37,7 @@ class GlobusPanel;
 class GlobusToggle;
 class HostConnection;
 class RecentWorkPane;
-class RigConnection;
+class RigControl;
 class SessionPage;
 class StationList;
 class wxBitmapButton;
@@ -64,7 +65,7 @@ private:
     // The operator's settings, to the host link, the chat and the window;
     // reconnecting when the callsign or the host changed.
     void applyPrefs(bool reconnect);
-    void showSettings();
+    void showSettings(SettingsDialog::Page page = SettingsDialog::Page::Station);
 
     void onHostEvents(const std::vector<ragtime::link::HostLink::Event>& events);
     void onClock();
@@ -196,7 +197,7 @@ private:
     ragtime::broadcast::Stations stations_;
     ragtime::gearbox::Gearshift gearshift_;
     std::unique_ptr<HostConnection> host_;
-    std::unique_ptr<RigConnection> rig_;
+    std::unique_ptr<RigControl> rig_;
     ragtime::radio::PathLog pathLog_;
     ragtime::broadcast::WatchList watch_;
     // Session files: the engine, the log of finished transfers (the Files
