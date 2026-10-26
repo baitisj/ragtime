@@ -425,8 +425,9 @@ void apply(AutoAlc& alc, std::optional<double> next)
     alc.hostLevel(*next, 1);
 }
 
-// Auto ALC: to 55% both ways, never above the ceiling (the level set or
-// found), at most 20 dB under it, and the ceiling put back when off.
+// Auto ALC: to 55% both ways, around the base (the level set or found):
+// at most CLIMB_DB over it, MAX_TRIM_DB under it, and the base put back
+// when off.
 void autoAlc()
 {
     AutoAlc alc;
@@ -435,46 +436,46 @@ void autoAlc()
     CHECK(!alc.burstEnded(burstStep(-2.0)));
 
     CHECK(!alc.setEnabled(true));
-    CHECK(near(alc.ceiling(), -3.0));
+    CHECK(near(alc.base(), -3.0));
+    CHECK(near(alc.top(), -3.0 + AutoAlc::CLIMB_DB));
+    CHECK(near(alc.floor(), -3.0 - AutoAlc::MAX_TRIM_DB));
     // A burst too hot: down by what the burst says, to a tenth.
     CHECK(near(alc.burstEnded(burstStep(-2.0)), -5.0));
-    // The host's answer to our own TXPOWER keeps the ceiling.
+    // The host's answer to our own TXPOWER keeps the base.
     alc.sent(-5.0);
     alc.hostLevel(-5.0, 0);
-    CHECK(near(alc.ceiling(), -3.0));
+    CHECK(near(alc.base(), -3.0));
     CHECK(near(alc.level(), -5.0));
-    CHECK(alc.trimmedDb() > 1.99 && alc.trimmedDb() < 2.01);
+    CHECK(std::fabs(alc.offsetDb() + 2.0) < 0.01);
     // In the band: nothing.
     CHECK(!alc.burstEnded(burstStep(0.0)));
-    // Too cold: up, but never above the ceiling.
-    CHECK(near(alc.burstEnded(burstStep(1.0)), -4.0));
-    apply(alc, -4.0);
-    apply(alc, alc.burstEnded(burstStep(1.0)));
-    CHECK(near(alc.level(), -3.0));
-    CHECK(!alc.atCeiling());
+    // Too cold: up, past the base (Jeff's IC-7100 sat at 40% at the level
+    // it found, 2026-10-26), to CLIMB_DB over it and no further.
+    for (int i = 0; i < 20; i++) apply(alc, alc.burstEnded(burstStep(1.0)));
+    CHECK(near(alc.level(), -3.0 + AutoAlc::CLIMB_DB));
+    CHECK(std::fabs(alc.offsetDb() - AutoAlc::CLIMB_DB) < 0.01);
     CHECK(!alc.burstEnded(burstStep(0.5)));
-    CHECK(alc.atCeiling());
-    CHECK(near(alc.level(), -3.0));
+    CHECK(alc.atTop());
 
-    // No further than MAX_TRIM_DB under the ceiling.
+    // No further than MAX_TRIM_DB under the base.
     for (int i = 0; i < 20; i++) apply(alc, alc.burstEnded(burstStep(-2.0)));
     CHECK(near(alc.level(), -3.0 - AutoAlc::MAX_TRIM_DB));
-    CHECK(alc.atFloor() && !alc.atCeiling());
+    CHECK(alc.atFloor() && !alc.atTop());
     CHECK(!alc.burstEnded(burstStep(-2.0)));
 
-    // Turned off: the ceiling goes back.
+    // Turned off: the base goes back.
     CHECK(near(alc.setEnabled(false), -3.0));
     apply(alc, -3.0);
-    CHECK(near(alc.ceiling(), -3.0));
+    CHECK(near(alc.base(), -3.0));
     CHECK(!alc.restore());
 
     // A level Ragtime didn't send (the operator's, in data2g-host's own
-    // window) is the new ceiling.
+    // window) is the new base.
     alc.setEnabled(true);
     apply(alc, alc.burstEnded(burstStep(-0.5)));
     CHECK(near(alc.level(), -3.5));
     alc.hostLevel(-10.0, 200000);
-    CHECK(near(alc.ceiling(), -10.0));
+    CHECK(near(alc.base(), -10.0));
     CHECK(!alc.restore());
     // A burst begun before it was sent at the old level: no step.
     CHECK(!alc.burstEnded(burstStep(-2.0, 190000)));
@@ -489,7 +490,7 @@ void autoAlc()
     knob.hostLevel(-18.0, 0);
     knob.operatorSet(-21.04, 300000);
     knob.sent(-21.0);
-    CHECK(near(knob.ceiling(), -21.0));
+    CHECK(near(knob.base(), -21.0));
     CHECK(!knob.burstEnded(burstStep(-2.5, 290000)));
     // A burst after it steps from the level sent, not the host's last
     // answer, even before the host has answered.
@@ -497,13 +498,13 @@ void autoAlc()
     knob.sent(-21.5);
     knob.hostLevel(-21.0, 311000);
     knob.hostLevel(-21.5, 311000);
-    CHECK(near(knob.ceiling(), -21.0));
+    CHECK(near(knob.base(), -21.0));
     CHECK(near(knob.level(), -21.5));
     // Held while the operator turns the knob in Settings.
     knob.hold(true);
     CHECK(!knob.burstEnded(burstStep(-2.0, 320000)));
     knob.hold(false);
-    // Quitting puts back the ceiling.
+    // Quitting puts back the base.
     CHECK(near(knob.restore(), -21.0));
 
     // No host level (a host without TXPOWER, or none): nothing.
@@ -511,11 +512,16 @@ void autoAlc()
     CHECK(!knob.burstEnded(burstStep(-2.0, 400000)));
     CHECK(!knob.restore());
 
-    // Never under TXPOWER's floor.
+    // Within TXPOWER's own range, at both ends.
     AutoAlc low;
     low.hostLevel(-59.0, 0);
     low.setEnabled(true);
     CHECK(near(low.burstEnded(burstStep(-2.0)), AutoAlc::LEVEL_MIN_DB));
+    AutoAlc high;
+    high.hostLevel(18.0, 0);
+    high.setEnabled(true);
+    for (int i = 0; i < 10; i++) apply(high, high.burstEnded(burstStep(1.0)));
+    CHECK(near(high.level(), AutoAlc::LEVEL_MAX_DB));
 }
 
 int main()

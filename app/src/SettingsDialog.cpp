@@ -229,8 +229,8 @@ wxWindow* SettingsDialog::stationPage(wxNotebook* book, const StationPrefs& pref
                                    "full scale. It is data2g-host's own, as it answered just now. Turning it sets "
                                    "it there at once, so you can watch the ALC meter as you go; Cancel puts back "
                                    "the level it had, and data2g-host keeps it after Ragtime quits. With Auto "
-                                   "ALC on, this is the most it may use: it moves the level under it to keep "
-                                   "the ALC near 55%."
+                                   "ALC on, it moves the level from here to keep the ALC near 55%: up to 6 dB "
+                                   "over it, up to 20 dB under."
                                  : "data2g-host's transmit audio level (TXPOWER). It needs data2g-host connected, "
                                    "and one from Data2G PR #122 on; until then set its --output-volume.");
     // Sent a few times a second at most while it turns, and the last turn
