@@ -1201,7 +1201,13 @@ words and the scope.
   `FilterEdit`, so quitting puts the rig back even after the Ear has
   closed; `HamlibRig` writes a pending setting before it closes the
   rig, and through rigctld every line goes at once before the
-  connection closes (`DialReader::flushFilter`). Closing the Ear, or losing the rig (closed, the box unticked),
+  connection closes (`DialReader::flushFilter`). After it changed the
+  filter Ragtime keeps reading it between bursts, the Ear open or not,
+  for the next point. Ragtime never sets the mode, so a new mode on the
+  rig is the operator's: it drops a change waiting or on trial, stops
+  Calibrate, and forgets what the rig had in the old mode, since writing
+  any of it would turn the mode back. Quitting then puts back only what
+  changes after that. Closing the Ear, or losing the rig (closed, the box unticked),
   takes an unkept change back.
 - **Calibrate** (`ear::Calibration`). From the setting now it centres
   both knobs and measures the passband; turns PBT_IN up by 0.15 and by

@@ -2427,12 +2427,14 @@ void MainFrame::setEar(bool open)
 {
     if (open && ear_ == nullptr)
     {
-        // The filter, set from the Ear: only with Hamlib and the box ticked
-        // (RigControl refuses rigctld), noted in the flight recorder.
+        // The filter, set from the Ear: only with the box ticked (RigControl
+        // checks), noted in the flight recorder.
         auto write = [this](const radio::RigFilter& f, const std::string& why) { setRigFilter(f, why); };
         ear_ = new EarFrame(this, filterEdit_, write, [this] {
             ear_ = nullptr;
-            rig_->setFilterWatch(false);
+            // Still read while Ragtime has changed the filter, so a new
+            // mode on the rig drops what it would put back on quitting.
+            rig_->setFilterWatch(filterEdit_.changed());
             bar_->setEarOpen(false);
             GetMenuBar()->Check(ID_EAR, false);
         });
@@ -2565,6 +2567,7 @@ void MainFrame::onDial()
         said = "rig filter " + filter->mode + " " + std::to_string(filter->widthHz) + " Hz";
         if (filter->pbtIn) said += " PBT_IN " + radio::pbtText(*filter->pbtIn);
         if (filter->pbtOut) said += " PBT_OUT " + radio::pbtText(*filter->pbtOut);
+        filterEdit_.seen(*filter);
     }
     if (said != notedFilter_)
     {

@@ -231,7 +231,11 @@ void EarFilterBar::tick(uint64_t nowMs, bool quiet, ear::EdgeFinder& edges, cons
     }
     else if (restore_)
     {
-        if (quiet)
+        if (rig.filter && rig.filter->mode != restore_->mode)
+        {
+            restore_.reset();
+        }
+        else if (quiet)
         {
             write(*restore_, "put back after Calibrate", edges);
             restore_.reset();
@@ -368,6 +372,13 @@ void EarFilterBar::runCalibration(uint64_t nowMs, bool quiet, ear::EdgeFinder& e
 {
     const std::optional<RigFilter> want = calibration_.setting();
     if (!want) return;
+    if (rig_.filter && calibrationFrom_ && rig_.filter->mode != calibrationFrom_->mode)
+    {
+        // The operator turned the mode knob: writing on would turn it back.
+        calibration_.cancel();
+        calibrationNews_ = "Calibrate stopped: the rig's mode changed";
+        return;
+    }
     if (!rig_.canSet || nowMs >= calibrationStepMs_ + STEP_GIVE_UP_MS)
     {
         calibration_.cancel();

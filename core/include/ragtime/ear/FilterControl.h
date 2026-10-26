@@ -121,7 +121,10 @@ public:
         Trial,      // written; goes back at the deadline unless kept
     };
 
-    // The rig's filter as read. The first is what the rig had.
+    // The rig's filter as read. The first is what the rig had. A new mode
+    // (the operator's: Ragtime never sets one) starts afresh, dropping a
+    // change waiting or on trial and what the rig had in the last mode,
+    // since putting either back would change the mode back too.
     void seen(const RigFilter& f);
     // The operator dragged or recalled: write to once quiet, then on trial.
     // What Undo goes back to stays what the rig had before the first

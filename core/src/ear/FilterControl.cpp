@@ -178,6 +178,9 @@ std::string changeText(const Span& from, const Span& to)
 
 void FilterEdit::seen(const RigFilter& f)
 {
+    // Ragtime never changes the mode, so the operator did: what it had of
+    // the last mode is moot, and writing it would change the mode back.
+    if (current_ && f.mode != current_->mode) *this = FilterEdit();
     if (!found_) found_ = f;
     current_ = f;
 }

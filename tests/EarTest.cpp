@@ -615,6 +615,21 @@ void keepAndUndo()
     CHECK(w && *w == usb(2400));
     CHECK(e.state() == FilterEdit::State::Idle);
 
+    // The operator turns the mode knob mid-trial: the trial and what the
+    // rig had are dropped, never written back in the old mode.
+    FilterEdit moved;
+    moved.seen(usb(2400));
+    moved.change(usb(2400, 0.6, 0.5), t);
+    CHECK(moved.due(t, true).has_value());
+    RigFilter lsb = usb(2400);
+    lsb.mode = "LSB";
+    moved.seen(lsb);
+    CHECK(moved.state() == FilterEdit::State::Idle);
+    CHECK(!moved.due(t + FilterEdit::KEEP_MS + 1, true));
+    CHECK(!moved.close());
+    CHECK(!moved.quit());
+    CHECK(moved.found() && moved.found()->mode == "LSB");
+
     // Never changed: nothing to put back on quitting.
     FilterEdit untouched;
     untouched.seen(usb(2400));
