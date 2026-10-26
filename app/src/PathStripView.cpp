@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <ctime>
 #include <string>
 
 #include <wx/dcbuffer.h>
@@ -9,6 +10,7 @@
 
 #include "Html.h"
 #include "ragtime/gearbox/Gearbox.h"
+#include "ragtime/globus/Sun.h"
 
 using ragtime::radio::BandRow;
 using ragtime::radio::HourCell;
@@ -45,15 +47,43 @@ PathStripView::PathStripView(wxWindow* parent, int cellDip)
 
 void PathStripView::setStrip(const PathStrip& strip, uint64_t nowMs)
 {
-    bool sameShape = strip.bands.size() == strip_.bands.size();
+    // Local time now, daylight time in it.
+    std::time_t now = std::time(nullptr);
+    const std::tm* localNow = std::localtime(&now);
+    std::tm local = localNow ? *localNow : std::tm{};
+    const std::tm* utcNow = std::gmtime(&now);
+    int offset = localNow && utcNow ? ragtime::globus::utcOffsetSeconds(local, *utcNow) : 0;
+    char name[64] = "";
+    if (localNow) std::strftime(name, sizeof name, "%Z", &local);
+    std::string zone = ragtime::globus::zoneAbbreviation(name);
+    if (offset == 0 && (zone.empty() || zone == "UTC" || zone == "GMT" || zone == "CUT"))
+        zone.clear();
+    else if (zone.empty())
+        zone = "local";
+
+    bool sameShape = strip.bands.size() == strip_.bands.size() && (zone.empty() == localZone_.empty());
     strip_ = strip;
     nowMs_ = nowMs;
+    localOffset_ = offset;
+    localZone_ = zone;
     if (!sameShape)
     {
         InvalidateBestSize();
         if (GetParent()) GetParent()->Layout();
     }
     Refresh();
+}
+
+std::string PathStripView::localText(size_t hour, bool minutes) const
+{
+    long m = ((long)(hour % 24) * 60 + localOffset_ / 60) % 1440;
+    if (m < 0) m += 1440;
+    char text[8];
+    if (minutes || m % 60 != 0)
+        std::snprintf(text, sizeof text, minutes ? "%02ld%02ld" : "%02ld:%02ld", m / 60, m % 60);
+    else
+        std::snprintf(text, sizeof text, "%02ld", m / 60);
+    return text;
 }
 
 int PathStripView::labelWidth() const
@@ -77,7 +107,8 @@ int PathStripView::cellWidth() const
 wxSize PathStripView::DoGetBestClientSize() const
 {
     size_t rows = std::max<size_t>(1, strip_.bands.size());
-    int height = (int)rows * (rowHeight() + FromDIP(2)) + GetCharHeight() + FromDIP(2);
+    int lines = showsLocal() ? 2 : 1;
+    int height = (int)rows * (rowHeight() + FromDIP(2)) + lines * GetCharHeight() + FromDIP(2);
     return wxSize(labelWidth() + 24 * FromDIP(cellDip_), height);
 }
 
@@ -136,6 +167,15 @@ void PathStripView::onPaint()
     }
     wxString utc = "UTC";
     dc.DrawText(utc, left + 24 * cell - dc.GetTextExtent(utc).x, y);
+    // The same hours in local time, under them.
+    if (showsLocal())
+    {
+        const int below = y + dc.GetCharHeight();
+        for (size_t h = 0; h < 24; h += 6)
+            dc.DrawText(utf8(localText(h, false)), left + (int)h * cell, below);
+        wxString zone = utf8(localZone_);
+        dc.DrawText(zone, left + 24 * cell - dc.GetTextExtent(zone).x, below);
+    }
     if (nowMs_ != 0)
     {
         size_t hour = (size_t)(nowMs_ / HOUR_MS % 24);
@@ -161,7 +201,11 @@ void PathStripView::onMotion(const wxPoint& at)
             const BandRow& b = strip_.bands[band];
             const HourCell& c = b.hours[hour];
             std::string text = (b.band.empty() ? std::string("Band not known") : b.band) + ", " + hourText(hour)
-                               + "\xE2\x80\x93" + hourText(hour + 1) + "Z: ";
+                               + "\xE2\x80\x93" + hourText(hour + 1) + "Z";
+            if (showsLocal())
+                text += " (" + localText(hour, true) + "\xE2\x80\x93" + localText(hour + 1, true) + " " + localZone_
+                        + ")";
+            text += ": ";
             if (c.bursts == 0)
             {
                 text += "not heard";

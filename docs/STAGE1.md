@@ -703,8 +703,10 @@ file, so a long log opens quickly) for the strips.
 
 **The strip.** The picked station's details under Globus gain a 24-hour
 strip by band, a cell for each UTC hour, darker for hours it was heard
-on more of the 14 days, the hour now marked, and hovering a cell gives
-its bursts, days and median S/N; and a line, "Heard most on 17 m: 11
+on more of the 14 days, the hour now marked, the UTC hours along the
+foot with local time under them (Jeff, 2026-10-26; left out where local
+time is UTC), and hovering a cell gives its hours in both, its bursts,
+days and median S/N; and a line, "Heard most on 17 m: 11
 days, median −6.0 dB". **Paths heard from KC2G...** on the station's
 right-click menu shows the strip bigger with a line a band, "17 m:
 2000–0000Z on 5 days, median −6.0 dB", and opens the log itself.

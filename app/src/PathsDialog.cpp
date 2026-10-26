@@ -18,7 +18,7 @@ PathsDialog::PathsDialog(wxWindow* parent, const ragtime::radio::PathStrip& stri
     auto* sizer = new wxBoxSizer(wxVERTICAL);
     auto* intro = new wxStaticText(
         this, wxID_ANY,
-        wxString::Format("The hours (UTC) %s was heard in the last %u days, by band: the darker, the more days.",
+        wxString::Format("The hours %s was heard in the last %u days, by band: the darker, the more days.",
                          wxString::FromUTF8(strip.call), (unsigned)strip.days));
     intro->Wrap(FromDIP(460));
     sizer->Add(intro, 0, wxEXPAND | wxLEFT | wxRIGHT | wxTOP, 12);
