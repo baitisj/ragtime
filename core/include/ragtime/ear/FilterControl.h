@@ -23,7 +23,7 @@
 // the edges move together about the centre. Widening past the width sets
 // a wider width, as does narrowing past what the knobs reach; a width
 // rewrites the rig's filter memory, so the first change keeps what the rig
-// had, for "Put back as I found them" and for quitting.
+// had, for Revert and for quitting.
 //
 // The change (ear::FilterEdit) waits until the rig is quiet: never while
 // keyed and never while a burst is heard. Then it is on trial for KEEP_MS,
@@ -100,6 +100,15 @@ int roundWidth(double hz, bool up);
 // the rest. The mode stays.
 RigFilter settingFor(const Span& wanted, const RigFilter& now, const KnobModel& m);
 RigFilter settingFor(const Span& wanted, const RigFilter& now, double centreHz, double hzPerKnob);
+// Both knobs turned alike: the passband moves by hz and keeps its width,
+// stopping where either knob would run out. Needs both knobs; the rest of
+// the setting stays.
+RigFilter shiftedBy(const RigFilter& now, double hz, double hzPerKnob);
+// Hz per knob before Calibrate has measured it: the filter's width, as Jeff's
+// IC-7100 showed (one full turn moves an edge one width). Only a guess,
+// so a shift made with it may land a little off; the edges in the noise
+// show where it went.
+double guessHzPerKnob(const RigFilter& f);
 // Whether a passband cuts into Data2G's (the wide modes', or the 500 Hz
 // ones' with the 500 Hz switch on), by more than 10 Hz.
 bool cutsData2G(const Span& span, bool narrow);

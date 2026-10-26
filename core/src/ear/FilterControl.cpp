@@ -154,6 +154,22 @@ RigFilter settingFor(const Span& wanted, const RigFilter& now, double centreHz, 
     return settingFor(wanted, now, m);
 }
 
+RigFilter shiftedBy(const RigFilter& now, double hz, double hzPerKnob)
+{
+    RigFilter out = now;
+    if (!now.pbtIn || !now.pbtOut || hzPerKnob <= 0) return out;
+    const double in = *now.pbtIn, o = *now.pbtOut;
+    const double turn = std::max(-std::min(in, o), std::min(1 - std::max(in, o), hz / hzPerKnob));
+    out.pbtIn = quantise(in + turn);
+    out.pbtOut = quantise(o + turn);
+    return out;
+}
+
+double guessHzPerKnob(const RigFilter& f)
+{
+    return f.widthHz > 0 ? f.widthHz : 3000;
+}
+
 bool cutsData2G(const Span& span, bool narrow)
 {
     const Passband p = data2gPassband(narrow);
@@ -162,7 +178,7 @@ bool cutsData2G(const Span& span, bool narrow)
 
 std::string changeText(const Span& from, const Span& to)
 {
-    const int dl = tens(to.lowHz) - tens(from.lowHz), dh = tens(to.highHz) - tens(from.highHz);
+    const int dl = tens(to.lowHz - from.lowHz), dh = tens(to.highHz - from.highHz);
     auto edge = [](const char* name, double a, double b) {
         return std::string(name) + " " + std::to_string(tens(a)) + ARROW + std::to_string(tens(b)) + " Hz";
     };

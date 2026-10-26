@@ -92,7 +92,7 @@ EarFilterBar::EarFilterBar(wxWindow* parent, EarScope* scope, FilterEdit& edit, 
     calibrate_->SetToolTip("Turns PBT_IN and PBT_OUT a little in turn and measures how far the edges move in the "
                            "band's noise, so the edges can be dragged one at a time. Takes about half a minute of "
                            "quiet band, then puts the knobs back.");
-    putBack_ = new wxButton(this, wxID_ANY, "Put back as I found them");
+    putBack_ = new wxButton(this, wxID_ANY, "Revert");
     putBack_->SetToolTip("Sets the rig's filter back to what it was when the Ear first read it (quitting Ragtime "
                          "does too)");
     top->Add(calibrate_, 0, wxALIGN_CENTER_VERTICAL);
@@ -280,7 +280,7 @@ void EarFilterBar::tick(uint64_t nowMs, bool quiet, ear::EdgeFinder& edges, cons
     const bool canDrag = settable() && setting() && !calibration_.running() && !restore_ &&
                          edit_.state() != FilterEdit::State::Waiting;
     const std::optional<RigFilter> f = setting();
-    scope_->setHandles(canDrag ? spanNow() : std::nullopt, !calibrated());
+    scope_->setHandles(canDrag ? spanNow() : std::nullopt, !calibrated(), f && f->pbtIn && f->pbtOut);
     if (edit_.state() == FilterEdit::State::Idle) wanted_.reset();
     scope_->setWanted(wanted_);
 
@@ -308,7 +308,15 @@ void EarFilterBar::dragged(const Span& from, const Span& wanted)
     const std::optional<RigFilter> now = setting();
     if (!settable() || !now || calibration_.running()) return;
     ear::KnobModel m = model(*now);
-    // Uncalibrated, only the width: about the centre the passband has now.
+    // Uncalibrated, a shift turns both knobs alike by a guessed Hz per
+    // knob (the noise shows where it lands), and an edge moves only the
+    // width, about the centre the passband has now.
+    const double dl = wanted.lowHz - from.lowHz, dh = wanted.highHz - from.highHz;
+    if (!m.known() && std::fabs(dl - dh) < 1 && now->pbtIn && now->pbtOut)
+    {
+        change(ear::shiftedBy(*now, dl, ear::guessHzPerKnob(*now)), wanted);
+        return;
+    }
     if (!m.known()) m.centreHz = from.centre();
     change(ear::settingFor(ear::dragTarget(from, wanted, *now, m), *now, m), wanted);
 }
@@ -550,8 +558,8 @@ void EarFilterBar::show(uint64_t nowMs, const ear::EdgeFinder&)
     }
     else if (!calibrated())
     {
-        text = f->pbtIn && f->pbtOut ? "Drag an edge to change the width: both edges move about the centre until "
-                                       "Calibrate has measured the PBT knobs"
+        text = f->pbtIn && f->pbtOut ? "Drag the middle to shift, or an edge for the width (about the centre). "
+                                       "Calibrate frees each edge and makes a shift land where you drop it"
                                      : "Drag an edge to change the width: both edges move about the centre";
     }
     else

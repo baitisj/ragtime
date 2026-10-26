@@ -188,8 +188,8 @@ with the code when the seal rules change.
   (`ear::FilterEdit`, `ear::Calibration` in `ear/FilterControl`;
   `app/src/EarFilterBar`, `EarControls`): on trial for 15 s with a
   clock beside Undo and Keep, Keep pressed twice for a cut into Data2G's
-  passband, four presets (tap recalls, hold stores), Put back as I found
-  them, and Calibrate for the twin PBT (`ear::KnobModel`: Hz per knob,
+  passband, four presets (tap recalls, hold stores), Revert (the
+  filter as the Ear found it), and Calibrate for the twin PBT (`ear::KnobModel`: Hz per knob,
   the real centre and width, and a cut in the audio that hides an edge;
   two turns each side, as Jeff's IC-7100 hides its low edge under a cut
   at 70 Hz). Quitting puts the filter back as found

@@ -1052,7 +1052,7 @@ where Jeff answered its questions. It comes in three steps, one PR each:
    Hamlib or rigctld: handles, presets along the top (a tap recalls; press and hold
    stores, with a quick clock running down on the button), Keep and Undo
    with a clock that runs down beside Undo and puts the filter back when
-   it runs out, "Put back as I found them", and Calibrate. Glissando
+   it runs out, Revert (back to the filter as found), and Calibrate. Glissando
    learned that a filter change needs an operator at the controls to see
    it did what was meant; the clock is that check.
 
@@ -1169,7 +1169,9 @@ words and the scope.
 
 - **Handles.** The edges the noise shows (or, until it shows them, the
   rig's setting drawn about the centre) get orange tabs. Drag an edge,
-  or the top of the band between them to shift the whole passband. While
+  or the top of the band between them, where an orange grip sits in the
+  middle, to shift the whole passband (Jeff, 2026-10-26: the centre
+  drags before Calibrate too, whenever the rig has both PBT knobs). While
   dragging, the new edges are dashed, with the span written over them,
   and a red strip under the plot marks any of Data2G's passband the new
   span would cut.
@@ -1180,8 +1182,12 @@ words and the scope.
   0.5). So the low edge is one knob, the high edge the other, and a
   shift is both. Nobody publishes hzPerKnob for an Icom (its PBT reads as
   the knob's position), so until Calibrate has measured it
-  (`ear::KnobModel`) only the width can change: both edges move together about the centre, and the
-  middle doesn't grab. Widening past the rig's width sets a wider width,
+  (`ear::KnobModel`) an edge changes only the width: both edges move
+  together about the centre. A shift turns both knobs alike
+  (`ear::shiftedBy`) by a guessed Hz per knob, the filter's width
+  (`ear::guessHzPerKnob`, what the IC-7100 showed), so before Calibrate
+  it may land a little off where it was dropped; the noise shows where it
+  went. Widening past the rig's width sets a wider width,
   as does narrowing past what the knobs reach (50 Hz steps to 500 Hz,
   then 100 Hz, as an Icom's DSP filter takes them). A width rewrites the
   rig's filter memory for that mode, which is why what the rig had is
@@ -1219,7 +1225,7 @@ words and the scope.
   (`/Ear/Presets/<rig>/<mode>/<n>`, the rig being `hamlib-<model>` or
   `rigctld`), and
   each says what it holds: the edges once calibrated, else the width.
-- **Put back as I found them.** The first filter the Ear reads is what
+- **Revert.** The first filter the Ear reads is what
   the rig had. This button puts it back (once quiet), and so does
   quitting Ragtime when it ever changed the filter: `MainFrame` keeps the
   `FilterEdit`, so quitting puts the rig back even after the Ear has

@@ -39,8 +39,8 @@ struct EarRig
 };
 
 // The Ear's filter controls (docs/STAGE1.md, "The Ear", step 3): the
-// presets along the top (a tap recalls, a hold stores), Calibrate and "Put
-// back as I found them", and under them a line saying what is changing,
+// presets along the top (a tap recalls, a hold stores), Calibrate and
+// Revert, and under them a line saying what is changing,
 // with the clock beside Undo and Keep.
 //
 // It drives ear::FilterEdit (MainFrame's, so that quitting can put the
