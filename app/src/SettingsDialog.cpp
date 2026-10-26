@@ -98,8 +98,10 @@ wxChoice* wordChoice(wxWindow* parent, const std::vector<wxString>& words, int s
 SettingsDialog::SettingsDialog(wxWindow* parent, const StationPrefs& prefs,
                                const std::vector<std::pair<std::string, std::string>>& gears,
                                std::function<std::string(const radio::RigSettings&)> openRig, Page page,
-                               std::optional<double> txLevel)
+                               std::optional<double> txLevel, std::function<void(double)> setTxLevel)
     : wxDialog(parent, wxID_ANY, "Settings")
+    , setTxLevel_(std::move(setTxLevel))
+    , txLevelTimer_(this)
     , openRig_(std::move(openRig))
     , testTimer_(this)
     , rigctldTimer_(this)
@@ -164,6 +166,7 @@ SettingsDialog::~SettingsDialog()
 {
     testTimer_.Stop();
     rigctldTimer_.Stop();
+    txLevelTimer_.Stop();
 }
 
 //-------------------------------------------------------------------------
@@ -214,19 +217,27 @@ wxWindow* SettingsDialog::stationPage(wxNotebook* book, const StationPrefs& pref
     hostGrid->AddSpacer(0);
     hostGrid->Add(dataPort_, 0);
     // The host's transmit level (TXPOWER, Data2G PR #122): read from the
-    // host as the dialog opens, set on it with OK, never kept here.
-    hostTxLevel_ = txLevel;
+    // host as the dialog opens, set on it as the knob turns, put back on
+    // Cancel, never kept here.
+    hostTxLevel_ = sentTxLevel_ = txLevel;
     txLevel_ = new wxSpinCtrlDouble(box, wxID_ANY, "", wxDefaultPosition, wxDefaultSize, wxSP_ARROW_KEYS,
                                     link::HostLink::TX_POWER_MIN_DB, link::HostLink::TX_POWER_MAX_DB,
                                     txLevel ? *txLevel : 0.0, 0.5);
     txLevel_->SetDigits(1);
     txLevel_->Enable(txLevel.has_value());
     txLevel_->SetToolTip(txLevel ? "data2g-host's transmit audio level (TXPOWER), in dB: 0 puts a burst's peak at "
-                                   "full scale. It is data2g-host's own, as it answered just now; OK sets it there "
-                                   "at once, and data2g-host keeps it after Ragtime quits. Auto ALC, on the "
-                                   "connection bar, only ever turns it down from here."
+                                   "full scale. It is data2g-host's own, as it answered just now. Turning it sets "
+                                   "it there at once, so you can watch the ALC meter as you go; Cancel puts back "
+                                   "the level it had, and data2g-host keeps it after Ragtime quits. With Auto "
+                                   "ALC on, this is the most it may use: it moves the level under it to keep "
+                                   "the ALC near 55%."
                                  : "data2g-host's transmit audio level (TXPOWER). It needs data2g-host connected, "
                                    "and one from Data2G PR #122 on; until then set its --output-volume.");
+    // Sent a few times a second at most while it turns, and the last turn
+    // always.
+    txLevel_->Bind(wxEVT_SPINCTRLDOUBLE, [this](wxSpinDoubleEvent&) {
+        if (!txLevelTimer_.IsRunning()) txLevelTimer_.StartOnce(150);
+    });
     auto* txRow = new wxBoxSizer(wxHORIZONTAL);
     txRow->Add(txLevel_, 0, wxALIGN_CENTER_VERTICAL);
     auto* txNote = new wxStaticText(box, wxID_ANY, txLevel ? "dB, data2g-host's own" : "dB (data2g-host can't say)");
@@ -682,6 +693,11 @@ void SettingsDialog::onTestTimer(wxTimerEvent& event)
         onRigctldTimer();
         return;
     }
+    if (&event.GetTimer() == &txLevelTimer_)
+    {
+        sendTxLevel();
+        return;
+    }
     if (!testRig_) return;
     rig::HamlibRig::Status s = testRig_->status();
     bool done = false;
@@ -780,12 +796,26 @@ void SettingsDialog::onRigctldTimer()
 // Both
 //-------------------------------------------------------------------------
 
-std::optional<double> SettingsDialog::txLevel() const
+void SettingsDialog::sendTxLevel()
 {
-    if (!hostTxLevel_ || !txLevel_->IsEnabled()) return std::nullopt;
+    if (!sentTxLevel_ || !setTxLevel_ || !txLevel_->IsEnabled()) return;
     double dB = txLevel_->GetValue();
-    if (std::fabs(dB - *hostTxLevel_) < 0.05) return std::nullopt;
-    return dB;
+    if (std::fabs(dB - *sentTxLevel_) < 0.05) return;
+    sentTxLevel_ = dB;
+    setTxLevel_(dB);
+}
+
+void SettingsDialog::finishTxLevel(bool ok)
+{
+    txLevelTimer_.Stop();
+    if (ok)
+    {
+        sendTxLevel();
+        return;
+    }
+    if (!hostTxLevel_ || !sentTxLevel_ || !setTxLevel_ || std::fabs(*sentTxLevel_ - *hostTxLevel_) < 0.05) return;
+    sentTxLevel_ = hostTxLevel_;
+    setTxLevel_(*hostTxLevel_);
 }
 
 StationPrefs SettingsDialog::prefs() const

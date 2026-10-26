@@ -53,8 +53,8 @@ ConnectionBar::ConnectionBar(wxWindow* parent)
     pause = new wxToggleButton(this, wxID_ANY, "Pause sending", wxDefaultPosition, wxDefaultSize, wxBU_EXACTFIT);
     pause->SetToolTip("Hold new broadcasts as Queued; a burst data2g-host already has still goes");
 
-    // Auto ALC turns data2g-host's TX level (TXPOWER) down to keep the
-    // rig's ALC under its target; the window enables it, and words its
+    // Auto ALC moves data2g-host's TX level (TXPOWER) to keep the rig's
+    // ALC near 55%; the window enables it, and words its
     // tooltip, once the host takes TXPOWER and the rig reports its ALC. The
     // meter beside it shows the rig's ALC (setAlc).
     autoAlc = new wxCheckBox(this, wxID_ANY, "Auto ALC");

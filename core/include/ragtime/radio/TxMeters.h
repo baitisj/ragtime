@@ -8,10 +8,12 @@
 // backend knows them, or else a share of full power.
 //
 // It only reads; Ragtime never plays to the sound card. Each burst works
-// out what Auto ALC should take off data2g-host's TX level, by Glissando's
-// rule (its Drive knob, docs/APP.md there): two ALC readings in a row over
-// ALC_TARGET turn the drive down STEP_DB, one over ALC_HIGH turns it down
-// BIG_STEP_DB. AutoAlc sends that to the host (TXPOWER) when ticked.
+// out how Auto ALC should move data2g-host's TX level to bring the ALC to
+// ALC_TARGET (55%, where Jeff finds a rig works best), from the median of
+// its ALC readings, so a reading at keying or unkeying doesn't sway it:
+// over ALC_HIGH down BIG_STEP_DB, over ALC_BAND_HIGH down STEP_DB, under
+// ALC_LOW up BIG_UP_DB, under ALC_BAND_LOW up STEP_DB, and between the two
+// band edges nothing. AutoAlc sends that to the host (TXPOWER) when ticked.
 //
 // The time is always passed in, so tests run it on a simulated clock.
 #ifndef RAGTIME_RADIO_TX_METERS_H
@@ -20,6 +22,7 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <vector>
 
 namespace ragtime
 {
@@ -39,11 +42,19 @@ struct MeterReading
 class TxMeters
 {
 public:
-    static constexpr double ALC_TARGET = 0.5;
+    static constexpr double ALC_TARGET = 0.55;
+    static constexpr double ALC_BAND_LOW = 0.45;
+    static constexpr double ALC_BAND_HIGH = 0.65;
     static constexpr double ALC_HIGH = 0.8;
+    static constexpr double ALC_LOW = 0.25;
     static constexpr double SWR_HIGH = 3.0;
     static constexpr double STEP_DB = 0.5;
     static constexpr double BIG_STEP_DB = 2.0;
+    static constexpr double BIG_UP_DB = 1.0;
+    // Fewer ALC readings than this in a burst: no step. One will do: with
+    // the meters taken in turn, a short burst may have only one, and the
+    // steps are small.
+    static constexpr int STEP_READINGS = 1;
 
     // One keying, from PTT on to PTT off.
     struct Burst
@@ -51,15 +62,18 @@ public:
         uint64_t startMs = 0;
         uint64_t endMs = 0;
         int readings = 0;
+        int alcReadings = 0;
         std::optional<double> alcPeak;
         std::optional<double> alcMean;
+        std::optional<double> alcMedian;   // set when the burst ends
         std::optional<double> swrPeak;
         std::optional<double> wattsMean;
         std::optional<double> powerMean;
-        // What Auto ALC would have turned the drive down by.
-        double turnDownDb = 0;
+        // How Auto ALC would move the drive, in dB: under 0 down, over 0
+        // up, set when the burst ends.
+        double alcStepDb = 0;
 
-        bool overTarget() const { return alcPeak && *alcPeak > ALC_TARGET; }
+        bool overTarget() const { return alcMedian ? *alcMedian > ALC_BAND_HIGH : alcPeak && *alcPeak > ALC_BAND_HIGH; }
         bool swrHigh() const { return swrPeak && *swrPeak > SWR_HIGH; }
     };
 
@@ -90,7 +104,7 @@ private:
     std::optional<Burst> last_;
     double alcSum_ = 0, wattsSum_ = 0, powerSum_ = 0;
     int alcCount_ = 0, wattsCount_ = 0, powerCount_ = 0;
-    int overInARow_ = 0;
+    std::vector<double> alcReadings_;
     uint64_t bursts_ = 0;
     uint64_t version_ = 0;
 };
@@ -113,6 +127,9 @@ enum class SwrBand
     Bad,
 };
 SwrBand swrBand(double swr);
+
+// The step for a burst whose ALC readings have this median (see above).
+double alcStepDb(double median);
 
 // SwrTrip: Settings > Rig's "Over 3:1 SWR, stop data2g-host; with Hamlib
 // also unkey the rig and turn its power to 0". It trips on READINGS
