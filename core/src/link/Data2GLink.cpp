@@ -114,11 +114,12 @@ std::vector<uint8_t> kissEncode(int port, const std::vector<uint8_t>& data)
 
 std::vector<uint8_t> kissEncodeAckMode(int port, uint16_t tag, const std::vector<uint8_t>& data)
 {
-    std::vector<uint8_t> body;
-    body.reserve(data.size() + 2);
-    body.push_back((uint8_t)(tag >> 8));
-    body.push_back((uint8_t)(tag & 0xFF));
-    body.insert(body.end(), data.begin(), data.end());
+    // Sized once and filled in place: GCC 14 at -O3 takes reserve() then
+    // push_back() for a free of a pointer off the heap (-Wfree-nonheap-object).
+    std::vector<uint8_t> body(data.size() + 2);
+    body[0] = (uint8_t)(tag >> 8);
+    body[1] = (uint8_t)(tag & 0xFF);
+    std::copy(data.begin(), data.end(), body.begin() + 2);
     return kissFrame((uint8_t)(((port & 0x0F) << 4) | KISS_ACKMODE), body);
 }
 
