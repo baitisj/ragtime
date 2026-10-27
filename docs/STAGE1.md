@@ -710,12 +710,26 @@ broadcasts wait (as Pause sending does, and the channel field says
 "Paused"), the session's bytes wait, Call is refused with the reason,
 and the host gets `LISTEN OFF` so it takes no calls; the Broadcast and
 Session tabs say "Receive only until the dial is inside a US data
-segment", and the connection bar's dial turns red with "Receive only".
-What data2g-host already holds still goes, and a session already up
-keeps its link, since the host acknowledges what it hears. 60 m is left
-out (data there is on four 2.8 kHz channels, 97.303(h), and the dial
-alone can't show a burst sits in one), as are 2200 m, 630 m and
-219-220 MHz. Licence classes aren't known.
+segment or on a 60 m channel", and the connection bar's dial turns red
+with "Receive only". What data2g-host already holds still goes, and a
+session already up keeps its link, since the host acknowledges what it
+hears. 2200 m, 630 m and 219-220 MHz are left out. Licence classes
+aren't known.
+
+60 m (47 CFR 97.303(h) and 97.313(i), as FCC 25-60 left them from
+13 February 2026, read in the eCFR 2026-10-27) has two parts. The four
+channels, centred on 5332, 5348, 5373 and 5405 kHz, carry data with
+the carrier 1.5 kHz below the centre, at up to 100 W ERP. Data2G
+centres every mode on 1500 Hz of audio, so Ragtime lets a burst go
+only with the dial at 5.3305, 5.3465, 5.3715 or 5.4035 MHz, to the
+hertz (Jeff, 2026-10-27: "strongly enforced"), in USB. The band
+segment 5351.5-5366.5 kHz, at up to 9.15 W ERP (15 W EIRP), is a data
+segment like any other, with 3 kHz to spare at each edge: the dial at
+5.3545-5.3635 MHz. The old 5358.5 kHz channel is inside it. Anywhere
+else on 60 m is receive only, and the refusal names both. The dial's
+tooltip, and the status bar when sending is allowed again, give the
+power limit where the dial is; Ragtime can't measure ERP, so keeping
+under it is the operator's business.
 
 **The path log** (`radio::PathLog`). Every burst heard from another
 station adds a line to `paths.log` in `appDataDir()` (or

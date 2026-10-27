@@ -136,6 +136,14 @@ range and 2.7 kHz below its high edge. Figures are the signal, in MHz.
 | 12 m | 24.895–24.911 | FT8 24.915–24.918; FT4 24.919–24.922; JS8Call 24.922–24.925; automatic stations 24.925–24.930, with WSPR 24.9260–24.9262; NCDXF beacons 24.930 |
 | 10 m | 28.081–28.119 | FT8 28.074–28.077; JS8Call 28.078–28.081; automatic stations 28.120–28.189, with WSPR 28.1260–28.1262 and FT4 28.180–28.183; beacons 28.190–28.300 |
 
+60 m is channels and one small segment (47 CFR 97.303(h)). Data goes
+on a channel only with the carrier 1.5 kHz below its centre: the dial at
+exactly 5.3305, 5.3465, 5.3715 or 5.4035 MHz in USB, at up to 100 W
+ERP. The band segment 5.3515–5.3665 MHz takes data anywhere, at up to
+9.15 W ERP (about 9 W into a dipole); keep the dial at 5.3545–5.3635 MHz.
+FT8 is at 5.357 dial. With "Receive only outside the US data segments"
+ticked, Ragtime holds sending anywhere else on 60 m.
+
 How these were picked (2026-10-26):
 
 - **What's busy.** PSK Reporter's mode counts for the two hours before

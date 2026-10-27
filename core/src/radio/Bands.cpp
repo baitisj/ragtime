@@ -60,6 +60,7 @@ const std::vector<Span>& usDataSegments()
     static const std::vector<Span> segments = {
         {1800000, 2000000, "160 m"},
         {3500000, 3600000, "80 m"},
+        {5351500, 5366500, "60 m"},
         {7000000, 7125000, "40 m"},
         {10100000, 10150000, "30 m"},
         {14000000, 14150000, "20 m"},
@@ -88,13 +89,75 @@ std::string formatMHz(uint64_t hz)
     return out + " MHz";
 }
 
+const std::vector<uint64_t>& us60mChannelCentres()
+{
+    static const std::vector<uint64_t> centres = {5332000, 5348000, 5373000, 5405000};
+    return centres;
+}
+
+const Span& us60mSegment()
+{
+    static const Span segment = {5351500, 5366500, "60 m"};
+    return segment;
+}
+
+namespace
+{
+
+// The 60 m channel whose dial setting this is, to the hertz; 0 if none.
+uint64_t on60mChannel(uint64_t dialHz)
+{
+    for (uint64_t centre : us60mChannelCentres())
+    {
+        if (dialHz == centre - US_60M_DIAL_BELOW_HZ) return centre;
+    }
+    return 0;
+}
+
+// The segment the dial is inside with room for the burst, or none.
+const Span* insideSegment(uint64_t dialHz)
+{
+    for (const Span& s : usDataSegments())
+    {
+        if (dialHz >= s.lowHz + SEGMENT_MARGIN_HZ && dialHz + SEGMENT_MARGIN_HZ <= s.highHz) return &s;
+    }
+    return nullptr;
+}
+
+// "14.000-14.150 MHz"
+std::string rangeText(const Span& s)
+{
+    std::string low = formatMHz(s.lowHz);
+    return low.substr(0, low.size() - 4) + "-" + formatMHz(s.highHz);
+}
+
+} // namespace
+
 std::string usDataRefusal(uint64_t dialHz)
 {
+    if (on60mChannel(dialHz) != 0 || insideSegment(dialHz) != nullptr) return std::string();
+    std::string why = formatMHz(dialHz);
+    if (bandOf(dialHz) == "60 m")
+    {
+        // Every channel's dial setting, in order, then the band segment.
+        why += " is on 60 m, where data goes out only centred on a channel (47 CFR 97.303(h)): the dial at ";
+        const std::vector<uint64_t>& centres = us60mChannelCentres();
+        for (size_t i = 0; i < centres.size(); i++)
+        {
+            std::string dial = formatMHz(centres[i] - US_60M_DIAL_BELOW_HZ);
+            if (i + 1 < centres.size()) dial = dial.substr(0, dial.size() - 4);
+            why += (i == 0 ? "" : i + 1 == centres.size() ? " or " : ", ") + dial;
+        }
+        const Span& seg = us60mSegment();
+        Span room = {seg.lowHz + SEGMENT_MARGIN_HZ, seg.highHz - SEGMENT_MARGIN_HZ, seg.band};
+        why += " in USB, 1.5 kHz below the channel's centre, exactly; or in the band segment "
+               + rangeText(seg) + ", with the dial at " + rangeText(room) + ".";
+        return why;
+    }
     const Span* nearest = nullptr;
     uint64_t nearestHz = UINT64_MAX;
     for (const Span& s : usDataSegments())
     {
-        if (dialHz >= s.lowHz + SEGMENT_MARGIN_HZ && dialHz + SEGMENT_MARGIN_HZ <= s.highHz) return std::string();
         uint64_t away = dialHz < s.lowHz ? s.lowHz - dialHz : dialHz > s.highHz ? dialHz - s.highHz : 0;
         if (away < nearestHz)
         {
@@ -102,20 +165,22 @@ std::string usDataRefusal(uint64_t dialHz)
             nearestHz = away;
         }
     }
-    std::string why = formatMHz(dialHz);
-    std::string band = bandOf(dialHz);
-    if (band == "60 m")
-        why += " is on 60 m, where data is only on four 2.8 kHz channels (47 CFR 97.303(h)); Ragtime "
-               "can't tell from the dial whether a burst sits inside one.";
-    else
-        why += " is outside the US data segments (47 CFR 97.305).";
+    why += " is outside the US data segments (47 CFR 97.305).";
     if (nearest != nullptr)
-    {
-        std::string range = formatMHz(nearest->lowHz);
-        range = range.substr(0, range.size() - 4) + "-" + formatMHz(nearest->highHz);
-        why += " The nearest is " + range + " (" + nearest->band + "), with 3 kHz to spare at each edge.";
-    }
+        why += " The nearest is " + rangeText(*nearest) + " (" + nearest->band + "), with 3 kHz to spare at each edge.";
     return why;
+}
+
+std::string usDataPlace(uint64_t dialHz)
+{
+    if (uint64_t centre = on60mChannel(dialHz))
+        return "Centred on the 60 m channel at " + formatMHz(centre)
+               + ": sending allowed, at up to 100 W ERP (47 CFR 97.313(i))";
+    const Span* s = insideSegment(dialHz);
+    if (s == nullptr) return std::string();
+    if (s->lowHz == us60mSegment().lowHz)
+        return "Inside the 60 m band segment: sending allowed, at up to 9.15 W ERP, 15 W EIRP (47 CFR 97.313(i))";
+    return "Inside a US data segment: sending allowed";
 }
 
 } // namespace radio
