@@ -86,6 +86,21 @@ int Spectrum::binOf(double hz, double topHz)
     return std::max(0, std::min(BINS - 1, i));
 }
 
+float Spectrum::quietLevel(const std::vector<float>& row, double topHz, double lowHz, double highHz)
+{
+    if (row.empty()) return 0.0f;
+    std::size_t from = (std::size_t)binOf(lowHz, topHz), to = (std::size_t)binOf(highHz, topHz) + 1;
+    if (to > row.size() || to < from + 4)
+    {
+        from = 0;
+        to = row.size();
+    }
+    std::vector<float> part(row.begin() + (long)from, row.begin() + (long)to);
+    const std::size_t k = part.size() * 3 / 10;
+    std::nth_element(part.begin(), part.begin() + (long)k, part.end());
+    return part[k];
+}
+
 void Spectrum::restart()
 {
     n_ = powerOfTwoAtLeast(rate_ / FFT_HZ);

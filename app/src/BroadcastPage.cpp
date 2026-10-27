@@ -19,6 +19,7 @@
 #include <gtk/gtk.h>
 #endif
 
+#include "ChatList.h"
 #include "DrawnIcon.h"
 #include "GearshiftIcon.h"
 #include "Html.h"
@@ -222,14 +223,13 @@ const int ID_REACT = wxID_HIGHEST + 470;           // and REACTION_MENU_IDS afte
 
 } // namespace
 
-class MessageList : public wxHtmlListBox
+class MessageList : public ChatList
 {
 public:
     explicit MessageList(BroadcastPage* owner)
-        : wxHtmlListBox(owner, wxID_ANY, wxDefaultPosition, wxDefaultSize, wxBORDER_THEME)
+        : ChatList(owner)
         , owner_(owner)
     {
-        SetMargins(FromDIP(4), FromDIP(1));
     }
 
     const Message* at(size_t n) const
@@ -581,11 +581,7 @@ void BroadcastPage::refresh()
         return;
     shownVersion_ = chat_.version();
     shownSeals_ = seals;
-    size_t count = chat_.messages().size();
-    bool atEnd = list_->GetItemCount() == 0 || list_->GetVisibleRowsEnd() >= list_->GetItemCount();
-    list_->SetItemCount(count);
-    list_->RefreshAll();
-    if (atEnd && count > 0) list_->ScrollToRow(count - 1);
+    list_->showRows(chat_.messages().size());
 }
 
 void BroadcastPage::setGearLabel(const wxString& label, const wxString& tooltip, double bitsPerSecond)

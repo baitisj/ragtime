@@ -2122,6 +2122,16 @@ bool MainFrame::fileCard(uint64_t id, FileCard& card)
     if (!broadcastFiles_.find(id, now, f)) return false;
     card.what = f.name + " \xc2\xb7 " + files::sizeText(f.size);
     std::string pieces = std::to_string(f.held) + " of " + std::to_string(f.pieces) + " pieces";
+    auto capital = [](std::string text) {
+        if (!text.empty() && text[0] >= 'a' && text[0] <= 'z') text[0] = (char)(text[0] - 'a' + 'A');
+        return text;
+    };
+    // Theirs: repair pieces held count toward the whole (KC2G, 2026-10-26:
+    // "my completion doesn't go up at all", then the file was whole).
+    uint32_t have = std::min<uint32_t>(f.pieces, (uint32_t)f.held + f.repairHeld);
+    if (!f.outgoing && f.repairHeld > 0)
+        pieces = std::to_string(have) + " of " + std::to_string(f.pieces) + " pieces, "
+                 + std::to_string(f.repairHeld) + " of them repair pieces";
     switch (f.state)
     {
         case State::Sending:
@@ -2130,13 +2140,18 @@ bool MainFrame::fileCard(uint64_t id, FileCard& card)
             card.menu = {{"stop", "Stop sending (repairs stay open)"}};
             break;
         case State::Repairing:
+            // A round as it goes, and who asked (Jeff, 2026-10-26: one went
+            // out after a re-open with nothing here saying so).
             if (!f.sealed)
                 card.state = "Sealing";
+            else if (f.roundPieces > 0)
+                card.state = capital(broadcast::repairText(f)) + ". Repairs open until "
+                             + repairsUntilText(f.repairsUntilMs, now, localOffsetSeconds());
             else
                 card.state = "Repairs open until " + repairsUntilText(f.repairsUntilMs, now, localOffsetSeconds())
-                             + (f.askers == 0 ? std::string()
-                                              : ", " + std::to_string(f.askers) + (f.askers == 1 ? " station" : " stations")
-                                                    + " asked");
+                             + (f.askedBy.empty() && f.askers == 0 && f.repairPieces == 0
+                                    ? std::string()
+                                    : ". " + capital(broadcast::repairText(f)));
             // Stopped part way: what went is sealed, and the rest goes to
             // a station that asks for it while repairs are open.
             if (f.stopped) card.state = "Stopped at " + pieces + ". " + card.state;
@@ -2158,6 +2173,8 @@ bool MainFrame::fileCard(uint64_t id, FileCard& card)
             card.good = f.state == State::Sent;
             if (f.repairCapped)
                 card.state += ". Repairs closed after " + durationText(f.repairSeconds) + " of repair airtime";
+            else if (!f.askedBy.empty() || f.repairPieces > 0)
+                card.state += ". " + capital(broadcast::repairText(f));
             // Repairs again (Jeff, 2026-10-25), while its seal is held.
             if (f.reopenable)
             {
@@ -2179,13 +2196,13 @@ bool MainFrame::fileCard(uint64_t id, FileCard& card)
             card.menu = {{"receive", "Receive..."}, {"reject", "Reject file..."}};
             break;
         case State::Receiving:
-            card.state = f.asking ? "Asking for " + std::to_string(f.pieces - f.held) + " pieces"
-                                  : "Receiving, " + pieces;
+            card.state = f.asking ? "Asking for " + std::to_string(f.pieces - have) + " more pieces, " + pieces
+                                  : (f.repairHeld > 0 ? "Repairing, " : "Receiving, ") + pieces;
             card.actions = {{"stopasking", "Stop"}};
             card.menu = {{"stopasking", "Stop (keep what came)"}, {"reject", "Reject file..."}};
             // Under its seal, the rest can be asked for now, rather than
             // at the next seal.
-            if (f.sealed && !f.asking && f.held < f.pieces)
+            if (f.sealed && !f.asking && have < f.pieces)
                 card.menu.insert(card.menu.begin(), {"askagain", "Ask again for the rest"});
             break;
         case State::Incomplete:
@@ -2409,6 +2426,22 @@ void MainFrame::onBroadcastFiles()
             case Type::Ended:
                 if (f.outgoing) note_ = f.name + ": " + broadcast::stateLabel(f.state);
                 chat_.fileEnded(f.id, broadcast::stateLabel(f.state));
+                break;
+            case Type::Repairing:
+                note_ = "Sending repairs of " + f.name
+                        + (f.repairingFor.empty() ? std::string() : " to " + broadcast::callsText(f.repairingFor));
+                break;
+            case Type::Reopened:
+                if (f.outgoing)
+                {
+                    note_ = "Repairs of " + f.name + " open again until "
+                            + repairsUntilText(f.repairsUntilMs, now, localOffsetSeconds());
+                }
+                else
+                {
+                    note_ = f.from + " opened repairs of " + f.name + " again: asking for the rest";
+                    if (!IsActive()) RequestUserAttention(wxUSER_ATTENTION_INFO);
+                }
                 break;
         }
     }

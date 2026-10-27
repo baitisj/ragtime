@@ -128,6 +128,34 @@ const char* stateLabel(BroadcastFile::State state)
     return "";
 }
 
+std::string callsText(const std::vector<std::string>& calls)
+{
+    const size_t named = 2;
+    std::string text;
+    for (size_t i = 0; i < calls.size() && i < named; i++)
+    {
+        if (i > 0) text += calls.size() == 2 ? " and " : ", ";
+        text += calls[i];
+    }
+    if (calls.size() > named) text += " and " + std::to_string(calls.size() - named) + " more";
+    return text;
+}
+
+std::string repairText(const BroadcastFile& f)
+{
+    if (f.roundPieces > 0)
+    {
+        std::string to = f.repairingFor.empty() ? std::string() : " to " + callsText(f.repairingFor);
+        return "sending repairs" + to + ", " + std::to_string(f.roundSent) + " of "
+               + countText(f.roundPieces, "piece", "pieces");
+    }
+    std::string text = !f.askedBy.empty() ? callsText(f.askedBy) + " asked"
+                       : f.askers != 0    ? countText(f.askers, "station", "stations") + " asked"
+                                          : std::string("no requests yet");
+    if (f.repairPieces > 0) text += ", " + countText(f.repairPieces, "repair piece", "repair pieces") + " sent";
+    return text;
+}
+
 BroadcastFiles::BroadcastFiles(link::HostLink& link, BroadcastChat& chat, Seals& seals)
     : link_(link)
     , chat_(chat)
@@ -394,9 +422,11 @@ bool BroadcastFiles::reopen(uint64_t id, uint64_t untilMs, uint64_t nowMs, std::
     }
     out->content = std::move(content);
     out->capped = false;
+    out->inRound = false;
     out->file.state = State::Repairing;
     out->file.sealed = true;
     out->file.lastMs = nowMs;
+    emit(Event::Type::Reopened, out->file.id);
     changed();
     return true;
 }
@@ -1037,6 +1067,10 @@ void BroadcastFiles::tick(uint64_t nowMs)
         {
             Seals::SealView seal = seals_.sealOf(out.file.seq, nowMs);
             if (seal.sealed) out.file.sealed = true;
+            // A round carrying its pieces: the screen says to whom.
+            bool inRound = seals_.fileRepairs(out.file.seq).roundPieces > 0;
+            if (inRound && !out.inRound) emit(Event::Type::Repairing, out.file.id);
+            out.inRound = inRound;
             if (out.file.sealed && seals_.repairCapReached(out.file.seq))
             {
                 // Its repairs have had the airtime the operator allows.
@@ -1084,6 +1118,7 @@ void BroadcastFiles::tick(uint64_t nowMs)
             in.file.expiresAtMs = 0;
             in.file.lastMs = nowMs;
             if (!seals_.askAgain(in.file.from, in.file.seq, nowMs)) seals_.askSoon(in.file.from, nowMs);
+            emit(Event::Type::Reopened, in.file.id);
             changed();
         }
         else if (in.file.state == State::Incomplete && nowMs >= in.file.expiresAtMs)
@@ -1353,6 +1388,18 @@ BroadcastFile BroadcastFiles::view(const Outgoing& out, uint64_t nowMs) const
     {
         f.reopenable = seals_.sealOf(f.seq, nowMs).sealed;
     }
+    if (f.state == State::Repairing || f.state == State::Sent || f.state == State::Cancelled)
+    {
+        Seals::FileRepairs repairs = seals_.fileRepairs(f.seq);
+        f.askedBy = std::move(repairs.askers);
+        f.repairPieces = repairs.piecesSent;
+        if (f.state == State::Repairing)
+        {
+            f.repairingFor = std::move(repairs.sendingTo);
+            f.roundPieces = repairs.roundPieces;
+            f.roundSent = repairs.roundSent;
+        }
+    }
     return f;
 }
 
@@ -1369,10 +1416,17 @@ BroadcastFile BroadcastFiles::view(const Incoming& in, uint64_t nowMs) const
     {
         // Missed: its turn has gone by (a later piece is here, or the seal).
         uint16_t last = in.pieces.empty() ? 0 : in.pieces.rbegin()->first;
+        size_t lacking = in.pieces.size() < f.pieces ? (size_t)f.pieces - in.pieces.size() : 0;
+        f.repairHeld = (uint16_t)std::min(in.parity.size(), lacking);
+        // The repair pieces held stand in for missing pieces, any of them:
+        // shown over the first gaps.
+        uint16_t covered = f.repairHeld;
         for (uint16_t i = 0; i < f.pieces; i++)
         {
             if (in.pieces.count(i) != 0)
                 f.pieceMap[i] = files::PIECE_HELD;
+            else if (covered > 0 && covered--)
+                f.pieceMap[i] = files::PIECE_COVERED;
             else if (f.sealed || (!in.pieces.empty() && i < last))
                 f.pieceMap[i] = files::PIECE_MISSED;
             else
@@ -1444,15 +1498,21 @@ std::vector<files::FileRow> BroadcastFiles::rows(uint64_t nowMs) const
         }
         else
         {
-            row.state = !f.sealed ? std::string("Sealing")
-                                  : f.askers == 0 ? std::string("Repairing, no requests yet")
-                                                  : "Repairing, " + countText(f.askers, "station", "stations") + " asked";
+            // Who asked, and a round as it goes (Jeff, 2026-10-26: one of 39
+            // repair pieces went out with nothing on the screen saying so).
+            std::string repairs = repairText(f);
+            if (!f.sealed)
+                row.state = "Sealing";
+            else if (f.roundPieces > 0)
+                row.state = "Sending repairs" + repairs.substr(std::string("sending repairs").size());
+            else
+                row.state = "Repairing, " + repairs;
             if (f.stopped)
                 row.state = "Stopped at " + std::to_string(f.held) + " of " + std::to_string(f.pieces) + ", "
                             + (!f.sealed ? std::string("sealing")
-                                         : f.askers == 0 ? std::string("repairs open")
-                                                         : countText(f.askers, "station", "stations") + " asked");
-            row.look = Look::Repairing;
+                               : f.askedBy.empty() && f.askers == 0 && f.repairPieces == 0 ? std::string("repairs open")
+                                                                                            : repairs);
+            row.look = f.roundPieces > 0 ? Look::Moving : Look::Repairing;
             row.expiresAtMs = f.repairsUntilMs;
         }
         rows.push_back(std::move(row));
@@ -1462,7 +1522,10 @@ std::vector<files::FileRow> BroadcastFiles::rows(uint64_t nowMs) const
         if (!in.announced || !in.file.live()) continue;
         BroadcastFile f = view(in, nowMs);
         files::FileRow row = base(f);
-        row.done = std::min<uint64_t>(f.size, in.bytes);
+        // Repair pieces held count toward the whole: they make up the
+        // missing pieces once there are enough of them (KC2G, 2026-10-26:
+        // "my completion doesn't go up at all").
+        row.done = std::min<uint64_t>(f.size, in.bytes + (uint64_t)f.repairHeld * in.announce.pieceBytes);
         row.handed = row.done;
         size_t have = in.pieces.size() + in.parity.size();
         size_t missing = have < f.pieces ? (size_t)f.pieces - have : 0;

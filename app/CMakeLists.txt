@@ -25,6 +25,7 @@ add_executable(ragtime WIN32
     src/AppIcon.cpp
     src/MainFrame.cpp
     src/BroadcastPage.cpp
+    src/ChatList.cpp
     src/ConnectionBar.cpp
     src/FilesPage.cpp
     src/GearshiftDialog.cpp

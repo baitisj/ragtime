@@ -250,6 +250,22 @@ public:
     };
     // The seal our item seq is listed in.
     SealView sealOf(uint32_t seq, uint64_t nowMs) const;
+    // A file of ours, as its card and Files tab row show its repairs
+    // (Jeff, 2026-10-26: a round of 39 repair pieces went out unseen).
+    struct FileRepairs
+    {
+        // Stations that asked for its pieces under its seal, in the order
+        // they first asked.
+        std::vector<std::string> askers;
+        // The round going now: the stations it answers, its repair pieces
+        // of this file still to go or gone (0: none of it in the round).
+        std::vector<std::string> sendingTo;
+        uint32_t roundPieces = 0;
+        uint32_t roundSent = 0;
+        // Repair pieces of it sent since its repairs last opened.
+        uint32_t piecesSent = 0;
+    };
+    FileRepairs fileRepairs(uint32_t seq) const;
     // The operator keeps it open until then (re-opening it, if closed), or
     // closes it now: the round's repairs under it still with HostLink are
     // taken back (the burst on the air goes on).
@@ -387,6 +403,9 @@ private:
         bool capped = false;        // closed as a file under it reached the repair airtime cap
         std::map<std::string, uint64_t> askers;
         size_t asks = 0;
+        // Per file under it, the stations that asked for its pieces, in
+        // the order they first asked.
+        std::map<uint32_t, std::vector<std::string>> fileAskers;
         int flushes = 0;            // sent again after a quiet window
         uint32_t nextParity = 0;    // the next ItemParity's index
         // Per item, from the requests heard under it: who holds it, and
@@ -405,6 +424,7 @@ private:
         std::map<uint32_t, std::string> items;
         std::vector<std::pair<std::set<uint32_t>, uint32_t>> itemAskers;
         std::map<uint32_t, std::map<std::string, uint32_t>> files;
+        std::map<uint32_t, std::set<std::string>> fileAskers;
     };
 
     // A refusal to go at the window's end: for these files under a seal,
@@ -581,8 +601,19 @@ private:
     {
         std::set<uint16_t> seals;
         std::map<uint32_t, double> fileAir;
+        std::map<uint32_t, uint32_t> filePieces;
     };
     std::map<uint64_t, RoundBurst> roundBursts_;
+    // Each file's part in the round going now (FileRepairs), and its
+    // repair pieces sent since its repairs last opened.
+    struct FileRound
+    {
+        std::set<std::string> to;
+        uint32_t pieces = 0;
+        uint32_t sent = 0;
+    };
+    std::map<uint32_t, FileRound> fileRound_;
+    std::map<uint32_t, uint32_t> repairPieces_;
     std::string lastRoundMode_;             // the gear the round's seals went in
 
     std::map<std::string, Station> stations_;

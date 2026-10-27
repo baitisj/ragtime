@@ -32,14 +32,6 @@ void colourOf(double t, unsigned char* rgb)
     for (int c = 0; c < 3; c++) rgb[c] = (unsigned char)std::lround(stops[i][c] + (stops[i + 1][c] - stops[i][c]) * f);
 }
 
-// The quieter part of a row: its 30th percentile.
-double quietLevel(const std::vector<float>& row)
-{
-    std::vector<float> sorted(row);
-    std::nth_element(sorted.begin(), sorted.begin() + (long)sorted.size() * 3 / 10, sorted.end());
-    return sorted[sorted.size() * 3 / 10];
-}
-
 } // namespace
 
 EarScope::EarScope(wxWindow* parent)
@@ -298,10 +290,15 @@ void EarScope::addRows(const std::vector<std::vector<float>>& rows, bool transmi
     for (const std::vector<float>& row : rows)
     {
         if ((int)row.size() != Spectrum::BINS) continue;
-        // The floor follows slowly, and not while transmitting.
+        // The floor follows slowly, and not while transmitting. It is the
+        // passband's noise: between the edges the noise shows, else in
+        // Data2G's passband (Jeff, 2026-10-26: at 12 kHz the roll-off past
+        // the filter pulled a whole row's floor down and lit it yellow).
         if (!transmitting)
         {
-            const double quiet = quietLevel(row);
+            ragtime::ear::Passband pass = ragtime::ear::data2gPassband(false);
+            if (edges_ && edges_->lowHz && edges_->highHz) pass = {*edges_->lowHz, *edges_->highHz};
+            const double quiet = Spectrum::quietLevel(row, topHz_, pass.lowHz, pass.highHz);
             floor_ = haveFloor_ ? floor_ + (quiet - floor_) * 0.05 : quiet;
             haveFloor_ = true;
         }

@@ -18,6 +18,7 @@
 #include <wx/stattext.h>
 #include <wx/textctrl.h>
 
+#include "ChatList.h"
 #include "DrawnIcon.h"
 #include "Html.h"
 #include "PhraseHighlight.h"
@@ -104,14 +105,13 @@ wxString stateLine(const Message& m, const std::string& peer)
 
 } // namespace
 
-class SessionMessages : public wxHtmlListBox
+class SessionMessages : public ChatList
 {
 public:
     explicit SessionMessages(SessionPage* owner)
-        : wxHtmlListBox(owner, wxID_ANY, wxDefaultPosition, wxDefaultSize, wxBORDER_THEME)
+        : ChatList(owner)
         , owner_(owner)
     {
-        SetMargins(FromDIP(4), FromDIP(1));
     }
 
     const Message* at(size_t n) const
@@ -401,13 +401,8 @@ void SessionPage::refresh(uint64_t nowMs, long utcOffsetS)
     {
         shownVersion_ = session_.version();
         shownFiles_ = files_.changes();
-        size_t before = items_.size();
-        bool atEnd = list_->GetItemCount() == 0 || list_->GetVisibleRowsEnd() >= list_->GetItemCount();
         rebuild(nowMs);
-        size_t count = items_.size();
-        list_->SetItemCount(count);
-        list_->RefreshAll();
-        if (atEnd && count > 0 && count != before) list_->ScrollToRow(count - 1);
+        list_->showRows(items_.size());
         refreshQueue();
     }
 }

@@ -134,7 +134,9 @@ void Seals::setChain(const std::string& callsign, const Chain& chain)
         resendBursts_.clear();
         resendLast_ = 0;
         roundBursts_.clear();
+        fileRound_.clear();
         repairAir_.clear();
+        repairPieces_.clear();
         gears_.clear();
         sealSoon_ = false;
         settled_.clear();
@@ -235,6 +237,26 @@ bool Seals::repairCapReached(uint32_t seq) const
     return repairCapSeconds_ > 0.0 && repairAirtime(seq) >= repairCapSeconds_;
 }
 
+Seals::FileRepairs Seals::fileRepairs(uint32_t seq) const
+{
+    FileRepairs r;
+    if (const OurSeal* s = sealFor(seq))
+    {
+        auto askers = s->fileAskers.find(seq);
+        if (askers != s->fileAskers.end()) r.askers = askers->second;
+    }
+    auto round = fileRound_.find(seq);
+    if (resendLast_ != 0 && round != fileRound_.end() && round->second.pieces > 0)
+    {
+        r.sendingTo.assign(round->second.to.begin(), round->second.to.end());
+        r.roundPieces = round->second.pieces;
+        r.roundSent = std::min(round->second.sent, round->second.pieces);
+    }
+    auto sent = repairPieces_.find(seq);
+    if (sent != repairPieces_.end()) r.piecesSent = sent->second;
+    return r;
+}
+
 void Seals::takeBackRepairs(uint16_t number)
 {
     for (auto it = roundBursts_.begin(); it != roundBursts_.end();)
@@ -242,6 +264,11 @@ void Seals::takeBackRepairs(uint16_t number)
         const std::set<uint16_t>& under = it->second.seals;
         if (under.size() == 1 && *under.begin() == number && link_.cancel(it->first))
         {
+            for (const auto& pieces : it->second.filePieces)
+            {
+                auto round = fileRound_.find(pieces.first);
+                if (round != fileRound_.end()) round->second.pieces -= std::min(round->second.pieces, pieces.second);
+            }
             resendBursts_.erase(it->first);
             it = roundBursts_.erase(it);
             version_++;
@@ -413,7 +440,11 @@ bool Seals::reopen(uint32_t seq, uint64_t untilMs, uint64_t nowMs)
     // Its files' repairs start afresh under the cap, and what we refused
     // may be refused again.
     s->capped = false;
-    for (uint32_t i = s->first; i < s->first + s->count; i++) repairAir_.erase(i);
+    for (uint32_t i = s->first; i < s->first + s->count; i++)
+    {
+        repairAir_.erase(i);
+        repairPieces_.erase(i);
+    }
     for (auto it = refusedMs_.begin(); it != refusedMs_.end();)
         it = it->first.first == s->number ? refusedMs_.erase(it) : std::next(it);
     // The seal again: a station that heard us refuse asks once more.
@@ -718,6 +749,9 @@ void Seals::onRequest(const std::string& from, const protocol::RepairRequest& re
         uint32_t want = std::min<uint32_t>(file.second, 4u * pieces);
         uint32_t& most = a.files[seq][mode];
         most = std::max(most, want);
+        a.fileAskers[seq].insert(from);
+        std::vector<std::string>& askers = s->fileAskers[seq];
+        if (std::find(askers.begin(), askers.end(), from) == askers.end()) askers.push_back(from);
     }
     if (!a.seal && a.items.empty() && a.files.empty()) asked_.erase(request.seal);
     s->askers[from] = nowMs;
@@ -777,6 +811,7 @@ void Seals::resend(uint64_t nowMs)
     std::vector<const OurSeal*> seals;
     std::vector<std::string> sealModes;
     roundItems_.clear();
+    fileRound_.clear();
     uint32_t time = seconds(nowMs);
     // The round's own gear is its newest seal's. Parity pieces are made to
     // fit its slow gears' cap, as they're numbered one after another: one
@@ -827,6 +862,8 @@ void Seals::resend(uint64_t nowMs)
             auto item = sealedItems_.find(seq);
             uint16_t k = files_ != nullptr ? files_->pieceCount(seq) : 0;
             if (item == sealedItems_.end() || k == 0) continue;
+            auto askers = a.fileAskers.find(seq);
+            if (askers != a.fileAskers.end()) fileRound_[seq].to = askers->second;
             uint32_t span = 65536u - k;
             for (const auto& gear : file.second)
             {
@@ -957,8 +994,16 @@ void Seals::resend(uint64_t nowMs)
             }
             if (!records.empty() && records.front().as<protocol::FilePiece>() != nullptr)
                 round.fileAir[records.front().header.seq] += each;
+            for (const protocol::Record& r : records)
+            {
+                if (r.as<protocol::FilePiece>() == nullptr) continue;
+                round.filePieces[r.header.seq]++;
+                fileRound_[r.header.seq].pieces++;
+            }
         }
     }
+    for (auto it = fileRound_.begin(); it != fileRound_.end();)
+        it = it->second.pieces == 0 ? fileRound_.erase(it) : std::next(it);
     lastRoundMode_ = end;
     version_++;
 }
@@ -1131,6 +1176,19 @@ void Seals::onEvent(const Event& event, uint64_t nowMs)
     if (round != roundBursts_.end())
     {
         std::map<uint32_t, double> fileAir = round->second.fileAir;
+        for (const auto& pieces : round->second.filePieces)
+        {
+            auto going = fileRound_.find(pieces.first);
+            if (sent)
+            {
+                repairPieces_[pieces.first] += pieces.second;
+                if (going != fileRound_.end()) going->second.sent += pieces.second;
+            }
+            else if (going != fileRound_.end())
+            {
+                going->second.pieces -= std::min(going->second.pieces, pieces.second);
+            }
+        }
         roundBursts_.erase(round);
         for (const auto& air : fileAir)
         {
@@ -1149,6 +1207,7 @@ void Seals::onEvent(const Event& event, uint64_t nowMs)
     {
         resendLast_ = 0;
         roundItems_.clear();
+        fileRound_.clear();
         // The round's seals went again: listeners ask once more if they
         // still lack anything.
         if (sent)
@@ -1277,6 +1336,8 @@ void Seals::prune(uint64_t nowMs)
             sealedItems_.erase(seq);
             gears_.erase(seq);
             repairAir_.erase(seq);
+            repairPieces_.erase(seq);
+            fileRound_.erase(seq);
         }
         asked_.erase(s.number);
         seals_.pop_front();
