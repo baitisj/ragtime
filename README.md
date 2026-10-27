@@ -59,11 +59,15 @@ have them under their own names.
 
 | Library | Ubuntu package | For | Without it |
 | --- | --- | --- | --- |
-| A C++17 compiler, CMake 3.16 or newer, pkg-config | `build-essential cmake pkg-config` | The build | Required |
+| A C++17 compiler (GCC 13, 14 and 16 tested), CMake 3.16 or newer, pkg-config | `build-essential cmake pkg-config` | The build | Required |
 | wxWidgets 3.2 (GTK 3) | `libwxgtk3.2-dev` | The window | `-DRAGTIME_APP=OFF` builds only the core, the rig library and their tests |
 | GTK 3 | `libgtk-3-dev` | The ham phrase highlight in the entry lines | Required for the app |
 | Hamlib | `libhamlib-dev` | Settings > Rig, opening the rig with Hamlib | `-DRAGTIME_HAMLIB=OFF` |
 | PipeWire 0.3 headers | `libpipewire-0.3-dev` | The Ear's listening | `-DRAGTIME_PIPEWIRE=OFF` |
+
+Warnings are errors by default. If a compiler we haven't tried stops
+the build on a warning, `-DRAGTIME_WERROR=OFF` lets it finish, and we'd
+like to hear about it.
 
 Ragtime never reads or writes JPEG, PNG, TIFF or WebP itself. Those
 libraries come in with wxWidgets, which is built against them: the
