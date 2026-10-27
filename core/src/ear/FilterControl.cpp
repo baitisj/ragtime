@@ -192,6 +192,12 @@ Span dragTarget(const Span& from, const Span& to, const RigFilter& now, const Kn
     return out;
 }
 
+Span reached(const Span& from, const RigFilter& now, const RigFilter& to, const KnobModel& m)
+{
+    const Span was = visible(spanOf(now, m), m), got = visible(spanOf(to, m), m);
+    return visible(Span{got.lowHz + (from.lowHz - was.lowHz), got.highHz + (from.highHz - was.highHz)}, m);
+}
+
 double centreOf(const Span& measured, const RigFilter& f, double hzPerKnob)
 {
     return measured.centre() - (knobShift(f.pbtIn, hzPerKnob) + knobShift(f.pbtOut, hzPerKnob)) / 2;

@@ -1047,6 +1047,57 @@ void keepAhead()
     CHECK(e.current() && e.current()->widthHz == 2300);
 }
 
+// Two shifts past the knobs' end (Jeff, 2026-10-26, his IC-7100's
+// calibration): the top edge dropped at 5 kHz stops near 4.4, and the
+// next shift, taken from where it landed, puts the edges where dropped.
+void shiftPastTheEnd()
+{
+    const std::optional<KnobModel> m = KnobModel::fromText("2803.3 1481.1 3028.7 3000.0 72.0 0.0");
+    CHECK(m.has_value());
+    RigFilter now = usb(3000, 0.5, 0.5);
+    now.mode = "PKTUSB";
+    const Span start = spanOf(now, *m);
+    const Span shown = visible(start, *m);
+
+    // Up 2000 Hz: the knobs stop at 1, the passband about 1400 Hz up.
+    const double up = 5000 - shown.highHz;
+    Span dropped{shown.lowHz + up, shown.highHz + up};
+    Span target = dragTarget(shown, dropped, now, *m);
+    RigFilter to = settingFor(target, now, *m);
+    CHECK(to.pbtIn && *to.pbtIn == 1.0 && to.pbtOut && *to.pbtOut == 1.0);
+    CHECK_EQ(to.widthHz, 3000);
+    const Span landed = reached(shown, now, to, *m);
+    CHECK(std::fabs(landed.highHz - spanOf(to, *m).highHz) < 1);
+    CHECK(std::fabs(landed.lowHz - spanOf(to, *m).lowHz) < 1);
+    CHECK(landed.highHz < 4500);
+    // A drag with nothing short lands where it was dropped, the model's
+    // error and all.
+    {
+        const Span measured{shown.lowHz, shown.highHz + 40};
+        const Span drop{measured.lowHz + 200, measured.highHz + 200};
+        const RigFilter t = settingFor(dragTarget(measured, drop, now, *m), now, *m);
+        const Span l = reached(measured, now, t, *m);
+        CHECK(std::fabs(l.highHz - drop.highHz) < 15);
+    }
+
+    // Down from where it landed until the low edge shows at 100 Hz.
+    now = to;
+    const double down = 100 - landed.lowHz;
+    dropped = Span{landed.lowHz + down, landed.highHz + down};
+    target = dragTarget(landed, dropped, now, *m);
+    to = settingFor(target, now, *m);
+    const Span got = spanOf(to, *m);
+    CHECK(std::fabs(got.lowHz - 100) < 15);
+    // The top edge a little over where it started, the width the same:
+    // not several hundred Hz short.
+    CHECK(std::fabs(got.highHz - (start.highHz + (100 - start.lowHz))) < 15);
+    CHECK(got.highHz > start.highHz);
+
+    // Taken from where it was dropped instead (the bug), it came up short.
+    const Span wrong = spanOf(settingFor(dragTarget(Span{1972, 5000}, Span{100, 3128}, now, *m), now, *m), *m);
+    CHECK(wrong.highHz < start.highHz - 300);
+}
+
 int main()
 {
     fftOfImpulse();
@@ -1066,5 +1117,6 @@ int main()
     notch();
     clockHeld();
     keepAhead();
+    shiftPastTheEnd();
     return ragtime_test::finish();
 }

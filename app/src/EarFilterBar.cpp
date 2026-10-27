@@ -362,14 +362,19 @@ void EarFilterBar::dragged(const Span& from, const Span& wanted)
     // Uncalibrated, a shift turns both knobs alike by a guessed Hz per
     // knob (the noise shows where it lands), and an edge moves only the
     // width, about the centre the passband has now.
+    // Shown where it lands, not where it was dropped, when the knobs stop
+    // it short (ear::reached).
     const double dl = wanted.lowHz - from.lowHz, dh = wanted.highHz - from.highHz;
     if (!m.known() && std::fabs(dl - dh) < 1 && now->pbtIn && now->pbtOut)
     {
-        change(ear::shiftedBy(*now, dl, ear::guessHzPerKnob(*now)), wanted);
+        m.hzPerKnob = ear::guessHzPerKnob(*now);
+        const RigFilter to = ear::shiftedBy(*now, dl, m.hzPerKnob);
+        change(to, ear::reached(from, *now, to, m));
         return;
     }
     if (!m.known()) m.centreHz = from.centre();
-    change(ear::settingFor(ear::dragTarget(from, wanted, *now, m), *now, m), wanted);
+    const RigFilter to = ear::settingFor(ear::dragTarget(from, wanted, *now, m), *now, m);
+    change(to, ear::reached(from, *now, to, m));
 }
 
 const ear::NotchModel& EarFilterBar::notchModel()
