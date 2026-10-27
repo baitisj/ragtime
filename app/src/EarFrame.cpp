@@ -12,7 +12,6 @@
 
 #include "EarScope.h"
 #include "Prefs.h"
-#include "ragtime/ear/ProcNet.h"
 #include "ragtime/radio/Noise.h"
 
 using namespace ragtime;
@@ -61,8 +60,9 @@ EarFrame::EarFrame(wxWindow* parent, ear::FilterEdit& edit, EarFilterBar::Write 
     auto* panel = new wxPanel(this);
     auto* top = new wxBoxSizer(wxHORIZONTAL);
     source_ = new wxChoice(panel, wxID_ANY);
-    source_->SetToolTip("What the Ear listens to: by default the sound card data2g-host records from, alongside it. "
-                        "It only records, and never plays a sound.");
+    source_->SetToolTip("What the Ear listens to: by default the sound card data2g-host records from, alongside it, "
+                        "or the default input while the host isn't recording. It only records, and never plays a "
+                        "sound.");
     speed_ = new wxChoice(panel, wxID_ANY);
     for (const char* name : SPEED_NAMES) speed_->Append(name);
     speed_->SetToolTip("How fast the waterfall runs: 5, 10 or 20 rows a second");
@@ -203,7 +203,7 @@ void EarFrame::setRig(std::function<EarRig()> rig)
 void EarFrame::lookForHost()
 {
     if (commandPort_ > 0 && onThisMachine(host_))
-        audio_->setHostPid(ear::processListeningOn(commandPort_));
+        audio_->setHostPid(audio::processListeningOn(commandPort_));
     else
         audio_->setHostPid(std::nullopt);
 }
@@ -310,14 +310,16 @@ void EarFrame::showStatus(const audio::EarStatus& s)
         }
         else
         {
-            line = utf8(s.host.why);
-            if (!line.empty()) line[0] = wxToupper(line[0]);
-            line += ".";
-            if (!s.listeningDescription.empty()) line += " Still on " + utf8(s.listeningDescription) + ".";
-            else if (s.host.candidates == 0) line += " Pick a source in Listen to, or start data2g-host.";
+            // Each reason starts with data2g-host's name, kept as it is spelt.
+            line = utf8(s.host.why) + ".";
+            if (s.pick == ear::Pick::HostBefore)
+                line += " Still on its sound card, " + utf8(s.listeningDescription) + ".";
+            else if (s.pick == ear::Pick::Default)
+                line += " Listening to the default input, " + utf8(s.listeningDescription) + ", meanwhile.";
+            else
+                line += " Pick a source in Listen to, or start data2g-host.";
         }
-        if (s.listening != 0 && !s.streaming)
-            line += " Waiting for audio: the sound card runs only while data2g-host records.";
+        if (s.listening != 0 && !s.streaming) line += " Waiting for audio.";
     }
     else
     {
@@ -325,6 +327,8 @@ void EarFrame::showStatus(const audio::EarStatus& s)
                                               : "Listening to " + utf8(s.listeningDescription) + ".";
         if (s.listening != 0 && !s.streaming) line += " Waiting for audio.";
     }
+    // Why the recording didn't start, or stopped.
+    if (s.available && !s.problem.empty()) line += " " + utf8(s.problem) + ".";
     status_->SetLabel(line);
     status_->SetToolTip(line);
 }

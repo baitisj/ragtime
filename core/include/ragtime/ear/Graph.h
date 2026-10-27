@@ -96,6 +96,36 @@ struct HostSearch
 // known, is the process listening on the host's command port.
 HostSearch findHostCapture(const Graph& graph, std::optional<int> hostPid);
 
+// Which source the Ear records, and why. In order: the source the operator
+// picked; the one data2g-host records from; the one it last recorded from,
+// while it is stopped or restarting; the system's default input (Jeff,
+// 2026-10-27: the Ear always listens to something, host or no host, rig
+// or no rig).
+enum class Pick
+{
+    None,
+    Chosen,
+    Host,
+    HostBefore,
+    Default,
+};
+
+struct SourcePick
+{
+    const GraphNode* node = nullptr;    // a node in the graph, or none
+    Pick why = Pick::None;
+    // Passive only on the card data2g-host records from right now, so the
+    // Ear never keeps it running on the host's account; anywhere else the
+    // Ear wakes the card itself, or it would hear nothing.
+    bool passive = false;
+};
+
+// chosen: the source's name the operator picked, empty to follow the host;
+// lastHostSource: the name of the source the host last recorded from;
+// defaultSource: the default input's name, empty when unknown.
+SourcePick pickSource(const Graph& graph, const std::string& chosen, const HostSearch& host,
+                      const std::string& lastHostSource, const std::string& defaultSource);
+
 } // namespace ear
 } // namespace ragtime
 

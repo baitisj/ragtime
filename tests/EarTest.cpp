@@ -209,6 +209,43 @@ void linkBeatsTarget()
     CHECK(!s.why.empty());
 }
 
+void picksASource()
+{
+    // data2g-gui records from the Burr-Brown codec: the Ear follows it,
+    // passive, so it never holds the card on the host's account.
+    Graph g = hamlet();
+    const std::string codec = "alsa_input.usb-Burr-Brown_USB_Audio_CODEC-00.analog-stereo-input";
+    const std::string builtIn = "alsa_input.pci-0000_00_1f.3.analog-stereo";
+    SourcePick p = pickSource(g, "", findHostCapture(g, std::nullopt), "", builtIn);
+    CHECK(p.node && p.node->id == 55u && p.why == Pick::Host && p.passive);
+
+    // Picked by the operator: the host's card stays passive, another wakes.
+    p = pickSource(g, codec, findHostCapture(g, std::nullopt), "", builtIn);
+    CHECK(p.node && p.node->id == 55u && p.why == Pick::Chosen && p.passive);
+    p = pickSource(g, builtIn, findHostCapture(g, std::nullopt), "", "");
+    CHECK(p.node && p.node->id == 60u && p.why == Pick::Chosen && !p.passive);
+    // A pick that has gone is nothing, not the default.
+    p = pickSource(g, "gone", findHostCapture(g, std::nullopt), codec, builtIn);
+    CHECK(!p.node && p.why == Pick::None);
+
+    // The host stops: its last card, now woken by the Ear itself.
+    Graph stopped = g;
+    stopped.nodes.erase(stopped.nodes.begin() + 3);
+    stopped.links = {};
+    p = pickSource(stopped, "", findHostCapture(stopped, std::nullopt), codec, builtIn);
+    CHECK(p.node && p.node->id == 55u && p.why == Pick::HostBefore && !p.passive);
+
+    // No host ever seen and no rig: the default input (Jeff, 2026-10-27).
+    p = pickSource(stopped, "", findHostCapture(stopped, std::nullopt), "", builtIn);
+    CHECK(p.node && p.node->id == 60u && p.why == Pick::Default && !p.passive);
+    // The default is the host's card once the host starts: passive again.
+    p = pickSource(g, "", findHostCapture(g, std::nullopt), "", codec);
+    CHECK(p.node && p.why == Pick::Host && p.passive);
+    // Nothing known: nothing.
+    p = pickSource(stopped, "", findHostCapture(stopped, std::nullopt), "", "");
+    CHECK(!p.node && p.why == Pick::None && !p.passive);
+}
+
 void twoHostsByPort()
 {
     Graph g;
@@ -1107,6 +1144,7 @@ int main()
     passbands();
     findsData2GGui();
     linkBeatsTarget();
+    picksASource();
     twoHostsByPort();
     procNet();
     edgesFromNoise();

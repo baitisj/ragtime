@@ -7,7 +7,8 @@
 # -DRAGTIME_APP=OFF builds only the core and rig libraries and their tests,
 # with no wxWidgets needed; -DRAGTIME_HAMLIB=OFF builds without Hamlib
 # (libhamlib-dev), and so without Settings > Rig's Hamlib choice;
-# -DRAGTIME_PIPEWIRE=OFF builds without the Ear's listening (libpipewire-0.3-dev). The Windows build cross-compiles with MinGW-w64: see
+# -DRAGTIME_PIPEWIRE=OFF builds without the Ear's listening on Linux (libpipewire-0.3-dev; on Windows the Ear
+# listens through WASAPI). The Windows build cross-compiles with MinGW-w64: see
 # cmake/Toolchain-mingw64.cmake and packaging/windows/make-zip.sh.
 cmake_minimum_required(VERSION 3.16)
 
@@ -32,7 +33,7 @@ if(WIN32 OR APPLE)
 else()
     set(RAGTIME_PIPEWIRE_DEFAULT ON)
 endif()
-option(RAGTIME_PIPEWIRE "The Ear listens through PipeWire (Linux); needs libpipewire-0.3-dev to build." ${RAGTIME_PIPEWIRE_DEFAULT})
+option(RAGTIME_PIPEWIRE "The Ear listens through PipeWire (Linux; Windows uses WASAPI); needs libpipewire-0.3-dev to build." ${RAGTIME_PIPEWIRE_DEFAULT})
 
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
 include(RagtimeWarnings)

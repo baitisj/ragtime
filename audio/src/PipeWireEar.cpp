@@ -14,6 +14,7 @@
 #include <type_traits>
 #include <vector>
 
+#include <pipewire/extensions/metadata.h>
 #include <pipewire/pipewire.h>
 #include <spa/param/audio/format-utils.h>
 #include <spa/pod/builder.h>
@@ -116,6 +117,19 @@ int64_t nowMs()
 uint32_t number(const std::string& text)
 {
     return text.empty() ? 0u : (uint32_t)std::strtoul(text.c_str(), nullptr, 10);
+}
+
+// The name in the default metadata's JSON, {"name":"alsa_input..."}.
+std::string jsonName(const char* value)
+{
+    if (!value) return "";
+    const std::string v = value;
+    const std::size_t key = v.find("\"name\"");
+    if (key == std::string::npos) return "";
+    const std::size_t open = v.find('"', v.find(':', key));
+    if (open == std::string::npos) return "";
+    const std::size_t close = v.find('"', open + 1);
+    return close == std::string::npos ? "" : v.substr(open + 1, close - open - 1);
 }
 
 class PipeWireEar : public EarAudio
@@ -225,6 +239,12 @@ private:
         PipeWireApi& pw = api();
         if (loop_) pw.threadLoopStop(loop_);
         destroyStream();
+        if (metadata_)
+        {
+            spa_hook_remove(&metadataHook_);
+            pw.proxyDestroy(reinterpret_cast<pw_proxy*>(metadata_));
+            metadata_ = nullptr;
+        }
         if (registry_)
         {
             spa_hook_remove(&registryHook_);
@@ -250,6 +270,7 @@ private:
         graph_ = ear::Graph();
         links_.clear();
         lastHostSource_.clear();
+        defaultSource_.clear();
         std::lock_guard<std::mutex> lock(statusMutex_);
         status_ = EarStatus();
     }
@@ -303,10 +324,39 @@ private:
             links_.push_back(id);
             graph_.links.push_back(l);
         }
+        else if (std::strcmp(type, PW_TYPE_INTERFACE_Metadata) == 0)
+        {
+            // The session manager's "default" metadata names the default
+            // input, the Ear's last resort.
+            if (metadata_ || lookup(props, PW_KEY_METADATA_NAME) != "default") return;
+            metadata_ = static_cast<pw_metadata*>(
+                pw_registry_bind(registry_, id, PW_TYPE_INTERFACE_Metadata, PW_VERSION_METADATA, 0));
+            if (!metadata_) return;
+            std::memset(&metadataEvents_, 0, sizeof metadataEvents_);
+            metadataEvents_.version = PW_VERSION_METADATA_EVENTS;
+            metadataEvents_.property = [](void* self, uint32_t subject, const char* key, const char*,
+                                          const char* value) {
+                static_cast<PipeWireEar*>(self)->property(subject, key, value);
+                return 0;
+            };
+            std::memset(&metadataHook_, 0, sizeof metadataHook_);
+            pw_metadata_add_listener(metadata_, &metadataHook_, &metadataEvents_, this);
+            return;
+        }
         else
         {
             return;
         }
+        evaluate();
+    }
+
+    void property(uint32_t subject, const char* key, const char* value)
+    {
+        // A null key clears them all.
+        if (subject != PW_ID_CORE || (key && std::strcmp(key, "default.audio.source") != 0)) return;
+        const std::string name = jsonName(value);
+        if (name == defaultSource_) return;
+        defaultSource_ = name;
         evaluate();
     }
 
@@ -333,32 +383,20 @@ private:
     void evaluate()
     {
         ear::HostSearch host = ear::findHostCapture(graph_, hostPid_);
-        const ear::GraphNode* want = nullptr;
-        if (!chosen_.empty())
-        {
-            for (const ear::GraphNode& n : graph_.nodes)
-                if (ear::isSource(n) && n.name == chosen_) want = &n;
-        }
-        else if (host.found && host.found->source != 0)
-        {
-            want = graph_.node(host.found->source);
-            if (want) lastHostSource_ = want->name;
-        }
-        else if (!lastHostSource_.empty())
-        {
-            // The host stopped or is restarting: stay on its sound card,
-            // which goes quiet with it (the Ear is passive).
-            for (const ear::GraphNode& n : graph_.nodes)
-                if (ear::isSource(n) && n.name == lastHostSource_) want = &n;
-        }
+        if (host.found && host.found->source != 0 && graph_.node(host.found->source))
+            lastHostSource_ = host.found->sourceName;
+        const ear::SourcePick pick = ear::pickSource(graph_, chosen_, host, lastHostSource_, defaultSource_);
+        const ear::GraphNode* want = pick.node;
+        const bool passive = pick.passive;
 
-        // Passive on data2g-host's card, so the Ear never keeps it running;
-        // a card the host doesn't use may be woken for the Ear alone.
         const uint32_t wantId = want ? want->id : 0;
-        const bool passive =
-            chosen_.empty() || !host.found || host.found->source == 0 || host.found->source == wantId;
         if (wantId != target_ || (want && passive != passive_))
         {
+            {
+                // A refusal is the last stream's; the new one may be fine.
+                std::lock_guard<std::mutex> lock(statusMutex_);
+                status_.problem.clear();
+            }
             destroyStream();
             if (want) createStream(*want, passive);
         }
@@ -369,6 +407,7 @@ private:
             status_.host = host;
             status_.following = chosen_.empty();
             status_.chosen = chosen_;
+            status_.pick = target_ != 0 ? pick.why : ear::Pick::None;
             status_.listening = target_;
             status_.listeningName = want ? want->name : "";
             status_.listeningDescription = want ? (want->description.empty() ? want->name : want->description) : "";
@@ -485,6 +524,9 @@ private:
     pw_core* core_ = nullptr;
     pw_registry* registry_ = nullptr;
     pw_stream* stream_ = nullptr;
+    pw_metadata* metadata_ = nullptr;
+    spa_hook metadataHook_{};
+    pw_metadata_events metadataEvents_{};
     spa_hook coreHook_{};
     spa_hook registryHook_{};
     spa_hook streamHook_{};
@@ -497,6 +539,7 @@ private:
     std::vector<uint32_t> links_;   // the link ids, beside graph_.links
     std::string chosen_;
     std::string lastHostSource_;    // the source data2g-host last used
+    std::string defaultSource_;     // the default input's node.name
     std::optional<int> hostPid_;
     uint32_t target_ = 0;
     bool passive_ = true;
