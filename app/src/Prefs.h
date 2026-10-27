@@ -26,6 +26,9 @@ struct StationPrefs
     std::string receivedFolder; // where files saved from a session go
     std::vector<std::string> autoAccept;   // stations whose files are saved without asking
     bool sealChat = false;      // our broadcast chat is sealed too (files always are)
+    // Pictures up to picture::AUTO_PICTURE_BYTES are received without
+    // asking, from anyone, and show as they come.
+    bool picturesAsTheyCome = true;
     // A repair round may spend this long in gears slower than its own, for
     // stations that hear us weakly (Seals::setSlowResendSeconds).
     int slowRepairMinutes = (int)(ragtime::broadcast::Seals::SLOW_RESEND_SECONDS / 60);
@@ -134,6 +137,11 @@ std::string broadcastPartsDir();
 // The path log, a line for every burst heard, appended and never cut:
 // beside the --config file (<config>.paths.log), or appDataDir()/paths.log.
 std::string pathLogPath();
+// The pictures we send, as they went (JPEG 2000), kept to repair and to
+// show: beside the --config file (<config>.sent-pictures), or
+// appDataDir()/sent-pictures; each in a folder of its own, named by the
+// UTC time it went, so it keeps its name.
+std::string sentPicturesDir();
 
 namespace keys
 {
@@ -154,6 +162,10 @@ constexpr const char* RECEIVED_FOLDER = "/Files/ReceivedFolder";
 constexpr const char* AUTO_ACCEPT = "/Files/AutoAccept";             // callsigns, comma separated
 constexpr const char* WATCH_LIST = "/Stations/Watch";                // callsigns, comma separated
 constexpr const char* AUTO_RECEIVE_BROADCAST = "/Files/AutoReceiveBroadcast";   // files on D2G, into the received folder
+constexpr const char* PICTURE_SECONDS = "/Pictures/Seconds";          // the most airtime a picture may take
+constexpr const char* PICTURE_SIDE = "/Pictures/LargestSide";        // pixels on its longer side
+constexpr const char* PICTURE_FOLDER = "/Pictures/LastFolder";        // where the last picture was picked
+constexpr const char* PICTURES_AS_THEY_COME = "/Pictures/ShowAsTheyCome";   // up to 64 KB, from anyone
 constexpr const char* EAR_SOURCE = "/Ear/Source";                    // a PipeWire source's node.name; empty follows data2g-host
 constexpr const char* EAR_SPEED = "/Ear/RowsPerSecond";               // the waterfall's rows a second
 constexpr const char* EAR_SPAN = "/Ear/SpanHz";                       // how high the picture goes; 0 is Auto

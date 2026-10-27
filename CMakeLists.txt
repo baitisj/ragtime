@@ -8,7 +8,9 @@
 # with no wxWidgets needed; -DRAGTIME_HAMLIB=OFF builds without Hamlib
 # (libhamlib-dev), and so without Settings > Rig's Hamlib choice;
 # -DRAGTIME_PIPEWIRE=OFF builds without the Ear's listening on Linux (libpipewire-0.3-dev; on Windows the Ear
-# listens through WASAPI). The Windows build cross-compiles with MinGW-w64: see
+# listens through WASAPI); -DRAGTIME_PICTURES=OFF builds without inline
+# pictures (libopenjp2-7-dev, libwebp-dev, libheif-dev), and
+# -DRAGTIME_HEIF=OFF without only HEIF. The Windows build cross-compiles with MinGW-w64: see
 # cmake/Toolchain-mingw64.cmake and packaging/windows/make-zip.sh.
 cmake_minimum_required(VERSION 3.16)
 
@@ -34,6 +36,9 @@ else()
     set(RAGTIME_PIPEWIRE_DEFAULT ON)
 endif()
 option(RAGTIME_PIPEWIRE "The Ear listens through PipeWire (Linux; Windows uses WASAPI); needs libpipewire-0.3-dev to build." ${RAGTIME_PIPEWIRE_DEFAULT})
+option(RAGTIME_PICTURES "Inline pictures: JPEG 2000 (OpenJPEG) and WebP (libwebp); needs libopenjp2-7-dev and libwebp-dev." ON)
+option(RAGTIME_HEIF "Pictures read from HEIF files (libheif with libde265); needs libheif-dev." ON)
+option(RAGTIME_BUILD_IMAGE_LIBS "Fetch and build OpenJPEG, libwebp, libde265 and libheif statically instead of using the system's (the Windows build)." OFF)
 
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
 include(RagtimeWarnings)
@@ -76,6 +81,43 @@ if(RAGTIME_PIPEWIRE)
     endif()
 endif()
 add_subdirectory(audio)
+
+# The picture codecs, as ragtime::openjpeg, ragtime::webp and ragtime::heif,
+# for the image library.
+if(NOT RAGTIME_PICTURES)
+    set(RAGTIME_HEIF OFF)
+endif()
+if(RAGTIME_PICTURES)
+    if(RAGTIME_BUILD_IMAGE_LIBS)
+        include(BuildImageLibs)
+    else()
+        find_package(PkgConfig)
+        if(PKG_CONFIG_FOUND)
+            pkg_check_modules(OPENJPEG IMPORTED_TARGET libopenjp2>=2.5)
+            pkg_check_modules(WEBP IMPORTED_TARGET libwebp)
+            if(RAGTIME_HEIF)
+                pkg_check_modules(HEIF IMPORTED_TARGET libheif)
+            endif()
+        endif()
+        if(NOT OPENJPEG_FOUND OR NOT WEBP_FOUND)
+            message(FATAL_ERROR "OpenJPEG 2.5 or libwebp not found: install libopenjp2-7-dev and libwebp-dev (Ubuntu, "
+                                "Debian), or pass -DRAGTIME_PICTURES=OFF to build without inline pictures.")
+        endif()
+        if(RAGTIME_HEIF AND NOT HEIF_FOUND)
+            message(FATAL_ERROR "libheif not found: install libheif-dev (Ubuntu, Debian), or pass -DRAGTIME_HEIF=OFF "
+                                "to build without reading HEIF pictures.")
+        endif()
+        add_library(ragtime::openjpeg INTERFACE IMPORTED)
+        target_link_libraries(ragtime::openjpeg INTERFACE PkgConfig::OPENJPEG)
+        add_library(ragtime::webp INTERFACE IMPORTED)
+        target_link_libraries(ragtime::webp INTERFACE PkgConfig::WEBP)
+        if(RAGTIME_HEIF)
+            add_library(ragtime::heif INTERFACE IMPORTED)
+            target_link_libraries(ragtime::heif INTERFACE PkgConfig::HEIF)
+        endif()
+    endif()
+endif()
+add_subdirectory(image)
 
 if(RAGTIME_APP)
     add_subdirectory(app)

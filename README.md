@@ -45,7 +45,8 @@ thresholds...** in the gearshift. See [docs/GEARBOX.md](docs/GEARBOX.md).
 
 On Ubuntu 24.04:
 
-    sudo apt-get install build-essential cmake pkg-config libwxgtk3.2-dev libgtk-3-dev libhamlib-dev libpipewire-0.3-dev
+    sudo apt-get install build-essential cmake pkg-config libwxgtk3.2-dev libgtk-3-dev libhamlib-dev libpipewire-0.3-dev \
+        libopenjp2-7-dev libwebp-dev libheif-dev libheif-plugin-libde265
     cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
     cmake --build build -j$(nproc)
     ctest --test-dir build --output-on-failure
@@ -64,13 +65,15 @@ have them under their own names.
 | GTK 3 | `libgtk-3-dev` | The ham phrase highlight in the entry lines | Required for the app |
 | Hamlib | `libhamlib-dev` | Settings > Rig, opening the rig with Hamlib | `-DRAGTIME_HAMLIB=OFF` |
 | PipeWire 0.3 headers | `libpipewire-0.3-dev` | The Ear's listening | `-DRAGTIME_PIPEWIRE=OFF` |
+| OpenJPEG 2.5 and libwebp | `libopenjp2-7-dev libwebp-dev` | Inline pictures: JPEG 2000 both ways, WebP read | `-DRAGTIME_PICTURES=OFF` |
+| libheif, with its libde265 plugin | `libheif-dev libheif-plugin-libde265` | Pictures read from HEIF (phones' `.heic`) | `-DRAGTIME_HEIF=OFF` |
 
 Warnings are errors by default. If a compiler we haven't tried stops
 the build on a warning, `-DRAGTIME_WERROR=OFF` lets it finish, and we'd
 like to hear about it.
 
-Ragtime never reads or writes JPEG, PNG, TIFF or WebP itself. Those
-libraries come in with wxWidgets, which is built against them: the
+Ragtime reads JPEG, PNG and TIFF through wxWidgets, never with those
+libraries itself. They come in with wxWidgets, which is built against them: the
 linker wants whichever `libjpeg`, `libpng`, `libtiff` and `libwebp`
 your wxWidgets was built with, and any version does as long as it is
 that one. On Ubuntu 24.04, `libwxgtk3.2-dev` pulls them in, libjpeg as
@@ -78,7 +81,9 @@ libjpeg-turbo 2.1.5 (`libjpeg-turbo8`, giving `libjpeg.so.8`), so there
 is nothing more to install.
 
 At run time the app needs the same libraries without `-dev`
-(`libwxgtk3.2-1t64`, `libhamlib4t64`). The Ear loads
+(`libwxgtk3.2-1t64`, `libhamlib4t64`, `libopenjp2-7`, `libwebp7`,
+`libheif1`), and HEIF needs `libheif-plugin-libde265` (the AppImage
+carries it). The Ear loads
 `libpipewire-0.3.so.0` (`libpipewire-0.3-0t64`) only when it opens, and
 needs PipeWire to be the sound server. On Windows it listens through
 WASAPI, which needs nothing installed.

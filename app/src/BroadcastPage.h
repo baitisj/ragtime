@@ -28,6 +28,7 @@ struct FileCard
     std::string state;          // "Receiving, 12 of 15 pieces", "Saved", "Repairs open until 15:42 (1 h 10 min)"
     bool good = false;          // shown green: Saved, Sent
     bool bad = false;           // shown red: Failed
+    bool picture = false;       // an inline picture, shown under its line
     // The card's links, in order: (action, label), such as
     // ("receive", "Receive...") and ("ignore", "Ignore").
     std::vector<std::pair<std::string, std::string>> actions;
@@ -98,6 +99,14 @@ public:
     {
         onFileAction_ = std::move(fn);
     }
+    // Inline pictures (docs/STAGE1.md, "Inline pictures"): the picture
+    // button, left of the floppy, and a picture card's picture as it
+    // stands, an <img> linked to "view" ("" while nothing shows yet).
+    void onBroadcastPicture(std::function<void()> fn) { onBroadcastPicture_ = std::move(fn); }
+    void pictures(std::function<wxString(uint64_t file, const wxWindow* list, const wxString& href)> fn)
+    {
+        pictureHtml_ = std::move(fn);
+    }
     // Each message's seal badge, and a number that moves when any changes.
     using SealMark = ragtime::broadcast::Seals::ItemMark;
     void sealMarks(std::function<SealMark(const ragtime::broadcast::Message&)> fn, std::function<uint64_t()> version)
@@ -136,6 +145,7 @@ private:
     wxStaticText* paused_ = nullptr;
     wxTextCtrl* compose_ = nullptr;
     wxButton* file_ = nullptr;
+    wxButton* picture_ = nullptr;
     wxBitmapButton* gear_ = nullptr;
     wxString gearName_ = "Gear";
     double gearSpeed_ = 0.0;  // bit/s, for the needle; 0 rests it at the left
@@ -153,7 +163,8 @@ private:
     std::function<void(uint64_t, uint8_t)> onReact_;
     std::function<void(const std::string&)> onPing_;
     std::function<std::string(const std::string&)> whyNoPing_;
-    std::function<void()> onBroadcastFile_;
+    std::function<void()> onBroadcastFile_, onBroadcastPicture_;
+    std::function<wxString(uint64_t, const wxWindow*, const wxString&)> pictureHtml_;
     std::function<bool(uint64_t, FileCard&)> fileCard_;
     std::function<void(uint64_t, const std::string&)> onFileAction_;
     std::function<std::string(const std::string&)> nameMode_;

@@ -117,7 +117,9 @@ bool encodeBody(const Body& body, std::vector<uint8_t>& out, bool canonical)
             {
                 putNumber(out, b.size, 4);
                 putDigest(out, b.digest);
-                return putShortString(out, b.name, MAX_FILE_NAME);
+                if (!putShortString(out, b.name, MAX_FILE_NAME)) return false;
+                if (b.kind != FILE_PLAIN) out.push_back(b.kind);
+                return true;
             }
             else if constexpr (std::is_same_v<T, FileAnswer>)
             {
@@ -151,7 +153,9 @@ bool encodeBody(const Body& body, std::vector<uint8_t>& out, bool canonical)
                 putNumber(out, b.size, 4);
                 putNumber(out, b.pieceBytes, 2);
                 putDigest(out, b.digest);
-                return putShortString(out, b.name, MAX_FILE_NAME);
+                if (!putShortString(out, b.name, MAX_FILE_NAME)) return false;
+                if (b.kind != FILE_PLAIN) out.push_back(b.kind);
+                return true;
             }
             else if constexpr (std::is_same_v<T, FilePiece>)
             {
@@ -308,6 +312,7 @@ DecodeResult decodeBody(uint8_t type, Reader& in, Record& out)
         {
             FileOffer b;
             if (!in.u32(b.size) || !in.digest(b.digest) || !in.shortString(b.name)) return DecodeResult::Malformed;
+            if (!in.done() && !in.u8(b.kind)) return DecodeResult::Malformed;
             return decoded(out, std::move(b));
         }
         case RecordType::FileAnswer:
@@ -346,6 +351,7 @@ DecodeResult decodeBody(uint8_t type, Reader& in, Record& out)
                 return DecodeResult::Malformed;
             }
             if (b.pieceBytes == 0) return DecodeResult::Malformed;
+            if (!in.done() && !in.u8(b.kind)) return DecodeResult::Malformed;
             return decoded(out, std::move(b));
         }
         case RecordType::FilePiece:

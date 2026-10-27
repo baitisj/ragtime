@@ -256,6 +256,17 @@ void testEveryRecord()
         Record back = roundTrip(make(offer));
         const FileOffer* o = back.as<FileOffer>();
         CHECK(o != nullptr && o->size == 7000 && o->digest == offer.digest && o->name == "FRED.TXT");
+        CHECK(o != nullptr && o->kind == FILE_PLAIN);
+        // A picture says so in one byte more; a plain file sends none, as
+        // 0.2 did, and 0.2 reads a picture's offer as a plain file.
+        std::vector<uint8_t> plainBytes = encodeRecord(make(offer));
+        offer.kind = FILE_PICTURE;
+        std::vector<uint8_t> pictureBytes = encodeRecord(make(offer));
+        CHECK_EQ(pictureBytes.size(), plainBytes.size() + 1);
+        CHECK(pictureBytes.back() == FILE_PICTURE);
+        Record backPicture = roundTrip(make(offer));
+        const FileOffer* p = backPicture.as<FileOffer>();
+        CHECK(p != nullptr && p->kind == FILE_PICTURE && p->name == "FRED.TXT");
         offer.name = std::string(MAX_FILE_NAME + 1, 'n');
         CHECK(encodeRecord(make(offer)).empty());
     }
@@ -289,6 +300,9 @@ void testEveryRecord()
         cancel.reason = (uint8_t)CancelReason::ReceiverStopped;
         Record back = roundTrip(make(cancel));
         CHECK(back.as<FileCancel>()->offer == 3 && back.as<FileCancel>()->reason == 0x81);
+        // The stop sign: a receiver cancel to a sender before 0.3.
+        cancel.reason = (uint8_t)CancelReason::ReceiverHasEnough;
+        CHECK(roundTrip(make(cancel)).as<FileCancel>()->reason == 0x84);
     }
     {
         FileAnnounce announce;
@@ -300,6 +314,11 @@ void testEveryRecord()
         const FileAnnounce* a = back.as<FileAnnounce>();
         CHECK(a != nullptr && a->size == 10000 && a->pieceBytes == 200 && a->digest == announce.digest &&
               a->name == "map.png");
+        CHECK(a != nullptr && a->kind == FILE_PLAIN);
+        announce.kind = FILE_PICTURE;
+        Record backPicture = roundTrip(make(announce));
+        const FileAnnounce* p = backPicture.as<FileAnnounce>();
+        CHECK(p != nullptr && p->kind == FILE_PICTURE && p->name == "map.png");
         FilePiece piece;
         piece.index = 49;
         piece.bytes.assign(200, 2);

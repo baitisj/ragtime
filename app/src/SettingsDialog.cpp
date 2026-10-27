@@ -265,6 +265,12 @@ wxWindow* SettingsDialog::stationPage(wxNotebook* book, const StationPrefs& pref
     filesGrid->Add(new wxStaticText(box, wxID_ANY, "Save without asking from"), 0, wxALIGN_CENTER_VERTICAL);
     filesGrid->Add(autoAccept_, 1, wxEXPAND);
     files->Add(filesGrid, 0, wxEXPAND | wxALL, 6);
+    pictures_ = new wxCheckBox(box, wxID_ANY, "Show pictures as they come (up to 64 KB, from anyone)");
+    pictures_->SetValue(prefs.picturesAsTheyCome);
+    pictures_->SetToolTip("A picture sent in a session or broadcast on D2G is received without asking and shows "
+                          "among the messages, sharper as more of it comes; it is saved in the received folder. "
+                          "Bigger ones wait for Save or Receive, like other files. Pictures come only as JPEG 2000.");
+    files->Add(pictures_, 0, wxLEFT | wxRIGHT | wxBOTTOM, 6);
 
     auto* broadcast = new wxStaticBoxSizer(wxVERTICAL, page, "Broadcast");
     box = broadcast->GetStaticBox();
@@ -836,6 +842,7 @@ StationPrefs SettingsDialog::prefs() const
         if (!call.empty()) p.autoAccept.push_back(call);
     }
     p.sealChat = sealChat_->GetValue();
+    p.picturesAsTheyCome = pictures_->GetValue();
     p.slowRepairMinutes = slowRepair_->GetValue();
     int floor = repairFloor_->GetSelection();
     p.repairFloor = floor > 0 && (size_t)floor < floorModes_.size() ? floorModes_[(size_t)floor] : std::string();

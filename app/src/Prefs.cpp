@@ -109,6 +109,7 @@ StationPrefs loadStationPrefs()
     p.receivedFolder = receivedFolder();
     p.autoAccept = loadAutoAccept();
     p.sealChat = config().ReadBool("/Broadcast/SealChat", p.sealChat);
+    p.picturesAsTheyCome = config().ReadBool(keys::PICTURES_AS_THEY_COME, p.picturesAsTheyCome);
     p.slowRepairMinutes = (int)config().ReadLong("/Broadcast/SlowRepairMinutes", p.slowRepairMinutes);
     p.slowRepairMinutes = std::min(std::max(p.slowRepairMinutes, SLOW_REPAIR_MIN_MINUTES), SLOW_REPAIR_MAX_MINUTES);
     p.repairFloor = readString("/Broadcast/RepairFloor", p.repairFloor);
@@ -131,6 +132,7 @@ void saveStationPrefs(const StationPrefs& p)
     if (!p.receivedFolder.empty() && p.receivedFolder != receivedFolder()) saveReceivedFolder(p.receivedFolder);
     saveAutoAccept(p.autoAccept);
     config().Write("/Broadcast/SealChat", p.sealChat);
+    config().Write(keys::PICTURES_AS_THEY_COME, p.picturesAsTheyCome);
     config().Write("/Broadcast/SlowRepairMinutes", (long)p.slowRepairMinutes);
     config().Write("/Broadcast/RepairFloor", wxString::FromUTF8(p.repairFloor));
     config().Write("/Broadcast/RepairCap", p.repairCap);
@@ -474,6 +476,14 @@ std::string pathLogPath()
     if (!configPath.empty()) return configPath + ".paths.log";
     wxFileName file(wxString::FromUTF8(appDataDir()), "paths.log");
     return std::string(file.GetFullPath().utf8_str());
+}
+
+std::string sentPicturesDir()
+{
+    if (!configPath.empty()) return configPath + ".sent-pictures";
+    wxFileName dir = wxFileName::DirName(wxString::FromUTF8(appDataDir()));
+    dir.AppendDir("sent-pictures");
+    return std::string(dir.GetPath().utf8_str());
 }
 
 std::string flightRecorderDir()

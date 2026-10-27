@@ -123,6 +123,9 @@ struct BroadcastFile
     // Each piece: files::PIECE_WAITING, PIECE_HELD or PIECE_MISSED, and
     // theirs PIECE_COVERED for as many missing as repairHeld.
     std::vector<uint8_t> pieceMap;
+    // An inline picture (protocol::FILE_PICTURE): shown among the messages
+    // as it comes.
+    bool picture = false;
 
     bool live() const;
 };
@@ -177,7 +180,9 @@ public:
     // Broadcasts a file in mode (empty: the group's mode as it stands).
     // 0, with the reason, if it can't go: empty, unreadable, over 300 KB,
     // or longer on the air than REFUSE_AIR_SECONDS.
-    uint64_t send(const std::string& path, const std::string& mode, uint64_t nowMs, std::string& error);
+    // picture: it is an inline picture, a JPEG 2000 codestream.
+    uint64_t send(const std::string& path, const std::string& mode, uint64_t nowMs, std::string& error,
+                  bool picture = false);
     // What send would take, without sending.
     FileEstimate estimate(uint64_t size, const std::string& name, const std::string& mode) const;
 
@@ -224,6 +229,14 @@ public:
     // already); empty: they wait for Receive.
     void setAutoReceive(const std::string& folder);
     const std::string& autoReceive() const { return autoFolder_; }
+    // Pictures of at most maxBytes are received without asking into this
+    // folder, so they show as they come; empty: they wait as other files do.
+    void setAutoPictures(const std::string& folder, uint64_t maxBytes);
+
+    // A picture's bytes as they stand: all of one of ours or one saved, or
+    // the pieces held of one coming, from the first up to the first one
+    // missing (any first part of a picture shows). False if there are none.
+    bool pictureBytes(uint64_t id, std::vector<uint8_t>& out) const;
 
     std::vector<BroadcastFile> files(uint64_t nowMs) const;
     bool find(uint64_t id, uint64_t nowMs, BroadcastFile& out) const;
@@ -362,6 +375,8 @@ private:
     std::vector<files::FinishedFile> finished_;
     std::vector<Event> events_;
     std::string autoFolder_;
+    std::string pictureFolder_;
+    uint64_t pictureMax_ = 0;
     uint64_t nextId_ = 1;
     uint64_t version_ = 0;
 };

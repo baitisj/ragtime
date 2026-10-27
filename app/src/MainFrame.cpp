@@ -47,6 +47,8 @@
 #include "GearshiftDialog.h"
 #include "HostConnection.h"
 #include "PathsDialog.h"
+#include "PictureDialog.h"
+#include "PictureFrame.h"
 #include "QuitSignal.h"
 #include "ReactionChips.h"
 #include "RecentWorkPane.h"
@@ -67,6 +69,8 @@
 #include "ragtime/ear/AutoSpan.h"
 #include "ragtime/files/FileRows.h"
 #include "ragtime/globus/Sun.h"
+#include "ragtime/image/Codec.h"
+#include "ragtime/picture/Picture.h"
 #include "ragtime/radio/Bands.h"
 #include "ragtime/radio/RigFilter.h"
 
@@ -99,6 +103,8 @@ enum
     ID_STATION_CALL,
     ID_STATION_LEAVE,
     ID_BROADCAST_FILE,
+    ID_BROADCAST_PICTURE,
+    ID_SEND_PICTURE,
     ID_AUTO_RECEIVE,
     // A broadcast file's menu on the Files tab.
     ID_BROADCAST_FILE_ACTION,
@@ -108,6 +114,7 @@ enum
     ID_STATION_SEND_FILE,
     // A file's right-click menu.
     ID_FILE_SAVE,
+    ID_FILE_VIEW_PICTURE,
     ID_FILE_SAVE_AS,
     ID_FILE_DECLINE,
     ID_FILE_CANCEL,
@@ -368,10 +375,15 @@ void MainFrame::buildMenus()
     auto* file = new wxMenu;
     file->Append(ID_SEND_FILE, "&Send file...\tCtrl+O",
                  "Offers files to the station you're in a session with, or calls the station picked first");
+    file->Append(ID_SEND_PICTURE, "Send a &picture...",
+                 "Sends a picture to the station you're in a session with, shown as it comes");
     file->Append(ID_OPEN_RECEIVED, "Open &received folder", "Where files you receive go");
     file->AppendSeparator();
     file->Append(ID_BROADCAST_FILE, "&Broadcast a file...\tCtrl+Shift+B",
                  "Sends a file to everyone on D2G, with repairs for stations that miss pieces");
+    file->Append(ID_BROADCAST_PICTURE, "Broadcast a pi&cture...",
+                 "Sends a picture to everyone on D2G, shown as it comes, with repairs for stations that miss "
+                 "pieces");
     file->AppendCheckItem(ID_AUTO_RECEIVE, "&Receive broadcast files automatically",
                           "Files broadcast on D2G are saved in the received folder without asking");
     file->AppendSeparator();
@@ -437,6 +449,12 @@ void MainFrame::buildMenus()
 
     Bind(wxEVT_MENU, [this](wxCommandEvent&) { Close(); }, wxID_EXIT);
     Bind(wxEVT_MENU, [this](wxCommandEvent&) { broadcastFile(); }, ID_BROADCAST_FILE);
+    Bind(wxEVT_MENU, [this](wxCommandEvent&) { sendPicture(true); }, ID_BROADCAST_PICTURE);
+    Bind(wxEVT_MENU, [this](wxCommandEvent&) { sendPicture(false); }, ID_SEND_PICTURE);
+    Bind(wxEVT_UPDATE_UI, [this](wxUpdateUIEvent& e) { e.Enable(!prefs_.callsign.empty()); }, ID_BROADCAST_PICTURE);
+    Bind(wxEVT_UPDATE_UI, [this](wxUpdateUIEvent& e) {
+        e.Enable(session_.phase() == session::SessionChat::Phase::Connected);
+    }, ID_SEND_PICTURE);
     Bind(wxEVT_MENU, [this](wxCommandEvent& e) { setAutoReceive(e.IsChecked()); }, ID_AUTO_RECEIVE);
     Bind(wxEVT_UPDATE_UI, [this](wxUpdateUIEvent& e) { e.Enable(!prefs_.callsign.empty()); }, ID_BROADCAST_FILE);
     Bind(wxEVT_MENU, [this](wxCommandEvent&) { showGearshift(); }, ID_GEARSHIFT);
@@ -505,7 +523,9 @@ void MainFrame::buildMenus()
         info.SetVersion(versionString());
         info.SetDescription("A plain chat and file-transfer client for Data2G.\n"
                             "Welcome to the D2G net. Sometimes we ragchew.\n\n"
-                            "Ragtime talks to a data2g-host you run; it never starts one.");
+                            "Ragtime talks to a data2g-host you run; it never starts one."
+                            + (ragtime::image::available() ? "\n\nPictures: " + utf8(ragtime::image::versions())
+                                                           : wxString()));
         info.SetLicence("MIT");
         info.SetWebSite("https://github.com/baitisj/ragtime");
         wxAboutBox(info, this);
@@ -691,6 +711,10 @@ void MainFrame::buildLayout()
     broadcast_->onBroadcastFile([this]() { broadcastFile(); });
     broadcast_->fileCards([this](uint64_t id, FileCard& card) { return fileCard(id, card); });
     broadcast_->onFileAction([this](uint64_t id, const std::string& action) { broadcastFileAction(id, action); });
+    broadcast_->onBroadcastPicture([this]() { sendPicture(true); });
+    broadcast_->pictures([this](uint64_t id, const wxWindow* list, const wxString& href) {
+        return pictureHtml("b" + std::to_string(id), list, href);
+    });
     // The Session tab.
     sessionPage_->onSend([this](const std::string& typed) {
         if (session_.send(typed, HostConnection::nowMs()) == 0) return false;
@@ -713,6 +737,10 @@ void MainFrame::buildLayout()
         refreshSession();
     });
     sessionPage_->onSendFile([this]() { sendFilePrompt(session_.peer()); });
+    sessionPage_->onSendPicture([this]() { sendPicture(false); });
+    sessionPage_->pictures([this](uint64_t id, const wxWindow* list, const wxString& href) {
+        return pictureHtml("s" + std::to_string(id), list, href);
+    });
     sessionPage_->onDropFiles([this](const std::vector<std::string>& paths) {
         if (session_.phase() == session::SessionChat::Phase::Connected)
             queueFiles(session_.peer(), paths);
@@ -1534,6 +1562,7 @@ void MainFrame::onSessionEvents()
 
 void MainFrame::refreshSession()
 {
+    updateSessionPictures(HostConnection::nowMs());
     sessionPage_->refresh(HostConnection::nowMs(), localOffsetSeconds());
     updateTabLabels();
     refreshStations();
@@ -1547,6 +1576,12 @@ void MainFrame::applyFilePrefs()
 {
     // Auto-accept saves straight into the received folder.
     sessionFiles_.setAutoAccept(receivedFolder(), loadAutoAccept());
+    // Pictures up to 64 KB show as they come, from anyone, unless the
+    // operator says not (Settings > Station, Files).
+    bool asTheyCome = ragtime::image::available() && prefs_.picturesAsTheyCome;
+    std::string folder = asTheyCome ? receivedFolder() : std::string();
+    sessionFiles_.setAutoPictures(folder, picture::AUTO_PICTURE_BYTES);
+    broadcastFiles_.setAutoPictures(folder, picture::AUTO_PICTURE_BYTES);
 }
 
 void MainFrame::loadFilesLog()
@@ -1701,14 +1736,14 @@ void MainFrame::sendFilePrompt(const std::string& call)
     if (!inSession) callStation(them);
 }
 
-void MainFrame::queueFiles(const std::string& call, const std::vector<std::string>& paths)
+void MainFrame::queueFiles(const std::string& call, const std::vector<std::string>& paths, bool picture)
 {
     uint64_t now = HostConnection::nowMs();
     std::string problems;
     for (const std::string& path : paths)
     {
         std::string error;
-        if (sessionFiles_.offer(call, path, now, error) == 0) problems += error + "\n";
+        if (sessionFiles_.offer(call, path, now, error, picture) == 0) problems += error + "\n";
     }
     fileTraffic_.update(now);
     host_->flush();
@@ -1764,6 +1799,12 @@ void MainFrame::fileAction(const std::string& action, uint64_t id)
         openWithDesktop(t->path);
     else if (action == "folder")
         openWithDesktop(std::string(wxFileName(utf8(t->path)).GetPath().utf8_str()));
+    else if (action == "view")
+        viewPicture("s" + std::to_string(id),
+                    t->outgoing ? "Your picture: " + utf8(t->name) : "Picture from " + utf8(t->peer) + ": " + utf8(t->name),
+                    t->name);
+    else if (action == "enough")
+        sessionFiles_.enough(id);
     fileTraffic_.update(HostConnection::nowMs());
     host_->flush();
     refreshSession();
@@ -1879,6 +1920,16 @@ void MainFrame::sessionFileMenu(const files::FileRow& row, wxMenu& menu)
 void MainFrame::finishedFileMenu(const files::FinishedFile& file, wxMenu& menu)
 {
     using Result = files::FinishedFile::Result;
+    // A picture, saved or sent, opens in the picture window.
+    if (file.picture && !file.path.empty() && wxFileName::FileExists(utf8(file.path)))
+    {
+        std::string path = file.path;
+        wxString title = file.outgoing ? "Your picture: " + utf8(file.name)
+                                       : "Picture from " + utf8(file.peer) + ": " + utf8(file.name);
+        menu.Append(ID_FILE_VIEW_PICTURE, "&View the picture");
+        menu.Bind(wxEVT_MENU, [=](wxCommandEvent&) { CallAfter([=]() { viewPictureFile(path, title); }); },
+                  ID_FILE_VIEW_PICTURE);
+    }
     if (file.via == files::Via::Broadcast)
     {
         // Ours: Re-open repairs while its seal is held (Jeff, 2026-10-25),
@@ -1891,7 +1942,8 @@ void MainFrame::finishedFileMenu(const files::FinishedFile& file, wxMenu& menu)
             std::string path = file.path;
             menu.Append(ID_FILE_SEND_AGAIN, "&Broadcast it again...");
             menu.Enable(ID_FILE_SEND_AGAIN, wxFileName::FileExists(utf8(path)));
-            menu.Bind(wxEVT_MENU, [=](wxCommandEvent&) { CallAfter([=]() { broadcastFile(utf8(path)); }); },
+            bool picture = file.picture;
+            menu.Bind(wxEVT_MENU, [=](wxCommandEvent&) { CallAfter([=]() { broadcastFile(utf8(path), picture); }); },
                       ID_FILE_SEND_AGAIN);
             return;
         }
@@ -1926,8 +1978,20 @@ void MainFrame::finishedFileMenu(const files::FinishedFile& file, wxMenu& menu)
 void MainFrame::sendAgain(const std::string& peer, const std::string& path)
 {
     bool inSession = session_.peer() == peer && session_.phase() == session::SessionChat::Phase::Connected;
-    queueFiles(peer, {path});
+    queueFiles(peer, {path}, sentPicture(path));
     if (!inSession) callStation(peer);
+}
+
+bool MainFrame::sentPicture(const std::string& path) const
+{
+    wxFileName file(utf8(path));
+    file.Normalize(wxPATH_NORM_ABSOLUTE | wxPATH_NORM_DOTS);
+    wxFileName dir = wxFileName::DirName(utf8(sentPicturesDir()));
+    dir.Normalize(wxPATH_NORM_ABSOLUTE | wxPATH_NORM_DOTS);
+    // Each in a folder of its own (sendPicture), so it keeps its name.
+    wxFileName parent = wxFileName::DirName(file.GetPath());
+    parent.RemoveLastDir();
+    return parent.GetPath() == dir.GetPath() && file.GetExt().Lower() == "j2k";
 }
 
 //-------------------------------------------------------------------------
@@ -2026,7 +2090,7 @@ void MainFrame::applySending()
 // Broadcast files
 //-------------------------------------------------------------------------
 
-void MainFrame::broadcastFile(wxString path)
+void MainFrame::broadcastFile(wxString path, bool picture)
 {
     if (prefs_.callsign.empty())
     {
@@ -2104,7 +2168,7 @@ void MainFrame::broadcastFile(wxString path)
     if (confirm.ShowModal() != wxID_YES) return;
 
     std::string error;
-    uint64_t id = broadcastFiles_.send(std::string(path.utf8_str()), mode, HostConnection::nowMs(), error);
+    uint64_t id = broadcastFiles_.send(std::string(path.utf8_str()), mode, HostConnection::nowMs(), error, picture);
     if (id == 0)
     {
         wxMessageBox(utf8(error) + ".", "Broadcast a file", wxOK | wxICON_INFORMATION, this);
@@ -2123,6 +2187,7 @@ bool MainFrame::fileCard(uint64_t id, FileCard& card)
     broadcast::BroadcastFile f;
     if (!broadcastFiles_.find(id, now, f)) return false;
     card.what = f.name + " \xc2\xb7 " + files::sizeText(f.size);
+    card.picture = f.picture;
     std::string pieces = std::to_string(f.held) + " of " + std::to_string(f.pieces) + " pieces";
     auto capital = [](std::string text) {
         if (!text.empty() && text[0] >= 'a' && text[0] <= 'z') text[0] = (char)(text[0] - 'a' + 'A');
@@ -2296,7 +2361,7 @@ void MainFrame::broadcastFileAction(uint64_t id, const std::string& action)
     else if (action == "reopenuntil")
         keepRepairsUntil(id, now + 30 * 60 * 1000, true);
     else if (action == "again" && !f.path.empty())
-        broadcastFile(utf8(f.path));
+        broadcastFile(utf8(f.path), f.picture);
     else if (action.rfind("gear:", 0) == 0)
         broadcastFiles_.setRepairGear(id, action.substr(5));
     else if (action == "close")
@@ -2305,6 +2370,10 @@ void MainFrame::broadcastFileAction(uint64_t id, const std::string& action)
         openWithDesktop(f.path);
     else if (action == "folder" && !f.path.empty())
         openWithDesktop(std::string(wxFileName(utf8(f.path)).GetPath().utf8_str()));
+    else if (action == "view")
+        viewPicture("b" + std::to_string(id),
+                    f.outgoing ? "Your picture: " + utf8(f.name) : "Picture from " + utf8(f.from) + ": " + utf8(f.name),
+                    f.name);
     onBroadcastFiles();
     host_->flush();
     refreshFiles();
@@ -2452,6 +2521,7 @@ void MainFrame::onBroadcastFiles()
         note_ = done.name + (done.outgoing ? " to " : " from ") + done.peer + ": " + files::resultLabel(done);
         history_.add(std::move(done));
     }
+    updateBroadcastPictures(now);
     if (broadcastFiles_.version() != broadcastFilesVersion_)
     {
         broadcastFilesVersion_ = broadcastFiles_.version();
@@ -2466,6 +2536,240 @@ void MainFrame::onBroadcastFiles()
     }
     sealsVersion_ = seals_.version();
     saveBroadcastState();
+}
+
+//-------------------------------------------------------------------------
+// Inline pictures
+//-------------------------------------------------------------------------
+
+namespace
+{
+// A picture among the messages, at most this on its longer side.
+constexpr int PICTURE_THUMB_DIP = 240;
+} // namespace
+
+void MainFrame::sendPicture(bool broadcast)
+{
+    if (prefs_.callsign.empty())
+    {
+        showSettings();
+        return;
+    }
+    const wxString title = broadcast ? "Broadcast a picture" : "Send a picture";
+    if (!ragtime::image::available())
+    {
+        wxMessageBox("This Ragtime was built without pictures.", title, wxOK | wxICON_INFORMATION, this);
+        return;
+    }
+    using Phase = session::SessionChat::Phase;
+    if (!broadcast && session_.phase() != Phase::Connected)
+    {
+        wxMessageBox("Pictures to one station go in a session: call it first.", title, wxOK | wxICON_INFORMATION,
+                     this);
+        return;
+    }
+
+    PictureTarget target;
+    target.broadcast = broadcast;
+    target.callsign = prefs_.callsign;
+    std::string mode;
+    if (broadcast)
+    {
+        mode = broadcastMode();
+        target.mode = broadcast::findMode(link_.modes(), mode, link_.groupMode());
+    }
+    else
+    {
+        target.peer = session_.peer();
+        target.mode = fileTraffic_.mode();
+        target.measuredRate = fileTraffic_.sessionRate();
+    }
+    if (target.mode.valid())
+    {
+        std::string shortName = gearshift_.shortName(target.mode.name);
+        target.gear = "gear " + (shortName.empty() ? target.mode.name : shortName);
+    }
+    else
+    {
+        // No gear picked and the group's mode not known, or a session whose
+        // mode the host hasn't said yet: the host picks. Planned for the
+        // slowest it offers, the picture goes no slower.
+        const std::vector<link::ModeInfo>& offered = link_.modes().empty() ? link::knownModes() : link_.modes();
+        double slowest = 0.0;
+        for (const link::ModeInfo& m : offered)
+        {
+            if (!m.valid() || !(m.secondsAtMax > 0)) continue;
+            double rate = (double)m.bytesPerCodeword * m.maxCodewords / m.secondsAtMax;
+            if (target.mode.valid() && rate >= slowest) continue;
+            target.mode = m;
+            slowest = rate;
+        }
+        if (target.mode.valid())
+        {
+            std::string shortName = gearshift_.shortName(target.mode.name);
+            target.gear = std::string(broadcast ? "the host's gear" : "a gear not known yet")
+                          + " (planned for the slowest, " + (shortName.empty() ? target.mode.name : shortName) + ")";
+        }
+    }
+
+    wxFileDialog pick(this, broadcast ? wxString("Broadcast a picture to D2G") : "Send a picture to " + utf8(target.peer),
+                      utf8(loadString(keys::PICTURE_FOLDER, "")), "", pictureWildcard(),
+                      wxFD_OPEN | wxFD_FILE_MUST_EXIST);
+    if (pick.ShowModal() != wxID_OK) return;
+    saveString(keys::PICTURE_FOLDER, std::string(pick.GetDirectory().utf8_str()));
+    PictureDialog dialog(this, target, std::string(pick.GetPath().utf8_str()));
+    if (dialog.ShowModal() != wxID_OK || dialog.coded().empty()) return;
+
+    // The picture as it goes is kept: what repairs and a re-send are made
+    // from, and what the window shows of ours. Each goes in a folder of
+    // its own, named by the time, so it goes on the air under its own name
+    // ("shack.j2k", never "shack (2).j2k").
+    wxString stamp = wxDateTime::Now().ToUTC().Format("%Y%m%d-%H%M%S");
+    wxFileName dir = wxFileName::DirName(utf8(sentPicturesDir()));
+    dir.AppendDir(stamp);
+    for (int n = 2; dir.DirExists(); n++)
+    {
+        dir.RemoveLastDir();
+        dir.AppendDir(stamp + wxString::Format("-%d", n));
+    }
+    std::string folder = std::string(dir.GetPath().utf8_str());
+    wxFileName::Mkdir(utf8(folder), wxS_DIR_DEFAULT, wxPATH_MKDIR_FULL);
+    std::string path = files::utf8FromPath(files::freeSavePath(files::pathFromUtf8(folder), dialog.name()));
+    {
+        wxFile out;
+        if (!out.Create(utf8(path), true) || out.Write(dialog.coded().data(), dialog.coded().size()) != dialog.coded().size())
+        {
+            wxMessageBox("The picture couldn't be kept in " + utf8(folder) + ".", title, wxOK | wxICON_WARNING, this);
+            return;
+        }
+    }
+
+    uint64_t now = HostConnection::nowMs();
+    std::string error;
+    if (broadcast)
+    {
+        uint64_t id = broadcastFiles_.send(path, mode, now, error, true);
+        if (id == 0)
+        {
+            wxMessageBox(utf8(error) + ".", title, wxOK | wxICON_INFORMATION, this);
+            return;
+        }
+        saveNewestItem(chat_.settings().callsign, chat_.newestItem());
+        onBroadcastFiles();
+        host_->flush();
+        tabs_->SetSelection(TAB_BROADCAST);
+        refreshFiles();
+        return;
+    }
+    // In a session it waits its turn behind files already queued, like any
+    // other: the queue above the line reorders it.
+    if (sessionFiles_.offer(target.peer, path, now, error, true) == 0)
+    {
+        wxMessageBox(utf8(error), title, wxOK | wxICON_WARNING, this);
+        return;
+    }
+    fileTraffic_.update(now);
+    host_->flush();
+    refreshSession();
+    refreshFiles();
+}
+
+void MainFrame::updateBroadcastPictures(uint64_t nowMs)
+{
+    bool changed = false;
+    for (const broadcast::BroadcastFile& f : broadcastFiles_.files(nowMs))
+    {
+        using State = broadcast::BroadcastFile::State;
+        if (!f.picture) continue;
+        // Theirs shows once it is being received: by itself up to 64 KB,
+        // else once the operator presses Receive.
+        if (f.state == State::Heard || f.state == State::Ignored) continue;
+        std::string key = "b" + std::to_string(f.id);
+        if (pictures_.settled(key)) continue;
+        std::vector<uint8_t> bytes;
+        if (!broadcastFiles_.pictureBytes(f.id, bytes)) continue;
+        // Ours, and one saved, are whole; one that failed won't grow.
+        bool final = f.outgoing || f.state == State::Saved || f.state == State::Failed;
+        if (pictures_.update(key, bytes, f.size, nowMs, final))
+        {
+            changed = true;
+            showInFrame(key);
+        }
+    }
+    if (!changed) return;
+    chat_.fileChanged();
+    refreshMessages();
+}
+
+void MainFrame::updateSessionPictures(uint64_t nowMs)
+{
+    bool changed = false;
+    for (const files::FileTransfer& t : sessionFiles_.transfers())
+    {
+        if (!t.picture) continue;
+        std::string key = "s" + std::to_string(t.id);
+        if (pictures_.settled(key)) continue;
+        std::vector<uint8_t> bytes;
+        if (!sessionFiles_.pictureBytes(t.id, bytes)) continue;
+        if (pictures_.update(key, bytes, t.size, nowMs, t.outgoing || !t.live()))
+        {
+            changed = true;
+            showInFrame(key);
+        }
+    }
+    if (changed) sessionPage_->picturesChanged();
+}
+
+wxString MainFrame::pictureHtml(const std::string& key, const wxWindow* list, const wxString& href)
+{
+    // Room for a 640-pixel picture's thumbnail beside the time.
+    return pictures_.thumbHtml(key, list, PICTURE_THUMB_DIP, href);
+}
+
+void MainFrame::viewPicture(const std::string& key, const wxString& title, const std::string& name)
+{
+    auto open = pictureFrames_.find(key);
+    if (open != pictureFrames_.end())
+    {
+        open->second->Raise();
+        return;
+    }
+    auto* frame = new PictureFrame(this, title, name);
+    pictureFrames_[key] = frame;
+    frame->onClosed([this, key]() { pictureFrames_.erase(key); });
+    showInFrame(key);
+    frame->Show();
+}
+
+void MainFrame::viewPictureFile(const std::string& path, const wxString& title)
+{
+    std::string key = "p" + path;
+    if (!pictures_.settled(key))
+    {
+        wxFile in(utf8(path));
+        wxFileOffset length = in.IsOpened() ? in.Length() : 0;
+        std::vector<uint8_t> bytes(length > 0 ? (size_t)length : 0);
+        if (bytes.empty() || in.Read(bytes.data(), bytes.size()) != (ssize_t)bytes.size())
+        {
+            wxMessageBox(utf8(path) + " can't be read.", title, wxOK | wxICON_INFORMATION, this);
+            return;
+        }
+        pictures_.update(key, bytes, bytes.size(), HostConnection::nowMs(), true);
+    }
+    if (pictures_.find(key) == nullptr)
+    {
+        wxMessageBox(utf8(path) + " isn't a picture Ragtime can show.", title, wxOK | wxICON_INFORMATION, this);
+        return;
+    }
+    viewPicture(key, title, std::string(wxFileName(utf8(path)).GetFullName().utf8_str()));
+}
+
+void MainFrame::showInFrame(const std::string& key)
+{
+    auto open = pictureFrames_.find(key);
+    const PictureShelf::Shelved* shelved = pictures_.find(key);
+    if (open == pictureFrames_.end() || shelved == nullptr) return;
+    open->second->show(shelved->image, shelved->width, shelved->height, shelved->bytes, shelved->size);
 }
 
 void MainFrame::saveBroadcastState()

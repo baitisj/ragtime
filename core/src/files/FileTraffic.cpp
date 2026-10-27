@@ -263,12 +263,16 @@ void FileTraffic::collect(uint64_t nowMs)
         if (t.state == State::FailedThere && f.reason.empty())
             f.reason = t.outgoing ? t.peer + " couldn't save it" : t.peer + " couldn't read it";
         if (t.outgoing || t.state == State::Saved) f.path = t.path;
+        f.picture = t.picture;
+        // A picture stopped part way: as far as it went.
+        uint64_t crossed = t.enough ? std::min(t.done, t.size) : t.size;
+        if (t.enough && crossed < t.size) f.enough = std::max<uint64_t>(1, crossed);
         auto start = started_.find(t.id);
         if (start != started_.end() && (t.state == State::Saved || t.state == State::Delivered) &&
-            t.size > start->second.done && nowMs > start->second.atMs)
+            crossed > start->second.done && nowMs > start->second.atMs)
         {
             // A part kept from before isn't counted: only what crossed now.
-            f.movedBytes = t.size - start->second.done;
+            f.movedBytes = crossed - start->second.done;
             f.movedMs = nowMs - start->second.atMs;
         }
         Event e;

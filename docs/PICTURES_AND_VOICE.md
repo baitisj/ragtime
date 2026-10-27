@@ -27,6 +27,11 @@ swapped for Ragtime's:
 Where this file and `docs/PLAN.md` ("Pictures and voice, *later*")
 disagree, the plan wins.
 
+Digital pictures are another thing, and are built: a picture sent as a
+progressive JPEG 2000 file, on D2G or in a ragchew (docs/STAGE1.md,
+"Inline pictures", and docs/PROTOCOL.md, "Pictures"). They are data,
+so they need none of the analogue rules below.
+
 ## Summary
 
 A chat message can carry one analogue object: a still picture made with

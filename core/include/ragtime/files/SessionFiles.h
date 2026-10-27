@@ -85,6 +85,13 @@ struct FileTransfer
     bool partKept = false;
     uint64_t atMs = 0;          // ours: when queued, then when offered; theirs: when offered to us
     protocol::Digest digest{};  // the whole file's
+    // An inline picture (protocol::FILE_PICTURE): shown among the messages
+    // as it comes, any first part of it the whole picture, softer.
+    bool picture = false;
+    // A picture the receiver stopped with the stop sign once it had enough
+    // (CancelReason::ReceiverHasEnough): theirs is Saved with done of it,
+    // ours Delivered with done of it gone.
+    bool enough = false;
 
     // Still going: waiting, offered, being answered or under way.
     bool live() const;
@@ -149,7 +156,8 @@ public:
     // Queues a file for a station: it is offered once a session with the
     // station is up and nothing else is going to it. 0, with the reason,
     // if the file can't be sent.
-    uint64_t offer(const std::string& peer, const std::string& path, uint64_t nowMs, std::string& error);
+    uint64_t offer(const std::string& peer, const std::string& path, uint64_t nowMs, std::string& error,
+                   bool picture = false);
 
     // Answers an offer: the file is written to path plus ".part" (or a
     // numbered part file, if that name is taken), and renamed to path once
@@ -168,6 +176,20 @@ public:
     // under the name offered (numbered when one is there already). An
     // empty folder or list turns it off.
     void setAutoAccept(const std::string& folder, const std::vector<std::string>& calls);
+    // Pictures of at most maxBytes, from any station, are taken without
+    // asking too, into folder, so they show as they come. An empty folder
+    // turns it off.
+    void setAutoPictures(const std::string& folder, uint64_t maxBytes);
+
+    // A picture of theirs being received: the stop sign. What has come is
+    // saved as the picture, softer than the whole, and the sender is told
+    // (ReceiverHasEnough) so the rest needn't go. With nothing come yet it
+    // is cancelled. False if it isn't a picture being received.
+    bool enough(uint64_t id);
+    // A picture's bytes as they stand: all of one of ours or one saved,
+    // or what has come of one being received, from its start. False if
+    // there are none.
+    bool pictureBytes(uint64_t id, std::vector<uint8_t>& out) const;
 
     // nowMs, when given, fills in each unanswered offer's expiresInMs.
     std::vector<FileTransfer> transfers(uint64_t nowMs = 0) const;
@@ -356,6 +378,9 @@ private:
     void limitKept(uint64_t nowMs);
     void receive(Entry& entry, const protocol::FileData& data);
     void completeReceive(Entry& entry);
+    // Renames the part file to the transfer's path (or, taken without
+    // asking, the next free name beside it); false if it can't be.
+    bool placePart(Entry& entry);
     void autoAccept(Entry& entry);
     void prune();
     void changed() { changes_++; }
@@ -370,6 +395,8 @@ private:
     uint64_t cutsWanted_ = 0;
     std::string autoFolder_;
     std::set<std::string> autoCalls_;
+    std::string pictureFolder_;
+    uint64_t pictureMax_ = 0;
     bool inhibited_ = false;
 };
 

@@ -51,10 +51,21 @@ public:
     void onReact(std::function<void(uint64_t id, uint8_t code)> fn) { onReact_ = std::move(fn); }
     // Send file... pressed.
     void onSendFile(std::function<void()> fn) { onSendFile_ = std::move(fn); }
+    // Inline pictures (docs/STAGE1.md, "Inline pictures"): the picture
+    // button, left of the floppy; a picture card's picture as it stands, an
+    // <img> linked to href ("" while nothing shows yet); and a word that a
+    // picture changed, so its card is drawn again.
+    void onSendPicture(std::function<void()> fn) { onSendPicture_ = std::move(fn); }
+    void pictures(std::function<wxString(uint64_t id, const wxWindow* list, const wxString& href)> fn)
+    {
+        pictureHtml_ = std::move(fn);
+    }
+    void picturesChanged() { shownFiles_ = ~0ull; }
     // Files dropped on the tab.
     void onDropFiles(std::function<void(const std::vector<std::string>& paths)> fn) { onDropFiles_ = std::move(fn); }
     // A card's link or the queue's buttons: "save", "saveas", "decline",
-    // "cancel", "open", "folder", "up", "down", with the transfer's id.
+    // "cancel", "open", "folder", "up", "down", and a picture's "view" and
+    // "enough" (its stop sign), with the transfer's id.
     void onFileAction(std::function<void(const std::string& action, uint64_t id)> fn)
     {
         onFileAction_ = std::move(fn);
@@ -83,7 +94,7 @@ private:
     void showMenu(int row);
     void rebuild(uint64_t nowMs);
     void refreshQueue();
-    wxString cardHtml(const ragtime::files::FileTransfer& t, bool picked) const;
+    wxString cardHtml(const ragtime::files::FileTransfer& t, bool picked, const wxWindow* list) const;
 
     const ragtime::session::SessionChat& session_;
     const ragtime::files::FileTraffic& files_;
@@ -105,6 +116,7 @@ private:
     wxTextCtrl* compose_ = nullptr;
     wxButton* send_ = nullptr;
     wxButton* sendFile_ = nullptr;
+    wxButton* sendPicture_ = nullptr;
     wxPanel* queue_ = nullptr;
     wxStaticText* queueTitle_ = nullptr;
     wxListBox* queueList_ = nullptr;
@@ -114,7 +126,8 @@ private:
     int shownPhase_ = -1;
 
     std::function<bool(const std::string&)> onSend_;
-    std::function<void()> onCancel_, onLeave_, onLeaveNow_, onCallAgain_, onSendFile_;
+    std::function<void()> onCancel_, onLeave_, onLeaveNow_, onCallAgain_, onSendFile_, onSendPicture_;
+    std::function<wxString(uint64_t, const wxWindow*, const wxString&)> pictureHtml_;
     std::function<void(const std::vector<std::string>&)> onDropFiles_;
     std::function<void(const std::string&, uint64_t)> onFileAction_;
     std::function<void(uint64_t)> onResend_;

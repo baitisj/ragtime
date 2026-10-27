@@ -53,6 +53,15 @@ target_include_directories(ragtime_globus_test PRIVATE ${PROJECT_SOURCE_DIR}/cor
 ragtime_test(ragtime_broadcast_files_test BroadcastFilesTest.cpp)
 ragtime_test(ragtime_file_traffic_test FileTrafficTest.cpp)
 
+# Inline pictures: the downscaler and airtime sums, and the codecs.
+ragtime_test(ragtime_picture_test PictureTest.cpp)
+target_link_libraries(ragtime_picture_test PRIVATE ragtime_image)
+if(TARGET ragtime::webp)
+    # libwebp's encoder makes the WebP the test reads back.
+    target_link_libraries(ragtime_picture_test PRIVATE ragtime::webp)
+    target_compile_definitions(ragtime_picture_test PRIVATE RAGTIME_TEST_WEBP=1)
+endif()
+
 ragtime_test(ragtime_radio_test RadioTest.cpp)
 ragtime_test(ragtime_recent_work_test RecentWorkTest.cpp)
 ragtime_test(ragtime_rig_test RigTest.cpp)

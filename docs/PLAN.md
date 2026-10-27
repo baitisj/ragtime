@@ -338,6 +338,8 @@ The SSTVAE pictures and RADE voice clips you decided on 2026-10-19 were already 
 - The Part 97 notes in that doc apply: text in the data segment, pictures and voice on the phone side, and CW or spoken ID every 10 minutes.
 - It waits on Andrew's latents spec and the "latents over KISS" extension in data2g-host. No work on it in the first versions.
 
+Digital pictures came first (Jeff, 2026-10-27): a picture shrunk and coded as progressive JPEG 2000 to fit an airtime, sent as a file that shows among the messages and sharpens as it comes, with a stop sign in a session. They are data, so they stay in the data segments with the rest. See docs/STAGE1.md, "Inline pictures", and docs/PROTOCOL.md, "Pictures".
+
 ## Signed, never secret: messages, pages and boards
 
 The idea (yours, 2026-10-20): build the useful parts of Reticulum, but with every byte readable on the air and a signature added for authenticity, so Part 97's plain-text rule becomes a strength instead of a limit. I think it fits the client well, because sessions already give a reliable byte stream to carry it.

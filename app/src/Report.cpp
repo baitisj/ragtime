@@ -16,6 +16,7 @@
 #include <wx/zipstrm.h>
 
 #include "FilesPage.h"
+#include "ragtime/image/Codec.h"
 #include "ragtime/Version.h"
 
 using ragtime::link::FlightRecorder;
@@ -106,6 +107,8 @@ void saveReport(wxWindow* parent, FlightRecorder& recorder, const ReportFacts& f
     info += "System: " + std::string(wxGetOsDescription().utf8_str()) + ", "
             + std::string(wxGetCpuArchitectureName().utf8_str()) + ", "
             + std::string(wxGetLibraryVersionInfo().GetVersionString().utf8_str()) + "\n";
+    info += "Pictures: " + (ragtime::image::available() ? ragtime::image::versions() : std::string("not built in"))
+            + (ragtime::image::heifAvailable() ? std::string(", HEIF readable") : std::string()) + "\n";
     info += "Callsign: " + (facts.callsign.empty() ? std::string("(none yet)") : facts.callsign) + "\n";
     info += "data2g-host: " + facts.host + ", " + facts.hostState + "\n";
     if (!facts.lastError.empty()) info += "Last connection error: " + facts.lastError + "\n";

@@ -44,10 +44,23 @@ trap 'rm -rf "$WORK"' EXIT
 cp app/res/ragtime.png "$WORK/ragtime.png"
 
 cd "$WORK"
+# libheif finds its HEVC decoder (libde265) as a plugin, which linuxdeploy
+# doesn't follow: it goes in the AppDir by hand, with libde265 deployed
+# beside the other libraries, and Ragtime loads libde265 and points libheif
+# at the plugin (image/src/Codec.cpp).
+PLUGIN_ARGS=()
+PLUGIN_DIR=$(pkg-config --variable=libdir libheif 2>/dev/null)/libheif/plugins
+if [ -f "$PLUGIN_DIR/libheif-libde265.so" ]; then
+    mkdir -p AppDir/usr/lib/libheif/plugins
+    cp "$PLUGIN_DIR/libheif-libde265.so" AppDir/usr/lib/libheif/plugins/
+    DE265=$(ldd "$PLUGIN_DIR/libheif-libde265.so" | awk '/libde265\.so/ {print $3}')
+    if [ -n "$DE265" ]; then PLUGIN_ARGS=(--library "$DE265"); fi
+fi
 export LDAI_OUTPUT="Ragtime.AppImage"
 "linuxdeploy-$ARCH.AppImage" \
     --appdir AppDir \
     --executable "$BUILD_DIR/app/ragtime" \
+    "${PLUGIN_ARGS[@]}" \
     --desktop-file "$ROOT/packaging/linux/ragtime.desktop" \
     --icon-file ragtime.png \
     --plugin gtk \

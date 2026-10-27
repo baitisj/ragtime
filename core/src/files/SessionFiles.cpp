@@ -299,7 +299,8 @@ void SessionFiles::prune()
     }
 }
 
-uint64_t SessionFiles::offer(const std::string& peer, const std::string& path, uint64_t nowMs, std::string& error)
+uint64_t SessionFiles::offer(const std::string& peer, const std::string& path, uint64_t nowMs, std::string& error,
+                            bool picture)
 {
     if (peer.empty())
     {
@@ -349,6 +350,7 @@ uint64_t SessionFiles::offer(const std::string& peer, const std::string& path, u
     t.state = FileTransfer::State::Waiting;
     t.digest = digest;
     t.atMs = nowMs;
+    t.picture = picture;
     entry.sinceMs = nowMs;
     // Sent again: the far end carries on from its part, and this transfer
     // stands for the part sent.
@@ -707,6 +709,77 @@ bool SessionFiles::cancel(uint64_t id)
     return true;
 }
 
+void SessionFiles::setAutoPictures(const std::string& folder, uint64_t maxBytes)
+{
+    pictureFolder_ = folder;
+    pictureMax_ = maxBytes;
+}
+
+bool SessionFiles::enough(uint64_t id)
+{
+    Entry* entry = find(id);
+    if (entry == nullptr || entry->transfer.outgoing || !entry->transfer.picture
+        || entry->transfer.state != FileTransfer::State::Receiving)
+    {
+        return false;
+    }
+    FileTransfer& t = entry->transfer;
+    // What has come of a piece still arriving counts: the stream comes in
+    // order.
+    size_t more = entry->arrivingData.size();
+    bool arriving = !entry->spoiled && more > 0 && entry->arrivingAt == t.done && t.done + more < t.size;
+    if (entry->spoiled || (t.done == 0 && !arriving)) return cancel(id);
+    if (arriving)
+    {
+        entry->out.write((const char*)entry->arrivingData.data(), (std::streamsize)more);
+        if (entry->out) t.done += more;
+    }
+    entry->out.close();
+    if (entry->out.fail())
+    {
+        std::error_code ec;
+        std::filesystem::remove(entry->part, ec);
+        queueCancel(*entry, CancelReason::ReceiverFailed);
+        finish(*entry, FileTransfer::State::Failed, "\"" + utf8FromPath(entry->part) + "\" could not be written.");
+        return true;
+    }
+    queueCancel(*entry, CancelReason::ReceiverHasEnough);
+    if (!placePart(*entry))
+    {
+        std::error_code ec;
+        std::filesystem::remove(entry->part, ec);
+        finish(*entry, FileTransfer::State::Failed, "\"" + t.path + "\" could not be saved.");
+        return true;
+    }
+    t.enough = true;
+    finish(*entry, FileTransfer::State::Saved);
+    return true;
+}
+
+bool SessionFiles::pictureBytes(uint64_t id, std::vector<uint8_t>& out) const
+{
+    out.clear();
+    const Entry* entry = nullptr;
+    for (const Entry& e : entries_)
+        if (e.transfer.id == id) entry = &e;
+    if (entry == nullptr) return false;
+    const FileTransfer& t = entry->transfer;
+    using State = FileTransfer::State;
+    bool whole = t.outgoing || t.state == State::Saved;
+    std::filesystem::path from = whole ? pathFromUtf8(t.path) : entry->part;
+    uint64_t length = whole ? std::min<uint64_t>(t.size, MAX_FILE_BYTES) : t.done;
+    if (from.empty() || (!whole && t.state != State::Receiving)) return false;
+    std::ifstream in(from, std::ios::binary);
+    if (!in) return false;
+    out.resize((size_t)length);
+    in.read((char*)out.data(), (std::streamsize)length);
+    out.resize((size_t)in.gcount());
+    // The bytes of a FileData still coming in follow on.
+    if (!whole && entry->arrivingAt == out.size())
+        out.insert(out.end(), entry->arrivingData.begin(), entry->arrivingData.end());
+    return !out.empty();
+}
+
 void SessionFiles::setAutoAccept(const std::string& folder, const std::vector<std::string>& calls)
 {
     autoFolder_ = folder;
@@ -764,6 +837,7 @@ std::vector<uint8_t> SessionFiles::takeRecords(const std::string& peer, protocol
         offer.size = (uint32_t)t.size;
         offer.digest = t.digest;
         offer.name = t.name;
+        offer.kind = t.picture ? protocol::FILE_PICTURE : protocol::FILE_PLAIN;
         protocol::Record record = numbering.record(offer, time);
         if (!protocol::encodeRecord(record, out))
         {
@@ -913,7 +987,12 @@ void SessionFiles::arriving(const std::string& peer, uint32_t offer, uint32_t of
 
 void SessionFiles::autoAccept(Entry& entry)
 {
-    if (inhibited_ || autoFolder_.empty() || autoCalls_.count(entry.transfer.peer) == 0) return;
+    // A picture small enough shows as it comes, from anyone; other files
+    // only from the stations listed.
+    bool fromListed = !autoFolder_.empty() && autoCalls_.count(entry.transfer.peer) != 0;
+    bool picture = entry.transfer.picture && !pictureFolder_.empty() && entry.transfer.size <= pictureMax_;
+    if (inhibited_ || (!fromListed && !picture)) return;
+    const std::string& into = picture ? pictureFolder_ : autoFolder_;
     if (!entry.transfer.keptPath.empty() && resumePart(entry, entry.transfer.keptPath))
     {
         entry.transfer.autoAccepted = true;
@@ -921,11 +1000,11 @@ void SessionFiles::autoAccept(Entry& entry)
     }
 
     std::error_code ec;
-    std::filesystem::path folder = pathFromUtf8(autoFolder_);
+    std::filesystem::path folder = pathFromUtf8(into);
     std::filesystem::create_directories(folder, ec);
     std::filesystem::path chosen = freeSavePath(folder, entry.transfer.name);
     std::string path = utf8FromPath(chosen);
-    std::string error = "No free name for \"" + entry.transfer.name + "\" in \"" + autoFolder_ + "\".";
+    std::string error = "No free name for \"" + entry.transfer.name + "\" in \"" + into + "\".";
     if (!chosen.empty() && openPart(entry, path, error))
     {
         entry.transfer.autoAccepted = true;
@@ -956,6 +1035,7 @@ void SessionFiles::onRecord(const std::string& peer, const protocol::Record& rec
         t.size = offer->size;
         t.digest = offer->digest;
         t.name = safeFileName(offer->name);
+        t.picture = offer->kind == protocol::FILE_PICTURE;
         t.state = State::Asking;
         t.atMs = nowMs;
         entry.offer = number;
@@ -1059,6 +1139,15 @@ void SessionFiles::onRecord(const std::string& peer, const protocol::Record& rec
         bool fromReceiver = (cancel->reason & protocol::CANCEL_FROM_RECEIVER) != 0;
         Entry* entry = fromReceiver ? findOutgoing(peer, cancel->offer) : findIncoming(peer, cancel->offer);
         if (entry == nullptr) return;
+        if (cancel->reason == (uint8_t)CancelReason::ReceiverHasEnough && entry->transfer.state == State::Sending)
+        {
+            // The far end kept what came of it: delivered, as far as it
+            // went. What the host still holds needn't go.
+            if (entry->written > entry->transfer.done) cutsWanted_++;
+            entry->transfer.enough = true;
+            finish(*entry, State::Delivered);
+            return;
+        }
 
         State state = State::CancelledThere;
         if (cancel->reason == (uint8_t)CancelReason::SenderExpired ||
@@ -1089,6 +1178,8 @@ void SessionFiles::receive(Entry& entry, const protocol::FileData& data)
     }
 
     entry.out.write((const char*)data.bytes.data(), (std::streamsize)length);
+    // A picture is read back as it comes, to show it.
+    if (entry.transfer.picture) entry.out.flush();
     if (!entry.out)
     {
         entry.spoiled = true;
@@ -1123,45 +1214,10 @@ void SessionFiles::completeReceive(Entry& entry)
         return;
     }
 
-    std::filesystem::path final = pathFromUtf8(t.path);
-    std::filesystem::path part = entry.part;
-    std::error_code ec;
-    if (written)
+    if (!written || !placePart(entry))
     {
-        // Another transfer's part file is never replaced.
-        auto clash = [&](const std::filesystem::path& path) {
-            return std::any_of(entries_.begin(), entries_.end(),
-                               [&](const Entry& e) { return &e != &entry && !e.part.empty() && e.part == path; });
-        };
-        if (t.autoAccepted && (std::filesystem::exists(final, ec) || clash(final)))
-        {
-            // Taken while it came: auto-accept never replaces a file, so
-            // it gets the next free name.
-            std::filesystem::path other = freeSavePath(final.parent_path(), t.name);
-            if (!other.empty() && !clash(other))
-            {
-                final = other;
-                t.path = utf8FromPath(final);
-            }
-            else
-            {
-                written = false;
-            }
-        }
-        else if (clash(final))
-        {
-            written = false;
-        }
-        else if (std::filesystem::exists(final, ec))
-        {
-            // The operator agreed, in the save dialog, to replace it.
-            std::filesystem::remove(final, ec);
-        }
-        if (written) std::filesystem::rename(part, final, ec);
-    }
-    if (!written || ec)
-    {
-        std::filesystem::remove(part, ec);
+        std::error_code ec;
+        std::filesystem::remove(entry.part, ec);
         queueCancel(entry, CancelReason::ReceiverFailed);
         finish(entry, FileTransfer::State::Failed, "\"" + t.path + "\" could not be saved.");
         return;
@@ -1171,6 +1227,39 @@ void SessionFiles::completeReceive(Entry& entry)
     saved.offer = entry.offer;
     queue(t.peer, saved);
     finish(entry, FileTransfer::State::Saved);
+}
+
+bool SessionFiles::placePart(Entry& entry)
+{
+    FileTransfer& t = entry.transfer;
+    std::filesystem::path final = pathFromUtf8(t.path);
+    std::filesystem::path part = entry.part;
+    std::error_code ec;
+    // Another transfer's part file is never replaced.
+    auto clash = [&](const std::filesystem::path& path) {
+        return std::any_of(entries_.begin(), entries_.end(),
+                           [&](const Entry& e) { return &e != &entry && !e.part.empty() && e.part == path; });
+    };
+    if (t.autoAccepted && (std::filesystem::exists(final, ec) || clash(final)))
+    {
+        // Taken while it came: auto-accept never replaces a file, so it
+        // gets the next free name.
+        std::filesystem::path other = freeSavePath(final.parent_path(), t.name);
+        if (other.empty() || clash(other)) return false;
+        final = other;
+        t.path = utf8FromPath(final);
+    }
+    else if (clash(final))
+    {
+        return false;
+    }
+    else if (std::filesystem::exists(final, ec))
+    {
+        // The operator agreed, in the save dialog, to replace it.
+        std::filesystem::remove(final, ec);
+    }
+    std::filesystem::rename(part, final, ec);
+    return !ec;
 }
 
 void SessionFiles::notTaken(const std::string& peer)
