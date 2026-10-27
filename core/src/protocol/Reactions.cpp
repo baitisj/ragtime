@@ -25,7 +25,7 @@ const std::vector<ReactionEntry>& reactionPalette()
         {12, "\xE2\x9A\xA1", "lightning", false},
         {13, "73", "best regards", true},
         {14, "88", "love and kisses", true},
-        {15, "R", "roger, received", true},
+        {15, "RR", "roger, received", true},
         {16, "QSL", "I confirm", true},
         {17, "TU", "thank you", true},
         {18, "FB", "fine business", true},

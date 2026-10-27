@@ -717,7 +717,7 @@ void testReactions()
     CHECK_EQ(all, std::string("1=\xF0\x9F\x91\x8D 2=\xE2\x9D\xA4\xEF\xB8\x8F 3=\xF0\x9F\x98\x82 4=\xF0\x9F\x98\xAE "
                               "5=\xF0\x9F\x98\xA2 6=\xF0\x9F\x8E\x89 7=\xF0\x9F\x91\x8F 8=\xF0\x9F\x99\x8F "
                               "9=\xF0\x9F\x91\x8B 10=\xE2\x98\x95 11=\xF0\x9F\x93\xBB 12=\xE2\x9A\xA1 13=73 14=88 "
-                              "15=R 16=QSL 17=TU 18=FB 19=HI HI 20=QRZ? "));
+                              "15=RR 16=QSL 17=TU 18=FB 19=HI HI 20=QRZ? "));
     CHECK_EQ(reactionShown(13), std::string("73"));
     CHECK_EQ(reactionShown(99), std::string("?"));
     CHECK(reactionEntry(0) == nullptr);

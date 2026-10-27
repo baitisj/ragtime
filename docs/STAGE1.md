@@ -1434,7 +1434,7 @@ Idea 10 of "Ideas before signatures" (Jeff's, 2026-10-25; built
 2026-10-26): an emoji or a ham word on a station's line, on D2G and in
 a ragchew. On the air it is the Reaction record (`0x14`, 21 bytes with
 five-character calls) naming one entry of a 20-entry palette:
-👍 ❤️ 😂 😮 😢 🎉 👏 🙏 👋 ☕ 📻 ⚡, then 73, 88, R, QSL, TU, FB,
+👍 ❤️ 😂 😮 😢 🎉 👏 🙏 👋 ☕ 📻 ⚡, then 73, 88, RR, QSL, TU, FB,
 HI HI and QRZ? (docs/PROTOCOL.md, "Reactions").
 
 - **Engines.** `protocol/Reactions.h` holds the palette, a line's

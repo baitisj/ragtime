@@ -552,7 +552,7 @@ station doesn't know is kept and shown as `?`.
 | 2 | ❤️ | heart | 12 | ⚡ | lightning |
 | 3 | 😂 | laughing | 13 | 73 | best regards |
 | 4 | 😮 | wow | 14 | 88 | love and kisses |
-| 5 | 😢 | sad | 15 | R | roger, received |
+| 5 | 😢 | sad | 15 | RR | roger, received |
 | 6 | 🎉 | hooray | 16 | QSL | I confirm |
 | 7 | 👏 | applause | 17 | TU | thank you |
 | 8 | 🙏 | thanks | 18 | FB | fine business |
