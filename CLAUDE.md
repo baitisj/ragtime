@@ -135,7 +135,8 @@ and the Part 97 check.
   asks rigctld `\chk_vfo`, `f`, while transmitting the meters
   `+l ALC`, `+l SWR` and `+l RFPOWER_METER_WATTS`, and between bursts
   the S-meter `+l STRENGTH` for the band's noise (`radio::NoiseFloor`,
-  the gearshift's QRN line), and while the Ear is open the filter
+  the gearshift's QRN line), and while the Ear or the gearshift is
+  open the filter
   (`+m`, `+l PBT_IN`, `+l PBT_OUT`, `+u MN`, `+l NOTCHF_RAW`, Jeff's
   OK 2026-10-26), naming
   `currVFO` for a `--vfo` one, and sets only the Ear's filter (`M`,

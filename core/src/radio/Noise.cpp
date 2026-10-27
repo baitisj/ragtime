@@ -27,6 +27,25 @@ std::string levelText(double dbOverS9)
     return (dB > 0 ? "+" : "") + std::to_string(dB);
 }
 
+namespace
+{
+double widthRatio(double filterHz)
+{
+    return SNR_BANDWIDTH_HZ / (filterHz > 0 ? filterHz : SNR_BANDWIDTH_HZ);
+}
+} // namespace
+
+double meterRiseDb(double snrDb, double filterHz)
+{
+    return 10.0 * std::log10(1.0 + std::pow(10.0, snrDb / 10.0) * widthRatio(filterHz));
+}
+
+std::optional<double> snrForRise(double riseDb, double filterHz)
+{
+    if (riseDb <= 0) return std::nullopt;
+    return 10.0 * std::log10((std::pow(10.0, riseDb / 10.0) - 1.0) / widthRatio(filterHz));
+}
+
 void NoiseFloor::reading(double dbOverS9, uint64_t nowMs)
 {
     readings_.emplace_back(nowMs, dbOverS9);

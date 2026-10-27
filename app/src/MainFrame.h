@@ -150,6 +150,8 @@ private:
     // The gearshift, its button and the 500 Hz switch.
     void loadGearshift();
     void showGearshift();
+    // The receive filter's width, for the gearshift's S-meter axis.
+    std::optional<double> filterWidthHz() const;
     void gearChanged();
     void showGear();
     // Auto's path S/N: the weakest station heard lately (Stations::weakestPath).

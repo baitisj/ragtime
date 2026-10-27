@@ -50,13 +50,33 @@ the Submode Map:
   of the last minute, read every 5 s between bursts and not in the
   1.5 s after one (`radio::NoiseFloor`), so a station's burst doesn't
   lift it; a new band starts afresh. An axis on the right, "On your
-  S-meter", says how strong a station must read for each gear: the
-  noise and the gear's S/N, 6 dB an S-unit (S9 is 0 dB, S3 is -36),
-  then S9+10 and up. Few S-meters are that exact, so the axis is a
-  guide, and so is the 2500 Hz S/N against the receiver's passband.
-  Hovering the label says so. The map keeps its S/N scale: the noise
-  moves the S-units, not the gears (Jeff chose this over the whole
-  chart riding the noise).
+  S-meter", says what a station at each gear's S/N reads there, S1 to
+  S9 (S9 is 0 dB, 6 dB an S-unit) and then S9+10 and up. The map keeps
+  its S/N scale: the noise moves the S-units, not the gears (Jeff chose
+  this over the whole chart riding the noise).
+- **Under the needle** (Jeff, 2026-10-27): Data2G's
+  S/N is the signal over the noise in 2500 Hz, but the S-meter reads
+  the signal and the noise together, as powers, across the whole
+  receive filter. With the noise N on the S-meter and a filter B Hz
+  wide, a station at S/N x reads
+
+      N + 10 log10(1 + 10^(x/10) x 2500/B)  dB   (radio::meterRiseDb)
+
+  so a strong station reads its S/N over the noise, moved by
+  10 log10(2500/B), and a weak one hardly moves the needle: at S/N 0 in
+  a 3000 Hz filter it reads 2.6 dB over the noise, at -12 dB 0.2 dB.
+  The axis's ticks sit where that puts each S-unit (`snrForRise`).
+  Gears for stations that lift the needle less than half an S-unit
+  (3 dB, `NEEDLE_DB`) are shaded blue, "under the needle": they copy
+  stations the S-meter can't show, and the axis there is a bar at the
+  noise's own S-unit. A narrow filter lifts the needle sooner (S/N 0
+  reads 7.8 dB over the noise in 500 Hz), so the shading shrinks. B is
+  the rig's filter, read while the gearshift is open (`+m`, and PBT, as
+  for the Ear), narrowed by its twin PBT with Calibrate's model where
+  there is one; the axis's title gives it, "On your S-meter, 2400 Hz
+  filter". Not read (no mode from the rig, or FM), it is taken as
+  2500 Hz. Few S-meters are 6 dB an S-unit, so the axis is a guide;
+  hovering the QRN label or "under the needle" says so.
 - The gear list beside the map: the gear (its short name), Data2G mode,
   speed, S/N on this path, and how long 1 KB takes. Gears go by their
   names, not numbers (Jeff, 2026-10-22). Once the path's S/N is known,

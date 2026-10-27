@@ -64,6 +64,7 @@
 #include "globus/GlobusToggle.h"
 #include "ragtime/Version.h"
 #include "ragtime/broadcast/Airtime.h"
+#include "ragtime/ear/AutoSpan.h"
 #include "ragtime/files/FileRows.h"
 #include "ragtime/globus/Sun.h"
 #include "ragtime/radio/Bands.h"
@@ -2492,13 +2493,31 @@ void MainFrame::loadGearshift()
 
 void MainFrame::showGearshift()
 {
+    // The S-meter axis reads across the rig's filter: read it while the
+    // gearshift is open, as while the Ear is.
+    if (rig_->readsNoise()) rig_->setFilterWatch(true);
     GearshiftDialog dialog(this, gearshift_, [this]() { gearChanged(); }, [this]() {
         BandNoise noise;
         noise.reads = rig_->readsNoise();
         noise.dbOverS9 = rig_->noiseDb();
+        noise.filterHz = filterWidthHz();
         return noise;
     });
     dialog.ShowModal();
+    rig_->setFilterWatch(ear_ != nullptr || filterEdit_.changed());
+}
+
+std::optional<double> MainFrame::filterWidthHz() const
+{
+    // The width the S-meter reads across: the rig's, narrowed by its twin
+    // PBT as the Ear draws it (with Calibrate's model, if there is one).
+    const std::optional<radio::RigFilter> f = rig_->filter();
+    if (!f || f->widthHz <= 0 || ear::fmMode(f->mode)) return std::nullopt;
+    const ear::KnobModel model = loadEarCalibration(rig_->rigKey(), f->mode, f->widthHz)
+                                     .value_or(ear::KnobModel::about(0, *f));
+    const double width = ear::spanOf(*f, model).width();
+    if (width <= 0) return std::nullopt;
+    return width;
 }
 
 void MainFrame::gearChanged()
@@ -2696,7 +2715,8 @@ void MainFrame::onDial()
         // Here, with every dial update, the last reading would come again
         // after a write until the rig is read back, and look like the
         // change undone (Jeff, 2026-10-26: edges that "snap back").
-        if (!ear_) filterEdit_.seen(*filter);
+        // Read for the gearshift alone, it is not the Ear's to note.
+        if (!ear_ && filterEdit_.changed()) filterEdit_.seen(*filter);
     }
     if (said != notedFilter_)
     {
