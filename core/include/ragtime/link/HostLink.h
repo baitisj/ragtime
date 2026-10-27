@@ -304,6 +304,8 @@ public:
     // reports a mode only when it changes, so a session in the mode of the
     // burst before it never hears one.
     const std::string& lastMode() const { return lastMode_; }
+    // The last that wasn't an ACK burst's (isAckMode): the mode data went in.
+    const std::string& lastDataMode() const { return lastDataMode_; }
     // The host's output volume (TXPOWER) and link idle timeout (TIMEOUT),
     // as last read; none from a host before Data2G PR #122.
     std::optional<double> txPower() const { return txPower_; }
@@ -364,6 +366,7 @@ private:
     bool busy_ = false;
     bool data2g_ = false;
     std::string lastMode_;
+    std::string lastDataMode_;
     std::optional<double> txPower_;
     std::optional<double> idleTimeout_;
     std::optional<double> hostIdleTimeout_;     // the host's own, read before we set ours

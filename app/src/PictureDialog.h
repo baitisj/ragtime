@@ -15,9 +15,21 @@
 
 class PictureView;
 class wxButton;
+class wxChoice;
 class wxSlider;
 class wxSpinCtrl;
 class wxStaticText;
+
+// A gear a picture can be planned for: the dialog's list, the first the
+// one it starts with (Jeff, 2026-10-27: from the path, and the operator
+// can pick another).
+struct PictureGear
+{
+    std::string label;              // in the list: "E2C, from how we hear KC2G (−3.1 dB, 4 bursts)"
+    std::string words;              // in the sentences: "gear E2C"
+    ragtime::link::ModeInfo mode;   // what it is planned for
+    std::string sendMode;           // on D2G, the mode it goes in ("" for the host's own)
+};
 
 // Where a picture goes, and what the dialog needs to say how long it takes.
 struct PictureTarget
@@ -25,9 +37,7 @@ struct PictureTarget
     bool broadcast = true;          // to D2G, else in the session with peer
     std::string peer;
     std::string callsign;           // ours
-    ragtime::link::ModeInfo mode;   // the gear it goes in; not valid() when none is known
-    std::string gear;               // "gear 3, E2C", for the words
-    double measuredRate = 0.0;      // a session's acknowledged bytes a second, 0 when not yet measured
+    std::vector<PictureGear> gears; // empty when the host has listed none
 };
 
 // Send a picture (docs/STAGE1.md, "Inline pictures"): the picture picked,
@@ -45,6 +55,9 @@ public:
     // After Send: the codestream, and its name ("shack.j2k").
     const std::vector<uint8_t>& coded() const { return coded_.bytes; }
     const std::string& name() const { return name_; }
+    // The gear picked: on D2G, the mode the picture goes in ("" for the
+    // host's own).
+    const PictureGear& gear() const { return gear_; }
 
 private:
     void choose();
@@ -52,11 +65,19 @@ private:
     // The longest side or the time moved: again shortly after.
     void later();
     void remake();
-    void showPartial();
+    // The preview playing the picture arriving: a step, the next, and how
+    // long the one on screen stays at the speed picked.
+    void showStep();
+    void nextStep();
+    int stepMs() const;
+    void showSpeed();
+    // Who sees it: the peer, or "a listener" on D2G.
+    wxString farEnd(bool capital = false) const;
     uint64_t budget(double seconds) const;
     double airSeconds(uint64_t bytes) const;
 
     PictureTarget target_;
+    PictureGear gear_;
     std::string path_;
     std::string name_;
     ragtime::picture::Image picked_;    // as read, turned the way up
@@ -69,13 +90,24 @@ private:
     wxStaticText* file_ = nullptr;
     wxSpinCtrl* side_ = nullptr;
     wxSpinCtrl* seconds_ = nullptr;
+    wxChoice* gears_ = nullptr;
     wxStaticText* size_ = nullptr;
     wxStaticText* air_ = nullptr;
     wxStaticText* seal_ = nullptr;
-    wxSlider* partial_ = nullptr;
+    wxSlider* speed_ = nullptr;         // 2 to the power of it: 1× to 64×
+    wxStaticText* speedText_ = nullptr;
+    bool speedPicked_ = false;
+    std::vector<ragtime::picture::ArrivalStep> steps_;
+    std::vector<wxImage> frames_;       // each step decoded, when first shown
+    size_t step_ = 0;
+    static constexpr int MAX_SPEED_STEP = 6;
+    static constexpr int MIN_STEP_MS = 80;
+    static constexpr int MAX_STEP_MS = 5000;
+    static constexpr int HOLD_MS = 3000;
     wxStaticText* partialText_ = nullptr;
     wxButton* send_ = nullptr;
     wxTimer timer_;
+    wxTimer play_;
 };
 
 #endif

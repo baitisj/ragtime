@@ -1533,16 +1533,34 @@ file with a kind byte (docs/PROTOCOL.md, "Pictures").
   sRGB. A grey picture is coded as one channel.
 - **Fitting the time.** The dialog takes the most airtime (60 s by
   default) and the longest side (640 pixels by default, Jeff), and turns
-  the seconds into bytes at the gear it will go in: on D2G the broadcast
-  gear, counted as `BroadcastFiles` sends it (announces, pieces, bursts
-  and the gaps between them, `picture::broadcastBytesFor`); in a
-  session, the session's measured rate, or the mode's longest burst and
-  the turns around it (`picture::sessionBytesFor`). OpenJPEG codes
+  the seconds into bytes at a gear: on D2G the broadcast gear, counted
+  as `BroadcastFiles` sends it (announces, pieces, bursts and the gaps
+  between them, `picture::broadcastBytesFor`); in a session, the mode's
+  longest burst and the turns around it (`picture::sessionBytesFor`).
+  The gear (Jeff, 2026-10-27) is a list the operator can change. On D2G
+  it starts at the gear in effect, and another sends this picture in
+  that gear. In a session Data2G picks the gear burst by burst, so the
+  list only sizes the picture ("Plan for"). It starts at the gear Auto
+  would pick for the far station's path: the mean S/N of its bursts in
+  the last 5 minutes (`Stations::pathFrom`, `picture::PATH_WINDOW_MS`;
+  how we hear it, the path back being much the same). With no S/N it
+  starts at the gear our data last went in, and with neither at the
+  slowest gear the host offers. The host's `MODE` names the mode of
+  every burst it keys, our ACK bursts (`ack-4f`) included, so neither
+  this nor the session's mode nor file pacing takes an `ack-` mode
+  (`link::isAckMode`). OpenJPEG codes
   quality layers each about twice the one before, LRCP, and the layer
   sizes are fitted until the codestream is under the bytes. Sent in less
   time, so much the better. If not even a small picture fits, the dialog
-  says the gear is too slow. Its preview shows the picture as it will
-  look, and a slider shows it part way in.
+  says the gear is too slow. Its preview plays the picture arriving, burst
+  by burst (`picture::broadcastArrival`, `picture::sessionArrival`: the
+  bursts the gear packs it into, at most 48 steps, each decoded from that
+  much of the codestream), holds the whole picture 3 s and plays again,
+  with "What KC2G sees 1 min 10 s in: 40%" under it. The playback speed
+  slider runs it from real time to 64× (Jeff, 2026-10-27: "use the
+  slider to adjust the speed at which the sequence is animated"); until
+  it is moved, the speed makes a playback of about 8 s. It changes
+  nothing sent.
 - **Sealing.** A broadcast picture is a broadcast file: sealed, and
   repaired with parity, as any other. Its seal is airtime on top of the
   picture's, never cheap at the slow rungs, so the dialog shows it on a
@@ -1565,8 +1583,10 @@ file with a kind byte (docs/PROTOCOL.md, "Pictures").
   a click opens it in a window of its own (`PictureFrame`): Fit, 1:1, a
   zoom slider from 5% to 1600%, the wheel zooms about the pointer, a
   drag moves it, and Save as... keeps it as a PNG.
-- **The stop sign.** In a ragchew, a picture coming in has a red stop
-  sign in its card's lower right corner. Pressed, it saves what came and
+- **The stop sign.** In a ragchew, a picture coming in has a button with
+  a red stop sign drawn over its lower right corner (Jeff, 2026-10-27),
+  an image map's area on the thumbnail; the rest of the picture opens
+  it. Pressed, it saves what came and
   sends FileCancel `0x84`; the sender cuts what its host still holds and
   logs "KC2G had enough at 41%". There is none on D2G, where one
   listener having enough says nothing for the rest.
@@ -1583,9 +1603,16 @@ file with a kind byte (docs/PROTOCOL.md, "Pictures").
   carries their licences in `licences/`. libheif and libde265 are LGPL:
   Ragtime's source and the recipe that builds the zip are public, so
   anyone can relink it.
-- Not built: a picture in the chat after a restart (the Broadcast and
-  Session logs bring back its line, not the picture; the Files tab keeps
-  it, with View the picture), pictures from the clipboard, a crop before
+- **In the session log.** A session picture's line in the station's
+  session log (`F`) carries the file's path and that it is a picture, so
+  after the session ends, by Leave or a drop, the next session with the
+  station shows the picture under its line, read from the sent-pictures
+  or received folder, and a click opens it (Jeff, 2026-10-27: a session
+  dropped by QSB took its pictures with it). An older Ragtime reads the
+  line and skips the two fields.
+- Not built: a broadcast picture in the chat after a restart (the
+  Broadcast log brings back its line, not the picture; the Files tab
+  keeps it, with View the picture), pictures from the clipboard, a crop before
   sending, and
   sending a smaller side by itself when the budget is very small (a
   smaller picture at the same bytes looks sharper).

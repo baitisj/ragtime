@@ -12,8 +12,10 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <deque>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "ragtime/gearbox/Gearbox.h"
@@ -92,6 +94,8 @@ struct Station
     std::optional<double> snrDb;
     uint64_t snrMs = 0;
     gearbox::PathSnr path;
+    // Every SNR in the last PATH_WINDOW_MS, oldest first, with its time.
+    std::deque<std::pair<uint64_t, double>> snrs;
 };
 
 // The path the gearshift's Auto shifts for: the weakest station heard
@@ -130,6 +134,9 @@ public:
     // The weakest of the stations whose SNR came in the last
     // PATH_WINDOW_MS; none when no station has one.
     std::optional<PathReport> weakestPath(uint64_t nowMs) const;
+    // The path from one station: the mean of its bursts' SNRs in the last
+    // windowMs (at most PATH_WINDOW_MS); none when none came.
+    std::optional<PathReport> pathFrom(const std::string& call, uint64_t nowMs, uint64_t windowMs) const;
 
     void clear();
 

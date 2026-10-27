@@ -864,9 +864,10 @@ void SessionChat::onEvent(const link::HostLink::Event& event, uint64_t nowMs)
             changed();
             break;
         case Type::ModeUsed:
-            // While a broadcast of ours is with the host, the mode may be its.
+            // While a broadcast of ours is with the host, the mode may be its;
+            // an ACK burst's mode is never the gear the session's data goes in.
             if ((phase_ == Phase::Connected || phase_ == Phase::Leaving) && !link_.burstWithHost()
-                && event.text != mode_)
+                && !link::isAckMode(event.text) && event.text != mode_)
             {
                 mode_ = event.text;
                 changed();
@@ -891,7 +892,7 @@ void SessionChat::begin(const std::string& peer, bool incoming, int bandwidth, u
     lastHeardMs_ = waitingSinceMs_ = nowMs;
     // The host reports a mode only when it changes: a session in the mode
     // of the burst before it hears none.
-    mode_ = link_.lastMode();
+    mode_ = link_.lastDataMode();
     farewellHeard_ = farewellPending_ = false;
     greetedTold_ = false;
     if (!stopping) cancelling_ = gaveUp_ = false;

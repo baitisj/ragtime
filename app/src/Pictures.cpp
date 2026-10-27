@@ -15,6 +15,7 @@
 #include <wx/graphics.h>
 #include <wx/log.h>
 #include <wx/mstream.h>
+#include <wx/pen.h>
 #include <wx/window.h>
 
 #include "ragtime/image/Codec.h"
@@ -186,8 +187,14 @@ void PictureShelf::forget(const std::string& key)
     entries_.erase(it);
 }
 
-wxString PictureShelf::thumbHtml(const std::string& key, const wxWindow* window, int maxDip,
-                                 const wxString& href)
+namespace
+{
+// The stop sign in a button, drawn over a thumbnail's lower right corner.
+wxRect drawStopButton(wxImage& thumb, const wxWindow* window);
+} // namespace
+
+wxString PictureShelf::thumbHtml(const std::string& key, const wxWindow* window, int maxDip, const wxString& href,
+                                 const wxString& stopHref)
 {
     auto it = entries_.find(key);
     if (it == entries_.end() || !it->second.shelved.image.IsOk()) return wxString();
@@ -195,8 +202,9 @@ wxString PictureShelf::thumbHtml(const std::string& key, const wxWindow* window,
     const wxImage& full = e.shelved.image;
     int w = 0, h = 0;
     ragtime::picture::fitWithin(full.GetWidth(), full.GetHeight(), window->FromDIP(maxDip), w, h);
+    const bool stop = !stopHref.empty();
 
-    if (e.thumbVersion != e.shelved.version || e.thumbPx != w)
+    if (e.thumbVersion != e.shelved.version || e.thumbPx != w || e.thumbStop != stop)
     {
         addMemoryHandlers();
         if (!e.memoryName.empty()) wxMemoryFSHandler::RemoveFile(e.memoryName);
@@ -204,12 +212,30 @@ wxString PictureShelf::thumbHtml(const std::string& key, const wxWindow* window,
         e.memoryName = wxString::Format("ragtime-picture-%d.png", nextName_++).ToStdString();
         wxImage thumb = full;
         if (w != full.GetWidth() || h != full.GetHeight()) thumb.Rescale(w, h, wxIMAGE_QUALITY_HIGH);
+        e.stopRect = stop ? drawStopButton(thumb, window) : wxRect();
         wxMemoryFSHandler::AddFile(e.memoryName, thumb, wxBITMAP_TYPE_PNG);
         e.thumbVersion = e.shelved.version;
         e.thumbPx = w;
+        e.thumbStop = stop;
     }
-    wxString img = wxString::Format("<img src=\"memory:%s\" width=\"%d\" height=\"%d\">",
-                                    wxString(e.memoryName), w, h);
+    wxString img = wxString::Format("<img src=\"memory:%s\" width=\"%d\" height=\"%d\"", wxString(e.memoryName), w, h);
+    if (stop && !e.stopRect.IsEmpty())
+    {
+        // An image map: the button's corner sends the stop sign, the rest
+        // of the picture opens it, as the plain link does.
+        wxString map = wxString::Format("ragtime-stop-map-%d", nextName_++);
+        wxString html = img + " usemap=\"#" + map + "\">";
+        html << "<map name=\"" << map << "\">"
+             << wxString::Format("<area shape=\"rect\" coords=\"%d,%d,%d,%d\" href=\"", e.stopRect.GetLeft(),
+                                 e.stopRect.GetTop(), e.stopRect.GetRight(), e.stopRect.GetBottom())
+             << stopHref << "\">";
+        if (!href.empty())
+            html << wxString::Format("<area shape=\"rect\" coords=\"0,0,%d,%d\" href=\"", w - 1, h - 1) << href
+                 << "\">";
+        html << "</map>";
+        return html;
+    }
+    img << ">";
     if (href.empty()) return img;
     return "<a href=\"" + href + "\">" + img + "</a>";
 }
@@ -260,30 +286,34 @@ void drawStopSign(wxGraphicsContext& gc, double size)
     gc.DrawText("STOP", c - tw / 2.0, c - th / 2.0);
 }
 
+wxRect drawStopButton(wxImage& thumb, const wxWindow* window)
+{
+    // A raised button, the stop sign inside, kept small on a small picture.
+    const int w = thumb.GetWidth(), h = thumb.GetHeight();
+    const int margin = window->FromDIP(6);
+    const int side = std::min(window->FromDIP(STOP_BUTTON_DIP), std::min(w, h) / 2 - margin);
+    if (side < window->FromDIP(16)) return wxRect();
+    if (!thumb.HasAlpha()) thumb.InitAlpha();
+    std::unique_ptr<wxGraphicsContext> gc(wxGraphicsContext::Create(thumb));
+    if (!gc) return wxRect();
+    gc->SetAntialiasMode(wxANTIALIAS_DEFAULT);
+    const double x = w - margin - side, y = h - margin - side, r = side * 0.18;
+    // Its shadow, its face and its rim.
+    gc->SetPen(*wxTRANSPARENT_PEN);
+    gc->SetBrush(wxBrush(wxColour(0, 0, 0, 90)));
+    gc->DrawRoundedRectangle(x + 1.5, y + 2.0, side, side, r);
+    gc->SetBrush(gc->CreateLinearGradientBrush(x, y, x, y + side, wxColour(252, 252, 252), wxColour(214, 214, 214)));
+    gc->SetPen(wxPen(wxColour(110, 110, 110), std::max(1, window->FromDIP(1))));
+    gc->DrawRoundedRectangle(x, y, side, side, r);
+    // The sign, inset.
+    const double inset = side * 0.12;
+    gc->PushState();
+    gc->Translate(x + inset, y + inset);
+    drawStopSign(*gc, side - 2.0 * inset);
+    gc->PopState();
+    gc.reset();
+    return wxRect((int)x, (int)y, side, side);
+}
+
 } // namespace
 
-wxString stopSignHtml(const wxWindow* window, int sizeDip)
-{
-    const int px = window->FromDIP(sizeDip);
-    wxString name = wxString::Format("ragtime-stop-%d.png", px);
-    static std::set<wxString> made;
-    if (made.count(name) == 0)
-    {
-        addMemoryHandlers();
-        wxImage image(px, px);
-        image.InitAlpha();
-        unsigned char* alpha = image.GetAlpha();
-        for (int i = 0; i < px * px; i++) alpha[i] = 0;
-        {
-            std::unique_ptr<wxGraphicsContext> gc(wxGraphicsContext::Create(image));
-            if (!gc) return wxString();
-            gc->SetAntialiasMode(wxANTIALIAS_DEFAULT);
-            drawStopSign(*gc, px);
-        }
-        wxMemoryFSHandler::AddFile(name, image, wxBITMAP_TYPE_PNG);
-        made.insert(name);
-    }
-    wxString side = wxString::Format("%d", px);
-    return "<img src=\"memory:" + name + "\" width=\"" + side + "\" height=\"" + side +
-           "\" alt=\"Stop\" title=\"Stop: I have enough\">";
-}

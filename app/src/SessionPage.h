@@ -53,14 +53,24 @@ public:
     void onSendFile(std::function<void()> fn) { onSendFile_ = std::move(fn); }
     // Inline pictures (docs/STAGE1.md, "Inline pictures"): the picture
     // button, left of the floppy; a picture card's picture as it stands, an
-    // <img> linked to href ("" while nothing shows yet); and a word that a
+    // <img> linked to href ("" while nothing shows yet), with the stop
+    // button linked to stopHref when that isn't empty; and a word that a
     // picture changed, so its card is drawn again.
     void onSendPicture(std::function<void()> fn) { onSendPicture_ = std::move(fn); }
-    void pictures(std::function<wxString(uint64_t id, const wxWindow* list, const wxString& href)> fn)
+    void pictures(std::function<wxString(uint64_t id, const wxWindow* list, const wxString& href,
+                                         const wxString& stopHref)> fn)
     {
         pictureHtml_ = std::move(fn);
     }
     void picturesChanged() { shownFiles_ = ~0ull; }
+    // A picture under an earlier session's file line, from the file kept
+    // (its path in the session log), and that picture clicked.
+    void pastPictures(std::function<wxString(const std::string& path, const wxWindow* list, const wxString& href)> html,
+                      std::function<void(const std::string& path)> view)
+    {
+        pastPictureHtml_ = std::move(html);
+        onViewPast_ = std::move(view);
+    }
     // Files dropped on the tab.
     void onDropFiles(std::function<void(const std::vector<std::string>& paths)> fn) { onDropFiles_ = std::move(fn); }
     // A card's link or the queue's buttons: "save", "saveas", "decline",
@@ -127,7 +137,9 @@ private:
 
     std::function<bool(const std::string&)> onSend_;
     std::function<void()> onCancel_, onLeave_, onLeaveNow_, onCallAgain_, onSendFile_, onSendPicture_;
-    std::function<wxString(uint64_t, const wxWindow*, const wxString&)> pictureHtml_;
+    std::function<wxString(uint64_t, const wxWindow*, const wxString&, const wxString&)> pictureHtml_;
+    std::function<wxString(const std::string&, const wxWindow*, const wxString&)> pastPictureHtml_;
+    std::function<void(const std::string&)> onViewPast_;
     std::function<void(const std::vector<std::string>&)> onDropFiles_;
     std::function<void(const std::string&, uint64_t)> onFileAction_;
     std::function<void(uint64_t)> onResend_;
