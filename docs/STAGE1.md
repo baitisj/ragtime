@@ -1285,10 +1285,15 @@ words and the scope.
   write the noise's average starts afresh, and once 3 s of quiet are in
   the line says what it shows: "noise shows 580–2740 Hz", or "missed by
   N Hz" when an edge is more than 100 Hz from what was dragged. Until
-  the noise shows the new edges, the handles stay where they were
-  dropped, not on the model's guess, so they don't jump twice (to the
-  model, then about 10 s later to the noise) and look like the change
-  went back. The rig reads its knobs back in its own steps, coarser than
+  the noise shows the new edges, the handles stay where the drop landed
+  (`ear::reached`): where the model puts the new setting, off by as much
+  as the edges shown were off the model, so they don't jump twice (to
+  the model, then about 10 s later to the noise) and look like the
+  change went back. That is where it was dropped, unless the knobs'
+  ends stopped it short (Jeff, 2026-10-26: the top edge dropped at
+  5 kHz stopped near 4.4 kHz; shown at 5, the next shift was taken from
+  there and left the passband several hundred Hz short), or an edge
+  hidden under a cut in the audio comes out from under it. The rig reads its knobs back in its own steps, coarser than
   Hamlib's 1/255 on the IC-7100 (0.43 written reads 0.44, flight log
   2026-10-26), so a write counts as read back within four of them.
   While the Ear is open it alone hands the rig's readings to the trial,

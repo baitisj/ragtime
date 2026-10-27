@@ -145,6 +145,14 @@ double centreOf(const Span& measured, const RigFilter& f, double hzPerKnob);
 // goes where it was dropped (Hamlet, 2026-10-26: the IC-7100's low edge at -72 Hz,
 // shown at 70, dropped at 400 landed at 280 when moved by the drag).
 Span dragTarget(const Span& from, const Span& to, const RigFilter& now, const KnobModel& m);
+// Where a drag from `from` (the edges as shown) lands once `to` replaces
+// `now`, as the scope will show it: what the model gives `to`, past any
+// cut in the audio, off by as much as the edges shown were off the model.
+// Not where it was dropped: past the knobs' ends a drag can't go all the
+// way (Jeff, 2026-10-26: the top edge dropped at 5 kHz, the knobs
+// stopping it near 4.4), and the next drag's move, taken from there, left
+// the passband several hundred Hz short.
+Span reached(const Span& from, const RigFilter& now, const RigFilter& to, const KnobModel& m);
 // A width the rig takes: 50 Hz steps to 500 Hz, then 100 Hz (an Icom's
 // steps; other rigs round as they will), at least 50 Hz.
 int roundWidth(double hz, bool up);
