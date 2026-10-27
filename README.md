@@ -12,7 +12,7 @@ and on which band, each of your friends gets through, so it can tell you
 who is likely around now, and the best time of day to check in to the
 D2G net to find them.
 
-Status: 0.1.1-beta. Ragtime connects to data2g-host,
+Status: 0.2.0-beta. Ragtime connects to data2g-host,
 chats on the D2G broadcast group. Current features include:
 - "Globus," which plots your friend's maidenhead coordinates
    on a globe,

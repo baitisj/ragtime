@@ -180,7 +180,7 @@ wxString pingTip(const Message& m)
                "Both in dB in 2500 Hz, the gearshift's scale; the pong came back in the ping's gear.";
     if (m.unanswered)
         return "No pong yet: it may not have heard the ping, we may not have heard the pong, or its Ragtime is "
-               "older than 0.1.2. A late pong still counts. Right click to ping again.";
+               "older than 0.2.0. A late pong still counts. Right click to ping again.";
     return "It answers by itself, in the same gear, with the S/N its host heard us at.";
 }
 

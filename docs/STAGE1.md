@@ -353,7 +353,7 @@ Choices made there, for Jeff to keep or change:
   the plan is a flat 8 KB, cut back on a cancel or to slip a message
   in (Andrew). Until then a message typed mid-file goes out behind at
   most the window, not behind the whole file.
-- **Cuts** (for 0.1.2, Data2G PR #118). Ragtime asks for `DATA2G ON`;
+- **Cuts** (for 0.2.0, Data2G PR #118). Ragtime asks for `DATA2G ON`;
   a host that takes it can cut what it holds of a session
   (`CLEANTXBUFFER`). There the window is a flat 8 KB, a FileData carries
   at most half a burst of the mode (512 B while it isn't known, so a cut
@@ -525,7 +525,7 @@ what goes on the air. Choices made there, for Jeff to keep or change:
   closes.
 - **Repair gears and Repair refused** (Jeff's idea, 2026-10-24, his
   choices on the proposal doc). A request carries the S/N its asker
-  heard the sender at (the lowest in 15 minutes; since 0.1.2 the mean of
+  heard the sender at (the lowest in 15 minutes; since 0.2.0 the mean of
   its last 5 bursts) in the spare bits of
   its flags byte, so it costs nothing on the air and 0.1 still works with
   it. Each item goes again in the fastest gear every station that asked

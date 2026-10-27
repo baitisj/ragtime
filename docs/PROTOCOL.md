@@ -114,7 +114,7 @@ frame as a check-in.
 | --- | --- | --- |
 | version | 1 | The protocol version the sender speaks: 0 |
 | flags | 1 | Bit 0: accepts sessions. Bit 1: automatic (nobody at the controls; Stage 2 gives it its rules). Other bits 0 |
-| takes | 1 | The records the sender takes. Bit 0: Text and Ack. Bit 1: Status. Bit 2: session files (FileOffer to FileCancel). Bit 3: broadcast files (FileAnnounce, FilePiece). Bit 4: Seal, RepairRequest, RepairRefused and ItemParity. Bit 5: Ping and Pong (0.1.2 on). Bit 6: Reaction (0.1.2 on). Version 0 sends `0x7F`, and sent `0x1F` before 0.1.2 |
+| takes | 1 | The records the sender takes. Bit 0: Text and Ack. Bit 1: Status. Bit 2: session files (FileOffer to FileCancel). Bit 3: broadcast files (FileAnnounce, FilePiece). Bit 4: Seal, RepairRequest, RepairRefused and ItemParity. Bit 5: Ping and Pong (0.2.0 on). Bit 6: Reaction (0.2.0 on). Version 0 sends `0x7F`, and sent `0x1F` before 0.2.0 |
 | locator | 4, optional | Maidenhead, packed (Fields); 0 for none |
 | software | 1 + n, optional | A short string, at most 64 bytes, such as `Ragtime 0.1.0` |
 
@@ -238,7 +238,7 @@ each file with a want of 0. A listener sends one when it heard a file
 the seal's sender, so the repairs can go in a gear it can copy. It is the
 mean of the SNRs the asker's data2g-host reported for that sender's
 last 5 bursts in the last 15 minutes, the figure the gearshift's Auto
-shifts for. Until 0.1.2 it was the lowest of the 15 minutes, which in
+shifts for. Until 0.2.0 it was the lowest of the 15 minutes, which in
 Jeff's AG7EW–KC2G test (2026-10-25) put every repair in the slowest
 gear for one deep fade while the path ran up to 10 dB above it; the
 parity covers what a fade takes. Senders read either the same way.
@@ -579,7 +579,7 @@ station doesn't know is kept and shown as `?`.
   kept for it, for the last 200 such.
 - Reactions aren't items: they carry the newest item's number, no seal
   lists them, they are never repaired, and when signing comes they stay
-  unsigned. A station before 0.1.2 skips them as a type it doesn't know.
+  unsigned. A station before 0.2.0 skips them as a type it doesn't know.
 
 ### Seals and repair
 

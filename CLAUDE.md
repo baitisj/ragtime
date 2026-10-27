@@ -105,9 +105,11 @@ and the Part 97 check.
   cross build against a static wxWidgets (`cmake/Toolchain-mingw64.cmake`,
   `-DRAGTIME_BUILD_WX=ON`), and their CI jobs. 0.1.0-beta is the first
   release; 0.1.1-beta adds the session file cancel fix (#49) with the
-  same protocol. Stage 1 is done once Jeff has run the two-host bench on
+  same protocol. 0.2.0-beta has everything since (parity repair, rig
+  control, the Ear, reactions); it chats with 0.1 but can't repair with
+  it. Stage 1 is done once Jeff has run the two-host bench on
   Hamlet.
-- Data2G PR #118 (CLEANTXBUFFER, DATA2G ON) gives cuts, for 0.1.2:
+- Data2G PR #118 (CLEANTXBUFFER, DATA2G ON) gives cuts, for 0.2.0:
   `HostLink` asks for DATA2G ON (WRONG from an older host is fine),
   `SessionChat` cuts and mends the stream from `session::StreamLog`,
   and `FileTraffic` keeps a flat 8 KB window where the host can cut

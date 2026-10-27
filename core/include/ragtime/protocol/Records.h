@@ -79,8 +79,8 @@ enum Takes : uint8_t
     TAKES_SESSION_FILES = 0x04,     // FileOffer .. FileCancel
     TAKES_BROADCAST_FILES = 0x08,   // FileAnnounce, FilePiece
     TAKES_SEALS = 0x10,             // Seal, RepairRequest, RepairRefused, ItemParity
-    TAKES_PINGS = 0x20,             // Ping and Pong (Ragtime 0.1.2 on)
-    TAKES_REACTIONS = 0x40,         // Reaction (Ragtime 0.1.2 on)
+    TAKES_PINGS = 0x20,             // Ping and Pong (Ragtime 0.2.0 on)
+    TAKES_REACTIONS = 0x40,         // Reaction (Ragtime 0.2.0 on)
     TAKES_ALL_V0 = 0x7F,
 };
 
