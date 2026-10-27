@@ -49,5 +49,21 @@ Where things go
   Ragtime's files   %APPDATA%\Ragtime (the files log, thresholds)
   Received files    Documents\Ragtime received (Settings > Station)
 
+Pictures
+--------
+
+The picture button beside the floppy disk sends a picture: JPEG, PNG,
+GIF, BMP, TIFF, WebP, HEIC or JPEG 2000 from disk, shrunk to the size you
+pick and coded as JPEG 2000 to fit the airtime you allow. Pictures come
+from the air only as JPEG 2000. The ones you send are kept in
+%APPDATA%\Ragtime\sent-pictures.
+
 Ragtime is MIT licensed: see LICENSE.txt. It includes wxWidgets
-(https://wxwidgets.org), under the wxWindows Library Licence.
+(https://wxwidgets.org, the wxWindows Library Licence), Hamlib
+(https://hamlib.github.io, LGPL 2.1), OpenJPEG (https://www.openjpeg.org,
+BSD), libwebp (https://chromium.googlesource.com/webm/libwebp, BSD),
+libde265 and libheif (https://github.com/strukturag, LGPL 3), each under
+its licence in the licences folder. Ragtime's source and the recipe that
+builds this zip (packaging/windows/make-zip.sh) are at
+https://github.com/baitisj/ragtime, to build it with your own copies of
+these libraries.

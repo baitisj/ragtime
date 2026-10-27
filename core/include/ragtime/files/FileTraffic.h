@@ -122,6 +122,10 @@ public:
     // The session's mode, as data2g-host last reported it (invalid when
     // not known).
     void setMode(const link::ModeInfo& mode) { mode_ = mode; }
+    const link::ModeInfo& mode() const { return mode_; }
+    // The session's acknowledged rate over the last 2 minutes, bytes a
+    // second; 0 while not known.
+    double sessionRate() const { return session_.rate(); }
     // The host can cut what it holds (it took DATA2G ON).
     void setCuts(bool cuts) { cuts_ = cuts; }
     bool cuts() const { return cuts_; }

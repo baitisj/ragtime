@@ -2162,6 +2162,83 @@ void testRepairsShown()
     CHECK(mine.repairPieces > 0);
 }
 
+// An inline picture: its announce says so, a listener that shows
+// pictures as they come takes one under its cap without asking, and any
+// first part of it heard is there to show while the rest comes. One over
+// the cap, or a listener that doesn't, waits for Receive like any file.
+void testPictures()
+{
+    Air air;
+    Station& a = air.add("AG7EW", 1);
+    Station& b = air.add("KC2G", 2);
+    Station& c = air.add("W1AW", 3);
+    std::filesystem::path bDir = freshFolder("pictures-b");
+    b.files.setAutoPictures(bDir.string(), 64 * 1024);
+    air.run(2000);
+
+    std::string path = makeFile("shack.j2k", 2500, 7);
+    std::vector<uint8_t> want = readAll(path);
+    std::string error;
+    uint64_t id = a.files.send(path, "qpsk-r1/3", now, error, true);
+    CHECK(id != 0);
+    std::vector<uint8_t> ours;
+    CHECK(a.files.pictureBytes(id, ours) && ours == want);
+
+    // As it comes, what there is to show is always the start of it.
+    bool partShown = false;
+    for (int i = 0; i < 120; i++)
+    {
+        air.run(1000);
+        BroadcastFile f = fileFrom(b, "AG7EW");
+        if (f.id == 0) continue;
+        CHECK(f.picture);
+        std::vector<uint8_t> part;
+        if (!b.files.pictureBytes(f.id, part)) continue;
+        CHECK(part.size() <= want.size());
+        CHECK(std::equal(part.begin(), part.end(), want.begin()));
+        partShown = partShown || (part.size() > 0 && part.size() < want.size());
+        if (f.state == FileState::Saved) break;
+    }
+    CHECK(partShown);
+    BroadcastFile fb = fileFrom(b, "AG7EW");
+    CHECK(fb.state == FileState::Saved && fb.picture);
+    CHECK(fb.path.find("pictures-b") != std::string::npos);
+    if (fb.id != 0)
+    {
+        CHECK(readAll(fb.path) == want);
+        std::vector<uint8_t> saved;
+        CHECK(b.files.pictureBytes(fb.id, saved) && saved == want);
+    }
+    // C shows no pictures by itself: heard, waiting for Receive.
+    BroadcastFile fc = fileFrom(c, "AG7EW");
+    CHECK(fc.picture && fc.state == FileState::Heard);
+
+    // Over the cap: heard, not taken.
+    Station& d = air.add("VK2ABC", 4);
+    std::filesystem::path dDir = freshFolder("pictures-d");
+    d.files.setAutoPictures(dDir.string(), 1000);
+    std::string big = makeFile("big.j2k", 1500, 8);
+    CHECK(a.files.send(big, "qpsk-r1/3", now, error, true) != 0);
+    air.run(60000);
+    bool heard = false;
+    for (const BroadcastFile& f : d.files.files(now))
+    {
+        if (f.outgoing || f.name != "big.j2k") continue;
+        heard = true;
+        CHECK(f.picture && f.state == FileState::Heard);
+    }
+    CHECK(heard);
+
+    // A file that isn't a picture is never taken as one.
+    std::string plain = makeFile("notes.txt", 500, 9);
+    CHECK(a.files.send(plain, "qpsk-r1/3", now, error) != 0);
+    air.run(60000);
+    for (const BroadcastFile& f : b.files.files(now))
+    {
+        if (f.name == "notes.txt") CHECK(!f.picture && f.state == FileState::Heard);
+    }
+}
+
 int main()
 {
     testAirtime();
@@ -2204,6 +2281,7 @@ int main()
     testRepairCapAndReopen();
     testCloseTakesBack();
     testRepairsShown();
+    testPictures();
     std::filesystem::remove_all(scratch());
     return ragtime_test::finish();
 }

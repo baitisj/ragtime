@@ -75,6 +75,37 @@ wxBitmapBundle floppyIcon(const wxColour& ink, int sizeDip)
     return drawnIcon([ink](wxGraphicsContext& gc, double size) { drawFloppyIcon(gc, size, ink); }, sizeDip);
 }
 
+void drawPictureIcon(wxGraphicsContext& gc, double size, const wxColour& ink)
+{
+    // Drawn on a 24-unit grid, like the floppy beside it.
+    const double u = size / 24.0;
+    gc.SetBrush(*wxTRANSPARENT_BRUSH);
+    gc.SetPen(gc.CreatePen(wxGraphicsPenInfo(ink, 1.8 * u).Cap(wxCAP_ROUND).Join(wxJOIN_ROUND)));
+
+    // The frame.
+    gc.DrawRoundedRectangle(3 * u, 4.5 * u, 18 * u, 15 * u, 1.5 * u);
+
+    // The sun, up on the right.
+    gc.SetPen(*wxTRANSPARENT_PEN);
+    gc.SetBrush(wxBrush(ink));
+    gc.DrawEllipse(14.5 * u, 7.5 * u, 3.6 * u, 3.6 * u);
+
+    // Two hills, the far one behind the near.
+    wxGraphicsPath hills = gc.CreatePath();
+    hills.MoveToPoint(4 * u, 18.5 * u);
+    hills.AddLineToPoint(9.5 * u, 11 * u);
+    hills.AddLineToPoint(13.5 * u, 16 * u);
+    hills.AddLineToPoint(15.5 * u, 13.5 * u);
+    hills.AddLineToPoint(20 * u, 18.5 * u);
+    hills.CloseSubpath();
+    gc.FillPath(hills);
+}
+
+wxBitmapBundle pictureIcon(const wxColour& ink, int sizeDip)
+{
+    return drawnIcon([ink](wxGraphicsContext& gc, double size) { drawPictureIcon(gc, size, ink); }, sizeDip);
+}
+
 void drawMoonIcon(wxGraphicsContext& gc, double size, const wxColour& ink)
 {
     // A disc with a smaller one, up and to the right, cut out of it.

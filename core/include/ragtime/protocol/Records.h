@@ -155,11 +155,20 @@ struct Reaction
 
 constexpr size_t MAX_FILE_NAME = 200;
 
+// What a file is: FileOffer's and FileAnnounce's optional last byte
+// (docs/PROTOCOL.md, "Pictures"). A receiver that doesn't know a kind
+// takes the file as a plain one.
+constexpr uint8_t FILE_PLAIN = 0;
+// An inline picture: a JPEG 2000 codestream, shown among the messages as
+// it comes, any first part of it a softer whole.
+constexpr uint8_t FILE_PICTURE = 1;
+
 struct FileOffer
 {
     uint32_t size = 0;
     Digest digest{};            // of the whole file
     std::string name;           // UTF-8, at most MAX_FILE_NAME bytes
+    uint8_t kind = FILE_PLAIN;  // sent only when not FILE_PLAIN
 };
 
 struct FileAnswer
@@ -189,6 +198,9 @@ enum class CancelReason : uint8_t
     ReceiverStopped = 0x81,     // the receiving operator cancelled it
     ReceiverFailed = 0x82,      // the file could not be written, or did not check
     ReceiverExpired = 0x83,
+    // The receiver has enough of a picture: it keeps what came, softer,
+    // and the rest needn't go. An older sender takes it as 0x81.
+    ReceiverHasEnough = 0x84,
 };
 constexpr uint8_t CANCEL_FROM_RECEIVER = 0x80;
 
@@ -204,6 +216,7 @@ struct FileAnnounce
     uint16_t pieceBytes = 0;
     Digest digest{};
     std::string name;
+    uint8_t kind = FILE_PLAIN;  // sent only when not FILE_PLAIN
 };
 
 // The header's seq is the announce's. An index at or past the file's

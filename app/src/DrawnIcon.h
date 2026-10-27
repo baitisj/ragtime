@@ -12,7 +12,7 @@ class wxWindow;
 
 // The small button icons Ragtime draws itself, in the theme's text colour
 // so they follow light and dark: the gearshift's speedometer and the file
-// buttons' floppy disk, the status bar's moon and sun, the green
+// buttons' floppy disk and the picture buttons' framed picture, the status bar's moon and sun, the green
 // check on Done, a watched station's bell, and the Ear's ear.
 
 // Draws an icon in a square size wide at the context's origin.
@@ -24,6 +24,11 @@ wxBitmapBundle drawnIcon(const IconDrawing& draw, int sizeDip);
 // A floppy disk, for the buttons that send a file (Jeff, 2026-10-23).
 void drawFloppyIcon(wxGraphicsContext& gc, double size, const wxColour& ink);
 wxBitmapBundle floppyIcon(const wxColour& ink, int sizeDip = 18);
+
+// A framed picture of hills under the sun, for the buttons that send a
+// picture inline (Jeff, 2026-10-27: just left of the floppy disk).
+void drawPictureIcon(wxGraphicsContext& gc, double size, const wxColour& ink);
+wxBitmapBundle pictureIcon(const wxColour& ink, int sizeDip = 18);
 
 // The light and dark button: a crescent moon in the light (click for
 // dark), a sun in the dark (click for light).

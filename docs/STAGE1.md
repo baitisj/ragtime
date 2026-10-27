@@ -1509,6 +1509,87 @@ HI HI and QRZ? (docs/PROTOCOL.md, "Reactions").
   on D2G and in a ragchew.
 - Not built: a watch-list bell for reactions (the doc's "reactions" tick).
 
+## Inline pictures
+
+Jeff's idea (2026-10-27, idea 12 of "Ideas before signatures" for the
+libraries): a picture among the messages, on D2G and in a ragchew, sent
+as progressive JPEG 2000 so it sharpens as it comes. On the air it is a
+file with a kind byte (docs/PROTOCOL.md, "Pictures").
+
+- **Reading.** JPEG, PNG, GIF and TIFF come through wxImage, JPEG 2000
+  (codestream or JP2) through OpenJPEG, WebP through libwebp, and HEIF
+  through libheif with libde265 for HEVC (`image/`, `ragtime_image`;
+  `-DRAGTIME_PICTURES=OFF` builds without, `-DRAGTIME_HEIF=OFF` without
+  HEIF). A phone's EXIF orientation is honoured, and re-coding drops the
+  rest of EXIF, its GPS included. From the air only a JPEG 2000
+  codestream is ever decoded, up to 4,096 pixels either way: decoders
+  are where an attack comes in.
+- **Shrinking.** `picture::downscale` is "Rapid, Detail-Preserving Image
+  Downscaling" (Weber, Waechter, Amirshahi and Goesele, 2016), with
+  λ = 0.5: each output pixel is a weighted average of the pixels under
+  it, weighted by how far each stands from a smoothed guide, so wires,
+  eyes and the strokes of a callsign survive where an area average or
+  Lanczos washes them out. Averages are in linear light, differences in
+  sRGB. A grey picture is coded as one channel.
+- **Fitting the time.** The dialog takes the most airtime (60 s by
+  default) and the longest side (640 pixels by default, Jeff), and turns
+  the seconds into bytes at the gear it will go in: on D2G the broadcast
+  gear, counted as `BroadcastFiles` sends it (announces, pieces, bursts
+  and the gaps between them, `picture::broadcastBytesFor`); in a
+  session, the session's measured rate, or the mode's longest burst and
+  the turns around it (`picture::sessionBytesFor`). OpenJPEG codes
+  quality layers each about twice the one before, LRCP, and the layer
+  sizes are fitted until the codestream is under the bytes. Sent in less
+  time, so much the better. If not even a small picture fits, the dialog
+  says the gear is too slow. Its preview shows the picture as it will
+  look, and a slider shows it part way in.
+- **Sealing.** A broadcast picture is a broadcast file: sealed, and
+  repaired with parity, as any other. Its seal is airtime on top of the
+  picture's, never cheap at the slow rungs, so the dialog shows it on a
+  line of its own (`picture::sealSeconds`), and says repairs take more.
+  The seal's digest is of the whole codestream, so a picture still
+  coming shows "As it has come so far, not yet verified" under it until
+  it is whole. Nothing is sealed in a session, where the stream is
+  already in order and checked.
+- **The sender's copy.** The codestream as it went is kept in the
+  sent-pictures folder (`sentPicturesDir()`, a folder each, named by the
+  time it went, so it keeps its name on the air), and sent from there: it is
+  what the seal names, what repairs rebuild and what Send again sends,
+  byte for byte. It is on the Files tab as any file sent, with View the
+  picture on its menu.
+- **Receiving.** "Show pictures as they come" (Settings > Station, on by
+  default) takes pictures up to 64 KB from anyone, into the received
+  folder, with no question; bigger ones, or all with the box unticked,
+  wait for Receive or Accept as other files do. A picture shows under
+  its card as it comes (decoded at most once a second until whole), and
+  a click opens it in a window of its own (`PictureFrame`): Fit, 1:1, a
+  zoom slider from 5% to 1600%, the wheel zooms about the pointer, a
+  drag moves it, and Save as... keeps it as a PNG.
+- **The stop sign.** In a ragchew, a picture coming in has a red stop
+  sign in its card's lower right corner. Pressed, it saves what came and
+  sends FileCancel `0x84`; the sender cuts what its host still holds and
+  logs "KC2G had enough at 41%". There is none on D2G, where one
+  listener having enough says nothing for the rest.
+- **The buttons.** A picture button, a framed sun over two hills, just
+  left of the floppy on both tabs, and File > Send a picture... and
+  Broadcast a picture....
+- **Part 97.** These are digital files, so they are data, and go in the
+  data segments as any Ragtime traffic does; SSTVAE's analogue pictures
+  (docs/PICTURES_AND_VOICE.md) are another matter.
+- **Packaging.** The AppImage carries libheif's libde265 plugin, found
+  through `LIBHEIF_PLUGIN_PATH` under `$APPDIR`. The Windows zip links
+  OpenJPEG, libwebp, libde265 and libheif in statically
+  (`-DRAGTIME_BUILD_IMAGE_LIBS=ON`, `cmake/BuildImageLibs.cmake`) and
+  carries their licences in `licences/`. libheif and libde265 are LGPL:
+  Ragtime's source and the recipe that builds the zip are public, so
+  anyone can relink it.
+- Not built: a picture in the chat after a restart (the Broadcast and
+  Session logs bring back its line, not the picture; the Files tab keeps
+  it, with View the picture), pictures from the clipboard, a crop before
+  sending, and
+  sending a smaller side by itself when the budget is very small (a
+  smaller picture at the same bytes looks sharper).
+
 ## Waiting on Andrew (via Jeff)
 
 - Read from Data2G's source on 2026-10-25 (`docs/DATA2G.md`): `BW1200`

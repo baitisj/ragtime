@@ -1274,6 +1274,83 @@ void testTheSizeCap()
 
 } // namespace
 
+// Inline pictures: under the cap they come without asking, from anyone,
+// into the pictures folder; a plain file or a big picture still asks.
+void testPicturesComeWithoutAsking()
+{
+    Scratch scratch("pictures");
+    Link link;
+    fs::create_directories(scratch.dir / "in");
+    std::string folder = utf8FromPath(scratch.dir / "in");
+    link.b.setAutoPictures(folder, 64 * 1024);
+    std::string error;
+    std::string source = scratch.write("shack.j2k", 6000);
+    uint64_t id = link.a.offer("VK3ABC", source, link.nowMs, error, true);
+    CHECK(id != 0 && transferOf(link.a, id).picture);
+    std::vector<uint8_t> ours;
+    CHECK(link.a.pictureBytes(id, ours) && std::string(ours.begin(), ours.end()) == readFile(source));
+    link.turns(5);
+    FileTransfer got = last(link.b, false);
+    CHECK(got.picture && got.autoAccepted && got.state == State::Saved);
+    CHECK(got.path == utf8FromPath(scratch.dir / "in" / "shack.j2k"));
+    CHECK(readFile(got.path) == readFile(source));
+    std::vector<uint8_t> shown;
+    CHECK(link.b.pictureBytes(got.id, shown) && std::string(shown.begin(), shown.end()) == readFile(source));
+    CHECK(transferOf(link.a, id).state == State::Delivered && !transferOf(link.a, id).enough);
+
+    // A plain file asks.
+    link.a.offer("VK3ABC", scratch.write("notes.txt", 100), link.nowMs, error);
+    link.turn();
+    CHECK(last(link.b, false).state == State::Asking && !last(link.b, false).picture);
+    link.b.decline(last(link.b, false).id);
+    link.turn();
+
+    // So does a picture over the cap.
+    link.b.setAutoPictures(folder, 1000);
+    link.a.offer("VK3ABC", scratch.write("big.j2k", 5000), link.nowMs, error, true);
+    link.turn();
+    CHECK(last(link.b, false).state == State::Asking && last(link.b, false).picture);
+}
+
+// The stop sign: the receiver has enough of a picture. What came is saved
+// as the picture, the sender is told, stops, and counts it delivered.
+void testTheStopSign()
+{
+    Scratch scratch("stop-sign");
+    Link link;
+    fs::create_directories(scratch.dir / "in");
+    link.b.setAutoPictures(utf8FromPath(scratch.dir / "in"), 64 * 1024);
+    std::string error;
+    std::string source = scratch.write("tower.j2k", 20000);
+    uint64_t id = link.a.offer("VK3ABC", source, link.nowMs, error, true);
+    link.turns(4);
+    FileTransfer coming = last(link.b, false);
+    CHECK(coming.picture && coming.state == State::Receiving && coming.done == 8192);
+    std::vector<uint8_t> part;
+    CHECK(link.b.pictureBytes(coming.id, part) && part.size() == 8192);
+    CHECK(std::string(part.begin(), part.end()) == readFile(source).substr(0, 8192));
+
+    // A plain file has no stop sign.
+    CHECK(!link.a.enough(id));
+
+    CHECK(link.b.enough(coming.id));
+    FileTransfer stopped = last(link.b, false);
+    CHECK(stopped.state == State::Saved && stopped.enough);
+    CHECK(readFile(stopped.path) == readFile(source).substr(0, 8192));
+    CHECK(!exists(stopped.path + ".part") && link.b.keptCount() == 0);
+    std::vector<uint8_t> shown;
+    CHECK(link.b.pictureBytes(stopped.id, shown) && shown.size() == 8192);
+    link.turns(2);
+    FileTransfer sent = transferOf(link.a, id);
+    CHECK(sent.state == State::Delivered && sent.enough);
+    CHECK(sent.done < sent.size);
+    // Nothing more of it goes.
+    int pieces = link.pieces;
+    link.turns(3);
+    CHECK(link.pieces == pieces);
+    CHECK(last(link.b, false).state == State::Saved);
+}
+
 int main()
 {
     testSafeNames();
@@ -1313,5 +1390,7 @@ int main()
     testADigestMismatchIsNotSaved();
     testOutOfOrderFails();
     testTheSizeCap();
+    testPicturesComeWithoutAsking();
+    testTheStopSign();
     return ragtime_test::finish();
 }

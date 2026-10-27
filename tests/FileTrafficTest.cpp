@@ -1008,6 +1008,15 @@ void testTheLogAsText()
     f.movedBytes = 6000;
     f.movedMs = 60000;
     history.add(f);
+    // A picture the far end had enough of.
+    f.via = Via::Session;
+    f.peer = "KC2G";
+    f.name = "shack.j2k";
+    f.size = 20000;
+    f.result = Result::Sent;
+    f.picture = true;
+    f.enough = 8192;
+    history.add(f);
     CHECK(history.find(first) != nullptr);
 
     KeptPart k;
@@ -1027,9 +1036,12 @@ void testTheLogAsText()
     std::vector<KeptPart> kept;
     std::vector<std::string> other;
     CHECK(loadFilesText(text + "Z\tgarbage\nF\tnot\tenough\n", back, kept, &other));
-    CHECK_EQ(back.entries().size(), (size_t)2);
-    if (back.entries().size() == 2)
+    CHECK_EQ(back.entries().size(), (size_t)3);
+    if (back.entries().size() == 3)
     {
+        const FinishedFile& picture = back.entries()[2];
+        CHECK(picture.picture && picture.enough == 8192 && !back.entries()[1].picture);
+        CHECK_EQ(resultLabel(picture), std::string("Sent: KC2G had enough at 40%"));
         const FinishedFile& b = back.entries()[0];
         CHECK_EQ(b.name, std::string("tab\there.txt"));
         CHECK_EQ(b.reason, std::string("line one\nline two \\ backslash"));

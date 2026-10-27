@@ -175,6 +175,48 @@ void BroadcastFiles::setAutoReceive(const std::string& folder)
     autoFolder_ = folder;
 }
 
+void BroadcastFiles::setAutoPictures(const std::string& folder, uint64_t maxBytes)
+{
+    pictureFolder_ = folder;
+    pictureMax_ = maxBytes;
+}
+
+bool BroadcastFiles::pictureBytes(uint64_t id, std::vector<uint8_t>& out) const
+{
+    out.clear();
+    auto readFile = [&out](const std::string& path, uint64_t size) {
+        std::ifstream in(files::pathFromUtf8(path), std::ios::binary);
+        if (!in) return false;
+        out.resize((size_t)std::min<uint64_t>(size, MAX_FILE_BYTES));
+        in.read((char*)out.data(), (std::streamsize)out.size());
+        out.resize((size_t)in.gcount());
+        return !out.empty();
+    };
+    for (const Outgoing& o : outgoing_)
+    {
+        if (o.file.id != id) continue;
+        if (!o.content.empty())
+        {
+            out = o.content;
+            return true;
+        }
+        return readFile(o.file.path, o.file.size);
+    }
+    for (const Incoming& i : incoming_)
+    {
+        if (i.file.id != id || !i.announced) continue;
+        if (i.file.state == State::Saved) return readFile(i.file.path, i.file.size);
+        for (uint16_t p = 0; p < i.file.pieces; p++)
+        {
+            auto it = i.pieces.find(p);
+            if (it == i.pieces.end()) break;
+            out.insert(out.end(), it->second.begin(), it->second.end());
+        }
+        return !out.empty();
+    }
+    return false;
+}
+
 //-------------------------------------------------------------------------
 // Ours
 //-------------------------------------------------------------------------
@@ -184,7 +226,8 @@ FileEstimate BroadcastFiles::estimate(uint64_t size, const std::string& name, co
     return estimateFile(size, name, chat_.settings().callsign, findMode(link_.modes(), mode, link_.groupMode()));
 }
 
-uint64_t BroadcastFiles::send(const std::string& path, const std::string& mode, uint64_t nowMs, std::string& error)
+uint64_t BroadcastFiles::send(const std::string& path, const std::string& mode, uint64_t nowMs, std::string& error,
+                              bool picture)
 {
     const std::string& call = chat_.settings().callsign;
     std::filesystem::path p = files::pathFromUtf8(path);
@@ -238,6 +281,7 @@ uint64_t BroadcastFiles::send(const std::string& path, const std::string& mode, 
     announce.pieceBytes = (uint16_t)est.pieceBytes;
     announce.digest = protocol::digestOf(content);
     announce.name = name;
+    announce.kind = picture ? protocol::FILE_PICTURE : protocol::FILE_PLAIN;
 
     Outgoing out;
     out.announce = chat_.record(announce, seconds(nowMs));
@@ -255,6 +299,7 @@ uint64_t BroadcastFiles::send(const std::string& path, const std::string& mode, 
     out.file.startedMs = nowMs;
     out.file.lastMs = nowMs;
     out.file.path = path;
+    out.file.picture = picture;
     out.file.pieceMap.assign(pieces, files::PIECE_WAITING);
     out.rate.sample(0, nowMs);
     outgoing_.push_back(std::move(out));
@@ -334,6 +379,7 @@ void BroadcastFiles::finishOutgoing(Outgoing& out, State state, uint64_t nowMs)
         f.size = out.file.size;
         f.result = state == State::Sent ? files::FinishedFile::Result::Sent : files::FinishedFile::Result::Cancelled;
         f.path = out.file.path;
+        f.picture = out.file.picture;
         // The first pass, start to end: repairs come later, sometimes hours.
         if (state == State::Sent && out.firstPassMs > out.file.startedMs)
         {
@@ -596,6 +642,7 @@ void BroadcastFiles::heardAnnounce(const protocol::Record& record, uint64_t nowM
     in->announceRecord = record;
     in->file.name = files::safeFileName(a->name);
     in->file.size = a->size;
+    in->file.picture = a->kind == protocol::FILE_PICTURE;
     in->file.pieces = pieces;
     in->file.pieceMap.assign(pieces, files::PIECE_WAITING);
 
@@ -661,11 +708,15 @@ void BroadcastFiles::heardAnnounce(const protocol::Record& record, uint64_t nowM
         finishIncoming(*in, State::Failed, nowMs, "over 300 KB");
         return;
     }
-    if (in->file.state == State::Heard && !autoFolder_.empty())
+    // A picture small enough shows as it comes; other files wait for
+    // Receive unless every file is taken without asking.
+    bool picture = in->file.picture && !pictureFolder_.empty() && a->size <= pictureMax_;
+    if (in->file.state == State::Heard && (picture || !autoFolder_.empty()))
     {
         in->file.state = State::Receiving;
         in->file.autoReceived = true;
-        in->file.path = files::utf8FromPath(files::pathFromUtf8(autoFolder_) / files::pathFromUtf8(in->file.name));
+        const std::string& folder = picture ? pictureFolder_ : autoFolder_;
+        in->file.path = files::utf8FromPath(files::pathFromUtf8(folder) / files::pathFromUtf8(in->file.name));
     }
     emit(Event::Type::Announced, in->file.id);
     changed();
@@ -848,6 +899,7 @@ void BroadcastFiles::finishIncoming(Incoming& in, State state, uint64_t nowMs, c
         f.peer = in.file.from;
         f.name = in.file.name;
         f.size = in.file.size;
+        f.picture = in.file.picture;
         using Result = files::FinishedFile::Result;
         switch (state)
         {
@@ -1296,6 +1348,7 @@ void BroadcastFiles::loadParts(uint64_t nowMs)
         kept.announceRecord = part.announce;
         kept.file.name = files::safeFileName(a->name);
         kept.file.size = a->size;
+        kept.file.picture = a->kind == protocol::FILE_PICTURE;
         uint16_t pieces = (uint16_t)((a->size + a->pieceBytes - 1) / a->pieceBytes);
         kept.file.pieces = pieces;
         kept.file.pieceMap.assign(pieces, files::PIECE_WAITING);

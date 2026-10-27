@@ -42,6 +42,10 @@ add_executable(ragtime WIN32
     src/RigControl.cpp
     src/Html.cpp
     src/PhraseHighlight.cpp
+    src/PictureDialog.cpp
+    src/PictureFrame.cpp
+    src/PictureView.cpp
+    src/Pictures.cpp
     src/ReactionChips.cpp
     src/SealBadge.cpp
     src/Prefs.cpp
@@ -88,7 +92,7 @@ else()
         target_compile_options(ragtime PRIVATE ${RAGTIME_WX_CXX_FLAGS})
     endif()
 endif()
-target_link_libraries(ragtime PRIVATE ragtime_core ragtime_rig ragtime_audio ${RAGTIME_WX_LIBS})
+target_link_libraries(ragtime PRIVATE ragtime_core ragtime_rig ragtime_audio ragtime_image ${RAGTIME_WX_LIBS})
 ragtime_warnings(ragtime)
 
 if(RAGTIME_TESTS AND NOT WIN32)

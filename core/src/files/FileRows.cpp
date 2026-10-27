@@ -189,12 +189,13 @@ std::string monthDay(uint64_t atMs, long utcOffsetS)
 std::string resultLabel(const FinishedFile& file)
 {
     using R = FinishedFile::Result;
+    std::string share = file.size == 0 ? std::string() : std::to_string(file.enough * 100 / file.size) + "%";
     switch (file.result)
     {
         case R::Saved:
-            return "Saved";
+            return file.enough > 0 ? "Saved, stopped at " + share : std::string("Saved");
         case R::Sent:
-            return "Sent";
+            return file.enough > 0 ? "Sent: " + file.peer + " had enough at " + share : std::string("Sent");
         case R::Declined:
             return file.outgoing ? "Declined by " + file.peer : "Declined";
         case R::Cancelled:
@@ -296,7 +297,9 @@ std::string saveFilesText(const FileHistory& history, const std::vector<KeptPart
                                            f.reason,
                                            f.path,
                                            std::to_string(f.movedBytes),
-                                           std::to_string(f.movedMs)};
+                                           std::to_string(f.movedMs),
+                                           f.picture ? "picture" : "",
+                                           std::to_string(f.enough)};
         for (size_t i = 0; i < fields.size(); i++) out += (i ? "\t" : "") + escape(fields[i]);
         out += "\n";
     }
@@ -357,6 +360,11 @@ bool loadFilesText(const std::string& text, FileHistory& history, std::vector<Ke
             file.path = f[9];
             if (f.size() >= 12 && (!number(f[10], file.movedBytes) || !number(f[11], file.movedMs)))
                 file.movedBytes = file.movedMs = 0;
+            if (f.size() >= 14)
+            {
+                file.picture = f[12] == "picture";
+                if (!number(f[13], file.enough) || file.enough >= file.size) file.enough = 0;
+            }
             history.add(std::move(file));
         }
         else if ((f[0] == "K" || f[0] == "S") && f.size() >= 10)

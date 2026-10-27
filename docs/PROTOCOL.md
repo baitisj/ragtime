@@ -162,8 +162,11 @@ Ack and one: with five-character calls, 21 bytes. Reactions, below.
 
 **FileOffer** (`0x20`), in a session: size (4 bytes, at most 307,200),
 digest (12 bytes, the whole file's: SHA-256, first 12 bytes), name (a
-short string, UTF-8, at most 200 bytes). The offer is an item; its
-sequence number names the transfer from then on.
+short string, UTF-8, at most 200 bytes), then kind (1 byte, optional):
+`0x00` a plain file, `0x01` a picture (Pictures, below). Missing, it is
+`0x00`, and a sender leaves it off a plain file; a receiver takes a kind
+it doesn't know as `0x00`. The offer is an item; its sequence number
+names the transfer from then on.
 
 **FileAnswer** (`0x21`): offer (3), answer (1 byte: 0 accept, 1
 decline), and when accepted from (4 bytes): how much of the file the
@@ -188,9 +191,11 @@ reason says who is speaking, which also says whose transfer it ends:
 | `0x81` | receiver | The operator stopped it, or declined after accepting |
 | `0x82` | receiver | It could not be written, the bytes came out of order or more than offered, the digest didn't match, it is over 300 KB, or this station may not transmit now |
 | `0x83` | receiver | The offer went unanswered |
+| `0x84` | receiver | It has enough of a picture (the stop sign): what came is saved |
 
 **FileAnnounce** (`0x30`), in broadcast mode: size (4), piece size (2,
-never 0), digest (12, the whole file's), name (short string). An item.
+never 0), digest (12, the whole file's), name (short string), then kind
+(1 byte, optional, as FileOffer's). An item.
 
 **FilePiece** (`0x31`): index (2), then the piece's bytes. Its header's
 seq is the announce's. Piece i holds bytes i × piece size up to the next
@@ -862,6 +867,41 @@ two.
   days after it went so; saved or rejected, at once. Nothing read back
   is trusted: a piece that doesn't fit the announce is dropped, and a
   file that doesn't parse, or lacks its closing line, is deleted.
+
+### Pictures
+
+A picture is a file with kind `0x01`, in a session or on D2G, and goes
+by the same rules as any other file: offered or announced, sent, sealed
+on D2G and repaired there. What kind adds is how the far end treats it.
+
+- **Only JPEG 2000 goes on the air.** The file is a JPEG 2000
+  codestream (ISO/IEC 15444-1, a `.j2k`: SOC, then SIZ), never a JP2
+  file and never any other format. Ragtime makes it progressive: the
+  9/7 wavelet, quality layers in layer-resolution-component-position
+  order, each about twice the bytes of the one before, the first a
+  thumbnail's worth. So **any first part of the file decodes to the
+  whole picture, softer**, and the rest only sharpens it. A receiver
+  decodes nothing else from the air, and nothing over 4,096 pixels
+  either way; a file of kind `0x01` that doesn't decode shows only its
+  card, as a plain file does.
+- **It shows as it comes.** A receiver may take a picture of up to 64 KB
+  without asking, from anyone (Settings, on by default), and shows it
+  among the messages, decoding what has come so far. Bigger ones wait
+  for Accept or Receive, as other files do.
+- **The stop sign.** In a session, the receiver can stop a picture that
+  is sharp enough: it saves what came, as the picture it got, and sends
+  FileCancel `0x84`. The sender counts the file delivered as far as it
+  went, and cuts what the host still holds (Cuts, above). A part file
+  is not kept: the receiver saved it.
+- **On D2G there is no stop sign:** many stations listen, and one having
+  enough says nothing of the rest. The picture is sealed as any file is,
+  and a listener that missed pieces asks for parity as for any file.
+  The sender keeps the codestream it sent (its sent-pictures folder), so
+  it can repair it and send it again byte for byte; the seal's digest is
+  of those bytes, never of the picture first picked.
+- A receiver from 0.2 or before reads a picture as a plain `.j2k` file,
+  and the stop sign as the receiver stopping it (`0x84` has the
+  receiver's bit set).
 
 ## Growing the protocol
 

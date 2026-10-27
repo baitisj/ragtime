@@ -22,6 +22,7 @@
 #include "DrawnIcon.h"
 #include "Html.h"
 #include "PhraseHighlight.h"
+#include "Pictures.h"
 #include "ReactionChips.h"
 #include "SealBadge.h"
 #include "Theme.h"
@@ -64,6 +65,15 @@ wxString link(bool picked, const char* action, uint64_t id, const wxString& labe
 }
 
 const char* const DOT = " \xc2\xb7 ";
+
+// The stop sign beside a picture coming in.
+constexpr int STOP_SIGN_DIP = 36;
+
+// "42%" of a file.
+std::string percentOf(uint64_t done, uint64_t size)
+{
+    return std::to_string(size == 0 ? 100 : (int)(100 * std::min(done, size) / size)) + "%";
+}
 
 // Files dropped anywhere on the tab.
 class FileDrop : public wxFileDropTarget
@@ -159,7 +169,7 @@ protected:
 
     wxString OnGetItem(size_t n) const override
     {
-        if (const FileTransfer* t = fileAt(n)) return owner_->cardHtml(*t, IsSelected(n));
+        if (const FileTransfer* t = fileAt(n)) return owner_->cardHtml(*t, IsSelected(n), this);
         const Message* m = at(n);
         if (m == nullptr) return wxString();
         bool picked = IsSelected(n);
@@ -259,14 +269,21 @@ SessionPage::SessionPage(wxWindow* parent, const SessionChat& session, const rag
     sendFile_->SetToolTip("Send a file: offers files to the station you're in a session with; you can also drop "
                           "files on this tab. They go one at a time, in the order queued.");
     sendFile_->SetMinSize(wxSize(-1, std::max(sendFile_->GetBestSize().y, send_->GetBestSize().y)));
+    // The picture button, just left of the floppy (Jeff, 2026-10-27).
+    sendPicture_ = new wxBitmapButton(this, wxID_ANY, pictureIcon(wxSystemSettings::GetColour(wxSYS_COLOUR_BTNTEXT)));
+    sendPicture_->SetToolTip("Send a picture: shrunk and coded as JPEG 2000 to fit the time you allow; the far end "
+                             "sees it as it comes, and can stop it once they have enough");
+    sendPicture_->SetMinSize(wxSize(-1, std::max(sendPicture_->GetBestSize().y, send_->GetBestSize().y)));
     Bind(wxEVT_SYS_COLOUR_CHANGED, [this](wxSysColourChangedEvent& e) {
         sendFile_->SetBitmap(floppyIcon(wxSystemSettings::GetColour(wxSYS_COLOUR_BTNTEXT)));
+        sendPicture_->SetBitmap(pictureIcon(wxSystemSettings::GetColour(wxSYS_COLOUR_BTNTEXT)));
         shownPhase_ = -1;   // the strip takes its colours again at the next refresh
         e.Skip();
     });
     auto* row = new wxBoxSizer(wxHORIZONTAL);
     row->Add(compose_, 1, wxALIGN_CENTER_VERTICAL);
     row->Add(send_, 0, wxALIGN_CENTER_VERTICAL | wxLEFT, 6);
+    row->Add(sendPicture_, 0, wxALIGN_CENTER_VERTICAL | wxLEFT, 6);
     row->Add(sendFile_, 0, wxALIGN_CENTER_VERTICAL | wxLEFT, 6);
 
     // The send queue: files waiting their turn, to reorder or remove.
@@ -314,6 +331,9 @@ SessionPage::SessionPage(wxWindow* parent, const SessionChat& session, const rag
     send_->Bind(wxEVT_BUTTON, [this](wxCommandEvent&) { send(); });
     sendFile_->Bind(wxEVT_BUTTON, [this](wxCommandEvent&) {
         if (onSendFile_) onSendFile_();
+    });
+    sendPicture_->Bind(wxEVT_BUTTON, [this](wxCommandEvent&) {
+        if (onSendPicture_) onSendPicture_();
     });
     // Drop targets are each window's own.
     SetDropTarget(new FileDrop(&onDropFiles_));
@@ -386,6 +406,7 @@ void SessionPage::refresh(uint64_t nowMs, long utcOffsetS)
         compose_->Enable(connected);
         send_->Enable(connected);
         sendFile_->Enable(connected);
+        sendPicture_->Enable(connected);
         compose_->SetHint(connected ? "Message to " + wxString::FromUTF8(session_.peer()) + " in the session"
                                     : wxString("No session: nothing to type into"));
         if (phase != shownPhase_ && connected && IsShownOnScreen()) CallAfter([this]() { compose_->SetFocus(); });
@@ -483,13 +504,15 @@ void SessionPage::refreshQueue()
     }
 }
 
-wxString SessionPage::cardHtml(const FileTransfer& t, bool picked) const
+wxString SessionPage::cardHtml(const FileTransfer& t, bool picked, const wxWindow* list) const
 {
     FileRow row = files_.row(t, nowMs_);
     std::string size = ragtime::files::sizeText(t.size);
     std::string progress = ragtime::files::progressText(t.handed > t.done && !t.outgoing ? t.handed : t.done, t.size);
     std::string rate = ragtime::files::rateText(row.bytesPerSecond);
-    wxString name = "<b>" + htmlEscape(t.name) + "</b>";
+    // A picture says so: "the picture shack.j2k", "The picture shack.j2k".
+    wxString name = (t.picture ? "the picture <b>" : "<b>") + htmlEscape(t.name) + "</b>";
+    wxString Name = (t.picture ? "The picture <b>" : "<b>") + htmlEscape(t.name) + "</b>";
     wxString who = "<b>" + htmlEscape(t.peer) + "</b>";
     auto grey = [picked](const wxString& text) {
         return picked ? text : "<font color=\"" + htmlColour(secondaryText()) + "\">" + text + "</font>";
@@ -525,7 +548,10 @@ wxString SessionPage::cardHtml(const FileTransfer& t, bool picked) const
                 body << "&nbsp;&nbsp; " << link(picked, "cancel", t.id, "Cancel");
                 break;
             case FState::Saved:
-                body << name << " from " << who << ": " << tinted("saved", goodText()) << " as "
+                body << Name << " from " << who << ": "
+                     << tinted(t.enough ? utf8("saved, stopped at " + percentOf(t.done, t.size)) : wxString("saved"),
+                               goodText())
+                     << " as "
                      << htmlEscape(t.path) << "&nbsp;&nbsp; " << link(picked, "open", t.id, "Open") << "&nbsp;&nbsp; "
                      << link(picked, "folder", t.id, "Open folder");
                 break;
@@ -540,7 +566,7 @@ wxString SessionPage::cardHtml(const FileTransfer& t, bool picked) const
                            : t.state == FState::CancelledThere ? ragtime::files::FinishedFile::Result::CancelledThere
                            : t.state == FState::Expired        ? ragtime::files::FinishedFile::Result::Expired
                                                                : ragtime::files::FinishedFile::Result::Failed;
-                body << name << " from " << who << ": " << tinted(htmlEscape(ragtime::files::resultLabel(f)),
+                body << Name << " from " << who << ": " << tinted(htmlEscape(ragtime::files::resultLabel(f)),
                                                                   badText());
                 if (t.done > 0 && t.done < t.size && t.state != FState::Declined)
                     body << grey(utf8(DOT + ragtime::files::progressText(t.done, t.size) + " kept, to carry on next time"));
@@ -565,7 +591,10 @@ wxString SessionPage::cardHtml(const FileTransfer& t, bool picked) const
                 body << "&nbsp;&nbsp; " << link(picked, "cancel", t.id, "Cancel");
                 break;
             case FState::Delivered:
-                body << name << ": " << tinted(htmlEscape(t.peer + " saved it"), goodText());
+                body << Name << ": "
+                     << tinted(htmlEscape(t.enough ? t.peer + " had enough at " + percentOf(t.done, t.size)
+                                                   : t.peer + " saved it"),
+                               goodText());
                 break;
             default:
             {
@@ -579,9 +608,24 @@ wxString SessionPage::cardHtml(const FileTransfer& t, bool picked) const
                            : t.state == FState::Expired        ? ragtime::files::FinishedFile::Result::Expired
                            : t.state == FState::NotTaken       ? ragtime::files::FinishedFile::Result::NotTaken
                                                                : ragtime::files::FinishedFile::Result::Failed;
-                body << name << ": " << tinted(htmlEscape(ragtime::files::resultLabel(f)), badText());
+                body << Name << ": " << tinted(htmlEscape(ragtime::files::resultLabel(f)), badText());
                 break;
             }
+        }
+    }
+
+    // A picture under its line as it stands; one coming to us has the stop
+    // sign at its lower right corner, to tell the sender we have enough.
+    if (t.picture && pictureHtml_)
+    {
+        wxString img = pictureHtml_(t.id, list, wxString::Format("view:%llu", (unsigned long long)t.id));
+        if (!img.empty())
+        {
+            body << "<br><table cellspacing=\"0\" cellpadding=\"0\"><tr><td>" << img << "</td>";
+            if (!t.outgoing && t.state == FState::Receiving)
+                body << "<td valign=\"bottom\">&nbsp;<a href=\"" << wxString::Format("enough:%llu", (unsigned long long)t.id)
+                     << "\">" << stopSignHtml(list, STOP_SIGN_DIP) << "</a></td>";
+            body << "</tr></table>";
         }
     }
 

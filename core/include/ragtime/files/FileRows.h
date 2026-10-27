@@ -104,10 +104,16 @@ struct FinishedFile
     // from before 2026-10-22).
     uint64_t movedBytes = 0;
     uint64_t movedMs = 0;
+    // An inline picture (protocol::FILE_PICTURE), and, stopped part way by
+    // its receiver's stop sign, the bytes it kept (0: all of it). Saved or
+    // Sent, so a log read by a Ragtime from before pictures still has it.
+    bool picture = false;
+    uint64_t enough = 0;
 };
 
 // "Saved", "Sent", "Declined", "Cancelled", "Cancelled by W1AW", "Expired",
-// "Not taken", "Failed: <reason>".
+// "Not taken", "Failed: <reason>"; a picture stopped part way, "Saved,
+// stopped at 41%" and "Sent: KC2G had enough at 41%".
 std::string resultLabel(const FinishedFile& file);
 // The bps column: bits a second over the whole transfer, movedBytes × 8
 // / movedMs, as "236" or "1,180"; "" when unknown or under a second.

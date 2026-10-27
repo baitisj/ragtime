@@ -105,6 +105,7 @@ private:
     void sendTxLevel();
     wxDirPickerCtrl* received_ = nullptr;
     wxTextCtrl* autoAccept_ = nullptr;
+    wxCheckBox* pictures_ = nullptr;
     wxCheckBox* sealChat_ = nullptr;
     wxSpinCtrl* slowRepair_ = nullptr;
     wxChoice* repairFloor_ = nullptr;

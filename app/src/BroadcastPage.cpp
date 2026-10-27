@@ -420,7 +420,18 @@ private:
              << "<td width=\"" << BADGE_ROOM << "\"></td>"
              << "<td valign=\"top\" nowrap><font" << colour(secondaryText()) << ">" << clock(m.atMs)
              << "</font></td>"
-             << "<td valign=\"top\" width=\"100%\"><b>" << who << "</b> a file: " << htmlEscape(card.what);
+             << "<td valign=\"top\" width=\"100%\"><b>" << who << "</b>" << (card.picture ? " a picture: " : " a file: ")
+             << htmlEscape(card.what);
+        // A picture shows as it stands, sharper as more of it comes.
+        if (card.picture && owner_->pictureHtml_)
+        {
+            wxString img = owner_->pictureHtml_(m.file, this, "view");
+            if (!img.empty()) html << "<br>" << img;
+            // Its digest covers only the whole file, so a part of it can't
+            // be checked against anything yet.
+            if (!img.empty() && !m.ours && !card.good)
+                html << "<br><font" << colour(secondaryText()) << "><i>As it has come so far, not yet verified</i></font>";
+        }
         // The state under it, where a long one ("Stopped at 3 of 13 pieces.
         // Repairs open until ...") can wrap, then the links.
         html << "<br><font" << colour(c) << ">" << htmlEscape(card.state) << "</font>";
@@ -452,6 +463,10 @@ BroadcastPage::BroadcastPage(wxWindow* parent, const BroadcastChat& chat)
     file_ = new wxBitmapButton(this, wxID_ANY, floppyIcon(wxSystemSettings::GetColour(wxSYS_COLOUR_BTNTEXT)));
     file_->SetToolTip("Broadcast a file to everyone on D2G (300 KB at most), with repairs for stations that "
                       "miss pieces");
+    // The picture button, just left of the floppy (Jeff, 2026-10-27).
+    picture_ = new wxBitmapButton(this, wxID_ANY, pictureIcon(wxSystemSettings::GetColour(wxSYS_COLOUR_BTNTEXT)));
+    picture_->SetToolTip("Broadcast a picture to everyone on D2G: shrunk and coded as JPEG 2000 to fit the time "
+                         "you allow, shown as it comes");
     // The gearshift: a speedometer with the gear's short name under it
     // ("A29") in small type, both drawn in the button's picture.
     gear_ = new wxBitmapButton(this, wxID_ANY, wxBitmapBundle(), wxDefaultPosition, wxDefaultSize, wxBU_EXACTFIT);
@@ -459,14 +474,17 @@ BroadcastPage::BroadcastPage(wxWindow* parent, const BroadcastChat& chat)
     drawGearButton();
     send_ = new wxButton(this, wxID_ANY, "Send");
     file_->SetMinSize(wxSize(-1, std::max(file_->GetBestSize().y, send_->GetBestSize().y)));
+    picture_->SetMinSize(wxSize(-1, std::max(picture_->GetBestSize().y, send_->GetBestSize().y)));
     gear_->SetMinSize(wxSize(FromDIP(48), send_->GetBestSize().y));
 
     // Send, the file button, then the gearshift, as on the Session tab
     // (Jeff, 2026-10-23); Tab moves through them in the same order.
-    file_->MoveAfterInTabOrder(send_);
+    picture_->MoveAfterInTabOrder(send_);
+    file_->MoveAfterInTabOrder(picture_);
     gear_->MoveAfterInTabOrder(file_);
     buttons_ = new wxBoxSizer(wxHORIZONTAL);
     buttons_->Add(send_, 0, wxALIGN_CENTER_VERTICAL | wxLEFT, 6);
+    buttons_->Add(picture_, 0, wxALIGN_CENTER_VERTICAL | wxLEFT, 6);
     buttons_->Add(file_, 0, wxALIGN_CENTER_VERTICAL | wxLEFT, 6);
     buttons_->Add(gear_, 0, wxALIGN_CENTER_VERTICAL | wxLEFT, 6);
     row_ = new wxBoxSizer(wxHORIZONTAL);
@@ -500,10 +518,14 @@ BroadcastPage::BroadcastPage(wxWindow* parent, const BroadcastChat& chat)
     file_->Bind(wxEVT_BUTTON, [this](wxCommandEvent&) {
         if (onBroadcastFile_) onBroadcastFile_();
     });
-    // The floppy and the speedometer follow the theme's text colour, light or dark.
+    picture_->Bind(wxEVT_BUTTON, [this](wxCommandEvent&) {
+        if (onBroadcastPicture_) onBroadcastPicture_();
+    });
+    // The picture, the floppy and the speedometer follow the theme's text colour, light or dark.
     Bind(wxEVT_SYS_COLOUR_CHANGED, [this](wxSysColourChangedEvent& e) {
         const wxColour ink = wxSystemSettings::GetColour(wxSYS_COLOUR_BTNTEXT);
         file_->SetBitmap(floppyIcon(ink));
+        picture_->SetBitmap(pictureIcon(ink));
         drawGearButton();
         e.Skip();
     });

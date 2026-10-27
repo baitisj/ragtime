@@ -11,6 +11,7 @@
 #include <wx/frame.h>
 #include <wx/timer.h>
 
+#include "Pictures.h"
 #include "Prefs.h"
 #include "SettingsDialog.h"
 #include "ragtime/broadcast/BroadcastChat.h"
@@ -39,6 +40,7 @@ class FilesPage;
 class GlobusPanel;
 class GlobusToggle;
 class HostConnection;
+class PictureFrame;
 class RecentWorkPane;
 class RigControl;
 class SessionPage;
@@ -100,7 +102,7 @@ private:
     // partner; to another station, Ragtime offers to call it first: there
     // is no hidden session for a file.
     void sendFilePrompt(const std::string& call);
-    void queueFiles(const std::string& call, const std::vector<std::string>& paths);
+    void queueFiles(const std::string& call, const std::vector<std::string>& paths, bool picture = false);
     void fileAction(const std::string& action, uint64_t id);
     void saveOffer(uint64_t id, bool ask);
     // "Please send FRED.TXT again": a line in the session, now if one is
@@ -108,7 +110,9 @@ private:
     void askAgain(const std::string& call, const std::string& name, uint64_t kept, uint64_t size);
     // Queues the file for the station again, calling it if no session
     // with it is up; a far end with part of it carries on from there.
+    // A picture we sent (kept in sentPicturesDir()) goes again as one.
     void sendAgain(const std::string& peer, const std::string& path);
+    bool sentPicture(const std::string& path) const;
     void sessionFileMenu(const ragtime::files::FileRow& row, wxMenu& menu);
     void finishedFileMenu(const ragtime::files::FinishedFile& file, wxMenu& menu);
     void onFileEvents();
@@ -133,7 +137,7 @@ private:
     // the estimate box, each file's card on the Broadcast tab, what its
     // links do, and keeping the seal chain across restarts.
     // Asks which file when path is empty.
-    void broadcastFile(wxString path = wxString());
+    void broadcastFile(wxString path = wxString(), bool picture = false);
     bool fileCard(uint64_t id, FileCard& card);
     void broadcastFileAction(uint64_t id, const std::string& action);
     void broadcastFileMenu(const ragtime::files::FileRow& row, wxMenu& menu);
@@ -146,6 +150,18 @@ private:
     void setAutoReceive(bool on);
     void onBroadcastFiles();
     void saveBroadcastState();
+
+    // Inline pictures (docs/STAGE1.md, "Inline pictures"): the picture
+    // dialog, to D2G or to the session's partner, the picture kept as it
+    // went in sentPicturesDir(); each picture shown among the messages as
+    // it stands, on the shelf; and the picture window, one a picture.
+    void sendPicture(bool broadcast);
+    void updateBroadcastPictures(uint64_t nowMs);
+    void updateSessionPictures(uint64_t nowMs);
+    wxString pictureHtml(const std::string& key, const wxWindow* list, const wxString& href);
+    void viewPicture(const std::string& key, const wxString& title, const std::string& name);
+    void viewPictureFile(const std::string& path, const wxString& title);
+    void showInFrame(const std::string& key);
 
     // The gearshift, its button and the 500 Hz switch.
     void loadGearshift();
@@ -234,6 +250,8 @@ private:
 
     ConnectionBar* bar_ = nullptr;
     EarFrame* ear_ = nullptr;               // while the Ear is open
+    PictureShelf pictures_;
+    std::map<std::string, PictureFrame*> pictureFrames_;   // open, by shelf key
     wxSplitterWindow* outer_ = nullptr;     // station list | the rest
     wxSplitterWindow* left_ = nullptr;      // station list over Recent work
     wxSplitterWindow* inner_ = nullptr;     // the tabs | Globus

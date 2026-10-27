@@ -67,6 +67,9 @@ add_library(ragtime_core STATIC
     src/ear/Graph.cpp
     src/ear/ProcNet.cpp
     src/ear/Spectrum.cpp
+    # Inline pictures: the detail-preserving downscaler, orientation and
+    # what fits the air (the codecs are in image/).
+    src/picture/Picture.cpp
 )
 
 target_include_directories(ragtime_core PUBLIC
