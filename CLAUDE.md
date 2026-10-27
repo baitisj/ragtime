@@ -141,7 +141,7 @@ and the Part 97 check.
   OK 2026-10-26), naming
   `currVFO` for a `--vfo` one, and sets only the Ear's filter (`M`,
   `L PBT_IN`, `L PBT_OUT`, `L NOTCHF_RAW`, `U MN`, each only when it
-  differs, with its box ticked); `Bands`, the US data segments; `PathLog`, a line a
+  differs, with its box ticked); `Bands`, the US data segments, and 60 m's channels (the dial exactly 1.5 kHz below a channel's centre, Jeff 2026-10-27) and band segment; `PathLog`, a line a
   burst heard, appended, and each station's 24-hour strip by band),
   `broadcast::WatchList` (bells, and Tell me when free), and in the app
   `RigConnection`, `PathStripView`, `PathsDialog` and `WatchDialog`.

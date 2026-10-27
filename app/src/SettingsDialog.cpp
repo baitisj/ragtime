@@ -549,8 +549,9 @@ wxWindow* SettingsDialog::rigPage(wxNotebook* book, const StationPrefs& prefs)
     usSegmentsOnly_->SetValue(prefs.usSegmentsOnly);
     usSegmentsOnly_->SetToolTip("Data2G bursts are data, and US rules allow data only in parts of each band "
                                 "(47 CFR 97.305). While this is ticked Ragtime hands data2g-host nothing to send, "
-                                "and takes no calls, unless the dial is at least 3 kHz inside a data segment; nor "
-                                "while it doesn't know the dial. It still receives. A session already up keeps "
+                                "and takes no calls, unless the dial is at least 3 kHz inside a data segment, or "
+                                "on 60 m exactly 1.5 kHz below a channel's centre (97.303(h)); nor while it "
+                                "doesn't know the dial. It still receives. A session already up keeps "
                                 "its link: data2g-host still acknowledges what it hears.");
 
     // The Ear's filter handles, off by default, for rigctld and Hamlib

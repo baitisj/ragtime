@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <initializer_list>
 #include <string>
 #include <system_error>
 #include <vector>
@@ -58,8 +59,32 @@ void bands()
     CHECK(!usDataRefusal(18120000).empty());
     CHECK(!usDataRefusal(3800000).empty());
     CHECK(!usDataRefusal(9000000).empty());
-    CHECK(usDataRefusal(5357000).find("60 m") != std::string::npos);
     CHECK(!usDataRefusal(0).empty());
+
+    // 60 m: each channel only with the dial 1.5 kHz below its centre, to
+    // the hertz, and the band segment with 3 kHz to spare (97.303(h)).
+    for (uint64_t dial : {5330500ull, 5346500ull, 5371500ull, 5403500ull})
+    {
+        CHECK(usDataRefusal(dial).empty());
+        CHECK(usDataPlace(dial).find("100 W ERP") != std::string::npos);
+        CHECK(!usDataRefusal(dial + 1).empty());
+        CHECK(!usDataRefusal(dial - 1).empty());
+        CHECK(!usDataRefusal(dial + 1500).empty());
+    }
+    CHECK(usDataPlace(5371500).find("5.373 MHz") != std::string::npos);
+    CHECK(usDataRefusal(5354500).empty());
+    CHECK(usDataRefusal(5357000).empty());
+    CHECK(usDataRefusal(5363500).empty());
+    CHECK(usDataPlace(5360000).find("9.15 W ERP") != std::string::npos);
+    CHECK(!usDataRefusal(5354499).empty());
+    CHECK(!usDataRefusal(5363501).empty());
+    CHECK(!usDataRefusal(5340000).empty());
+    std::string sixty = usDataRefusal(5371600);
+    CHECK(sixty.find("5.3716 MHz is on 60 m") == 0);
+    CHECK(sixty.find("5.3305, 5.3465, 5.3715 or 5.4035 MHz") != std::string::npos);
+    CHECK(sixty.find("5.3545-5.3635 MHz") != std::string::npos);
+    CHECK(usDataPlace(14105000) == "Inside a US data segment: sending allowed");
+    CHECK(usDataPlace(14250000).empty());
 }
 
 // Answers the meter probe rigctld gets on connecting: the levels named in

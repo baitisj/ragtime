@@ -2015,7 +2015,8 @@ void MainFrame::applySending()
     wxString why;
     if (held_ && !paused_)
         why = rig_->swrTripped() ? "Receive only until the SWR trip is cleared: messages wait as Queued."
-                                 : "Receive only until the dial is inside a US data segment: messages wait as Queued.";
+                                 : "Receive only until the dial is inside a US data segment or on a 60 m channel: messages "
+                                   "wait as Queued.";
     sessionPage_->setPaused(hold, why);
     broadcast_->setPaused(hold, why);
     if (host_) host_->flush();
@@ -2989,8 +2990,8 @@ void MainFrame::showDial()
     std::string tip = rig_->describe();
     if (held_)
         tip += "\n\nReceive only: " + heldWhy_;
-    else if (prefs_.usSegmentsOnly)
-        tip += "\n\nInside a US data segment: sending allowed";
+    else if (prefs_.usSegmentsOnly && !radio::usDataPlace(hz.value_or(0)).empty())
+        tip += "\n\n" + radio::usDataPlace(hz.value_or(0));
     tip += "\n\nRagtime only reads the dial; it never tunes the radio.";
     bar_->setDial(utf8(text), utf8(tip), held_);
 }
@@ -3017,10 +3018,10 @@ void MainFrame::applySendGuard()
     heldWhy_ = why;
     if (changed)
     {
-        note_ = held_ ? "Receive only: " + heldWhy_
-                : prefs_.readsDial() && prefs_.usSegmentsOnly
-                    ? std::string("Sending allowed: the dial is inside a US data segment")
-                    : std::string("Sending allowed again");
+        std::string place;
+        if (prefs_.readsDial() && prefs_.usSegmentsOnly && rig_)
+            place = radio::usDataPlace(rig_->dialHz().value_or(0));
+        note_ = held_ ? "Receive only: " + heldWhy_ : !place.empty() ? place : std::string("Sending allowed again");
         applySending();
         showStatus();
     }
