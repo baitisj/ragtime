@@ -923,7 +923,9 @@ recovers. Through rigctld it goes between dial readings, one question
 at a time as ever; a rig that fails it twice is not asked again on that
 connection. `radio::NoiseFloor` keeps the quietest reading of the last
 minute, and forgets it after 30 s with none or on a new band. The
-gearshift shows it (docs/GEARBOX.md, "QRN"). The bench's `--rig`
+gearshift shows it (docs/GEARBOX.md, "QRN" and "Under the needle"),
+and reads the rig's filter while it is open, as the Ear does, for the
+width the S-meter reads across. The bench's `--rig`
 answers `-40`, or `--rig-noise DB`, a few dB more now and then and a
 station at -10 one reading in six; Hamlib's dummy rig jiggles its own.
 

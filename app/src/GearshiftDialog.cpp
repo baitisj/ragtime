@@ -124,7 +124,8 @@ public:
             Refresh();
         });
         Bind(wxEVT_LEFT_DOWN, [this](wxMouseEvent& e) {
-            if (qrnBox_.Contains(e.GetPosition().x, e.GetPosition().y))
+            if (qrnBox_.Contains(e.GetPosition().x, e.GetPosition().y)
+                || needleBox_.Contains(e.GetPosition().x, e.GetPosition().y))
                 return;
             const int gear = gearAt(e.GetPosition());
             if (gear > 0)
@@ -175,7 +176,7 @@ public:
     // The band's noise, for the QRN line and the S-meter axis.
     void setNoise(const BandNoise& noise)
     {
-        if (noise.reads == noise_.reads && noise.dbOverS9 == noise_.dbOverS9)
+        if (noise.reads == noise_.reads && noise.dbOverS9 == noise_.dbOverS9 && noise.filterHz == noise_.filterHz)
             return;
         noise_ = noise;
         Refresh();
@@ -447,10 +448,12 @@ private:
         {
             const Submode* hovered = dotAt(all, mouse_);
             const bool onQrn = !hovered && noise_.dbOverS9 && qrnBox_.Contains(mouse_.x, mouse_.y);
-            if (hovered || onQrn)
+            const bool onNeedle = !hovered && !onQrn && noise_.dbOverS9 && needleBox_.Contains(mouse_.x, mouse_.y);
+            if (hovered || onQrn || onNeedle)
             {
                 const wxString text
-                    = onQrn ? qrnTip(*noise_.dbOverS9)
+                    = onQrn      ? qrnTip(*noise_.dbOverS9)
+                      : onNeedle ? needleTip(*noise_.dbOverS9)
                             : utf8(shift_.shortName(hovered->name)) + "   " + utf8(hovered->name) + "\n"
                                   + wxString::Format("%d Hz", hovered->widthHz) + wxString::FromUTF8(" \xC2\xB7 ")
                                   + modulationLabel(hovered->modulation) + "\n"
@@ -475,16 +478,23 @@ private:
 
     // The band's noise from the S-meter: a blue dashed line at 0 dB S/N
     // labelled with the rig's own reading, "QRN: -40" (dB over S9), and an
-    // axis on the right saying how strong a signal at each S/N reads on the
-    // S-meter (S/N 0 is the noise itself; 6 dB an S-unit).
+    // axis on the right saying what a station at each S/N reads on the
+    // S-meter: the noise and the signal together across the rig's filter
+    // (radio::meterRiseDb), 6 dB an S-unit. Gears for stations that lift
+    // the needle less than half an S-unit off the noise are shaded: under
+    // the needle.
     void drawNoise(wxGraphicsContext& gc, const Plot& p, const wxFont& small, const wxColour& soft)
     {
+        using namespace ragtime::radio;
         qrnBox_ = wxRect();
+        needleBox_ = wxRect();
         if (!noise_.reads)
             return;
         const wxColour ink = wxSystemSettings::GetColour(wxSYS_COLOUR_WINDOWTEXT);
         double w = 0, h = 0;
-        const wxString title = "On your S-meter";
+        const wxString title = noise_.filterHz
+                                   ? wxString::Format("On your S-meter, %.0f Hz filter", *noise_.filterHz)
+                                   : wxString("On your S-meter");
         gc.SetFont(small, soft);
         gc.GetTextExtent(title, &w, &h);
         gc.DrawText(title, GetClientSize().x - h - 2, (p.top + p.bottom + w) / 2, PI / 2);
@@ -496,21 +506,63 @@ private:
             return;
         }
         const double noise = *noise_.dbOverS9;
+        const double filter = noise_.filterHz.value_or(0.0);
 
-        // The axis: S1 to S9 a unit at a time, then S9+10 and up.
+        // Under the needle: from the weakest S/N to the one that lifts the
+        // needle half an S-unit.
+        const double needle = std::max(p.top, std::min(p.bottom, yFor(p, *snrForRise(NEEDLE_DB, filter))));
+        double lineH = 0;
+        gc.SetFont(small, ink);
+        gc.GetTextExtent("S9", &w, &lineH);
+        const bool restsShown = needle - p.top > lineH + 4;
+        if (needle > p.top)
+        {
+            gc.SetPen(*wxTRANSPARENT_PEN);
+            gc.SetBrush(wxBrush(wxColour(ACCENT.Red(), ACCENT.Green(), ACCENT.Blue(), 28)));
+            gc.DrawRectangle(p.left, p.top, p.right - p.left, needle - p.top);
+            setPen(gc, ACCENT, 1);
+            if (needle < p.bottom)
+                gc.StrokeLine(p.left, needle, p.right + 4, needle);
+            // The needle stays on the noise all the way up: a bar on the
+            // axis, with the noise's S-units.
+            setPen(gc, ACCENT, 3);
+            gc.StrokeLine(p.right + 2, p.top, p.right + 2, needle);
+            gc.SetFont(small, ink);
+            const wxString rests = utf8(sUnitText(noise));
+            gc.GetTextExtent(rests, &w, &h);
+            if (restsShown)
+                gc.DrawText(rests, p.right + 7, (p.top + needle - h) / 2);
+            gc.SetFont(small, ACCENT);
+            const wxString under = "under the needle";
+            gc.GetTextExtent(under, &w, &h);
+            if (needle - p.top > h + 8)
+            {
+                const double bx = p.right - w - 6, by = p.top + 4;
+                gc.DrawText(under, bx, by);
+                needleBox_ = wxRect((int)bx, (int)by, (int)w + 1, (int)h + 1);
+            }
+        }
+
+        // The axis: S1 to S9 a unit at a time, then S9+10 and up, each
+        // where a station lifts the needle to it.
         setPen(gc, soft, 1);
         gc.SetFont(small, ink);
         auto tick = [&](double dbOverS9) {
-            const double y = yFor(p, dbOverS9 - noise);
+            if (dbOverS9 - noise < NEEDLE_DB)
+                return;
+            const double y = yFor(p, *snrForRise(dbOverS9 - noise, filter));
             if (y < p.top - 0.5 || y > p.bottom + 0.5)
                 return;
+            // Not on top of the noise's own label.
+            if (restsShown && y - needle < lineH)
+                return;
             gc.StrokeLine(p.right, y, p.right + 4, y);
-            const wxString label = utf8(ragtime::radio::sUnitText(dbOverS9));
+            const wxString label = utf8(sUnitText(dbOverS9));
             gc.GetTextExtent(label, &w, &h);
             gc.DrawText(label, p.right + 7, y - h / 2);
         };
         for (int s = 1; s <= 9; s++)
-            tick((s - 9) * ragtime::radio::DB_PER_S_UNIT);
+            tick((s - 9) * DB_PER_S_UNIT);
         for (int over = 10; over <= 60; over += 10)
             tick(over);
 
@@ -520,7 +572,7 @@ private:
             return;
         setPen(gc, ACCENT, 2, wxPENSTYLE_SHORT_DASH);
         gc.StrokeLine(p.left, y, p.right, y);
-        const wxString label = "QRN: " + utf8(ragtime::radio::levelText(noise));
+        const wxString label = "QRN: " + utf8(levelText(noise));
         const wxFont bold = small.Bold();
         gc.SetFont(bold, *wxWHITE);
         gc.GetTextExtent(label, &w, &h);
@@ -536,18 +588,41 @@ private:
         qrnBox_ = wxRect((int)bx, (int)by, (int)bw + 1, (int)bh + 1);
     }
 
-    static wxString qrnTip(double noise)
+    // "your 2400 Hz filter", or that its width isn't known.
+    wxString filterText() const
     {
+        if (noise_.filterHz)
+            return wxString::Format("your %.0f Hz filter", *noise_.filterHz);
+        return "your filter (its width not read: taken as 2500 Hz)";
+    }
+
+    wxString qrnTip(double noise) const
+    {
+        using namespace ragtime::radio;
         return wxString::Format("QRN: %s, the band's noise on your S-meter (%s): the quietest\n"
                                 "reading between bursts in the last minute, in dB over S9.\n"
-                                "The S-meter axis says how strong a station must read\n"
-                                "for each gear: the noise and that gear's S/N, 6 dB an S-unit.",
-                                utf8(ragtime::radio::levelText(noise)), utf8(ragtime::radio::sUnitText(noise)));
+                                "The S-meter axis says how strong a station reads for each\n"
+                                "gear: its signal and the noise together across %s,\n"
+                                "6 dB an S-unit. Data2G's S/N is in 2500 Hz.",
+                                utf8(levelText(noise)), utf8(sUnitText(noise)), filterText());
+    }
+
+    wxString needleTip(double noise) const
+    {
+        using namespace ragtime::radio;
+        const double filter = noise_.filterHz.value_or(0.0);
+        return wxString::Format("Under the needle: the gears up here copy stations too weak to\n"
+                                "lift your S-meter half an S-unit off the noise (QRN %s, %s).\n"
+                                "With %s, a station at S/N 0 lifts it %.1f dB,\n"
+                                "and one at -12 dB, Data2G's slowest, %.1f dB.\n"
+                                "Data2G hears what the needle can't show.",
+                                utf8(levelText(noise)), utf8(sUnitText(noise)), filterText(),
+                                meterRiseDb(0, filter), meterRiseDb(-12, filter));
     }
 
     const Gearshift& shift_;
     BandNoise noise_;
-    wxRect qrnBox_;
+    wxRect qrnBox_, needleBox_;
     std::function<void(int)> onPickGear_;
     std::function<void(const std::string&)> onPickMode_;
     wxPoint mouse_;

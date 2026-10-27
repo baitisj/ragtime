@@ -444,6 +444,22 @@ void strength()
     CHECK_EQ(levelText(12), std::string("+12"));
     CHECK_EQ(levelText(0), std::string("0"));
 
+    // The needle: signal and noise add as powers over the filter's width.
+    auto near = [](double a, double b) { return std::fabs(a - b) < 0.05; };
+    CHECK(near(meterRiseDb(0, 2500), 3.01));         // as strong as the noise
+    CHECK(near(meterRiseDb(0, 3000), 2.63));
+    CHECK(near(meterRiseDb(-12, 3000), 0.22));       // Data2G's slowest: no move
+    CHECK(near(meterRiseDb(20, 3000), 19.26));       // strong: the S/N, less 0.8 dB
+    CHECK(near(meterRiseDb(0, 500), 7.78));          // a narrow filter shows more
+    CHECK(near(meterRiseDb(0, 0), 3.01));            // width not known: 2500 Hz
+    for (double width : {500.0, 2400.0, 3000.0})
+        for (double snr : {-12.0, 0.0, 9.5, 30.0})
+            CHECK(near(*snrForRise(meterRiseDb(snr, width), width), snr));
+    CHECK(near(*snrForRise(NEEDLE_DB, 3000), 0.77));
+    CHECK(near(*snrForRise(NEEDLE_DB, 500), -7.02));
+    CHECK(!snrForRise(0, 3000));
+    CHECK(!snrForRise(-1, 3000));
+
     // The floor: the quietest reading of the last minute, gone when stale.
     NoiseFloor floor;
     CHECK(!floor.dbOverS9(T0));

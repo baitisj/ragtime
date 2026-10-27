@@ -21,12 +21,14 @@ class wxToggleButton;
 class SubmodeMap;
 
 // The band's noise from the rig's S-meter (RigControl), for the map's QRN
-// line and its S-meter axis: whether the rig reports one, and the noise in
-// dB over S9 once read.
+// line and its S-meter axis: whether the rig reports one, the noise in dB
+// over S9 once read, and the receive filter's width the S-meter reads
+// across, once read.
 struct BandNoise
 {
     bool reads = false;
     std::optional<double> dbOverS9;
+    std::optional<double> filterHz;
 };
 
 // The gearshift popup (docs/GEARBOX.md): the Data2G Submode Map with the
