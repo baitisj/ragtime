@@ -9,7 +9,9 @@
 //   B <ms>                                a session began
 //   M <id> <atMs> <time> <seq> <ours> <state> <from> <text>
 //   S <id> <state>                        a message of ours settled
-//   F <atMs> <ours> <from> <text>         a file that went, as one line
+//   F <atMs> <ours> <from> <text> [<path> <picture>]
+//                                         a file that went, as one line:
+//                                         where it is, and 1 for a picture
 //   X <id> <call> <code>                  call reacted to a message
 //   Y <id> <code>                         we reacted to a message
 //   E <ms>                                the session ended

@@ -84,6 +84,8 @@ void testTwoSessionsAndTheirRules()
     file.from = "AG7EW";
     file.text = "antenna.jpg, 12 KB: Sent";
     file.atMs = T0 + 15 * 60 * 1000;
+    file.path = "/tmp/sent pictures/antenna.j2k";
+    file.picture = true;
     log.file("W1AW", file);
 
     // The second, with ids that start again (a restart).
@@ -110,6 +112,8 @@ void testTwoSessionsAndTheirRules()
         CHECK_EQ(rows[3].beganMs, T0);
         CHECK_EQ(rows[3].atMs, T0 + 14 * 60 * 1000);
         CHECK(rows[4].kind == Kind::File && rows[4].ours && rows[4].text == "antenna.jpg, 12 KB: Sent");
+        CHECK(rows[4].path == "/tmp/sent pictures/antenna.j2k" && rows[4].picture);
+        CHECK(rows[0].path.empty() && !rows[0].picture);
         CHECK(rows[5].text == "Back again" && rows[5].state == MState::Heard);
         CHECK(rows[6].kind == Kind::Rule && rows[6].atMs == T0 + 62 * 60 * 1000);
         bool allPast = true, noIds = true;

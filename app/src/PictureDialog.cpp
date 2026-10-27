@@ -5,6 +5,7 @@
 #include <string>
 
 #include <wx/button.h>
+#include <wx/choice.h>
 #include <wx/filedlg.h>
 #include <wx/filename.h>
 #include <wx/msgdlg.h>
@@ -54,23 +55,30 @@ PictureDialog::PictureDialog(wxWindow* parent, const PictureTarget& target, cons
                wxDefaultPosition, wxDefaultSize, wxDEFAULT_DIALOG_STYLE | wxRESIZE_BORDER)
     , target_(target)
     , timer_(this)
+    , play_(this)
 {
+    if (!target_.gears.empty()) gear_ = target_.gears.front();
     auto* sizer = new wxBoxSizer(wxVERTICAL);
     view_ = new PictureView(this, FromDIP(PREVIEW_DIP), false);
     view_->setNote("Reading the picture...");
     sizer->Add(view_, 1, wxEXPAND | wxLEFT | wxRIGHT | wxTOP, 12);
 
-    // As it comes: the far end sees the whole picture from the first part,
-    // sharper as the rest arrives.
-    auto* partialRow = new wxBoxSizer(wxHORIZONTAL);
-    partialRow->Add(new wxStaticText(this, wxID_ANY, "As it comes:"), 0, wxALIGN_CENTER_VERTICAL);
-    partial_ = new wxSlider(this, wxID_ANY, 100, 1, 100);
-    partial_->SetToolTip("What the far end sees part of the way: any first part of the picture shows the whole "
-                         "of it, softer");
-    partialRow->Add(partial_, 1, wxALIGN_CENTER_VERTICAL | wxLEFT, 6);
+    // The preview plays the picture arriving, burst by burst, as the far
+    // end sees it build up (the codestream is progressive: each step the
+    // whole picture, sharper), holds on the whole and goes round again
+    // (Jeff, 2026-10-27). The slider sets how fast.
+    auto* speedRow = new wxBoxSizer(wxHORIZONTAL);
+    speedRow->Add(new wxStaticText(this, wxID_ANY, "Playback speed:"), 0, wxALIGN_CENTER_VERTICAL);
+    speed_ = new wxSlider(this, wxID_ANY, 3, 0, MAX_SPEED_STEP);
+    speed_->SetToolTip("How fast the preview plays the picture arriving: from real time to 64 times as fast. "
+                       "Only the preview: it changes nothing that is sent");
+    speedRow->Add(speed_, 1, wxALIGN_CENTER_VERTICAL | wxLEFT, 6);
+    speedText_ = new wxStaticText(this, wxID_ANY, wxString::FromUTF8("64\xc3\x97"), wxDefaultPosition, wxDefaultSize, wxALIGN_RIGHT);
+    speedText_->SetMinSize(wxSize(speedText_->GetTextExtent(wxString::FromUTF8("64\xc3\x97")).x + FromDIP(4), -1));
+    speedRow->Add(speedText_, 0, wxALIGN_CENTER_VERTICAL | wxLEFT, 4);
     partialText_ = new wxStaticText(this, wxID_ANY, "");
     partialText_->SetForegroundColour(secondaryText());
-    sizer->Add(partialRow, 0, wxEXPAND | wxLEFT | wxRIGHT | wxTOP, 12);
+    sizer->Add(speedRow, 0, wxEXPAND | wxLEFT | wxRIGHT | wxTOP, 12);
     sizer->Add(partialText_, 0, wxEXPAND | wxLEFT | wxRIGHT, 12);
 
     auto* fileRow = new wxBoxSizer(wxHORIZONTAL);
@@ -95,6 +103,24 @@ PictureDialog::PictureDialog(wxWindow* parent, const PictureTarget& target, cons
     grid->Add(new wxStaticText(this, wxID_ANY, "Airtime at most:"), 0, wxALIGN_CENTER_VERTICAL);
     grid->Add(seconds_, 0, wxALIGN_CENTER_VERTICAL);
     grid->Add(new wxStaticText(this, wxID_ANY, "seconds"), 0, wxALIGN_CENTER_VERTICAL);
+    // The gear: on D2G the one it goes in; in a session only what it is
+    // planned for, as Data2G picks the session's gear burst by burst.
+    gears_ = new wxChoice(this, wxID_ANY);
+    for (const PictureGear& g : target_.gears) gears_->Append(utf8(g.label));
+    if (!target_.gears.empty()) gears_->SetSelection(0);
+    gears_->Enable(target_.gears.size() > 1);
+    gears_->SetToolTip(target_.broadcast
+                           ? wxString("The gear the picture goes in. The first is the one in effect; another "
+                                      "sends this picture in that gear")
+                           : wxString("The gear the picture is planned for. Data2G picks the session's gear "
+                                      "burst by burst, from how each end hears the other, so this only sizes the "
+                                      "picture: the first is from how we have heard ")
+                                 + utf8(target_.peer)
+                                 + " over the last few minutes, the path back being much the same");
+    grid->Add(new wxStaticText(this, wxID_ANY, target_.broadcast ? "Gear:" : "Plan for:"), 0,
+              wxALIGN_CENTER_VERTICAL);
+    grid->Add(gears_, 0, wxALIGN_CENTER_VERTICAL);
+    grid->AddSpacer(0);
     sizer->Add(grid, 0, wxLEFT | wxRIGHT | wxTOP, 12);
 
     size_ = new wxStaticText(this, wxID_ANY, "");
@@ -120,10 +146,23 @@ PictureDialog::PictureDialog(wxWindow* parent, const PictureTarget& target, cons
     side_->Bind(wxEVT_TEXT, [this](wxCommandEvent&) { later(); });
     seconds_->Bind(wxEVT_SPINCTRL, [this](wxSpinEvent&) { later(); });
     seconds_->Bind(wxEVT_TEXT, [this](wxCommandEvent&) { later(); });
-    partial_->Bind(wxEVT_SLIDER, [this](wxCommandEvent&) { showPartial(); });
-    Bind(wxEVT_TIMER, [this](wxTimerEvent&) { remake(); });
+    speed_->Bind(wxEVT_SLIDER, [this](wxCommandEvent&) {
+        speedPicked_ = true;
+        showSpeed();
+        // The step on screen waits the new speed's time.
+        if (!steps_.empty()) play_.StartOnce(stepMs());
+    });
+    gears_->Bind(wxEVT_CHOICE, [this](wxCommandEvent&) {
+        int n = gears_->GetSelection();
+        if (n < 0 || n >= (int)target_.gears.size()) return;
+        gear_ = target_.gears[(size_t)n];
+        later();
+    });
+    Bind(wxEVT_TIMER, [this](wxTimerEvent&) { remake(); }, timer_.GetId());
+    Bind(wxEVT_TIMER, [this](wxTimerEvent&) { nextStep(); }, play_.GetId());
     send_->Bind(wxEVT_BUTTON, [this](wxCommandEvent&) {
         timer_.Stop();
+        play_.Stop();
         remake();
         if (coded_.bytes.empty()) return;
         saveInt(keys::PICTURE_SIDE, side_->GetValue());
@@ -182,17 +221,17 @@ void PictureDialog::later()
 
 uint64_t PictureDialog::budget(double seconds) const
 {
-    if (!target_.mode.valid()) return 0;
-    if (target_.broadcast) return picture::broadcastBytesFor(seconds, name_, target_.callsign, target_.mode);
-    return picture::sessionBytesFor(seconds, picture::sessionBytesPerSecond(target_.mode, target_.measuredRate));
+    if (!gear_.mode.valid()) return 0;
+    if (target_.broadcast) return picture::broadcastBytesFor(seconds, name_, target_.callsign, gear_.mode);
+    return picture::sessionBytesFor(seconds, picture::sessionBytesPerSecond(gear_.mode, 0.0));
 }
 
 double PictureDialog::airSeconds(uint64_t bytes) const
 {
-    if (!target_.mode.valid()) return 0.0;
+    if (!gear_.mode.valid()) return 0.0;
     if (target_.broadcast)
-        return ragtime::broadcast::estimateFile(bytes, name_, target_.callsign, target_.mode).airSeconds;
-    double rate = picture::sessionBytesPerSecond(target_.mode, target_.measuredRate);
+        return ragtime::broadcast::estimateFile(bytes, name_, target_.callsign, gear_.mode).airSeconds;
+    double rate = picture::sessionBytesPerSecond(gear_.mode, 0.0);
     return rate > 0 ? ((double)bytes * (256.0 + 18.0) / 256.0 + 40.0) / rate : 0.0;
 }
 
@@ -216,11 +255,10 @@ void PictureDialog::remake()
     whole_ = wxImage();
     double seconds = seconds_->GetValue();
     uint64_t most = budget(seconds);
-    wxString gear = target_.gear.empty() ? wxString("this gear") : utf8(target_.gear);
-    if (!target_.mode.valid())
+    wxString gear = gear_.words.empty() ? wxString("this gear") : utf8(gear_.words);
+    if (!gear_.mode.valid())
     {
-        air_->SetLabel(target_.broadcast ? "data2g-host hasn't listed its gears yet: connect, then try again."
-                                         : "The session's gear isn't known yet.");
+        air_->SetLabel("data2g-host hasn't listed its gears yet: connect, then try again.");
         air_->SetForegroundColour(badText());
     }
     else if (most == 0)
@@ -247,9 +285,7 @@ void PictureDialog::remake()
             double air = airSeconds(coded_.bytes.size());
             wxString how = target_.broadcast
                                ? wxString::Format("about %s on the air in %s", utf8(secondsText(air)), gear)
-                               : wxString::Format("about %s in the session in %s%s", utf8(secondsText(air)), gear,
-                                                  target_.measuredRate > 0 ? wxString(", at the rate it moves now")
-                                                                           : wxString());
+                               : wxString::Format("about %s in the session in %s", utf8(secondsText(air)), gear);
             air_->SetLabel(wxString::Format("%s in %d quality layer%s: %s", utf8(bytesText(coded_.bytes.size())),
                                             coded_.layers, coded_.layers == 1 ? "" : "s", how));
             air_->SetForegroundColour(GetForegroundColour());
@@ -257,7 +293,7 @@ void PictureDialog::remake()
     }
     if (target_.broadcast)
     {
-        double seal = target_.mode.valid() ? picture::sealSeconds(target_.callsign, target_.mode) : 0.0;
+        double seal = gear_.mode.valid() ? picture::sealSeconds(target_.callsign, gear_.mode) : 0.0;
         seal_->SetLabel(seal > 0 ? wxString::Format("Then its seal: about %s more, then repairs for stations that "
                                                     "miss pieces, which take airtime too.",
                                                     utf8(secondsText(seal)))
@@ -269,8 +305,26 @@ void PictureDialog::remake()
                                               "they have enough.");
     }
     send_->Enable(!coded_.bytes.empty());
+    play_.Stop();
+    steps_.clear();
+    frames_.clear();
     if (whole_.IsOk())
-        showPartial();
+    {
+        steps_ = target_.broadcast
+                     ? picture::broadcastArrival(coded_.bytes.size(), name_, target_.callsign, gear_.mode)
+                     : picture::sessionArrival(coded_.bytes.size(), gear_.mode);
+        frames_.resize(steps_.size());
+        // Until the operator picks a speed, one that plays it in about 8 s.
+        if (!speedPicked_ && !steps_.empty())
+        {
+            int step = 0;
+            while (step < MAX_SPEED_STEP && steps_.back().seconds / (double)(1 << step) > 8.0) step++;
+            speed_->SetValue(step);
+        }
+        showSpeed();
+        step_ = 0;
+        showStep();
+    }
     else
     {
         view_->setImage(toWxImage(shrunk_), false);
@@ -284,25 +338,59 @@ void PictureDialog::remake()
     if (room.y > GetClientSize().y) SetClientSize(GetClientSize().x, room.y);
 }
 
-void PictureDialog::showPartial()
+wxString PictureDialog::farEnd(bool capital) const
 {
-    if (coded_.bytes.empty()) return;
-    int percent = partial_->GetValue();
-    if (percent >= 100)
+    if (!target_.broadcast) return utf8(target_.peer);
+    return capital ? wxString("A listener") : wxString("a listener");
+}
+
+void PictureDialog::showSpeed()
+{
+    speedText_->SetLabel(wxString::Format(wxString::FromUTF8("%d\xc3\x97"), 1 << speed_->GetValue()));
+}
+
+int PictureDialog::stepMs() const
+{
+    if (steps_.empty()) return 1000;
+    // At the whole picture, a pause before it goes round again.
+    if (step_ + 1 >= steps_.size()) return HOLD_MS;
+    double seconds = (steps_[step_ + 1].seconds - steps_[step_].seconds) / (double)(1 << speed_->GetValue());
+    return std::max(MIN_STEP_MS, std::min(MAX_STEP_MS, (int)std::lround(seconds * 1000.0)));
+}
+
+void PictureDialog::nextStep()
+{
+    if (steps_.empty()) return;
+    step_ = step_ + 1 >= steps_.size() ? 0 : step_ + 1;
+    showStep();
+}
+
+void PictureDialog::showStep()
+{
+    if (step_ >= steps_.size()) return;
+    const picture::ArrivalStep& at = steps_[step_];
+    bool whole = step_ + 1 == steps_.size();
+    if (!frames_[step_].IsOk())
     {
-        view_->setImage(whole_);
-        partialText_->SetLabel("Whole: as it looks once all of it has come.");
-        return;
+        if (whole)
+            frames_[step_] = whole_;
+        else
+        {
+            picture::Image decoded;
+            std::string error;
+            if (ragtime::image::decode(coded_.bytes.data(), (size_t)at.bytes, decoded, error))
+                frames_[step_] = toWxImage(decoded);
+        }
     }
-    size_t bytes = std::max<size_t>(1, coded_.bytes.size() * (size_t)percent / 100);
-    picture::Image decoded;
-    std::string error;
-    if (!ragtime::image::decode(coded_.bytes.data(), bytes, decoded, error))
-    {
-        partialText_->SetLabel(wxString::Format("At %d%%: nothing to show yet.", percent));
-        return;
-    }
-    view_->setImage(toWxImage(decoded));
-    partialText_->SetLabel(wxString::Format("At %d%%, %s: about %s in.", percent, utf8(bytesText(bytes)),
-                                            utf8(secondsText(airSeconds(bytes)))));
+    int percent = (int)(100 * at.bytes / std::max<uint64_t>(1, coded_.bytes.size()));
+    wxString when = utf8(secondsText(at.seconds));
+    if (whole)
+        partialText_->SetLabel(wxString::Format("%s has all of it, %s in.", farEnd(true), when));
+    else if (!frames_[step_].IsOk())
+        partialText_->SetLabel(wxString::Format("%s in, %s has nothing to show yet.", when, farEnd()));
+    else
+        partialText_->SetLabel(wxString::Format("What %s sees %s in: %d%%, %s.", farEnd(), when, percent,
+                                                utf8(bytesText(at.bytes))));
+    if (frames_[step_].IsOk()) view_->setImage(frames_[step_]);
+    play_.StartOnce(stepMs());
 }

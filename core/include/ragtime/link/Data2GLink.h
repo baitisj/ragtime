@@ -104,6 +104,12 @@ struct ModeInfo
 // says wins.
 const std::vector<ModeInfo>& knownModes();
 
+// One of Data2G's session acknowledgement modes ("ack-4f"): 4 bytes a
+// codeword, for a session's ACK bursts, never a gear data goes in. The
+// host's MODE report names the mode of whatever burst it keys, these
+// included (docs/DATA2G.md, "Modes").
+bool isAckMode(const std::string& mode);
+
 // The operator's 500 Hz setting: of the modes offered (or, none listed
 // yet, the known ones), those no wider than this.
 constexpr int NARROW_MODE_MAX_HZ = 500;

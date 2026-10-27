@@ -400,6 +400,47 @@ uint64_t sessionBytesFor(double seconds, double bytesPerSecond)
     return std::min<uint64_t>(MAX_PICTURE_BYTES, (uint64_t)bytes);
 }
 
+namespace
+{
+
+// Steps evenly through n bursts of a picture of size bytes taking seconds
+// in all, at most MAX_STEPS of them.
+std::vector<ArrivalStep> evenSteps(uint64_t size, uint64_t bursts, double seconds)
+{
+    std::vector<ArrivalStep> steps;
+    if (size == 0 || bursts == 0) return steps;
+    uint64_t count = std::min<uint64_t>(bursts, MAX_STEPS);
+    for (uint64_t i = 1; i <= count; i++)
+    {
+        // The burst this step ends at, so the last is the whole.
+        uint64_t burst = (bursts * i + count - 1) / count;
+        ArrivalStep step;
+        step.bytes = i == count ? size : std::min(size, size * burst / bursts);
+        step.seconds = seconds * (double)burst / (double)bursts;
+        steps.push_back(step);
+    }
+    return steps;
+}
+
+} // namespace
+
+std::vector<ArrivalStep> broadcastArrival(uint64_t size, const std::string& name, const std::string& callsign,
+                                          const link::ModeInfo& mode)
+{
+    if (!mode.valid() || size == 0) return {};
+    broadcast::FileEstimate estimate = broadcast::estimateFile(size, name, callsign, mode);
+    double seconds = estimate.wallSeconds > 0 ? estimate.wallSeconds : estimate.airSeconds;
+    return evenSteps(size, (uint64_t)std::max(1, estimate.bursts), seconds);
+}
+
+std::vector<ArrivalStep> sessionArrival(uint64_t size, const link::ModeInfo& mode)
+{
+    uint64_t burst = files::FileTraffic::burstBytes(mode);
+    double rate = sessionBytesPerSecond(mode, 0.0);
+    if (size == 0 || burst == 0 || !(rate > 0)) return {};
+    return evenSteps(size, (size + burst - 1) / burst, (double)size / rate);
+}
+
 std::string pictureName(const std::string& picked)
 {
     std::string base = picked;

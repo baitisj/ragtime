@@ -168,6 +168,28 @@ void Stations::heard(const std::string& call, uint64_t nowMs, std::optional<doub
     s.snrDb = snr;
     s.snrMs = nowMs;
     s.path.record(*snr);
+    s.snrs.emplace_back(nowMs, *snr);
+    while (!s.snrs.empty() && nowMs > s.snrs.front().first + PATH_WINDOW_MS) s.snrs.pop_front();
+}
+
+std::optional<PathReport> Stations::pathFrom(const std::string& call, uint64_t nowMs, uint64_t windowMs) const
+{
+    std::string normal = protocol::normalCallsign(call);
+    for (const Station& s : stations_)
+    {
+        if (s.call != normal) continue;
+        double sum = 0.0;
+        size_t n = 0;
+        for (const auto& snr : s.snrs)
+        {
+            if (nowMs > snr.first + std::min(windowMs, PATH_WINDOW_MS)) continue;
+            sum += snr.second;
+            n++;
+        }
+        if (n == 0) return std::nullopt;
+        return PathReport{s.call, sum / (double)n, n};
+    }
+    return std::nullopt;
 }
 
 std::optional<PathReport> Stations::weakestPath(uint64_t nowMs) const

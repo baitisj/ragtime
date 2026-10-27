@@ -67,7 +67,11 @@ Python host needs only numpy and scipy; torch is for training.
 Reports: `CONNECTED src dst bw`, `DISCONNECTED [reason [detail]]`
 (below), `PTT ON|OFF`,
 `BUSY ON|OFF`, `BUFFER n` (again every 30 s while not 0), `MODE submode`
-(the session's), `IAMALIVE` (every 60 s).
+(at a `PTT ON`, when the burst's mode differs from the last reported:
+any burst the host keys, our session ACK bursts in `ack-*` modes
+included, so a client takes the session's gear from the others;
+`data2g/host.py` at 859724a),
+`IAMALIVE` (every 60 s).
 
 Broadcast statuses reach a client only once it has sent a `BCAST`
 command:

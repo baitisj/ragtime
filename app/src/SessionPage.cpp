@@ -66,9 +66,6 @@ wxString link(bool picked, const char* action, uint64_t id, const wxString& labe
 
 const char* const DOT = " \xc2\xb7 ";
 
-// The stop sign beside a picture coming in.
-constexpr int STOP_SIGN_DIP = 36;
-
 // "42%" of a file.
 std::string percentOf(uint64_t done, uint64_t size)
 {
@@ -153,6 +150,15 @@ protected:
             owner_->CallAfter([owner, message, code]() { owner->onReact_(message, code); });
             return;
         }
+        if (href == "pastpicture")
+        {
+            const Message* m = at(n);
+            if (m == nullptr || m->path.empty() || !owner_->onViewPast_) return;
+            std::string path = m->path;
+            SessionPage* owner = owner_;
+            owner_->CallAfter([owner, path]() { owner->onViewPast_(path); });
+            return;
+        }
         wxString action = href.BeforeFirst(':');
         unsigned long long id = 0;
         if (!href.AfterFirst(':').ToULongLong(&id) || !owner_->onFileAction_) return;
@@ -218,6 +224,13 @@ protected:
              << "</font></td>"
              << "<td valign=\"top\" width=\"100%\"><font" << body << "><b>" << htmlEscape(m->from) << "</b>&nbsp; "
              << what << "</font>";
+        // A picture sent or taken in an earlier session, from its file:
+        // the chat keeps it when the link drops and a new session starts.
+        if (m->kind == Message::Kind::File && m->picture && !m->path.empty() && owner_->pastPictureHtml_)
+        {
+            wxString img = owner_->pastPictureHtml_(m->path, this, "pastpicture");
+            if (!img.empty()) html << "<br>" << img;
+        }
         // Its reactions, as chips under it.
         wxString chips = reactionChipsHtml(m->reactions, m->myReaction, m->myWaiting,
                                            owner_->session_.settings().callsign, owner_->session_.canReact(*m), false,
@@ -614,19 +627,15 @@ wxString SessionPage::cardHtml(const FileTransfer& t, bool picked, const wxWindo
         }
     }
 
-    // A picture under its line as it stands; one coming to us has the stop
-    // sign at its lower right corner, to tell the sender we have enough.
+    // A picture under its line as it stands; one coming to us has a button
+    // with the stop sign over its lower right corner, to tell the sender we
+    // have enough.
     if (t.picture && pictureHtml_)
     {
-        wxString img = pictureHtml_(t.id, list, wxString::Format("view:%llu", (unsigned long long)t.id));
-        if (!img.empty())
-        {
-            body << "<br><table cellspacing=\"0\" cellpadding=\"0\"><tr><td>" << img << "</td>";
-            if (!t.outgoing && t.state == FState::Receiving)
-                body << "<td valign=\"bottom\">&nbsp;<a href=\"" << wxString::Format("enough:%llu", (unsigned long long)t.id)
-                     << "\">" << stopSignHtml(list, STOP_SIGN_DIP) << "</a></td>";
-            body << "</tr></table>";
-        }
+        bool stop = !t.outgoing && t.state == FState::Receiving;
+        wxString img = pictureHtml_(t.id, list, wxString::Format("view:%llu", (unsigned long long)t.id),
+                                    stop ? wxString::Format("enough:%llu", (unsigned long long)t.id) : wxString());
+        if (!img.empty()) body << "<br>" << img;
     }
 
     wxColour surface = wxSystemSettings::GetColour(wxSYS_COLOUR_LISTBOX);

@@ -6,6 +6,7 @@
 #include <string>
 #include <vector>
 
+#include <wx/gdicmn.h>
 #include <wx/image.h>
 #include <wx/string.h>
 
@@ -57,8 +58,11 @@ public:
     void forget(const std::string& key);
 
     // The picture among the messages: an <img> at most maxDip on its longer
-    // side, linked to href; "" while nothing has decoded.
-    wxString thumbHtml(const std::string& key, const wxWindow* window, int maxDip, const wxString& href);
+    // side, linked to href; "" while nothing has decoded. With stopHref, a
+    // button with the stop sign is drawn over its lower right corner, linked
+    // to stopHref (one coming to us in a session, Jeff 2026-10-27).
+    wxString thumbHtml(const std::string& key, const wxWindow* window, int maxDip, const wxString& href,
+                       const wxString& stopHref = wxString());
 
 private:
     struct Entry
@@ -69,13 +73,15 @@ private:
         std::string memoryName;     // its thumbnail in wxHTML's memory files
         int thumbVersion = -1;
         int thumbPx = 0;
+        bool thumbStop = false;
+        wxRect stopRect;            // the stop button's, in the thumbnail
     };
     std::map<std::string, Entry> entries_;
     int nextName_ = 1;
 };
 
-// The red stop sign for a picture coming in a session, as an <img> for a
-// wxHTML row (drawn once into wxHTML's memory files).
-wxString stopSignHtml(const wxWindow* window, int sizeDip);
+// The stop button's side over a picture in a session's card.
+constexpr int STOP_BUTTON_DIP = 40;
+
 
 #endif

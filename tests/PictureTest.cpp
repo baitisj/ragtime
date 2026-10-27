@@ -201,6 +201,22 @@ void testAirtime()
     CHECK(session > 5000 && session < 6000);
     CHECK_EQ(picture::sessionBytesFor(1, 100.0), (uint64_t)0);   // too little for a picture
     CHECK_EQ(picture::sessionBytesFor(60, 0.0), (uint64_t)0);
+
+    // How it arrives, for the preview to play: burst by burst, the last
+    // step the whole picture, at most MAX_STEPS.
+    for (const auto& steps : {picture::broadcastArrival(20000, "sunset.j2k", "AG7EW", slow),
+                              picture::broadcastArrival(3000, "sunset.j2k", "AG7EW", fast),
+                              picture::sessionArrival(20000, fast), picture::sessionArrival(900, slow)})
+    {
+        CHECK(!steps.empty() && steps.size() <= picture::MAX_STEPS);
+        for (size_t i = 1; i < steps.size(); i++)
+            CHECK(steps[i].bytes > steps[i - 1].bytes && steps[i].seconds > steps[i - 1].seconds);
+    }
+    CHECK_EQ(picture::sessionArrival(20000, fast).back().bytes, (uint64_t)20000);
+    CHECK_EQ(picture::broadcastArrival(20000, "sunset.j2k", "AG7EW", slow).size(), picture::MAX_STEPS);
+    CHECK(picture::sessionArrival(900, slow).size() < picture::MAX_STEPS);
+    CHECK(picture::sessionArrival(1000, link::ModeInfo()).empty());
+    CHECK(picture::broadcastArrival(0, "sunset.j2k", "AG7EW", fast).empty());
 }
 
 void testNames()

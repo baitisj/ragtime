@@ -631,6 +631,18 @@ void testStations()
     list.heard("W1AW", t, 2.0);
     path = list.weakestPath(t);
     CHECK(path && path->bursts == 1 && path->dB == 2.0);
+    // One station's path over the last few minutes, for a picture's gear.
+    t += 60000;
+    list.heard("w1aw", t, -4.0);
+    t += 4 * 60000;
+    list.heard("W1AW", t, -6.0);
+    path = list.pathFrom("W1AW", t, 5 * 60000);   // the last three
+    CHECK(path && path->bursts == 3 && std::fabs(path->dB - (2.0 - 4.0 - 6.0) / 3.0) < 1e-9);
+    path = list.pathFrom("W1AW", t, 2 * 60000);   // only the last
+    CHECK(path && path->bursts == 1 && path->dB == -6.0);
+    CHECK(!list.pathFrom("W1AW", t + 3 * 60000, 2 * 60000));
+    CHECK(!list.pathFrom("JA1XYZ", t, 5 * 60000)); // heard with no SNR
+    CHECK(!list.pathFrom("G4XYZ", t, 5 * 60000));  // never heard
 }
 
 void testReconnect()

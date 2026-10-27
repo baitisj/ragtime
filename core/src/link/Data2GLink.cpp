@@ -196,6 +196,11 @@ double ModeInfo::burstSeconds(const std::vector<int>& frameBytes) const
     return secondsAtOne + (secondsAtMax - secondsAtOne) * (codewords - 1) / (maxCodewords - 1);
 }
 
+bool isAckMode(const std::string& mode)
+{
+    return mode.compare(0, 4, "ack-") == 0;
+}
+
 const std::vector<ModeInfo>& knownModes()
 {
     // From a 2400 Hz data2g-host's MODES (Data2G 8ffe15c, 2026-10-07, as

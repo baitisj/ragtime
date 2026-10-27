@@ -5,6 +5,7 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -41,6 +42,7 @@ class GlobusPanel;
 class GlobusToggle;
 class HostConnection;
 class PictureFrame;
+struct PictureGear;
 class RecentWorkPane;
 class RigControl;
 class SessionPage;
@@ -156,11 +158,20 @@ private:
     // went in sentPicturesDir(); each picture shown among the messages as
     // it stands, on the shelf; and the picture window, one a picture.
     void sendPicture(bool broadcast);
+    // The gears a picture can be planned for, the first the one it starts
+    // with: on D2G the gear in effect, in a session the one for the far
+    // station's path over the last few minutes (PictureDialog).
+    std::vector<PictureGear> pictureGears(bool broadcast, const std::string& peer, uint64_t nowMs) const;
     void updateBroadcastPictures(uint64_t nowMs);
     void updateSessionPictures(uint64_t nowMs);
-    wxString pictureHtml(const std::string& key, const wxWindow* list, const wxString& href);
+    wxString pictureHtml(const std::string& key, const wxWindow* list, const wxString& href,
+                         const wxString& stopHref = wxString());
     void viewPicture(const std::string& key, const wxString& title, const std::string& name);
     void viewPictureFile(const std::string& path, const wxString& title);
+    // A picture file read into the shelf under "p" + path, and a past
+    // session line's picture from it ("" when it can't be read).
+    bool shelvePictureFile(const std::string& path);
+    wxString pastPictureHtml(const std::string& path, const wxWindow* list, const wxString& href);
     void showInFrame(const std::string& key);
 
     // The gearshift, its button and the 500 Hz switch.
@@ -252,6 +263,7 @@ private:
     EarFrame* ear_ = nullptr;               // while the Ear is open
     PictureShelf pictures_;
     std::map<std::string, PictureFrame*> pictureFrames_;   // open, by shelf key
+    std::set<std::string> unreadablePictures_;             // past pictures whose files are gone
     wxSplitterWindow* outer_ = nullptr;     // station list | the rest
     wxSplitterWindow* left_ = nullptr;      // station list over Recent work
     wxSplitterWindow* inner_ = nullptr;     // the tabs | Globus

@@ -990,6 +990,21 @@ void testTheSessionModeCarriesOver()
     CHECK_EQ(rig.chat.mode(), std::string("qpsk-r1/3"));
     rig.say("PTT ON\rMODE w48-16qam-r1/2\r");
     CHECK_EQ(rig.chat.mode(), std::string("w48-16qam-r1/2"));
+    // Our ACK bursts go in ack- modes, never the session's gear.
+    rig.say("PTT OFF\rPTT ON\rMODE ack-4f\rPTT OFF\r");
+    CHECK_EQ(rig.chat.mode(), std::string("w48-16qam-r1/2"));
+    CHECK(link::isAckMode("ack-4f"));
+    CHECK(!link::isAckMode("fsk16r25-r1/3"));
+}
+
+void testAnAckModeDoesntCarryOver()
+{
+    // A session that starts after an ACK burst takes the data mode before it.
+    Rig rig;
+    rig.say("PTT ON\rMODE qpsk-r1/3\rPTT OFF\rPTT ON\rMODE ack-4f\rPTT OFF\r");
+    CHECK(rig.chat.call("W1AW", rig.now));
+    rig.say("OK\rCONNECTED AG7EW W1AW 2300\r");
+    CHECK_EQ(rig.chat.mode(), std::string("qpsk-r1/3"));
 }
 
 } // namespace
@@ -1112,6 +1127,7 @@ int main()
     testTheLengths();
     testTheLogCarriesOn();
     testTheSessionModeCarriesOver();
+    testAnAckModeDoesntCarryOver();
     testReactionsInASession();
     return ragtime_test::finish();
 }

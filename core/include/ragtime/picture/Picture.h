@@ -99,6 +99,9 @@ constexpr int MAX_SECONDS = 30 * 60;
 // A picture received without asking may be this big at most; bigger ones
 // wait for Receive, as other files do.
 constexpr uint64_t AUTO_PICTURE_BYTES = 64 * 1024;
+// A session picture is planned for the gear that suits the far station's
+// path over this long (Stations::pathFrom; Jeff, 2026-10-27).
+constexpr uint64_t PATH_WINDOW_MS = 5 * 60 * 1000;
 // One taken from the air is decoded only up to this size either way.
 constexpr int MAX_DECODE_SIDE = 4096;
 
@@ -125,6 +128,24 @@ double sessionBytesPerSecond(const link::ModeInfo& mode, double measuredBytesPer
 // rate, less the offer's own bytes; 0 if not even MIN_PICTURE_BYTES fit
 // or the rate isn't known.
 uint64_t sessionBytesFor(double seconds, double bytesPerSecond);
+
+// How a picture arrives, burst by burst, for the dialog's preview to play:
+// after each step, bytes of it have come, seconds after the first burst
+// began. The last step is the whole picture. At most MAX_STEPS, bursts
+// taken together when there are more.
+struct ArrivalStep
+{
+    uint64_t bytes = 0;
+    double seconds = 0.0;
+};
+constexpr size_t MAX_STEPS = 48;
+// On D2G: its first pass as BroadcastFiles sends it (estimateFile's
+// bursts, and its time with the gaps between them).
+std::vector<ArrivalStep> broadcastArrival(uint64_t size, const std::string& name, const std::string& callsign,
+                                          const link::ModeInfo& mode);
+// In a session: the mode's longest burst of file bytes at a time, at
+// sessionBytesPerSecond.
+std::vector<ArrivalStep> sessionArrival(uint64_t size, const link::ModeInfo& mode);
 
 // A file name for the picture made from the one picked: its stem, made
 // plain (letters, digits, '-' and '_'), cut to 40 bytes, and ".j2k".

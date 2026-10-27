@@ -738,9 +738,14 @@ void MainFrame::buildLayout()
     });
     sessionPage_->onSendFile([this]() { sendFilePrompt(session_.peer()); });
     sessionPage_->onSendPicture([this]() { sendPicture(false); });
-    sessionPage_->pictures([this](uint64_t id, const wxWindow* list, const wxString& href) {
-        return pictureHtml("s" + std::to_string(id), list, href);
+    sessionPage_->pictures([this](uint64_t id, const wxWindow* list, const wxString& href, const wxString& stopHref) {
+        return pictureHtml("s" + std::to_string(id), list, href, stopHref);
     });
+    sessionPage_->pastPictures(
+        [this](const std::string& path, const wxWindow* list, const wxString& href) {
+            return pastPictureHtml(path, list, href);
+        },
+        [this](const std::string& path) { viewPictureFile(path, wxFileName(utf8(path)).GetFullName()); });
     sessionPage_->onDropFiles([this](const std::vector<std::string>& paths) {
         if (session_.phase() == session::SessionChat::Phase::Connected)
             queueFiles(session_.peer(), paths);
@@ -879,7 +884,8 @@ void MainFrame::onHostEvents(const std::vector<Event>& events)
                 if (ear_) ear_->setTransmitting(e.on);
                 break;
             case Event::Type::ModeUsed:
-                modeUsed_ = e.text;
+                // An ACK burst's mode is no gear of ours.
+                if (!link::isAckMode(e.text)) modeUsed_ = e.text;
                 break;
             case Event::Type::HeardFrom:
                 stations_.heard(e.text, now, e.snr);
@@ -1694,6 +1700,8 @@ void MainFrame::onFileEvents()
                 line.from = f->outgoing ? session_.settings().callsign : f->peer;
                 line.atMs = f->atMs;
                 line.text = f->name + ", " + files::sizeText(f->size) + ": " + result;
+                line.path = f->path;
+                line.picture = f->picture;
                 sessionLog_.file(f->peer, line);
             }
         }
@@ -2572,45 +2580,8 @@ void MainFrame::sendPicture(bool broadcast)
     PictureTarget target;
     target.broadcast = broadcast;
     target.callsign = prefs_.callsign;
-    std::string mode;
-    if (broadcast)
-    {
-        mode = broadcastMode();
-        target.mode = broadcast::findMode(link_.modes(), mode, link_.groupMode());
-    }
-    else
-    {
-        target.peer = session_.peer();
-        target.mode = fileTraffic_.mode();
-        target.measuredRate = fileTraffic_.sessionRate();
-    }
-    if (target.mode.valid())
-    {
-        std::string shortName = gearshift_.shortName(target.mode.name);
-        target.gear = "gear " + (shortName.empty() ? target.mode.name : shortName);
-    }
-    else
-    {
-        // No gear picked and the group's mode not known, or a session whose
-        // mode the host hasn't said yet: the host picks. Planned for the
-        // slowest it offers, the picture goes no slower.
-        const std::vector<link::ModeInfo>& offered = link_.modes().empty() ? link::knownModes() : link_.modes();
-        double slowest = 0.0;
-        for (const link::ModeInfo& m : offered)
-        {
-            if (!m.valid() || !(m.secondsAtMax > 0)) continue;
-            double rate = (double)m.bytesPerCodeword * m.maxCodewords / m.secondsAtMax;
-            if (target.mode.valid() && rate >= slowest) continue;
-            target.mode = m;
-            slowest = rate;
-        }
-        if (target.mode.valid())
-        {
-            std::string shortName = gearshift_.shortName(target.mode.name);
-            target.gear = std::string(broadcast ? "the host's gear" : "a gear not known yet")
-                          + " (planned for the slowest, " + (shortName.empty() ? target.mode.name : shortName) + ")";
-        }
-    }
+    if (!broadcast) target.peer = session_.peer();
+    target.gears = pictureGears(broadcast, target.peer, HostConnection::nowMs());
 
     wxFileDialog pick(this, broadcast ? wxString("Broadcast a picture to D2G") : "Send a picture to " + utf8(target.peer),
                       utf8(loadString(keys::PICTURE_FOLDER, "")), "", pictureWildcard(),
@@ -2648,7 +2619,7 @@ void MainFrame::sendPicture(bool broadcast)
     std::string error;
     if (broadcast)
     {
-        uint64_t id = broadcastFiles_.send(path, mode, now, error, true);
+        uint64_t id = broadcastFiles_.send(path, dialog.gear().sendMode, now, error, true);
         if (id == 0)
         {
             wxMessageBox(utf8(error) + ".", title, wxOK | wxICON_INFORMATION, this);
@@ -2672,6 +2643,104 @@ void MainFrame::sendPicture(bool broadcast)
     host_->flush();
     refreshSession();
     refreshFiles();
+}
+
+std::vector<PictureGear> MainFrame::pictureGears(bool broadcast, const std::string& peer, uint64_t nowMs) const
+{
+    std::vector<PictureGear> gears;
+    const std::vector<link::ModeInfo>& offered = link_.modes();
+    auto shortName = [this](const std::string& mode) {
+        std::string name = gearshift_.shortName(mode);
+        return name.empty() ? mode : name;
+    };
+    auto gearFor = [&](const link::ModeInfo& mode, const std::string& label, const std::string& sendMode) {
+        PictureGear g;
+        g.mode = mode;
+        g.label = label;
+        g.words = "gear " + shortName(mode.name);
+        g.sendMode = sendMode;
+        return g;
+    };
+
+    // The first, the one it starts with.
+    if (broadcast)
+    {
+        // The gear in effect, Auto's or the one picked.
+        std::string mode = broadcastMode();
+        link::ModeInfo info = broadcast::findMode(offered, mode, link_.groupMode());
+        if (info.valid())
+        {
+            std::string how = mode.empty() ? ", the group's mode"
+                              : gearshift_.isAuto() && gearshift_.suggestion() && !gearshift_.snrFrom().empty()
+                                  ? ", Auto's for the weakest path (" + gearshift_.snrFrom() + ")"
+                                  : ", the gear in effect";
+            gears.push_back(gearFor(info, shortName(info.name) + how, mode));
+        }
+    }
+    else
+    {
+        // From how we have heard the far station over the last few minutes
+        // (Jeff, 2026-10-27): the gear Auto would pick for that path.
+        std::optional<broadcast::PathReport> path = stations_.pathFrom(peer, nowMs, picture::PATH_WINDOW_MS);
+        if (path)
+        {
+            gearbox::Gearshift forPath = gearshift_;
+            forPath.setPathSnr(path->dB, path->bursts, path->call);
+            std::optional<gearbox::Gear> pick = forPath.suggestion();
+            link::ModeInfo info = pick ? broadcast::findMode(offered, pick->mode) : link::ModeInfo();
+            if (info.valid())
+            {
+                std::string bursts = path->bursts == 1 ? "1 burst" : std::to_string(path->bursts) + " bursts";
+                gears.push_back(gearFor(info,
+                                        shortName(info.name) + ", from how we hear " + path->call + " ("
+                                            + gearbox::formatDb(path->dB) + ", " + bursts + " in 5 min)",
+                                        std::string()));
+            }
+        }
+        // Else the gear our data last went in, ACK bursts aside.
+        if (gears.empty() && fileTraffic_.mode().valid())
+            gears.push_back(gearFor(fileTraffic_.mode(), shortName(fileTraffic_.mode().name)
+                                                             + ", the gear the session sent in last",
+                                    std::string()));
+    }
+    if (gears.empty())
+    {
+        // Nothing known: the host picks. Planned for the slowest it offers,
+        // the picture goes no slower.
+        const std::vector<link::ModeInfo>& modes = offered.empty() ? link::knownModes() : offered;
+        link::ModeInfo slowest;
+        double rate = 0.0;
+        for (const link::ModeInfo& m : modes)
+        {
+            if (!m.valid() || link::isAckMode(m.name) || !(m.secondsAtMax > 0)) continue;
+            double r = (double)m.bytesPerCodeword * m.maxCodewords / m.secondsAtMax;
+            if (slowest.valid() && r >= rate) continue;
+            slowest = m;
+            rate = r;
+        }
+        if (slowest.valid())
+        {
+            PictureGear g = gearFor(slowest, shortName(slowest.name) + ", the slowest: "
+                                                 + (broadcast ? "the host picks" : "the path isn't known yet"),
+                                    std::string());
+            g.words = (broadcast ? "the host's gear" : "a gear not known yet") + std::string(" (planned for the slowest, ")
+                      + shortName(slowest.name) + ")";
+            gears.push_back(g);
+        }
+    }
+
+    // Then every gear of the ladder the host offers, for the operator to
+    // pick instead.
+    for (const gearbox::Gear& gear : gearshift_.ladder())
+    {
+        link::ModeInfo info = broadcast::findMode(offered, gear.mode);
+        if (!info.valid() || info.name != gear.mode) continue;
+        gears.push_back(gearFor(info,
+                                "Gear " + std::to_string(gear.number) + " \xc2\xb7 " + shortName(gear.mode)
+                                    + " (needs about " + gearbox::formatDb(gear.threshold) + ")",
+                                gear.mode));
+    }
+    return gears;
 }
 
 void MainFrame::updateBroadcastPictures(uint64_t nowMs)
@@ -2720,10 +2789,11 @@ void MainFrame::updateSessionPictures(uint64_t nowMs)
     if (changed) sessionPage_->picturesChanged();
 }
 
-wxString MainFrame::pictureHtml(const std::string& key, const wxWindow* list, const wxString& href)
+wxString MainFrame::pictureHtml(const std::string& key, const wxWindow* list, const wxString& href,
+                                const wxString& stopHref)
 {
     // Room for a 640-pixel picture's thumbnail beside the time.
-    return pictures_.thumbHtml(key, list, PICTURE_THUMB_DIP, href);
+    return pictures_.thumbHtml(key, list, PICTURE_THUMB_DIP, href, stopHref);
 }
 
 void MainFrame::viewPicture(const std::string& key, const wxString& title, const std::string& name)
@@ -2741,20 +2811,37 @@ void MainFrame::viewPicture(const std::string& key, const wxString& title, const
     frame->Show();
 }
 
+bool MainFrame::shelvePictureFile(const std::string& path)
+{
+    std::string key = "p" + path;
+    if (pictures_.settled(key)) return true;
+    wxFile in(utf8(path));
+    wxFileOffset length = in.IsOpened() ? in.Length() : 0;
+    std::vector<uint8_t> bytes(length > 0 ? (size_t)length : 0);
+    if (bytes.empty() || in.Read(bytes.data(), bytes.size()) != (ssize_t)bytes.size()) return false;
+    pictures_.update(key, bytes, bytes.size(), HostConnection::nowMs(), true);
+    return true;
+}
+
+wxString MainFrame::pastPictureHtml(const std::string& path, const wxWindow* list, const wxString& href)
+{
+    // Read once: a file gone since is skipped, not read at every redraw.
+    if (unreadablePictures_.count(path) != 0) return wxString();
+    if (!shelvePictureFile(path))
+    {
+        unreadablePictures_.insert(path);
+        return wxString();
+    }
+    return pictureHtml("p" + path, list, href);
+}
+
 void MainFrame::viewPictureFile(const std::string& path, const wxString& title)
 {
     std::string key = "p" + path;
-    if (!pictures_.settled(key))
+    if (!shelvePictureFile(path))
     {
-        wxFile in(utf8(path));
-        wxFileOffset length = in.IsOpened() ? in.Length() : 0;
-        std::vector<uint8_t> bytes(length > 0 ? (size_t)length : 0);
-        if (bytes.empty() || in.Read(bytes.data(), bytes.size()) != (ssize_t)bytes.size())
-        {
-            wxMessageBox(utf8(path) + " can't be read.", title, wxOK | wxICON_INFORMATION, this);
-            return;
-        }
-        pictures_.update(key, bytes, bytes.size(), HostConnection::nowMs(), true);
+        wxMessageBox(utf8(path) + " can't be read.", title, wxOK | wxICON_INFORMATION, this);
+        return;
     }
     if (pictures_.find(key) == nullptr)
     {

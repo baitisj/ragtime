@@ -102,6 +102,7 @@ void HostLink::commandDown(uint64_t nowMs)
     busy_ = false;
     data2g_ = false;
     lastMode_.clear();
+    lastDataMode_.clear();
     txPower_.reset();
     idleTimeout_.reset();
     hostIdleTimeout_.reset();
@@ -342,6 +343,7 @@ void HostLink::onLine(const std::string& line, uint64_t nowMs)
         case Type::Mode:
         {
             lastMode_ = c.text;
+            if (!isAckMode(c.text)) lastDataMode_ = c.text;
             Event e;
             e.type = Event::Type::ModeUsed;
             e.text = c.text;
