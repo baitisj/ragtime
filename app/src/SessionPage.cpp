@@ -637,7 +637,7 @@ void SessionPage::showMenu(int row)
     else if (!m->ours && !m->past && m->kind == Message::Kind::Text
              && session_.phase() == SessionChat::Phase::Connected && session_.greeted())
     {
-        // Ragtime before 0.1.2 skips reactions: say so rather than send one.
+        // Ragtime before 0.2.0 skips reactions: say so rather than send one.
         menu.Append(ID_REACT, "React (" + wxString::FromUTF8(session_.peer()) + "'s Ragtime takes none)")
             ->Enable(false);
         menu.AppendSeparator();
