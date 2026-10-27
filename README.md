@@ -51,6 +51,39 @@ On Ubuntu 24.04:
     ctest --test-dir build --output-on-failure
     ./build/app/ragtime
 
+### Libraries
+
+These are all the libraries the build looks for. The package names are
+Ubuntu 24.04's (Debian uses the same `-dev` names); other distributions
+have them under their own names.
+
+| Library | Ubuntu package | For | Without it |
+| --- | --- | --- | --- |
+| A C++17 compiler, CMake 3.16 or newer, pkg-config | `build-essential cmake pkg-config` | The build | Required |
+| wxWidgets 3.2 (GTK 3) | `libwxgtk3.2-dev` | The window | `-DRAGTIME_APP=OFF` builds only the core, the rig library and their tests |
+| GTK 3 | `libgtk-3-dev` | The ham phrase highlight in the entry lines | Required for the app |
+| Hamlib | `libhamlib-dev` | Settings > Rig, opening the rig with Hamlib | `-DRAGTIME_HAMLIB=OFF` |
+| PipeWire 0.3 headers | `libpipewire-0.3-dev` | The Ear's listening | `-DRAGTIME_PIPEWIRE=OFF` |
+
+Ragtime never reads or writes JPEG, PNG, TIFF or WebP itself. Those
+libraries come in with wxWidgets, which is built against them: the
+linker wants whichever `libjpeg`, `libpng`, `libtiff` and `libwebp`
+your wxWidgets was built with, and any version does as long as it is
+that one. On Ubuntu 24.04, `libwxgtk3.2-dev` pulls them in, libjpeg as
+libjpeg-turbo 2.1.5 (`libjpeg-turbo8`, giving `libjpeg.so.8`), so there
+is nothing more to install.
+
+At run time the app needs the same libraries without `-dev`
+(`libwxgtk3.2-1t64`, `libhamlib4t64`). The Ear loads
+`libpipewire-0.3.so.0` (`libpipewire-0.3-0t64`) only when it opens, and
+needs PipeWire to be the sound server.
+
+The helper scripts need a few more tools: `tools/ear/pretend_radio.sh`
+wants `pipewire-pulse`, `pulseaudio-utils` (`pactl`),
+`pipewire-bin` (`pw-play`, `pw-cat`) and `python3-numpy`;
+`tools/gcc16/check.py` wants Docker; and `tools/icon/make_icons.sh`
+wants `librsvg2-bin` and `imagemagick`.
+
 ### Packages
 
     packaging/linux/make-appimage.sh      # dist/Ragtime-<version>-...-x86_64.AppImage
