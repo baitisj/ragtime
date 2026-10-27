@@ -11,11 +11,12 @@
 namespace
 {
 
-// The faint red: Glissando's "accelerated" background, as a tint of the
-// line's own background so it reads in light and dark themes.
+// The faint green: speedy and good (Chris's suggestion, 2026-10-27; it was
+// Glissando's red), as a tint of the line's own background so it reads in
+// light and dark themes.
 wxColour phraseColour(const wxColour& background)
 {
-    return blendColour(background, wxColour(0xc8, 0x28, 0x1e), 0.22);
+    return blendColour(background, wxColour(0x2e, 0xa0, 0x4a), 0.22);
 }
 
 } // namespace
