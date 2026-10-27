@@ -755,7 +755,7 @@ Functionally equivalent means the client does all of this (tick as each lands):
 - [x] Progress for each transfer, both directions at once, with a finish estimate (packages G and H)
 - [x] The 500 Hz setting, sending `BW500`/`BW2300` (package E)
 - [x] Pause sending (Glissando's Woah!) (package E)
-- [x] Ham phrases highlighted as they are typed, faint red on the ones that go as one symbol, on the Broadcast and Session entry lines
+- [x] Ham phrases highlighted as they are typed, faint green on the ones that go as one symbol, on the Broadcast and Session entry lines
 - [x] Re-send on a message's right-click menu, Broadcast and Session
 - [x] No sending outside the US data segments when receive only is set (Settings > Rig: the dial read from rigctld or Hamlib, docs/STAGE1.md "The dial, the path log and the watch list")
 

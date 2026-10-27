@@ -9,8 +9,8 @@
 #include "ragtime/text/HamText.h"
 
 // The ham phrases text table 0 codes as one symbol each ("CQ CQ", " the",
-// "73", tools/ham_table/phrases.txt) get a faint red background in an entry
-// line as they are typed, as in Glissando's COMMS entry box, so the
+// "73", tools/ham_table/phrases.txt) get a faint green background in an entry
+// line as they are typed (Glissando's COMMS entry box uses red), so the
 // operator sees what rides accelerated.
 //
 // utf8 is the line's text as sent and spans are byte spans of it. A GtkEntry
