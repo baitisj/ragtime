@@ -26,8 +26,9 @@ class wxStaticText;
 // The Ear (docs/STAGE1.md, "The Ear"): a floating window with a waterfall
 // of what the radio hears, opened by the ear button on the connection bar.
 // It listens alongside data2g-host (audio::EarAudio) to the sound card the
-// host records from, or to a source picked in "Listen to", and only while
-// it is open: closing it stops the recording.
+// host records from, or to a source picked in "Listen to", or with neither
+// to the default input, and only while it is open: closing it stops the
+// recording.
 //
 // Under the controls it says what the rig reports of its receive filter
 // (read between bursts while the Ear is open, through rigctld or Hamlib)

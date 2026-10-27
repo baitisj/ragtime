@@ -131,5 +131,47 @@ HostSearch findHostCapture(const Graph& graph, std::optional<int> hostPid)
     return search;
 }
 
+namespace
+{
+
+const GraphNode* sourceNamed(const Graph& graph, const std::string& name)
+{
+    if (name.empty()) return nullptr;
+    for (const GraphNode& n : graph.nodes)
+        if (isSource(n) && n.name == name) return &n;
+    return nullptr;
+}
+
+} // namespace
+
+SourcePick pickSource(const Graph& graph, const std::string& chosen, const HostSearch& host,
+                      const std::string& lastHostSource, const std::string& defaultSource)
+{
+    SourcePick pick;
+    const uint32_t hostSource = host.found ? host.found->source : 0;
+    if (!chosen.empty())
+    {
+        // A pick that has gone is not swapped for another: the dropdown
+        // says it's missing.
+        pick.node = sourceNamed(graph, chosen);
+        pick.why = pick.node ? Pick::Chosen : Pick::None;
+    }
+    else if (hostSource != 0 && graph.node(hostSource))
+    {
+        pick.node = graph.node(hostSource);
+        pick.why = Pick::Host;
+    }
+    else if ((pick.node = sourceNamed(graph, lastHostSource)) != nullptr)
+    {
+        pick.why = Pick::HostBefore;
+    }
+    else if ((pick.node = sourceNamed(graph, defaultSource)) != nullptr)
+    {
+        pick.why = Pick::Default;
+    }
+    pick.passive = pick.node && hostSource != 0 && pick.node->id == hostSource;
+    return pick;
+}
+
 } // namespace ear
 } // namespace ragtime

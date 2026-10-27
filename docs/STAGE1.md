@@ -1120,7 +1120,11 @@ the one Ragtime talks to is the process listening on its command port
 `/proc/PID/fd`; only for a host on this machine). "Listen to" offers
 "Same as data2g-host · *card*" first, then every source; a source picked
 before that has gone stays on the list as "(not there)". If the host
-stops, the Ear stays on its last card.
+stops, the Ear stays on its last card. With no host seen and nothing
+picked it listens to the system's default input (PipeWire's
+`default.audio.source`, or Windows' default recording device), so it
+always hears something, rig or no rig (Jeff, 2026-10-27;
+`ear::pickSource`).
 
 **Listening without being noticed** (`audio::EarAudio`, PipeWire's
 stream API through `dlopen`, so Ragtime and its AppImage still run where
@@ -1130,15 +1134,35 @@ PipeWire isn't):
   graph's cycle, which the shortest any stream asks for sets;
 - the source's own rate, mono floats, so nothing resamples or switches
   rate;
-- passive on data2g-host's card (`node.passive`), so it never keeps the
-  card running: when the host stops, the Ear goes quiet. A card the
-  operator picks that the host doesn't use is woken;
+- passive on the card data2g-host records from (`node.passive`), so it
+  never keeps that card running on the host's account. Anywhere else,
+  and on the host's card once the host stops, the Ear wakes the card
+  itself, or it would hear nothing (Jeff, 2026-10-27: it should always
+  listen; until then a stopped host left it silent);
 - pinned to its source (`target.object`, `node.dont-reconnect`), so the
   session manager never moves it; it moves itself when the host does.
 
 It never plays a sound and never opens ALSA's devices itself. Whether
 audio is coming is judged by when the last samples came, since a passive
 stream on a sleeping card stays paused without a word.
+
+**On Windows** (2026-10-27, Jeff: 0.2.0's Windows build had only a
+stand-in that said it needs PipeWire), `audio::EarAudio` records through
+WASAPI in shared mode, at the input's own mix format, with a 100 ms
+buffer, mixed to mono. data2g-host's audio library (miniaudio) opens its
+card in shared mode by default, so the two share it and the host never
+notices; an input another program holds in exclusive mode can't be
+joined, and the Ear says so. "Listen to" lists every active recording
+device by its name. To follow the host, once a second the Ear lists the
+audio sessions on each input (`IAudioSessionManager2`) and takes an
+active one whose process is `data2g-host.exe` or `data2g-gui.exe`, by
+`QueryFullProcessImageName`; with several, the one listening on the
+command port (`GetExtendedTcpTable`, `audio::processListeningOn`) wins,
+as on Linux. The inputs and sessions make a pretend PipeWire graph, so
+`ear::findHostCapture` and `ear::pickSource` choose as they do on Linux.
+Wine shares no sessions between processes, so under Wine the Ear finds
+no host and listens to the default input; following the host wants a
+real Windows.
 
 **The picture** (`ear::Spectrum`, `EarScope`). Each row is an FFT with
 bins about 6 Hz wide (the next power of two above rate / 6 Hz) under a
@@ -1437,7 +1461,8 @@ someone has looked on the air.
 
 "Listen to", Speed and Span are kept (`/Ear/Source`,
 `/Ear/RowsPerSecond`, `/Ear/SpanHz`, 0 for Auto).
-Windows has no Ear yet: a stand-in says it needs PipeWire.
+A build with `-DRAGTIME_PIPEWIRE=OFF` (or the Mac) has a stand-in that
+says the Ear can't listen there.
 
 **On the bench.** `tools/ear/pretend_radio.sh up` makes a pretend radio
 in PipeWire: a null sink playing noise through an SSB filter with Data2G
@@ -1446,7 +1471,9 @@ called Pretend-radio, and a stand-in recorder named `data2g-host`
 recording from it, so the Ear has a host to follow. `... down` takes it
 away. `build/tests/ragtime_ear_probe` prints what the Ear would find,
 the loudest frequency each second and the edges, without a window
-(`--span 8000` for FM's wider audio). Neither touches a
+(`--span 8000` for FM's wider audio), and on its first second every
+source it can pick; it is built for Windows too, and runs under Wine
+(with `PULSE_SERVER` set, Wine's inputs are PulseAudio's). Neither touches a
 real sound card; never point them at the radio's USB codec.
 
 ## Reactions

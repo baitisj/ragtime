@@ -186,8 +186,11 @@ and the Part 97 check.
   (or View > Ear) floats a waterfall and spectrum of what the radio
   hears (`app/src/EarFrame`, `EarScope`), with Data2G's passbands drawn
   on it. It records alongside data2g-host from the same PipeWire source
-  (`ear::findHostCapture`, `audio::EarAudio` in `audio/`), passive and
-  only while open. Step 2: it reads the rig's filter while open (mode,
+  (`ear::findHostCapture`, `audio::EarAudio` in `audio/`), passive on
+  the host's card and only while open; on Windows through WASAPI in
+  shared mode (`audio/src/WasapiEar.cpp`, the host found by its audio
+  session's process, 2026-10-27). With no host and nothing picked it
+  listens to the default input, rig or no rig (`ear::pickSource`). Step 2: it reads the rig's filter while open (mode,
   width, PBT; `radio::RigFilter`, through rigctld or Hamlib) and
   measures the real edges from the band's noise (`ear::EdgeFinder`),
   drawing both. Step 3: with "Let the Ear change the rig's filters"
@@ -249,8 +252,9 @@ and the Part 97 check.
   and update that page in the same PR.
 - Never start `data2g-host`; the operator runs it. Ragtime never plays
   to the sound card or opens its ALSA devices. The Ear only records,
-  through PipeWire, alongside data2g-host, passive and with a long
-  latency so the host never notices (docs/STAGE1.md, "The Ear"). It keys the rig only with "Key the rig when
+  through PipeWire (WASAPI's shared mode on Windows), alongside
+  data2g-host, passive on the host's card and with a long latency so
+  the host never notices (docs/STAGE1.md, "The Ear"). It keys the rig only with "Key the rig when
   data2g-host keys" ticked (Settings > Rig, Hamlib only, off by
   default), following the host's PTT ON/OFF and unkeying by itself on
   a dropped link, a rig failure, quitting and after 180 s (Andrew's
@@ -315,7 +319,7 @@ and the Part 97 check.
 | Path | What |
 | --- | --- |
 | `core/` | `ragtime_core`, the socket-free library: no wx, no sockets in the engines, all unit-tested. Headers in `core/include/ragtime/`, sources in `core/src/`, one subfolder per area: `protocol/`, `link/`, `text/`, `files/` (package B; G adds `FileRows`, `FileTraffic`), `globus/` (C), `gearbox/` (D), `broadcast/` (E, with `BroadcastLog`; H adds `Airtime`, `Seals`, `BroadcastFiles`), `session/` (F, and `SessionLog`; `StreamLog` for cuts), `radio/` (the dial from rigctld, the US data segments, the path log, Recent work, the rig settings and the PTT follower), `ear/` (the Ear's spectrum, finding data2g-host's sound card in PipeWire's graph, the host's process by its port, Data2G's passbands, the filter's edges from the noise, the filter model, its trials and Calibrate). Add sources to `core/CMakeLists.txt` |
-| `audio/` | `ragtime_audio`: `audio::EarAudio`, the Ear's listener, PipeWire loaded with `dlopen` (never linked) on its own thread; with `-DRAGTIME_PIPEWIRE=OFF` (and on Windows) a stand-in that says the Ear needs PipeWire |
+| `audio/` | `ragtime_audio`: `audio::EarAudio`, the Ear's listener, PipeWire loaded with `dlopen` (never linked) on its own thread, or on Windows WASAPI in shared mode (`WasapiEar.cpp`) on a thread of its own; `processListeningOn` (the host's process by its port: /proc, or Windows' TCP table); with `-DRAGTIME_PIPEWIRE=OFF` (and on the Mac) a stand-in that says the Ear can't listen |
 | `rig/` | `ragtime_rig`: `rig::HamlibRig`, the rig opened with Hamlib on a thread of its own, Hamlib's rig list and the serial ports. Kept out of core (no ports there); with `-DRAGTIME_HAMLIB=OFF` a stand-in that says Hamlib is missing |
 | `app/` | The wxWidgets app (`app/src/`). It draws and wires; logic goes in core. `MainFrame` is the one main window and owns the engines; `HostConnection` (data2g-host) and `RigConnection` (rigctld: questions, and the Ear's filter settings) are the only code with sockets, and `RigControl` holds the rig as Settings > Rig has it; `Prefs` holds every wxConfig key, and `appDataDir()` is where Ragtime keeps its own files (never wx's `GetUserDataDir()`: on Linux that is `~/.Ragtime`, the settings file); `app/src/globus/` is the Globus pane (`GlobusPanel`, `GlobusView`, `GlobusToggle`) |
 | `tests/` | ctest unit tests for core, plain executables on `tests/Check.h` (`CHECK`, `CHECK_EQ`). Add one with `ragtime_test(<name> <source>)` in `tests/CMakeLists.txt`. `FakeHost.*` is a fake data2g-host on loopback sockets (POSIX, so its test and the bench build only `if(UNIX)`); `FakeAirMain.cpp` is the bench `ragtime_fake_air`, and `ReplayHost.*` its `--replay` |

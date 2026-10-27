@@ -1,7 +1,8 @@
 // ragtime_ear_probe: the Ear without the window, for the bench and for
 // checking a station by hand. It listens as the Ear does (alongside
 // data2g-host, or to --source NAME) for --seconds, and prints what it
-// finds in PipeWire's graph, the loudest part of each second's audio, and
+// finds in PipeWire's graph (or Windows' inputs and their sessions), the
+// sources it can pick on the first second, the loudest part of each second's audio, and
 // the filter edges the band's noise shows (ear::EdgeFinder, as the Ear
 // window draws them), from 0 to --span HZ (4000 by default; up to 12000,
 // for FM). With --average it ends with the whole run's spectrum, one
@@ -23,7 +24,6 @@
 
 #include "ragtime/audio/EarAudio.h"
 #include "ragtime/ear/Edges.h"
-#include "ragtime/ear/ProcNet.h"
 #include "ragtime/ear/Spectrum.h"
 
 using namespace ragtime;
@@ -62,7 +62,7 @@ int main(int argc, char** argv)
     long summed = 0;
     std::atomic<long> samples{0};
     auto ear = audio::makeEarAudio();
-    ear->setHostPid(ear::processListeningOn(port));
+    ear->setHostPid(audio::processListeningOn(port));
     ear->start(
         [&](const float* x, std::size_t n, int rate) {
             std::lock_guard<std::mutex> lock(mutex);
@@ -106,16 +106,23 @@ int main(int argc, char** argv)
             }
             rows.clear();
         }
-        std::printf("%ds: %s\n", s + 1, !st.available ? st.problem.c_str() : "PipeWire connected");
+        std::printf("%ds: %s\n", s + 1, !st.available ? st.problem.c_str() : "connected");
         if (st.host.found)
             std::printf("  data2g capture: %s (pid %d) from %s%s\n", st.host.found->program.c_str(),
                         st.host.found->pid, st.host.found->sourceDescription.c_str(),
                         st.host.found->linked ? "" : " (its target; no link yet)");
         else
             std::printf("  data2g capture: none (%s)\n", st.host.why.c_str());
-        std::printf("  listening to: %s, %s, %d Hz; %ld samples; %s\n",
-                    st.listeningDescription.empty() ? "nothing" : st.listeningDescription.c_str(),
+        if (s == 0)
+            for (const ear::GraphNode& n : st.sources)
+                std::printf("  source: %s (%s)\n", n.description.c_str(), n.name.c_str());
+        const char* why = st.pick == ear::Pick::Default      ? " (the default input)"
+                          : st.pick == ear::Pick::HostBefore ? " (data2g-host's last)"
+                                                             : "";
+        std::printf("  listening to: %s%s, %s, %d Hz; %ld samples; %s\n",
+                    st.listeningDescription.empty() ? "nothing" : st.listeningDescription.c_str(), why,
                     st.streaming ? "streaming" : "waiting", st.rate, (long)samples, row.c_str());
+        if (st.available && !st.problem.empty()) std::printf("  problem: %s\n", st.problem.c_str());
         const std::optional<ear::Edges> e = edges.edges();
         if (e)
             std::printf("  edges: low %s, high %s; passband %.1f dB, stopband %.1f dB, %.0f s of quiet\n",

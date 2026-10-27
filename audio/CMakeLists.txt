@@ -1,17 +1,21 @@
-# ragtime_audio: the Ear listening alongside data2g-host, through PipeWire
-# (EarAudio.h). libpipewire is loaded at run time, never linked, so only its
-# headers (libpipewire-0.3-dev) are needed to build, and Ragtime runs where
-# there is no PipeWire. Elsewhere (Windows, -DRAGTIME_PIPEWIRE=OFF) a
-# stand-in says the Ear needs it. The Ear's spectrum and graph search are
-# core's, and tested there.
+# ragtime_audio: the Ear listening alongside data2g-host (EarAudio.h):
+# through PipeWire on Linux, WASAPI on Windows. libpipewire is loaded at run
+# time, never linked, so only its headers (libpipewire-0.3-dev) are needed
+# to build, and Ragtime runs where there is no PipeWire. With
+# -DRAGTIME_PIPEWIRE=OFF (and on the Mac) a stand-in says the Ear can't
+# listen. The Ear's spectrum and graph search are core's, and tested there.
 
-if(RAGTIME_PIPEWIRE)
-    add_library(ragtime_audio STATIC src/PipeWireEar.cpp)
+if(WIN32)
+    add_library(ragtime_audio STATIC src/WasapiEar.cpp src/HostProcess.cpp)
+    # COM and property variants (ole32), the TCP table (iphlpapi).
+    target_link_libraries(ragtime_audio PRIVATE ole32 iphlpapi)
+elseif(RAGTIME_PIPEWIRE)
+    add_library(ragtime_audio STATIC src/PipeWireEar.cpp src/HostProcess.cpp)
     # Headers only: SYSTEM, so a warning in PipeWire's own never fails -Werror.
     target_include_directories(ragtime_audio SYSTEM PRIVATE ${PIPEWIRE_INCLUDE_DIRS})
     target_link_libraries(ragtime_audio PRIVATE ${CMAKE_DL_LIBS})
 else()
-    add_library(ragtime_audio STATIC src/NoEar.cpp)
+    add_library(ragtime_audio STATIC src/NoEar.cpp src/HostProcess.cpp)
 endif()
 
 find_package(Threads REQUIRED)

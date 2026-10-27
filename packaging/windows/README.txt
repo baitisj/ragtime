@@ -13,8 +13,11 @@ You need data2g-host
 
 Ragtime is only a front end. It talks over TCP to a data2g-host that you
 run yourself, on this computer or another one on your network; Ragtime
-never starts it, never bundles it, and never touches the sound card. It
-keys the rig only if you tick Key the rig in Settings > Rig.
+never starts it, never bundles it, and never plays to the sound card. Its
+Ear (View > Ear) only records, alongside data2g-host, from the input
+data2g-host records from (or one you pick, or the default recording
+device), in Windows' shared mode. It keys the rig only if you tick Key
+the rig in Settings > Rig.
 Get Data2G from https://github.com/arodland/Data2G and follow its own
 instructions to run data2g-host with your radio.
 

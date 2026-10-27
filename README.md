@@ -80,7 +80,8 @@ is nothing more to install.
 At run time the app needs the same libraries without `-dev`
 (`libwxgtk3.2-1t64`, `libhamlib4t64`). The Ear loads
 `libpipewire-0.3.so.0` (`libpipewire-0.3-0t64`) only when it opens, and
-needs PipeWire to be the sound server.
+needs PipeWire to be the sound server. On Windows it listens through
+WASAPI, which needs nothing installed.
 
 The helper scripts need a few more tools: `tools/ear/pretend_radio.sh`
 wants `pipewire-pulse`, `pulseaudio-utils` (`pactl`),
@@ -191,7 +192,8 @@ Sources: [ARRL band plan](https://www.arrl.org/band-plan),
 
 Ragtime is a front end for a separately running `data2g-host`, reached
 over TCP. It never starts the modem and never plays to the sound card;
-its Ear only listens in, through PipeWire, to what data2g-host records.
+its Ear only listens in, through PipeWire on Linux or WASAPI on
+Windows, to what data2g-host records.
 It reads the radio's dial from rigctld, or opens the rig itself with
 Hamlib (Settings > Rig), and can key it when data2g-host does, for rigs
 whose drivers can't be opened twice (off by default). Through Hamlib or

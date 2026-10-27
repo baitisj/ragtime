@@ -1,5 +1,5 @@
-// EarAudio's stand-in where there is no PipeWire to load: Windows, and
-// builds with -DRAGTIME_PIPEWIRE=OFF.
+// EarAudio's stand-in where it has nothing to listen through: builds with
+// -DRAGTIME_PIPEWIRE=OFF, and the Mac.
 #include "ragtime/audio/EarAudio.h"
 
 namespace ragtime
@@ -23,7 +23,7 @@ public:
     EarStatus status() const override
     {
         EarStatus s;
-        s.problem = "The Ear listens through PipeWire, on Linux";
+        s.problem = "The Ear listens through PipeWire on Linux and WASAPI on Windows; this build has neither";
         return s;
     }
 };
