@@ -1428,6 +1428,39 @@ the loudest frequency each second and the edges, without a window
 (`--span 8000` for FM's wider audio). Neither touches a
 real sound card; never point them at the radio's USB codec.
 
+## Reactions
+
+Idea 10 of "Ideas before signatures" (Jeff's, 2026-10-25; built
+2026-10-26): an emoji or a ham word on a station's line, on D2G and in
+a ragchew. On the air it is the Reaction record (`0x14`, 21 bytes with
+five-character calls) naming one entry of a 20-entry palette:
+👍 ❤️ 😂 😮 😢 🎉 👏 🙏 👋 ☕ 📻 ⚡, then 73, 88, RR, QSL, TU, FB,
+HI HI and QRZ? (docs/PROTOCOL.md, "Reactions").
+
+- **Engines.** `protocol/Reactions.h` holds the palette, a line's
+  reactions (one per station, the latest kept) and the chips they make.
+  `BroadcastChat::react` holds ours up to 30 s to ride in our next
+  burst, then sends it alone, lone ones at most once a minute;
+  `unreact` takes back one not yet with the host. A reaction from the
+  station an @message went to counts as its Ack, and one heard before
+  its line waits for it. `SessionChat::react` writes it into the stream
+  at once, or when Pause sending lifts, and only to a far end whose
+  Hello takes them.
+- **On screen.** Chips under the line, "👋 G4XYZ, KC2G   73 W1AW",
+  ham words in bold, ours in bold and in italics while it waits to go.
+  Right-click a line for **React**, the palette with ours ticked (and
+  **Take back mine** while it waits); click a chip to add ours, or ours
+  still waiting to take it back. Not on our own lines, nor in a session
+  that has ended. A reaction to one of our lines shows in the status bar
+  for 30 s ("W1AW reacted 👍 (thumbs up) to your line: ...") and counts
+  once in the tab's unread; it makes no desktop notification.
+- **Kept.** The broadcast log keeps `X` and `Y` lines and the session
+  log the same, so reactions come back with their lines after a
+  restart; a past broadcast line still takes one.
+- **Bench.** The `ragtime_fake_air` bots react to about one line in two,
+  on D2G and in a ragchew.
+- Not built: a watch-list bell for reactions (the doc's "reactions" tick).
+
 ## Waiting on Andrew (via Jeff)
 
 - Read from Data2G's source on 2026-10-25 (`docs/DATA2G.md`): `BW1200`

@@ -11,6 +11,9 @@
 //   S <id> <state> <mode>                  a message of ours settled
 //   F <id> <atMs> <ours> <from> <name>     a broadcast file's card
 //   R <id> <outcome>                       how that file ended ("Saved")
+//   X <from> <seq> <time> <call> <code>    call reacted to a line (its
+//                                          sender, number and record time)
+//   Y <from> <seq> <time> <code>           our reaction to a line went
 //   E <ms>                                 Ragtime closed
 //
 // Times are Unix ms; time is the record's, in seconds. <id> is the row's
@@ -19,7 +22,9 @@
 // N, C and A (Heard, Queued, Sending, Held, Sent, Not sent, Cancelled,
 // Acknowledged). <before>, when there and not 0, is the row of the same
 // run the message goes above (a line repaired, put in its place among
-// its sender's). Lines of kinds this reader doesn't know are skipped.
+// its sender's). A reaction names its line as the record does, so it
+// finds a line of an earlier run too; one whose line was cut away is
+// skipped. Lines of kinds this reader doesn't know are skipped.
 //
 // Not thread safe. Disk errors are ignored: the chat goes on without its
 // log rather than stop.
@@ -61,6 +66,9 @@ public:
     // before: the id of the row it goes above, 0 for the end.
     void added(const Message& message, uint64_t before = 0);
     void settled(const Message& message);
+    // A station's reaction to a line, and ours once it has gone.
+    void reacted(const Message& line, const std::string& call, uint8_t code);
+    void weReacted(const Message& line, uint8_t code);
     void fileEnded(const Message& card, const std::string& outcome);
     void ended(uint64_t nowMs);
 

@@ -10,6 +10,8 @@
 //   M <id> <atMs> <time> <seq> <ours> <state> <from> <text>
 //   S <id> <state>                        a message of ours settled
 //   F <atMs> <ours> <from> <text>         a file that went, as one line
+//   X <id> <call> <code>                  call reacted to a message
+//   Y <id> <code>                         we reacted to a message
 //   E <ms>                                the session ended
 //
 // Times are Unix ms; time is the record's, in seconds. <id> is the
@@ -61,6 +63,9 @@ public:
     void began(const std::string& peer, uint64_t nowMs);
     void added(const std::string& peer, const Message& message);
     void settled(const std::string& peer, const Message& message);
+    // A reaction to a message of this session: the far end's, or ours.
+    void reacted(const std::string& peer, const Message& message, const std::string& call, uint8_t code);
+    void weReacted(const std::string& peer, const Message& message, uint8_t code);
     void file(const std::string& peer, const Message& note);
     void ended(const std::string& peer, uint64_t nowMs);
 

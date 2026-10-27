@@ -153,6 +153,17 @@ std::vector<Message> parseSessionLog(const std::string& text, size_t max)
             auto it = ids.find(id);
             if (it != ids.end()) rows[it->second].state = state;
         }
+        else if ((kind == "X" && f.size() >= 4) || (kind == "Y" && f.size() >= 3))
+        {
+            // A reaction to a message of the same session.
+            uint64_t id = 0, code = 0;
+            bool ours = kind == "Y";
+            if (!number(f[1], id) || !number(f[ours ? 2 : 3], code) || code == 0 || code > 255) continue;
+            auto it = ids.find(id);
+            if (it == ids.end()) continue;
+            if (ours) rows[it->second].myReaction = (uint8_t)code;
+            else protocol::setReaction(rows[it->second].reactions, unescape(f[2]), (uint8_t)code);
+        }
         else if (kind == "F" && f.size() >= 5)
         {
             uint64_t atMs = 0;
@@ -267,6 +278,16 @@ void SessionLog::added(const std::string& peer, const Message& m)
 void SessionLog::settled(const std::string& peer, const Message& m)
 {
     append(peer, join({"S", std::to_string(m.id), std::string(1, stateLetter(m.state))}));
+}
+
+void SessionLog::reacted(const std::string& peer, const Message& m, const std::string& call, uint8_t code)
+{
+    append(peer, join({"X", std::to_string(m.id), escape(call), std::to_string(code)}));
+}
+
+void SessionLog::weReacted(const std::string& peer, const Message& m, uint8_t code)
+{
+    append(peer, join({"Y", std::to_string(m.id), std::to_string(code)}));
 }
 
 void SessionLog::file(const std::string& peer, const Message& note)

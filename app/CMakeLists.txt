@@ -42,6 +42,7 @@ add_executable(ragtime WIN32
     src/RigControl.cpp
     src/Html.cpp
     src/PhraseHighlight.cpp
+    src/ReactionChips.cpp
     src/SealBadge.cpp
     src/Prefs.cpp
     src/QuitSignal.cpp

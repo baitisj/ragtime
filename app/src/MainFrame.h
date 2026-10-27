@@ -77,6 +77,9 @@ private:
     void showThemeButton();     // its icon and tooltip, for the theme showing
     void showStatus();
     void refreshMessages();
+    // A station reacted to one of our lines: a line in the status bar for a
+    // while, and one more unread on the tab out of sight.
+    void noteReaction(const std::string& from, uint8_t code, const std::string& line);
     void refreshStations();
     void stationPicked(const std::string& call);
     void stationMenu(const std::string& call);
@@ -253,6 +256,9 @@ private:
     uint64_t seenMessage_ = 0;  // the newest message id the operator has seen
     size_t unread_ = 0;
     size_t sessionUnread_ = 0;  // heard in the session while its tab is out of sight
+    size_t reactionsUnread_ = 0;    // reactions to our lines heard while the Broadcast tab is out of sight
+    std::string reactionNote_;      // the latest, shown over the transfers line until reactionNoteUntilMs_
+    uint64_t reactionNoteUntilMs_ = 0;
     std::string pendingCall_;   // to call once the session we're leaving has ended
     uint64_t stationsVersion_ = 0;
     std::string modeUsed_;      // the mode the host last sent in

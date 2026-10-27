@@ -106,6 +106,13 @@ bool encodeBody(const Body& body, std::vector<uint8_t>& out, bool canonical)
                 out.push_back(repairSnrCode(b.snr));
                 return true;
             }
+            else if constexpr (std::is_same_v<T, Reaction>)
+            {
+                if (!putCallsign(out, b.to) || b.item > MAX_SEQ || b.code == 0) return false;
+                putNumber(out, b.item, 3);
+                out.push_back(b.code);
+                return true;
+            }
             else if constexpr (std::is_same_v<T, FileOffer>)
             {
                 putNumber(out, b.size, 4);
@@ -291,6 +298,12 @@ DecodeResult decodeBody(uint8_t type, Reader& in, Record& out)
             b.snr = repairSnr(code);
             return decoded(out, std::move(b));
         }
+        case RecordType::Reaction:
+        {
+            Reaction b;
+            if (!in.callsign(b.to) || !in.u24(b.item) || !in.u8(b.code) || b.code == 0) return DecodeResult::Malformed;
+            return decoded(out, std::move(b));
+        }
         case RecordType::FileOffer:
         {
             FileOffer b;
@@ -450,6 +463,7 @@ uint8_t Record::type() const
             else if constexpr (std::is_same_v<T, Ack>) return (uint8_t)RecordType::Ack;
             else if constexpr (std::is_same_v<T, Ping>) return (uint8_t)RecordType::Ping;
             else if constexpr (std::is_same_v<T, Pong>) return (uint8_t)RecordType::Pong;
+            else if constexpr (std::is_same_v<T, Reaction>) return (uint8_t)RecordType::Reaction;
             else if constexpr (std::is_same_v<T, FileOffer>) return (uint8_t)RecordType::FileOffer;
             else if constexpr (std::is_same_v<T, FileAnswer>) return (uint8_t)RecordType::FileAnswer;
             else if constexpr (std::is_same_v<T, FileData>) return (uint8_t)RecordType::FileData;

@@ -61,6 +61,9 @@ void fillFileMenu(wxMenu& menu, const FileCard& card, int firstId, std::function
 // −3.5 dB" or "No pong from W1AW in 45 s"; a station's ping to us reads
 // "W1AW pinged us; we hear it at −3.5 dB. Pong sent".
 //
+// A line's reactions show as chips under it (ReactionChips.h); its
+// right-click menu has React, and clicking a chip adds ours.
+//
 // Each message row has a badge on its left (SealBadge.h), and hovering it
 // says what it means. Ours show their state (Queued, Sending, Sent,
 // Acknowledged, Not sent...) until a seal says more: whether its seal has
@@ -77,6 +80,9 @@ public:
     void onGear(std::function<void()> fn) { onGear_ = std::move(fn); }
     void onCancel(std::function<void(uint64_t id)> fn) { onCancel_ = std::move(fn); }
     void onResend(std::function<void(uint64_t id)> fn) { onResend_ = std::move(fn); }
+    // A reaction picked on a line's menu or chip: its palette code, or 0 to
+    // take back ours still waiting to go.
+    void onReact(std::function<void(uint64_t id, uint8_t code)> fn) { onReact_ = std::move(fn); }
     // A ping row's Ping again (and Ping back, on a station's ping to us):
     // ping goes, and whyNot says why it can't ("in a session"), or "".
     void onPing(std::function<void(const std::string& call)> ping,
@@ -144,6 +150,7 @@ private:
     std::function<bool(const std::string&)> onSend_;
     std::function<void()> onGear_;
     std::function<void(uint64_t)> onCancel_, onResend_;
+    std::function<void(uint64_t, uint8_t)> onReact_;
     std::function<void(const std::string&)> onPing_;
     std::function<std::string(const std::string&)> whyNoPing_;
     std::function<void()> onBroadcastFile_;

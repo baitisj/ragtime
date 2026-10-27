@@ -339,6 +339,74 @@ void SessionChat::writeQueued(uint64_t nowMs)
     }
     if (!queued_.empty()) changed();
     queued_.clear();
+    writeReactions(nowMs);
+}
+
+bool SessionChat::canReact(const Message& m) const
+{
+    return phase_ == Phase::Connected && m.kind == Message::Kind::Text && !m.ours && !m.past && m.seq != 0
+           && !settings_.callsign.empty() && reader_.greeted()
+           && (reader_.hello().takes & protocol::TAKES_REACTIONS) != 0;
+}
+
+bool SessionChat::react(uint64_t id, uint8_t code, uint64_t nowMs)
+{
+    for (Message& m : messages_)
+    {
+        if (m.id != id) continue;
+        if (!canReact(m) || protocol::reactionEntry(code) == nullptr) return false;
+        if (code == (m.myWaiting != 0 ? m.myWaiting : m.myReaction)) return false;
+        m.myWaiting = code;
+        if (std::find(reactionsHeld_.begin(), reactionsHeld_.end(), id) == reactionsHeld_.end())
+            reactionsHeld_.push_back(id);
+        if (!paused_ && cutting_ == Cutting::None) writeReactions(nowMs);
+        changed();
+        return true;
+    }
+    return false;
+}
+
+void SessionChat::writeReactions(uint64_t nowMs)
+{
+    if (!dataUp_ || phase_ != Phase::Connected) return;
+    for (uint64_t id : reactionsHeld_)
+    {
+        for (Message& m : messages_)
+        {
+            if (m.id != id || m.myWaiting == 0) continue;
+            protocol::Reaction r;
+            r.to = m.from;
+            r.item = m.seq;
+            r.code = m.myWaiting;
+            write(protocol::encodeRecord(numbering_.record(r, seconds(nowMs))), nowMs);
+            m.myReaction = m.myWaiting;
+            m.myWaiting = 0;
+            if (log_ != nullptr) log_->weReacted(peer_, m, m.myReaction);
+            changed();
+        }
+    }
+    reactionsHeld_.clear();
+}
+
+void SessionChat::onReaction(const protocol::Record& record, const protocol::Reaction& reaction)
+{
+    for (Message& m : messages_)
+    {
+        if (m.past || m.kind != Message::Kind::Text || m.from != reaction.to || m.seq != reaction.item) continue;
+        if (!protocol::setReaction(m.reactions, record.header.callsign, reaction.code)) return;
+        if (log_ != nullptr) log_->reacted(peer_, m, record.header.callsign, reaction.code);
+        if (m.ours)
+        {
+            SessionChat::Event e;
+            e.type = SessionChat::Event::Type::Reacted;
+            e.peer = peer_;
+            e.id = m.id;
+            e.code = reaction.code;
+            emit(e);
+        }
+        changed();
+        return;
+    }
 }
 
 std::vector<uint8_t> SessionChat::takeDataOutput(uint64_t nowMs)
@@ -637,6 +705,10 @@ void SessionChat::onRecord(const protocol::Record& record, uint64_t nowMs)
             changed();
         }
     }
+    else if (const protocol::Reaction* reaction = record.as<protocol::Reaction>())
+    {
+        onReaction(record, *reaction);
+    }
     else if (record.as<protocol::Ack>() == nullptr && traffic_ != nullptr)
     {
         traffic_->onRecord(peer_, record, nowMs);
@@ -828,6 +900,7 @@ void SessionChat::begin(const std::string& peer, bool incoming, int bandwidth, u
     account_.reset();
     out_.clear();
     queued_.clear();
+    reactionsHeld_.clear();
     endCut();
     cuts_ = 0;
     cutBytes_ = 0;
@@ -867,8 +940,11 @@ void SessionChat::finish(Ending ending, uint64_t nowMs)
     for (Message& m : messages_)
     {
         if (m.ours && (m.state == State::Sent || m.state == State::Queued)) m.state = State::NotDelivered;
+        // A reaction still held never went.
+        m.myWaiting = 0;
     }
     queued_.clear();
+    reactionsHeld_.clear();
     if (wasUp && traffic_ != nullptr) traffic_->ended(peer_, nowMs);
     // The log's end mark waits out the afterglow, for the last words in it.
     if (wasUp && log_ != nullptr) logEndMs_ = std::max<uint64_t>(nowMs, 1);

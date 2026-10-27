@@ -47,6 +47,8 @@ public:
     void onCallAgain(std::function<void()> fn) { onCallAgain_ = std::move(fn); }
     // Re-send on a message's right-click menu, with the message's id.
     void onResend(std::function<void(uint64_t id)> fn) { onResend_ = std::move(fn); }
+    // A reaction picked on a message's menu or chip, with its palette code.
+    void onReact(std::function<void(uint64_t id, uint8_t code)> fn) { onReact_ = std::move(fn); }
     // Send file... pressed.
     void onSendFile(std::function<void()> fn) { onSendFile_ = std::move(fn); }
     // Files dropped on the tab.
@@ -116,6 +118,7 @@ private:
     std::function<void(const std::vector<std::string>&)> onDropFiles_;
     std::function<void(const std::string&, uint64_t)> onFileAction_;
     std::function<void(uint64_t)> onResend_;
+    std::function<void(uint64_t, uint8_t)> onReact_;
 };
 
 #endif

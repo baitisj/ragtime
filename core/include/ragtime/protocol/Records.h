@@ -42,6 +42,7 @@ enum class RecordType : uint8_t
     Ack = 0x11,
     Ping = 0x12,
     Pong = 0x13,
+    Reaction = 0x14,
     FileOffer = 0x20,
     FileAnswer = 0x21,
     FileData = 0x22,
@@ -79,7 +80,8 @@ enum Takes : uint8_t
     TAKES_BROADCAST_FILES = 0x08,   // FileAnnounce, FilePiece
     TAKES_SEALS = 0x10,             // Seal, RepairRequest, RepairRefused, ItemParity
     TAKES_PINGS = 0x20,             // Ping and Pong (Ragtime 0.1.2 on)
-    TAKES_ALL_V0 = 0x3F,
+    TAKES_REACTIONS = 0x40,         // Reaction (Ragtime 0.1.2 on)
+    TAKES_ALL_V0 = 0x7F,
 };
 
 struct Hello
@@ -139,6 +141,16 @@ struct Pong
     std::string to;             // who sent the Ping
     uint16_t number = 0;        // the Ping's
     std::optional<double> snr;  // as repairSnrCode codes it, in a byte of its own; none without a figure
+};
+
+// A station's reaction to a line: an emoji or a ham word from the
+// published palette (protocol/Reactions.h), never free text, so it stays
+// one byte (docs/PROTOCOL.md, "Reactions").
+struct Reaction
+{
+    std::string to;             // who sent the line
+    uint32_t item = 0;          // its sequence number
+    uint8_t code = 0;           // its palette entry; 0 is never sent
 };
 
 constexpr size_t MAX_FILE_NAME = 200;
@@ -286,7 +298,7 @@ struct Unknown
 
 using Body = std::variant<Unknown, Hello, Status, Text, Ack, FileOffer, FileAnswer, FileData, FileSaved,
                           FileCancel, FileAnnounce, FilePiece, Seal, RepairRequest, RepairRefused, ItemParity,
-                          Ping, Pong>;
+                          Ping, Pong, Reaction>;
 
 struct Record
 {
