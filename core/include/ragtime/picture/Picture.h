@@ -129,16 +129,22 @@ double sessionBytesPerSecond(const link::ModeInfo& mode, double measuredBytesPer
 // or the rate isn't known.
 uint64_t sessionBytesFor(double seconds, double bytesPerSecond);
 
-// How a picture arrives, burst by burst, for the dialog's preview to play:
-// after each step, bytes of it have come, seconds after the first burst
-// began. The last step is the whole picture. At most MAX_STEPS, bursts
-// taken together when there are more.
+// How a picture arrives, for the dialog's preview to play: after each
+// step, bytes of it have come, seconds after the first burst began. A
+// step at a burst's end has its number (from 1), what the far end then
+// holds; between them, steps of a few percent (at least MIN_STEP_BYTES,
+// about PREVIEW_STEPS in all) show the picture sharpening, which the far
+// end sees at the burst's end. The last step is the whole picture. At
+// most MAX_STEPS, bursts taken together when there are more.
 struct ArrivalStep
 {
     uint64_t bytes = 0;
     double seconds = 0.0;
+    int burst = 0;
 };
 constexpr size_t MAX_STEPS = 48;
+constexpr size_t PREVIEW_STEPS = 32;
+constexpr uint64_t MIN_STEP_BYTES = 16;
 // On D2G: its first pass as BroadcastFiles sends it (estimateFile's
 // bursts, and its time with the gaps between them).
 std::vector<ArrivalStep> broadcastArrival(uint64_t size, const std::string& name, const std::string& callsign,
@@ -146,6 +152,11 @@ std::vector<ArrivalStep> broadcastArrival(uint64_t size, const std::string& name
 // In a session: the mode's longest burst of file bytes at a time, at
 // sessionBytesPerSecond.
 std::vector<ArrivalStep> sessionArrival(uint64_t size, const link::ModeInfo& mode);
+
+// How much of a picture has come, for under the dialog's preview (Jeff,
+// 2026-10-29: "1k/40k"): "120 / 293 bytes" while it is under 1 KB, else
+// in KB of 1024, one decimal under 10, "0.4k / 3.9k", "12k / 40k".
+std::string comeText(uint64_t done, uint64_t whole);
 
 // A file name for the picture made from the one picked: its stem, made
 // plain (letters, digits, '-' and '_'), cut to 40 bytes, and ".j2k".

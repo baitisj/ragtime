@@ -124,6 +124,26 @@ void handlers(opj_codec_t* codec, std::string* error)
     opj_set_error_handler(codec, keepError, error);
 }
 
+// A first part of a codestream cut inside a code-block's segment: OpenJPEG
+// says "segment too long (N) with max (M) ..." and drops that code-block,
+// all its layers, and M is how many of the segment's bytes had come. Cut
+// in the lowest resolution's, that leaves a flat grey picture.
+struct Cut
+{
+    bool seen = false;
+    size_t had = 0;
+};
+void noteCut(const char* message, void* user)
+{
+    const char* at = std::strstr(message, "segment too long");
+    if (at == nullptr) return;
+    Cut& cut = *static_cast<Cut*>(user);
+    cut.seen = true;
+    cut.had = 0;
+    if (const char* max = std::strstr(at, "max ("))
+        cut.had = (size_t)std::strtoul(max + 5, nullptr, 10);
+}
+
 struct CodecGone
 {
     void operator()(opj_codec_t* c) const { opj_destroy_codec(c); }
@@ -269,11 +289,31 @@ struct Component
     }
 };
 
-bool decodeJ2k(const uint8_t* bytes, size_t length, bool jp2, picture::Image& out, std::string& error, int maxSide)
+// Where the first tile-part's packets begin, past its SOD marker, in a
+// codestream's first length bytes; 0 if they haven't come yet.
+size_t firstPacketAt(const uint8_t* bytes, size_t length)
+{
+    // SOC, then marker segments (each a marker and its length) up to SOT.
+    size_t at = 2;
+    while (at + 4 <= length && bytes[at] == 0xFF)
+    {
+        const uint8_t marker = bytes[at + 1];
+        const size_t segment = ((size_t)bytes[at + 2] << 8) | bytes[at + 3];
+        if (marker == 0x93) return at + 2 <= length ? at + 2 : 0;   // SOD has no length
+        at += 2 + segment;
+    }
+    // SOD at the very end, with no room for a length after it.
+    if (at + 2 <= length && bytes[at] == 0xFF && bytes[at + 1] == 0x93) return at + 2;
+    return 0;
+}
+
+bool decodeJ2k(const uint8_t* bytes, size_t length, bool jp2, picture::Image& out, std::string& error, int maxSide,
+               Cut* cut = nullptr)
 {
     CodecPtr codec(opj_create_decompress(jp2 ? OPJ_CODEC_JP2 : OPJ_CODEC_J2K));
     if (!codec) return false;
     handlers(codec.get(), &error);
+    if (cut != nullptr) opj_set_warning_handler(codec.get(), noteCut, cut);
     opj_dparameters_t p;
     opj_set_default_decoder_parameters(&p);
     if (!opj_setup_decoder(codec.get(), &p)) return false;
@@ -310,6 +350,18 @@ bool decodeJ2k(const uint8_t* bytes, size_t length, bool jp2, picture::Image& ou
         if (j2k->comps[k].data == nullptr || j2k->comps[k].w == 0 || j2k->comps[k].h == 0)
         {
             if (error.empty()) error = "no picture in it yet";
+            return false;
+        }
+    }
+    // Only the headers so far: every coefficient nought, so every sample
+    // the same flat grey, is nothing to show yet.
+    {
+        const opj_image_comp_t& first = j2k->comps[0];
+        const OPJ_INT32* data = first.data;
+        const size_t samples = (size_t)first.w * first.h;
+        if (std::all_of(data, data + samples, [data](OPJ_INT32 v) { return v == data[0]; }))
+        {
+            error = "no picture in it yet";
             return false;
         }
     }
@@ -584,13 +636,37 @@ bool encode(const picture::Image& image, uint64_t maxBytes, Coded& out, std::str
 
 bool decode(const uint8_t* bytes, size_t length, picture::Image& out, std::string& error, int maxSide)
 {
+    constexpr int MAX_CUT_BACKS = 64;
     error.clear();
     if (!picture::isCodestream(bytes, length))
     {
         error = "it isn't a JPEG 2000 codestream";
         return false;
     }
-    return decodeJ2k(bytes, length, false, out, error, maxSide);
+    // What has come may end inside a code-block's segment: cut back to
+    // before that segment, and again, until a cut falls between them, so a
+    // first part shows softer, never grey (2026-10-29).
+    // Before any packet's bytes, OpenJPEG makes a picture of whatever its
+    // memory held.
+    size_t packets = firstPacketAt(bytes, length);
+    if (packets == 0 || length <= packets)
+    {
+        error = "no picture in it yet";
+        return false;
+    }
+    size_t at = length;
+    for (int tries = 0; tries < MAX_CUT_BACKS; tries++)
+    {
+        if (at <= packets) break;
+        Cut cut;
+        if (!decodeJ2k(bytes, at, false, out, error, maxSide, &cut)) return false;
+        if (!cut.seen) return true;
+        size_t back = cut.had + 1;
+        if (back >= at) break;
+        at -= back;
+    }
+    error = "no picture in it yet";
+    return false;
 }
 
 } // namespace image
