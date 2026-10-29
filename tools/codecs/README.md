@@ -189,6 +189,20 @@ Its first 1.5 kB are weights, so nothing shows before them:
 | All but the two finest (down to 120×160) | about 3,700 | 17.13 |
 | All but the three finest (down to 60×80) | about 2,000 | 14.21 |
 
+Cool-chic fitted for a progressive preview (`cc_encode_prog.py`, lop),
+in Ragtime's stream (`rcc/`), cut at the same byte counts as plain fits:
+
+| Fit | Whole | 2,000 B | 2,500 B | 3,000 B | 3,400 B |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Plain, λ 0.03 | 3,778 B, 24.17 dB | 16.0 | 17.1 | 18.8 | 20.9 |
+| Progressive, λ 0.03 | 3,307 B, 23.53 dB | 21.3 | 22.0 | 22.9 | |
+| Progressive, λ 0.022 | 4,063 B, 24.13 dB | 20.6 | 21.7 | 22.4 | 23.0 |
+
+At 4 kB the whole progressive picture needs about 7% more bytes for the
+same quality, and is 2 to 5 dB better for most of the way in. At 1.6 kB
+it costs nothing (λ 0.10: 1,548 B, 21.47 dB, against the plain fit's
+1,586 B, 21.38 dB). Both fits put nearly everything into one grid there.
+
 `results/` keeps the bitstreams: Ragtime's JPEG 2000 and JPEG XL at both
 budgets (`.j2k`, `.jxl`), the Cool-chic runs (`.cool`, decoded with
 `cc_decode.py`), and `cai.log`. CompressAI's strings weren't kept, but
