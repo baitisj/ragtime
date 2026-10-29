@@ -72,6 +72,8 @@ private:
     void nextStep();
     int stepMs() const;
     void showSpeed();
+    // The gear's label and list in red while the gear is too slow.
+    void showGearTooSlow(bool slow);
     // A blank the picture's size, for a step with nothing to show yet.
     wxImage blank() const;
     uint64_t budget(double seconds) const;
@@ -92,6 +94,7 @@ private:
     wxSpinCtrl* side_ = nullptr;
     wxSpinCtrl* seconds_ = nullptr;
     wxChoice* gears_ = nullptr;
+    wxStaticText* gearLabel_ = nullptr;
     wxStaticText* size_ = nullptr;
     wxStaticText* air_ = nullptr;
     wxStaticText* seal_ = nullptr;

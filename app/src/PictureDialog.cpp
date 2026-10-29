@@ -135,8 +135,8 @@ PictureDialog::PictureDialog(wxWindow* parent, const PictureTarget& target, cons
                                       "picture: the first is from how we have heard ")
                                  + utf8(target_.peer)
                                  + " over the last few minutes, the path back being much the same");
-    grid->Add(new wxStaticText(this, wxID_ANY, target_.broadcast ? "Gear:" : "Plan for:"), 0,
-              wxALIGN_CENTER_VERTICAL);
+    gearLabel_ = new wxStaticText(this, wxID_ANY, target_.broadcast ? "Gear:" : "Plan for:");
+    grid->Add(gearLabel_, 0, wxALIGN_CENTER_VERTICAL);
     grid->Add(gears_, 0, wxALIGN_CENTER_VERTICAL);
     sizer->Add(grid, 0, wxLEFT | wxRIGHT | wxTOP, 12);
 
@@ -272,6 +272,9 @@ void PictureDialog::remake()
     double seconds = seconds_->GetValue();
     uint64_t most = budget(seconds);
     wxString gear = gear_.words.empty() ? wxString("this gear") : utf8(gear_.words);
+    // A gear too slow for the time is red, light on a dark theme and dark
+    // on a light one (Jeff, 2026-10-29).
+    showGearTooSlow(gear_.mode.valid() && most == 0);
     if (!gear_.mode.valid())
     {
         air_->SetLabel("data2g-host hasn't listed its gears yet: connect, then try again.");
@@ -350,6 +353,15 @@ void PictureDialog::remake()
     Layout();
     wxSize room = GetSizer()->GetMinSize();
     if (room.y > GetClientSize().y) SetClientSize(GetClientSize().x, room.y);
+}
+
+void PictureDialog::showGearTooSlow(bool slow)
+{
+    for (wxWindow* w : {static_cast<wxWindow*>(gearLabel_), static_cast<wxWindow*>(gears_)})
+    {
+        w->SetForegroundColour(slow ? badText() : wxNullColour);
+        w->Refresh();
+    }
 }
 
 wxImage PictureDialog::blank() const
