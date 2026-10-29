@@ -121,7 +121,7 @@ void checkSoap()
         in >> kind;
         Tensor t;
         t.name = kind + std::to_string(m.tensors.size());
-        t.module = kind == "latent" ? Module::Latent : Module::Synthesis;
+        t.module = kind == "latent" ? TensorKind::Latent : TensorKind::Synthesis;
         int d;
         t.size = 1;
         while (in >> d)

@@ -7,8 +7,10 @@
 //       size), params.bin, target.bin, grads.bin and loss.txt
 //   ragtime_coolchic_fit eval ARCH DIR
 //       reads DIR/params.bin and target.bin back and prints the test loss
+#include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
@@ -20,6 +22,9 @@
 #include "FitPool.h"
 #include "FitQuant.h"
 #include "FitTrain.h"
+#include "FitWrite.h"
+#include "ragtime/image/CoolChic.h"
+#include "ragtime/picture/Picture.h"
 
 using namespace ragtime::image::coolchic;
 
@@ -95,6 +100,76 @@ void quantiseAndReport(const Model& m, const Target& target, Net& net, double la
                     q.quant(n).biasShift, q.quant(n).weightOrder, q.quant(n).biasOrder);
     writeFloats(dir + "/quantised.bin", params);
     writePpm(dir + "/quantised.ppm", net.picture(), target.height, target.width);
+
+    // The stream, and the decoder's picture of it.
+    std::vector<uint8_t> stream;
+    std::string error;
+    size_t clamped = 0;
+    if (!writeStream(m, params, net, q, stream, error, &clamped))
+    {
+        std::printf("can't write the stream: %s\n", error.c_str());
+        return;
+    }
+    std::ofstream(dir + "/stream.rcc", std::ios::binary)
+        .write(reinterpret_cast<const char*>(stream.data()), (std::streamsize)stream.size());
+    ragtime::picture::Image decoded;
+    if (!ragtime::image::coolchicDecode(stream.data(), stream.size(), decoded, error))
+    {
+        std::printf("%7.1f s  stream %zu B, clamped %zu, won't decode: %s\n", seconds(),
+                    stream.size(), clamped, error.c_str());
+        return;
+    }
+    const size_t plane = (size_t)target.height * (size_t)target.width;
+    double err = 0.0, diff = 0.0;
+    for (size_t i = 0; i < plane; i++)
+        for (int c = 0; c < 3; c++)
+        {
+            const double d = decoded.pixels[i * 3 + (size_t)c] / 255.0;
+            const double t = target.rgb[(size_t)c * plane + i];
+            err += (d - t) * (d - t);
+            diff = std::max(diff, std::fabs(d - (double)net.picture()[(size_t)c * plane + i]));
+        }
+    std::printf("%7.1f s  stream %zu B (%.4f bpp), clamped %zu: decoded psnr %.3f dB, "
+                "worst difference from the fit's %.0f/255\n",
+                seconds(), stream.size(), 8.0 * (double)stream.size() / (double)plane, clamped,
+                10.0 * std::log10(3.0 * (double)plane / err), diff * 255.0);
+
+    // The picture from a stream cut at the end of each grid, coarsest first.
+    ragtime::image::coolchic::Decoder dec;
+    dec.feed(stream.data(), stream.size());
+    size_t at = dec.latentStart();
+    std::vector<size_t> lengths;
+    for (size_t k = 0; k < dec.gridCount(); k++)
+    {
+        size_t n = 0;
+        int shift = 0;
+        uint8_t b = 0;
+        do
+        {
+            b = stream[at++];
+            n |= (size_t)(b & 0x7F) << shift;
+            shift += 7;
+        } while (b & 0x80);
+        lengths.push_back(n);
+    }
+    size_t end = at;
+    for (size_t k = 0; k < lengths.size(); k++)
+    {
+        end += lengths[k];
+        ragtime::picture::Image cut;
+        if (!ragtime::image::coolchicDecode(stream.data(), end, cut, error))
+            continue;
+        double e = 0.0;
+        for (size_t i = 0; i < plane; i++)
+            for (int c = 0; c < 3; c++)
+            {
+                const double d = cut.pixels[i * 3 + (size_t)c] / 255.0 -
+                                 target.rgb[(size_t)c * plane + i];
+                e += d * d;
+            }
+        std::printf("  cut after grid %zu (%zu B): psnr %.3f dB\n", lengths.size() - 1 - k, end,
+                    10.0 * std::log10(3.0 * (double)plane / e));
+    }
 }
 
 int usage()
@@ -134,7 +209,7 @@ int main(int argc, char** argv)
         for (const Tensor& t : m.tensors)
             for (size_t i = 0; i < t.size; i++)
                 params[t.offset + i] +=
-                    (t.module == Module::Latent ? 0.1f : 0.05f) * rng.normal();
+                    (t.module == TensorKind::Latent ? 0.1f : 0.05f) * rng.normal();
         params[m.tensors[(size_t)m.armLayers.back().bias].offset + 1] += 4.0f;
         Target target;
         target.height = h;

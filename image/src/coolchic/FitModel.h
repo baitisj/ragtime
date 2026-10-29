@@ -66,7 +66,7 @@ bool archByName(const std::string& name, Arch& out);
 
 // One latent grid, in Cool-chic's order: finest first, and at each level
 // the latent grid before the hyperlatent grid of the same size.
-struct Grid
+struct FitGrid
 {
     int level = 0;          // 1/2^level of the picture
     int h = 0;
@@ -77,7 +77,7 @@ struct Grid
 };
 
 // Where a tensor sits in the flat parameter array.
-enum class Module
+enum class TensorKind
 {
     Latent,
     Arm,
@@ -89,7 +89,7 @@ enum class Module
 struct Tensor
 {
     std::string name;       // PyTorch's state-dict name, for comparisons
-    Module module = Module::Latent;
+    TensorKind module = TensorKind::Latent;
     bool bias = false;
     std::vector<int> shape;
     size_t offset = 0;
@@ -122,7 +122,7 @@ struct Model
     int height = 0;
     int width = 0;
     int gain = 16;          // encoder gain on the latents before quantisation
-    std::vector<Grid> grids;
+    std::vector<FitGrid> grids;
     std::vector<int> synGrid;   // synthesis grid i (0 finest) -> index in grids
 
     std::vector<Tensor> tensors;

@@ -102,7 +102,7 @@ int gainForLambda(double lambda)
 size_t Model::latentCount() const
 {
     size_t n = 0;
-    for (const Grid& g : grids)
+    for (const FitGrid& g : grids)
         n += (size_t)g.h * (size_t)g.w;
     return n;
 }
@@ -147,7 +147,7 @@ bool buildModel(const Arch& arch, int height, int width, Model& out, std::string
     }
     for (int i = lo; i <= hi; i++)
     {
-        Grid g;
+        FitGrid g;
         g.level = i;
         g.h = ceilShift(height, i);
         g.w = ceilShift(width, i);
@@ -170,7 +170,7 @@ bool buildModel(const Arch& arch, int height, int width, Model& out, std::string
     const int n = (int)m.grids.size();
     for (int i = 0; i < n; i++)
     {
-        Grid& g = m.grids[(size_t)i];
+        FitGrid& g = m.grids[(size_t)i];
         int ratio = (int)std::ceil(std::log2((double)height / (double)g.h));
         if (arch.ifceOut > 0 && ratio >= arch.ifceLo && ratio <= arch.ifceHi)
             g.ifceIn = std::max(n - 1 - i, 1);
@@ -188,7 +188,7 @@ bool buildModel(const Arch& arch, int height, int width, Model& out, std::string
                 m.ctxDx.push_back(idx % 9 - 4);
             }
 
-    auto add = [&](const std::string& name, Module module, bool bias,
+    auto add = [&](const std::string& name, TensorKind module, bool bias,
                    std::vector<int> shape, bool trained = true) {
         Tensor t;
         t.name = name;
@@ -206,7 +206,7 @@ bool buildModel(const Arch& arch, int height, int width, Model& out, std::string
     };
 
     for (int i = 0; i < n; i++)
-        m.latent.push_back(add("latent_grids." + std::to_string(i), Module::Latent, false,
+        m.latent.push_back(add("latent_grids." + std::to_string(i), TensorKind::Latent, false,
                                {1, 1, m.grids[(size_t)i].h, m.grids[(size_t)i].w}));
 
     // The ARM: hidden residual layers dim x dim, then dim -> 2, and the
@@ -220,8 +220,8 @@ bool buildModel(const Arch& arch, int height, int width, Model& out, std::string
         l.out = dim;
         l.residual = true;
         std::string p = "arm.mlp." + std::to_string(layer);
-        l.weight = add(p + ".weight", Module::Arm, false, {dim, dim});
-        l.bias = add(p + ".bias", Module::Arm, true, {dim});
+        l.weight = add(p + ".weight", TensorKind::Arm, false, {dim, dim});
+        l.bias = add(p + ".bias", TensorKind::Arm, true, {dim});
         m.armLayers.push_back(l);
     }
     {
@@ -229,16 +229,16 @@ bool buildModel(const Arch& arch, int height, int width, Model& out, std::string
         l.in = dim;
         l.out = 2;
         std::string p = "arm.mlp." + std::to_string(layer);
-        l.weight = add(p + ".weight", Module::Arm, false, {2, dim});
-        l.bias = add(p + ".bias", Module::Arm, true, {2});
+        l.weight = add(p + ".weight", TensorKind::Arm, false, {2, dim});
+        l.bias = add(p + ".bias", TensorKind::Arm, true, {2});
         m.armLayers.push_back(l);
     }
     if (arch.armStabiliser)
     {
         m.armStabiliser.in = dim;
         m.armStabiliser.out = 2;
-        m.armStabiliser.weight = add("arm.stabiliser_branch.weight", Module::Arm, false, {2, dim});
-        m.armStabiliser.bias = add("arm.stabiliser_branch.bias", Module::Arm, true, {2});
+        m.armStabiliser.weight = add("arm.stabiliser_branch.weight", TensorKind::Arm, false, {2, dim});
+        m.armStabiliser.bias = add("arm.stabiliser_branch.bias", TensorKind::Arm, true, {2});
     }
 
     // Upsampling: one transposed and one pre-concatenation kernel per step.
@@ -248,16 +248,16 @@ bool buildModel(const Arch& arch, int height, int width, Model& out, std::string
     for (int i = 0; i < arch.latentHi; i++)
     {
         std::string p = "upsampling.conv_transpose2ds." + std::to_string(i);
-        m.upsBias.push_back(add(p + ".bias", Module::Upsampling, true, {1}, false));
+        m.upsBias.push_back(add(p + ".bias", TensorKind::Upsampling, true, {1}, false));
         m.upsWeight.push_back(
-            add(p + ".parametrizations.weight.original", Module::Upsampling, false, {halfUps}));
+            add(p + ".parametrizations.weight.original", TensorKind::Upsampling, false, {halfUps}));
     }
     for (int i = 0; i < arch.latentHi; i++)
     {
         std::string p = "upsampling.conv2ds." + std::to_string(i);
-        m.preBias.push_back(add(p + ".bias", Module::Upsampling, true, {1}, false));
+        m.preBias.push_back(add(p + ".bias", TensorKind::Upsampling, true, {1}, false));
         m.preWeight.push_back(
-            add(p + ".parametrizations.weight.original", Module::Upsampling, false, {halfPre}));
+            add(p + ".parametrizations.weight.original", TensorKind::Upsampling, false, {halfPre}));
     }
 
     // Synthesis: the main branch, then the stabiliser (1x1) beside it. The
@@ -281,8 +281,8 @@ bool buildModel(const Arch& arch, int height, int width, Model& out, std::string
         c.layer = s;
         c.in = in;
         std::string p = "synthesis.main_branch." + std::to_string(2 * i);
-        c.weight = add(p + ".weight", Module::Synthesis, false, {s.out, in, s.k, s.k});
-        c.bias = add(p + ".bias", Module::Synthesis, true, {s.out});
+        c.weight = add(p + ".weight", TensorKind::Synthesis, false, {s.out, in, s.k, s.k});
+        c.bias = add(p + ".bias", TensorKind::Synthesis, true, {s.out});
         m.synLayers.push_back(c);
         in = s.out;
     }
@@ -293,10 +293,10 @@ bool buildModel(const Arch& arch, int height, int width, Model& out, std::string
         s.k = 1;
         m.synStabiliser.layer = s;
         m.synStabiliser.in = arch.synInputs();
-        m.synStabiliser.weight = add("synthesis.stabiliser_branch.weight", Module::Synthesis,
+        m.synStabiliser.weight = add("synthesis.stabiliser_branch.weight", TensorKind::Synthesis,
                                      false, {s.out, arch.synInputs(), 1, 1});
         m.synStabiliser.bias =
-            add("synthesis.stabiliser_branch.bias", Module::Synthesis, true, {s.out});
+            add("synthesis.stabiliser_branch.bias", TensorKind::Synthesis, true, {s.out});
     }
 
     // The output transform, sent with the synthesis but never trained:
@@ -306,10 +306,10 @@ bool buildModel(const Arch& arch, int height, int width, Model& out, std::string
         m.synOutput.layer.out = c;
         m.synOutput.layer.k = 1;
         m.synOutput.in = c;
-        m.synOutput.weight = add("synthesis.output_transform.weight", Module::Synthesis, false,
+        m.synOutput.weight = add("synthesis.output_transform.weight", TensorKind::Synthesis, false,
                                  {c, c, 1, 1}, false);
         m.synOutput.bias =
-            add("synthesis.output_transform.bias", Module::Synthesis, true, {c}, false);
+            add("synthesis.output_transform.bias", TensorKind::Synthesis, true, {c}, false);
     }
 
     // The IFCEs (no hidden layer, no stabiliser), one per grid that has one.
@@ -317,15 +317,15 @@ bool buildModel(const Arch& arch, int height, int width, Model& out, std::string
     int ifceIndex = 0;
     for (int i = 0; i < n; i++)
     {
-        const Grid& g = m.grids[(size_t)i];
+        const FitGrid& g = m.grids[(size_t)i];
         if (g.ifceIn <= 0)
             continue;
         LinearRef& l = m.ifce[(size_t)i];
         l.in = g.ifceIn;
         l.out = arch.ifceOut;
         std::string p = "ifce.arms." + std::to_string(ifceIndex++) + ".mlp.0";
-        l.weight = add(p + ".weight", Module::Ifce, false, {arch.ifceOut, g.ifceIn});
-        l.bias = add(p + ".bias", Module::Ifce, true, {arch.ifceOut});
+        l.weight = add(p + ".weight", TensorKind::Ifce, false, {arch.ifceOut, g.ifceIn});
+        l.bias = add(p + ".bias", TensorKind::Ifce, true, {arch.ifceOut});
     }
 
     out = std::move(m);

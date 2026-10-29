@@ -87,6 +87,9 @@ ragtime_test(ragtime_coolchic_fit_test CoolChicFitTest.cpp)
 target_link_libraries(ragtime_coolchic_fit_test PRIVATE ragtime_image)
 target_include_directories(ragtime_coolchic_fit_test PRIVATE ${PROJECT_SOURCE_DIR}/image/src/coolchic)
 target_compile_definitions(ragtime_coolchic_fit_test PRIVATE RAGTIME_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+# The whole encoder on a small picture, through the decoder.
+ragtime_test(ragtime_coolchic_encode_test CoolChicEncodeTest.cpp)
+target_link_libraries(ragtime_coolchic_encode_test PRIVATE ragtime_image)
 # A developer's tool beside it (tools/codecs/coolchic_fit_check.py).
 add_executable(ragtime_coolchic_fit CoolChicFitTool.cpp)
 target_link_libraries(ragtime_coolchic_fit PRIVATE ragtime_image)

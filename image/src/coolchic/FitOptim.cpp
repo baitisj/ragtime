@@ -200,7 +200,7 @@ Optimizer::Optimizer(const Model& model, const OptimConfig& config) : m_(model),
             continue;
         State s;
         s.tensor = (int)t;
-        s.latent = tensor.module == Module::Latent;
+        s.latent = tensor.module == TensorKind::Latent;
         s.dims = tensor.shape;
         s.gg.resize(s.dims.size());
         s.q.resize(s.dims.size());

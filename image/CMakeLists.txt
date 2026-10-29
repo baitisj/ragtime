@@ -38,12 +38,14 @@ endif()
 # The Cool-chic encoder (image/src/coolchic/, BSD-3, LICENSE.txt there):
 # fitting a picture on the CPU, with no libraries, so it builds either way.
 set(RAGTIME_COOLCHIC_ENC_SOURCES
+    src/coolchic/FitEncode.cpp
     src/coolchic/FitModel.cpp
     src/coolchic/FitNet.cpp
     src/coolchic/FitOptim.cpp
     src/coolchic/FitPool.cpp
     src/coolchic/FitQuant.cpp
     src/coolchic/FitTrain.cpp
+    src/coolchic/FitWrite.cpp
 )
 target_sources(ragtime_image PRIVATE ${RAGTIME_COOLCHIC_ENC_SOURCES})
 find_package(Threads REQUIRED)

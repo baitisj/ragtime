@@ -301,8 +301,8 @@ Net::Net(const Model& model, Pool& pool)
     for (int step = 0; step < L; step++)
     {
         UpStep& st = ups_[(size_t)step];
-        const Grid& from = m_.grids[(size_t)m_.synGrid[(size_t)(L - step)]];
-        const Grid& to = m_.grids[(size_t)m_.synGrid[(size_t)(L - 1 - step)]];
+        const FitGrid& from = m_.grids[(size_t)m_.synGrid[(size_t)(L - step)]];
+        const FitGrid& to = m_.grids[(size_t)m_.synGrid[(size_t)(L - 1 - step)]];
         st.h = from.h;
         st.w = from.w;
         st.th = to.h;
@@ -391,7 +391,7 @@ void Net::ifceForward(const float* params)
         const LinearRef& l = m_.ifce[(size_t)g];
         if (l.weight < 0 || g + 1 >= n)
             continue;
-        const Grid& at = m_.grids[(size_t)g + 1];
+        const FitGrid& at = m_.grids[(size_t)g + 1];
         const float* W = params + m_.tensors[(size_t)l.weight].offset;
         const float* B = params + m_.tensors[(size_t)l.bias].offset;
         float* F = ifceF_[(size_t)g].data();
@@ -409,7 +409,7 @@ void Net::ifceForward(const float* params)
                             v[c] = 0.0f;
                             continue;
                         }
-                        const Grid& src = m_.grids[(size_t)j];
+                        const FitGrid& src = m_.grids[(size_t)j];
                         const int d = src.level - at.level;
                         v[c] = q_[gridOff_[(size_t)j] + (size_t)(y >> d) * (size_t)src.w +
                                   (size_t)(x >> d)];
@@ -435,7 +435,8 @@ void Net::ifceForward(const float* params)
 template <int DT>
 void Net::armRows(const ArmLayers& a, int r0, int r1, int thread, bool wantGrad)
 {
-    const int D = DT > 0 ? DT : dim_;
+    // Bounded, so the compiler knows the blocks below are small.
+    const int D = DT > 0 ? DT : std::min(std::max(dim_, 1), MAX_DIM);
     const int S = m_.arch.armContext;
     const int nh = m_.arch.armHidden;
     const size_t N = q_.size();
@@ -459,7 +460,7 @@ void Net::armRows(const ArmLayers& a, int r0, int r1, int thread, bool wantGrad)
     {
         const int g = rowGrid_[(size_t)r];
         const int y = rowY_[(size_t)r];
-        const Grid& grid = m_.grids[(size_t)g];
+        const FitGrid& grid = m_.grids[(size_t)g];
         const float* qg = q_.data() + gridOff_[(size_t)g];
         const bool hasIfce = !ifceF_[(size_t)g].empty();
         const int fw = hasIfce ? m_.grids[(size_t)g + 1].w : 0;
@@ -735,7 +736,7 @@ void Net::contextBackward()
         {
             const int g = rowGrid_[(size_t)r];
             const int y = rowY_[(size_t)r];
-            const Grid& grid = m_.grids[(size_t)g];
+            const FitGrid& grid = m_.grids[(size_t)g];
             const size_t base = gridOff_[(size_t)g];
             for (int x = 0; x < grid.w; x++)
             {
@@ -765,8 +766,8 @@ void Net::ifceBackward(const float* params, float* grads)
         const LinearRef& l = m_.ifce[(size_t)g];
         if (l.weight < 0 || g + 1 >= n)
             continue;
-        const Grid& me = m_.grids[(size_t)g];
-        const Grid& at = m_.grids[(size_t)g + 1];
+        const FitGrid& me = m_.grids[(size_t)g];
+        const FitGrid& at = m_.grids[(size_t)g + 1];
         const float* W = params + m_.tensors[(size_t)l.weight].offset;
         float* gW = grads + m_.tensors[(size_t)l.weight].offset;
         float* gB = grads + m_.tensors[(size_t)l.bias].offset;
@@ -801,7 +802,7 @@ void Net::ifceBackward(const float* params, float* grads)
                     const int j = g + 1 + c;
                     if (j >= n)
                         continue;
-                    const Grid& src = m_.grids[(size_t)j];
+                    const FitGrid& src = m_.grids[(size_t)j];
                     const int d = src.level - at.level;
                     const size_t idx =
                         gridOff_[(size_t)j] + (size_t)(y >> d) * (size_t)src.w + (size_t)(x >> d);
