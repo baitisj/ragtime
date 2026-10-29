@@ -71,7 +71,14 @@ private:
     void showStep();
     void nextStep();
     int stepMs() const;
+    // Dragged on the bar: the step nearest that many bytes.
+    void seek(uint64_t bytes);
     void showSpeed();
+    // The gear's label and list in red while the gear is too slow.
+    void showGearTooSlow(bool slow);
+    // The picture torn about a third of the way across, the rest gone:
+    // what a gear too slow would get through.
+    wxImage torn(const wxImage& picture) const;
     // A blank the picture's size, for a step with nothing to show yet.
     wxImage blank() const;
     uint64_t budget(double seconds) const;
@@ -92,6 +99,9 @@ private:
     wxSpinCtrl* side_ = nullptr;
     wxSpinCtrl* seconds_ = nullptr;
     wxChoice* gears_ = nullptr;
+    wxStaticText* gearLabel_ = nullptr;
+    wxStaticText* sideLabel_ = nullptr;     // lit with the bar's largest figures
+    wxStaticText* airLabel_ = nullptr;
     wxStaticText* size_ = nullptr;
     wxStaticText* air_ = nullptr;
     wxStaticText* seal_ = nullptr;
@@ -100,6 +110,7 @@ private:
     std::vector<ragtime::picture::ArrivalStep> steps_;
     std::vector<wxImage> frames_;       // each step decoded, when first shown
     size_t step_ = 0;
+    bool paused_ = false;               // the pointer over the bar
     static constexpr int MAX_SPEED_STEP = 6;
     static constexpr int DEFAULT_SPEED_STEP = 3;   // 8×
     static constexpr int MIN_STEP_MS = 80;

@@ -69,6 +69,29 @@ PictureDialog::PictureDialog(wxWindow* parent, const PictureTarget& target, cons
     // Under it, how much has come of the whole as it plays: a bar with
     // the picture's size on a scale, and "1.2k / 4.0k" (Jeff, 2026-10-29).
     arrival_ = new ArrivalBar(this);
+    // Over the bar the preview stops for the operator to drag through it,
+    // and plays on from there once the pointer leaves (Jeff, 2026-10-29).
+    arrival_->onHover = [this](bool over) {
+        paused_ = over;
+        if (over)
+            play_.Stop();
+        else if (!steps_.empty())
+            play_.StartOnce(stepMs());
+    };
+    arrival_->onSeek = [this](uint64_t bytes) { seek(bytes); };
+    // Over the axes' largest figures, the two settings that make them
+    // light up with them (Jeff, 2026-10-29).
+    arrival_->onLimits = [this](bool lit) {
+        for (wxStaticText* heading : {sideLabel_, airLabel_})
+        {
+            if (!heading) continue;
+            heading->SetForegroundColour(lit ? accentText() : wxNullColour);
+            wxFont font = heading->GetFont();
+            font.SetUnderlined(lit);
+            heading->SetFont(font);
+            heading->Refresh();
+        }
+    };
     sizer->Add(arrival_, 0, wxEXPAND | wxLEFT | wxRIGHT | wxTOP, 12);
     sizeText_ = new wxStaticText(this, wxID_ANY, "", wxDefaultPosition, wxDefaultSize,
                                  wxALIGN_CENTRE_HORIZONTAL | wxST_NO_AUTORESIZE);
@@ -117,9 +140,11 @@ PictureDialog::PictureDialog(wxWindow* parent, const PictureTarget& target, cons
         row->Add(new wxStaticText(this, wxID_ANY, unit), 0, wxALIGN_CENTER_VERTICAL | wxLEFT, FromDIP(6));
         return row;
     };
-    grid->Add(new wxStaticText(this, wxID_ANY, "Longest side:"), 0, wxALIGN_CENTER_VERTICAL);
+    sideLabel_ = new wxStaticText(this, wxID_ANY, "Longest side:");
+    grid->Add(sideLabel_, 0, wxALIGN_CENTER_VERTICAL);
     grid->Add(withUnit(side_, "pixels"), 0, wxALIGN_CENTER_VERTICAL);
-    grid->Add(new wxStaticText(this, wxID_ANY, "Max airtime:"), 0, wxALIGN_CENTER_VERTICAL);
+    airLabel_ = new wxStaticText(this, wxID_ANY, "Max airtime:");
+    grid->Add(airLabel_, 0, wxALIGN_CENTER_VERTICAL);
     grid->Add(withUnit(seconds_, "seconds"), 0, wxALIGN_CENTER_VERTICAL);
     // The gear: on D2G the one it goes in; in a session only what it is
     // planned for, as Data2G picks the session's gear burst by burst.
@@ -135,8 +160,8 @@ PictureDialog::PictureDialog(wxWindow* parent, const PictureTarget& target, cons
                                       "picture: the first is from how we have heard ")
                                  + utf8(target_.peer)
                                  + " over the last few minutes, the path back being much the same");
-    grid->Add(new wxStaticText(this, wxID_ANY, target_.broadcast ? "Gear:" : "Plan for:"), 0,
-              wxALIGN_CENTER_VERTICAL);
+    gearLabel_ = new wxStaticText(this, wxID_ANY, target_.broadcast ? "Gear:" : "Plan for:");
+    grid->Add(gearLabel_, 0, wxALIGN_CENTER_VERTICAL);
     grid->Add(gears_, 0, wxALIGN_CENTER_VERTICAL);
     sizer->Add(grid, 0, wxLEFT | wxRIGHT | wxTOP, 12);
 
@@ -166,7 +191,7 @@ PictureDialog::PictureDialog(wxWindow* parent, const PictureTarget& target, cons
     speed_->Bind(wxEVT_SLIDER, [this](wxCommandEvent&) {
         showSpeed();
         // The step on screen waits the new speed's time.
-        if (!steps_.empty()) play_.StartOnce(stepMs());
+        if (!steps_.empty() && !paused_) play_.StartOnce(stepMs());
     });
     gears_->Bind(wxEVT_CHOICE, [this](wxCommandEvent&) {
         int n = gears_->GetSelection();
@@ -272,6 +297,9 @@ void PictureDialog::remake()
     double seconds = seconds_->GetValue();
     uint64_t most = budget(seconds);
     wxString gear = gear_.words.empty() ? wxString("this gear") : utf8(gear_.words);
+    // A gear too slow for the time is red, light on a dark theme and dark
+    // on a light one (Jeff, 2026-10-29).
+    showGearTooSlow(gear_.mode.valid() && most == 0);
     if (!gear_.mode.valid())
     {
         air_->SetLabel("data2g-host hasn't listed its gears yet: connect, then try again.");
@@ -340,9 +368,19 @@ void PictureDialog::remake()
     }
     else
     {
-        view_->setImage(toWxImage(shrunk_), false);
         sizeText_->SetLabel("");
-        arrival_->setWhole(0, {}, 0.0);
+        if (gear_.mode.valid() && most == 0)
+        {
+            // Too slow: the picture torn, its left third all that would
+            // get through (Jeff, 2026-10-29).
+            view_->setImage(torn(toWxImage(shrunk_)), false);
+            arrival_->setTooSlow(seconds);
+        }
+        else
+        {
+            view_->setImage(toWxImage(shrunk_), false);
+            arrival_->setWhole(0, {}, 0.0);
+        }
     }
     // Long lines wrap at the preview's width, and the dialog grows to fit
     // them.
@@ -350,6 +388,60 @@ void PictureDialog::remake()
     Layout();
     wxSize room = GetSizer()->GetMinSize();
     if (room.y > GetClientSize().y) SetClientSize(GetClientSize().x, room.y);
+}
+
+void PictureDialog::showGearTooSlow(bool slow)
+{
+    for (wxWindow* w : {static_cast<wxWindow*>(gearLabel_), static_cast<wxWindow*>(gears_)})
+    {
+        w->SetForegroundColour(slow ? badText() : wxNullColour);
+        w->Refresh();
+    }
+}
+
+wxImage PictureDialog::torn(const wxImage& picture) const
+{
+    wxImage image = picture.Copy();
+    const int w = image.GetWidth(), h = image.GetHeight();
+    if (w < 6 || h < 1) return image;
+    wxColour face = wxSystemSettings::GetColour(wxSYS_COLOUR_BTNFACE);
+    unsigned char* rgb = image.GetData();
+    // A ragged edge about a third of the way across: a wander that drifts
+    // a few pixels at a time and is pulled back to the third, with fine
+    // fibres of a pixel or two on top and now and then a sharper jag. The
+    // same every time, so the tear doesn't move as the dialog redraws.
+    uint32_t seed = 0x9e3779b9u;
+    auto next = [&seed]() {
+        seed = seed * 1664525u + 1013904223u;
+        return (int)(seed >> 16);
+    };
+    const int third = w / 3, reach = std::max(2, w / 22), fibre = std::max(1, w / 120);
+    double wander = 0.0, drift = 0.0;
+    for (int y = 0; y < h; y++)
+    {
+        drift = 0.9 * drift + 0.3 * (double)(next() % 9 - 4) - 0.01 * wander;
+        wander = std::max(-(double)reach, std::min((double)reach, wander + drift));
+        int jag = next() % 17 == 0 ? next() % (2 * fibre + 3) : 0;
+        int edge = third + (int)std::lround(wander) + next() % (fibre + 2) - jag;
+        for (int x = std::max(0, edge - fibre - 1); x < w; x++)
+        {
+            unsigned char* p = rgb + 3 * ((size_t)y * (size_t)w + (size_t)x);
+            if (x < edge)
+            {
+                // The paper's torn fibres: pale along the edge.
+                for (int c = 0; c < 3; c++) p[c] = (unsigned char)(p[c] + (255 - p[c]) * 3 / 4);
+            }
+            else
+            {
+                // Beyond it, nothing: a faint shadow just past the edge.
+                int shade = x - edge < 3 ? 18 - 6 * (x - edge) : 0;
+                p[0] = (unsigned char)std::max(0, face.Red() - shade);
+                p[1] = (unsigned char)std::max(0, face.Green() - shade);
+                p[2] = (unsigned char)std::max(0, face.Blue() - shade);
+            }
+        }
+    }
+    return image;
 }
 
 wxImage PictureDialog::blank() const
@@ -408,5 +500,21 @@ void PictureDialog::showStep()
         view_->setImage(frames_[step_]);
     else if (whole_.IsOk())
         view_->setImage(blank());
-    play_.StartOnce(stepMs());
+    if (!paused_) play_.StartOnce(stepMs());
+}
+
+void PictureDialog::seek(uint64_t bytes)
+{
+    if (steps_.empty()) return;
+    // The step nearest, and the bar right at the point dragged to.
+    size_t best = 0;
+    for (size_t i = 1; i < steps_.size(); i++)
+    {
+        uint64_t gap = steps_[i].bytes > bytes ? steps_[i].bytes - bytes : bytes - steps_[i].bytes;
+        uint64_t bestGap = steps_[best].bytes > bytes ? steps_[best].bytes - bytes : bytes - steps_[best].bytes;
+        if (gap < bestGap) best = i;
+    }
+    if (best == step_) return;
+    step_ = best;
+    showStep();
 }

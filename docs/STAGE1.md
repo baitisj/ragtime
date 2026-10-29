@@ -1554,7 +1554,9 @@ file with a kind byte (docs/PROTOCOL.md, "Pictures").
   quality layers each about twice the one before, LRCP, and the layer
   sizes are fitted until the codestream is under the bytes. Sent in less
   time, so much the better. If not even a small picture fits, the dialog
-  says the gear is too slow. Its preview plays the picture arriving
+  says the gear is too slow, and the gear's label and list turn red
+  (`badText`: a slightly light red on a dark theme, a mildly dark one on
+  a light theme, Jeff 2026-10-29). Its preview plays the picture arriving
   (`picture::broadcastArrival`, `picture::sessionArrival`): each burst's
   end, and between them steps of a few percent (about 32 in all, at least
   16 bytes each, at most 48 steps), each decoded from that much of the
@@ -1570,7 +1572,17 @@ file with a kind byte (docs/PROTOCOL.md, "Pictures").
   40k" (`picture::comeText`, Jeff 2026-10-29). The bytes come at an even
   pace across the time, the gaps between bursts shared out, so both axes
   are even. No line of words under the slider says it again (Jeff,
-  2026-10-29: the bar makes it plain). It holds the whole picture
+  2026-10-29: the bar makes it plain). Hovering over the bar pauses the
+  preview and shows a knob; pressing or dragging along it shows the step
+  nearest that point, and once the pointer leaves the preview plays on
+  from there (Jeff, 2026-10-29). With the pointer over either axis's
+  largest figure, that figure and the Longest side and Max airtime
+  headings light up blue together, the headings underlined, as the
+  settings that make them. When the gear is too slow, the bar runs red
+  to the airtime allowed and bursts out of its right end in shards, and
+  the preview shows the picture torn about a third of the way across,
+  only its left third left (Jeff, 2026-10-29: the same ragged edge each
+  time). It holds the whole picture
   3 s and plays again. The Simulation speed slider (named so by Jeff,
   2026-10-29) runs it from real time to 64× (Jeff, 2026-10-27: "use the
   slider to adjust the speed at which the sequence is animated"),
