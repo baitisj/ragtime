@@ -22,6 +22,19 @@ else()
     add_library(ragtime_image STATIC src/NoCodec.cpp)
 endif()
 
-target_link_libraries(ragtime_image PUBLIC ragtime_core PRIVATE ${CMAKE_DL_LIBS})
+# The Cool-chic encoder (image/src/coolchic/, BSD-3, LICENSE.txt there):
+# fitting a picture on the CPU, with no libraries, so it builds either way.
+set(RAGTIME_COOLCHIC_ENC_SOURCES
+    src/coolchic/FitModel.cpp
+    src/coolchic/FitNet.cpp
+    src/coolchic/FitOptim.cpp
+    src/coolchic/FitPool.cpp
+    src/coolchic/FitQuant.cpp
+    src/coolchic/FitTrain.cpp
+)
+target_sources(ragtime_image PRIVATE ${RAGTIME_COOLCHIC_ENC_SOURCES})
+find_package(Threads REQUIRED)
+
+target_link_libraries(ragtime_image PUBLIC ragtime_core Threads::Threads PRIVATE ${CMAKE_DL_LIBS})
 target_include_directories(ragtime_image PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 ragtime_warnings(ragtime_image)
