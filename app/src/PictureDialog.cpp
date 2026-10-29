@@ -6,9 +6,11 @@
 
 #include <wx/button.h>
 #include <wx/choice.h>
+#include <wx/colour.h>
 #include <wx/filedlg.h>
 #include <wx/filename.h>
 #include <wx/msgdlg.h>
+#include <wx/settings.h>
 #include <wx/sizer.h>
 #include <wx/slider.h>
 #include <wx/spinctrl.h>
@@ -62,11 +64,18 @@ PictureDialog::PictureDialog(wxWindow* parent, const PictureTarget& target, cons
     view_ = new PictureView(this, FromDIP(PREVIEW_DIP), false);
     view_->setNote("Reading the picture...");
     sizer->Add(view_, 1, wxEXPAND | wxLEFT | wxRIGHT | wxTOP, 12);
+    // Under it, how much has come of the whole as it plays, "1.2k / 4.0k"
+    // (Jeff, 2026-10-29).
+    sizeText_ = new wxStaticText(this, wxID_ANY, "", wxDefaultPosition, wxDefaultSize,
+                                 wxALIGN_CENTRE_HORIZONTAL | wxST_NO_AUTORESIZE);
+    sizeText_->SetFont(sizeText_->GetFont().Bold());
+    sizer->Add(sizeText_, 0, wxEXPAND | wxLEFT | wxRIGHT | wxTOP, 12);
 
-    // The preview plays the picture arriving, burst by burst, as the far
-    // end sees it build up (the codestream is progressive: each step the
-    // whole picture, sharper), holds on the whole and goes round again
-    // (Jeff, 2026-10-27). The slider sets how fast.
+    // The preview plays the picture arriving, each burst's end and steps
+    // of a few percent between, as the far end sees it build up (the
+    // codestream is progressive: each step the whole picture, sharper),
+    // holds on the whole and goes round again (Jeff, 2026-10-27). The
+    // slider sets how fast.
     auto* speedRow = new wxBoxSizer(wxHORIZONTAL);
     speedRow->Add(new wxStaticText(this, wxID_ANY, "Playback speed:"), 0, wxALIGN_CENTER_VERTICAL);
     speed_ = new wxSlider(this, wxID_ANY, 3, 0, MAX_SPEED_STEP);
@@ -329,6 +338,7 @@ void PictureDialog::remake()
     {
         view_->setImage(toWxImage(shrunk_), false);
         partialText_->SetLabel("");
+        sizeText_->SetLabel("");
     }
     // Long lines wrap at the preview's width, and the dialog grows to fit
     // them.
@@ -336,6 +346,14 @@ void PictureDialog::remake()
     Layout();
     wxSize room = GetSizer()->GetMinSize();
     if (room.y > GetClientSize().y) SetClientSize(GetClientSize().x, room.y);
+}
+
+wxImage PictureDialog::blank() const
+{
+    wxImage image(whole_.GetWidth(), whole_.GetHeight());
+    wxColour face = wxSystemSettings::GetColour(wxSYS_COLOUR_BTNFACE);
+    image.SetRGB(wxRect(0, 0, image.GetWidth(), image.GetHeight()), face.Red(), face.Green(), face.Blue());
+    return image;
 }
 
 wxString PictureDialog::farEnd(bool capital) const
@@ -384,13 +402,23 @@ void PictureDialog::showStep()
     }
     int percent = (int)(100 * at.bytes / std::max<uint64_t>(1, coded_.bytes.size()));
     wxString when = utf8(secondsText(at.seconds));
+    int bursts = steps_.back().burst;
+    sizeText_->SetLabel(utf8(picture::comeText(at.bytes, coded_.bytes.size())));
     if (whole)
         partialText_->SetLabel(wxString::Format("%s has all of it, %s in.", farEnd(true), when));
     else if (!frames_[step_].IsOk())
         partialText_->SetLabel(wxString::Format("%s in, %s has nothing to show yet.", when, farEnd()));
+    else if (at.burst != 0)
+        partialText_->SetLabel(wxString::Format("What %s sees after burst %d of %d, %s in: %d%%.", farEnd(),
+                                                at.burst, bursts, when, percent));
     else
-        partialText_->SetLabel(wxString::Format("What %s sees %s in: %d%%, %s.", farEnd(), when, percent,
-                                                utf8(bytesText(at.bytes))));
-    if (frames_[step_].IsOk()) view_->setImage(frames_[step_]);
+        partialText_->SetLabel(wxString::Format("%d%% of it, %s in (%s sees it as each burst ends).", percent, when,
+                                                farEnd()));
+    // Nothing to show yet: a blank the picture's size, not the last frame
+    // left standing (the whole picture, when it goes round again).
+    if (frames_[step_].IsOk())
+        view_->setImage(frames_[step_]);
+    else if (whole_.IsOk())
+        view_->setImage(blank());
     play_.StartOnce(stepMs());
 }

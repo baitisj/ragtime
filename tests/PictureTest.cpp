@@ -202,7 +202,8 @@ void testAirtime()
     CHECK_EQ(picture::sessionBytesFor(1, 100.0), (uint64_t)0);   // too little for a picture
     CHECK_EQ(picture::sessionBytesFor(60, 0.0), (uint64_t)0);
 
-    // How it arrives, for the preview to play: burst by burst, the last
+    // How it arrives, for the preview to play: burst by burst and between,
+    // the last
     // step the whole picture, at most MAX_STEPS.
     for (const auto& steps : {picture::broadcastArrival(20000, "sunset.j2k", "AG7EW", slow),
                               picture::broadcastArrival(3000, "sunset.j2k", "AG7EW", fast),
@@ -215,6 +216,31 @@ void testAirtime()
     CHECK_EQ(picture::sessionArrival(20000, fast).back().bytes, (uint64_t)20000);
     CHECK_EQ(picture::broadcastArrival(20000, "sunset.j2k", "AG7EW", slow).size(), picture::MAX_STEPS);
     CHECK(picture::sessionArrival(900, slow).size() < picture::MAX_STEPS);
+    // A picture of only a few bursts still plays in steps of a few percent
+    // (Jeff, 2026-10-29), each burst's end among them, the last the whole.
+    for (const auto& steps : {picture::sessionArrival(1500, fast), picture::sessionArrival(300, slow),
+                              picture::broadcastArrival(1500, "sunset.j2k", "AG7EW", fast)})
+    {
+        CHECK(steps.size() >= 12);
+        CHECK(steps.back().burst > 0);
+        int ends = 0;
+        for (size_t i = 0; i < steps.size(); i++)
+        {
+            if (steps[i].burst != 0) ends++;
+            if (i > 0)
+                CHECK(steps[i].bytes >= steps[i - 1].bytes + picture::MIN_STEP_BYTES
+                      && steps[i].seconds > steps[i - 1].seconds);
+        }
+        CHECK_EQ(ends, steps.back().burst);
+    }
+    CHECK_EQ(picture::sessionArrival(1500, fast).back().bytes, (uint64_t)1500);
+    CHECK_EQ(picture::sessionArrival(20, slow).size(), (size_t)1);   // too small to step through
+
+    // How much has come, under the preview.
+    CHECK_EQ(picture::comeText(120, 293), std::string("120 / 293 bytes"));
+    CHECK_EQ(picture::comeText(400, 4000), std::string("0.4k / 3.9k"));
+    CHECK_EQ(picture::comeText(1024, 40960), std::string("1.0k / 40k"));
+    CHECK_EQ(picture::comeText(12800, 40960), std::string("12k / 40k"));
     CHECK(picture::sessionArrival(1000, link::ModeInfo()).empty());
     CHECK(picture::broadcastArrival(0, "sunset.j2k", "AG7EW", fast).empty());
 }
@@ -303,6 +329,42 @@ void testCodec()
     Image tinyBack;
     CHECK(image::decode(t.bytes.data(), t.bytes.size(), tinyBack, error));
     CHECK(psnr(tiny, tinyBack) > 30.0);
+
+    // Every first part of it is the picture, softer, or nothing yet; never
+    // a flat grey from a cut inside a code-block's segment, which OpenJPEG
+    // drops whole (2026-10-29). A white page with two shapes, as a drawing
+    // is, cuts that way in its second layer.
+    {
+        Image page = Image::blank(320, 240, 3, 255);
+        for (int y = 0; y < page.height; y++)
+        {
+            for (int x = 0; x < page.width; x++)
+            {
+                uint8_t* px = page.row(y) + (size_t)x * 3;
+                double dx = x - 192.0, dy = y - 144.0;
+                if (dx * dx + dy * dy < 64.0 * 64.0)
+                    px[0] = px[1] = 40, px[2] = 200;
+                else if (x > 40 && x < 106 && y > 40 && y < 80)
+                    px[0] = 220, px[1] = px[2] = 30;
+            }
+        }
+        image::Coded drawn;
+        CHECK(image::encode(page, 800, drawn, error));
+        Image whole;
+        CHECK(image::decode(drawn.bytes.data(), drawn.bytes.size(), whole, error));
+        int shown = 0, grey = 0;
+        for (size_t n = 40; n < drawn.bytes.size(); n += 2)
+        {
+            Image part;
+            if (!image::decode(drawn.bytes.data(), n, part, error)) continue;
+            shown++;
+            double off = 0.0;
+            for (size_t k = 0; k < part.pixels.size(); k++) off += std::abs((int)part.pixels[k] - (int)whole.pixels[k]);
+            if (off / (double)part.pixels.size() > 40.0) grey++;
+        }
+        CHECK(shown > 100);
+        CHECK_EQ(grey, 0);
+    }
 
     // Too few bytes to say anything, or the wrong thing: no picture.
     Image none;

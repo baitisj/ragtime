@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdio>
 #include <cstring>
 #include <utility>
 
@@ -403,21 +404,58 @@ uint64_t sessionBytesFor(double seconds, double bytesPerSecond)
 namespace
 {
 
-// Steps evenly through n bursts of a picture of size bytes taking seconds
-// in all, at most MAX_STEPS of them.
-std::vector<ArrivalStep> evenSteps(uint64_t size, uint64_t bursts, double seconds)
+// Steps through a picture of size bytes coming in n bursts taking seconds
+// in all: each burst's end, and between them enough steps of a few
+// percent each for the preview to show the picture sharpening, at most
+// MAX_STEPS in all (Jeff, 2026-10-29: a 60 s picture is often only two or
+// three bursts, too few to see it come).
+std::vector<ArrivalStep> arrivalSteps(uint64_t size, uint64_t bursts, double seconds)
 {
     std::vector<ArrivalStep> steps;
     if (size == 0 || bursts == 0) return steps;
-    uint64_t count = std::min<uint64_t>(bursts, MAX_STEPS);
-    for (uint64_t i = 1; i <= count; i++)
+    // Many bursts: every one (or every few) is step enough.
+    uint64_t ends = std::min<uint64_t>(bursts, MAX_STEPS);
+    uint64_t between = ends * 2 >= MAX_STEPS ? 0 : std::min<uint64_t>(PREVIEW_STEPS, MAX_STEPS - ends);
+    between = std::min<uint64_t>(between, size / MIN_STEP_BYTES);
+    std::vector<ArrivalStep> all;
+    for (uint64_t i = 1; i <= ends; i++)
     {
         // The burst this step ends at, so the last is the whole.
-        uint64_t burst = (bursts * i + count - 1) / count;
+        uint64_t burst = (bursts * i + ends - 1) / ends;
         ArrivalStep step;
-        step.bytes = i == count ? size : std::min(size, size * burst / bursts);
+        step.bytes = i == ends ? size : std::min(size, size * burst / bursts);
         step.seconds = seconds * (double)burst / (double)bursts;
+        step.burst = (int)burst;
+        all.push_back(step);
+    }
+    for (uint64_t k = 1; k < between; k++)
+    {
+        ArrivalStep step;
+        step.bytes = size * k / between;
+        step.seconds = seconds * (double)step.bytes / (double)size;
+        all.push_back(step);
+    }
+    std::stable_sort(all.begin(), all.end(), [](const ArrivalStep& a, const ArrivalStep& b) {
+        return a.bytes < b.bytes || (a.bytes == b.bytes && a.burst > b.burst);
+    });
+    for (const ArrivalStep& step : all)
+    {
+        if (step.bytes == 0) continue;
+        if (!steps.empty() && (step.bytes - std::min(step.bytes, steps.back().bytes) < MIN_STEP_BYTES
+                               || step.seconds <= steps.back().seconds))
+        {
+            // Too close to the step before to show anything new: a burst's
+            // end takes the place of a step between, else it is left out.
+            if (step.burst == 0 || steps.back().burst != 0) continue;
+            steps.pop_back();
+        }
         steps.push_back(step);
+    }
+    // The whole picture is always the last.
+    if (!steps.empty() && steps.back().bytes != size)
+    {
+        steps.back() = all.back();
+        if (steps.size() > 1 && steps[steps.size() - 2].seconds >= steps.back().seconds) steps.erase(steps.end() - 2);
     }
     return steps;
 }
@@ -430,7 +468,7 @@ std::vector<ArrivalStep> broadcastArrival(uint64_t size, const std::string& name
     if (!mode.valid() || size == 0) return {};
     broadcast::FileEstimate estimate = broadcast::estimateFile(size, name, callsign, mode);
     double seconds = estimate.wallSeconds > 0 ? estimate.wallSeconds : estimate.airSeconds;
-    return evenSteps(size, (uint64_t)std::max(1, estimate.bursts), seconds);
+    return arrivalSteps(size, (uint64_t)std::max(1, estimate.bursts), seconds);
 }
 
 std::vector<ArrivalStep> sessionArrival(uint64_t size, const link::ModeInfo& mode)
@@ -438,7 +476,22 @@ std::vector<ArrivalStep> sessionArrival(uint64_t size, const link::ModeInfo& mod
     uint64_t burst = files::FileTraffic::burstBytes(mode);
     double rate = sessionBytesPerSecond(mode, 0.0);
     if (size == 0 || burst == 0 || !(rate > 0)) return {};
-    return evenSteps(size, (size + burst - 1) / burst, (double)size / rate);
+    return arrivalSteps(size, (size + burst - 1) / burst, (double)size / rate);
+}
+
+std::string comeText(uint64_t done, uint64_t whole)
+{
+    if (whole < 1024) return std::to_string(done) + " / " + std::to_string(whole) + " bytes";
+    auto kb = [](uint64_t bytes) {
+        char text[32];
+        double k = (double)bytes / 1024.0;
+        if (k < 9.95)
+            std::snprintf(text, sizeof(text), "%.1fk", k);
+        else
+            std::snprintf(text, sizeof(text), "%.0fk", k);
+        return std::string(text);
+    };
+    return kb(done) + " / " + kb(whole);
 }
 
 std::string pictureName(const std::string& picked)

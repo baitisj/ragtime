@@ -73,6 +73,8 @@ private:
     void showSpeed();
     // Who sees it: the peer, or "a listener" on D2G.
     wxString farEnd(bool capital = false) const;
+    // A blank the picture's size, for a step with nothing to show yet.
+    wxImage blank() const;
     uint64_t budget(double seconds) const;
     double airSeconds(uint64_t bytes) const;
 
@@ -104,6 +106,7 @@ private:
     static constexpr int MIN_STEP_MS = 80;
     static constexpr int MAX_STEP_MS = 5000;
     static constexpr int HOLD_MS = 3000;
+    wxStaticText* sizeText_ = nullptr;
     wxStaticText* partialText_ = nullptr;
     wxButton* send_ = nullptr;
     wxTimer timer_;

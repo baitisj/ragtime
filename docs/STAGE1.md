@@ -1552,15 +1552,28 @@ file with a kind byte (docs/PROTOCOL.md, "Pictures").
   quality layers each about twice the one before, LRCP, and the layer
   sizes are fitted until the codestream is under the bytes. Sent in less
   time, so much the better. If not even a small picture fits, the dialog
-  says the gear is too slow. Its preview plays the picture arriving, burst
-  by burst (`picture::broadcastArrival`, `picture::sessionArrival`: the
-  bursts the gear packs it into, at most 48 steps, each decoded from that
-  much of the codestream), holds the whole picture 3 s and plays again,
-  with "What KC2G sees 1 min 10 s in: 40%" under it. The playback speed
-  slider runs it from real time to 64× (Jeff, 2026-10-27: "use the
-  slider to adjust the speed at which the sequence is animated"); until
-  it is moved, the speed makes a playback of about 8 s. It changes
-  nothing sent.
+  says the gear is too slow. Its preview plays the picture arriving
+  (`picture::broadcastArrival`, `picture::sessionArrival`): each burst's
+  end, and between them steps of a few percent (about 32 in all, at least
+  16 bytes each, at most 48 steps), each decoded from that much of the
+  codestream, so even a picture of two or three bursts is seen sharpening
+  (Jeff, 2026-10-29: it didn't animate, a 60 s picture often being only
+  two to seven bursts, the first too small to show). Until enough has come
+  to show anything, the preview is blank. Under it, how much has come of
+  the whole, "1.2k / 40k" (`picture::comeText`, Jeff 2026-10-29), and
+  "What KC2G sees after burst 2 of 4, 1 min 10 s in: 40%" at a burst's
+  end, "40% of it, 1 min 10 s in" between. It holds the whole picture
+  3 s and plays again. The playback speed slider runs it from real time
+  to 64× (Jeff, 2026-10-27: "use the slider to adjust the speed at which
+  the sequence is animated"); until it is moved, the speed makes a
+  playback of about 8 s. It changes nothing sent.
+- **First parts.** A codestream cut inside a code-block's segment makes
+  OpenJPEG drop that code-block whole, all its layers, which in the
+  lowest resolution leaves a flat grey picture ("segment too long ...
+  max (M)"). `image::decode` cuts back past that segment, again until a
+  cut falls between segments, so a first part shows softer, never grey;
+  before any packet's bytes (the first SOD) there is no picture yet. This
+  holds for pictures coming in as for the preview.
 - **Sealing.** A broadcast picture is a broadcast file: sealed, and
   repaired with parity, as any other. Its seal is airtime on top of the
   picture's, never cheap at the slow rungs, so the dialog shows it on a
