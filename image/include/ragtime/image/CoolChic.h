@@ -17,8 +17,11 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <vector>
+
+#include "ragtime/picture/Picture.h"
 
 namespace ragtime
 {
@@ -27,19 +30,20 @@ namespace image
 namespace coolchic
 {
 
-// Hard caps on what a stream may ask for. Anything past them is refused
-// before a byte of memory is spent on it.
+// Hard caps on what a stream may ask for (docs/PICTURE_CODEC.md, "Limits").
+// Anything past them is refused before a byte of memory is spent on it.
 constexpr int MAX_SIDE = 2048;
 constexpr int64_t MAX_PIXELS = 2048 * 1536;
-constexpr int MAX_GRIDS = 20;
+constexpr size_t MAX_STREAM_BYTES = 300 * 1024;  // Ragtime's cap on any item
+constexpr int MAX_GRIDS = 12;
 constexpr int MAX_DOWNSAMPLING = 10;            // the coarsest grid is 1/1024
-constexpr int MAX_SYNTHESIS_LAYERS = 7;
-constexpr int MAX_SYNTHESIS_WIDTH = 128;
+constexpr int MAX_SYNTHESIS_LAYERS = 7;         // the header has 3 bits for them
+constexpr int MAX_SYNTHESIS_WIDTH = 64;
 constexpr int MAX_SYNTHESIS_KERNEL = 7;
 constexpr int MAX_SPATIAL_CONTEXT = 40;         // all of the 9x9 mask's causal half
-constexpr int MAX_ARM_HIDDEN_LAYERS = 7;
+constexpr int MAX_ARM_HIDDEN_LAYERS = 4;
 constexpr int MAX_IFCE_OUTPUTS = 16;
-constexpr int MAX_UPS_KERNEL = 16;
+constexpr int MAX_UPS_KERNEL = 14;
 constexpr int MAX_PRECONCAT_KERNEL = 15;
 // Latents are coded in [-LATENT_LIMIT, LATENT_LIMIT - 1].
 constexpr int LATENT_LIMIT = 64;
@@ -155,7 +159,60 @@ struct QuantisedNetwork
 // How many weights (or biases) a module of arch has.
 size_t parameterCount(const Architecture& arch, Module module, bool biases);
 
+// Decodes a stream as it arrives (docs/PICTURE_CODEC.md, "Partial
+// streams"). Each feed gives the stream's first bytes, at least as many as
+// the last time; the decoder keeps its latents and its range decoder
+// between feeds, so each new burst decodes only the new values. Nothing
+// shows until the headers and weights are in; then the grids that have
+// arrived decode exactly, the one being received as far as its bytes go,
+// and the rest stay zero.
+class Decoder
+{
+public:
+    enum class State
+    {
+        Waiting,    // the headers and weights haven't all come
+        Partial,    // a picture can be shown, but more is to come
+        Complete,   // every grid is decoded
+        Failed      // not a stream this decoder takes (error() says why)
+    };
+
+    Decoder();
+    ~Decoder();
+    Decoder(const Decoder&) = delete;
+    Decoder& operator=(const Decoder&) = delete;
+
+    // bytes: the stream's first length bytes. Bytes past the stream's own
+    // length are ignored.
+    State feed(const uint8_t* bytes, size_t length);
+    State state() const;
+    const std::string& error() const;
+
+    // The picture from the grids as they stand: RGB, 8 bits. False while
+    // Waiting or Failed.
+    bool picture(picture::Image& out) const;
+
+    // Once the headers are in: the shape, and where the latent part starts
+    // and the stream ends. 0 before.
+    const Architecture* architecture() const;
+    size_t latentStart() const;
+    size_t streamLength() const;
+    // Each grid's latents, in grids()'s order (finest first), and how many
+    // of them have been decoded (in the coding order).
+    size_t gridCount() const;
+    const std::vector<int8_t>& latents(size_t grid) const;
+    size_t decoded(size_t grid) const;
+
+private:
+    struct Impl;
+    std::unique_ptr<Impl> impl_;
+};
+
 } // namespace coolchic
+
+// Decodes a Cool-chic picture (kind 0x02), or as much of one as has come:
+// false, with the reason, if it isn't one or not enough has come to show.
+bool coolchicDecode(const uint8_t* bytes, size_t length, picture::Image& out, std::string& error);
 } // namespace image
 } // namespace ragtime
 
