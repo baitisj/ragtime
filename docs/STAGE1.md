@@ -1554,7 +1554,9 @@ file with a kind byte (docs/PROTOCOL.md, "Pictures").
   quality layers each about twice the one before, LRCP, and the layer
   sizes are fitted until the codestream is under the bytes. Sent in less
   time, so much the better. If not even a small picture fits, the dialog
-  says the gear is too slow. Its preview plays the picture arriving
+  says the gear is too slow, and the gear's label and list turn red
+  (`badText`: a slightly light red on a dark theme, a mildly dark one on
+  a light theme, Jeff 2026-10-29). Its preview plays the picture arriving
   (`picture::broadcastArrival`, `picture::sessionArrival`): each burst's
   end, and between them steps of a few percent (about 32 in all, at least
   16 bytes each, at most 48 steps), each decoded from that much of the
