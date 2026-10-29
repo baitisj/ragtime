@@ -13,6 +13,7 @@
 #include "ragtime/link/Data2GLink.h"
 #include "ragtime/picture/Picture.h"
 
+class ArrivalBar;
 class PictureView;
 class wxButton;
 class wxChoice;
@@ -71,8 +72,6 @@ private:
     void nextStep();
     int stepMs() const;
     void showSpeed();
-    // Who sees it: the peer, or "a listener" on D2G.
-    wxString farEnd(bool capital = false) const;
     // A blank the picture's size, for a step with nothing to show yet.
     wxImage blank() const;
     uint64_t budget(double seconds) const;
@@ -106,8 +105,8 @@ private:
     static constexpr int MIN_STEP_MS = 80;
     static constexpr int MAX_STEP_MS = 5000;
     static constexpr int HOLD_MS = 3000;
+    ArrivalBar* arrival_ = nullptr;
     wxStaticText* sizeText_ = nullptr;
-    wxStaticText* partialText_ = nullptr;
     wxButton* send_ = nullptr;
     wxTimer timer_;
     wxTimer play_;

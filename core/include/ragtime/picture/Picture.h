@@ -158,6 +158,19 @@ std::vector<ArrivalStep> sessionArrival(uint64_t size, const link::ModeInfo& mod
 // in KB of 1024, one decimal under 10, "0.4k / 3.9k", "12k / 40k".
 std::string comeText(uint64_t done, uint64_t whole);
 
+// The scale under the preview's progress bar: tick positions in bytes
+// from 0 up to whole, at most maxTicks + 1 of them, a round step apart
+// (1, 2 or 5 times a power of ten, in bytes under 1 KB, else in KB of
+// 1024); and a tick's label, "0", "500", "1.5k", "20k".
+std::vector<uint64_t> scaleTicks(uint64_t whole, int maxTicks);
+std::string scaleLabel(uint64_t bytes, uint64_t whole);
+// The time axis over the bar (Jeff, 2026-10-29): ticks from 0 up to
+// seconds, at most maxTicks + 1 of them, a round step apart (1, 2, 5, 10,
+// 15, 20 or 30 s, in whole minutes from 3 minutes up); and a tick's label,
+// "0", "30 s", "2 min".
+std::vector<double> timeTicks(double seconds, int maxTicks);
+std::string timeLabel(double tick, double seconds);
+
 // A file name for the picture made from the one picked: its stem, made
 // plain (letters, digits, '-' and '_'), cut to 40 bytes, and ".j2k".
 std::string pictureName(const std::string& picked);

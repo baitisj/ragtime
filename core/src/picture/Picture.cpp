@@ -494,6 +494,87 @@ std::string comeText(uint64_t done, uint64_t whole)
     return kb(done) + " / " + kb(whole);
 }
 
+std::vector<uint64_t> scaleTicks(uint64_t whole, int maxTicks)
+{
+    std::vector<uint64_t> ticks;
+    if (whole == 0 || maxTicks < 1) return ticks;
+    // Tenths of the unit, so a step of 0.1k is a whole number here.
+    const double unit = whole < 1024 ? 1.0 : 1024.0;
+    const double span = (double)whole / unit;
+    double step = 0.0;
+    for (double power = whole < 1024 ? 1.0 : 0.1; step == 0.0; power *= 10.0)
+    {
+        for (double m : {1.0, 2.0, 5.0})
+        {
+            if (span / (m * power) <= (double)maxTicks)
+            {
+                step = m * power;
+                break;
+            }
+        }
+    }
+    for (int i = 0;; i++)
+    {
+        double at = step * i;
+        if (at > span + 1e-9) break;
+        ticks.push_back((uint64_t)std::llround(at * unit));
+    }
+    return ticks;
+}
+
+std::string scaleLabel(uint64_t bytes, uint64_t whole)
+{
+    if (bytes == 0) return "0";
+    if (whole < 1024) return std::to_string(bytes);
+    char text[32];
+    double k = (double)bytes / 1024.0;
+    if (std::fabs(k - std::round(k)) < 0.05)
+        std::snprintf(text, sizeof(text), "%.0fk", k);
+    else
+        std::snprintf(text, sizeof(text), "%.1fk", k);
+    return text;
+}
+
+std::vector<double> timeTicks(double seconds, int maxTicks)
+{
+    std::vector<double> ticks;
+    if (!(seconds > 0) || maxTicks < 1) return ticks;
+    double step = 0.0;
+    if (seconds < 180.0)
+    {
+        for (double s : {1.0, 2.0, 5.0, 10.0, 15.0, 20.0, 30.0, 60.0})
+        {
+            step = s;
+            if (seconds / s <= (double)maxTicks) break;
+        }
+    }
+    else
+    {
+        for (double minutes = 1.0; step == 0.0; minutes *= 10.0)
+            for (double m : {1.0, 2.0, 5.0})
+                if (seconds / (60.0 * m * minutes) <= (double)maxTicks)
+                {
+                    step = 60.0 * m * minutes;
+                    break;
+                }
+    }
+    for (int i = 0;; i++)
+    {
+        double at = step * i;
+        if (at > seconds + 1e-9) break;
+        ticks.push_back(at);
+    }
+    return ticks;
+}
+
+std::string timeLabel(double tick, double seconds)
+{
+    long whole = std::lround(tick);
+    if (whole == 0) return "0";
+    if (seconds < 180.0) return std::to_string(whole) + " s";
+    return std::to_string(whole / 60) + " min";
+}
+
 std::string pictureName(const std::string& picked)
 {
     std::string base = picked;

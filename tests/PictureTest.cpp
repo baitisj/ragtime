@@ -241,6 +241,48 @@ void testAirtime()
     CHECK_EQ(picture::comeText(400, 4000), std::string("0.4k / 3.9k"));
     CHECK_EQ(picture::comeText(1024, 40960), std::string("1.0k / 40k"));
     CHECK_EQ(picture::comeText(12800, 40960), std::string("12k / 40k"));
+
+    // The progress bar's scale: round steps, from 0, never past the whole.
+    std::vector<uint64_t> ticks = picture::scaleTicks(40960, 5);
+    CHECK_EQ(ticks.size(), (size_t)5);   // 0, 10k, 20k, 30k, 40k
+    if (ticks.size() == 5) CHECK_EQ(ticks[1], (uint64_t)10240);
+    ticks = picture::scaleTicks(1600, 6);   // 1.6k: 0, 0.5k, 1k, 1.5k
+    CHECK_EQ(ticks.size(), (size_t)4);
+    if (ticks.size() == 4) CHECK_EQ(ticks[1], (uint64_t)512);
+    ticks = picture::scaleTicks(293, 4);    // 0, 100, 200
+    CHECK_EQ(ticks.size(), (size_t)3);
+    for (uint64_t whole : {1ull, 99ull, 293ull, 1600ull, 40960ull, 300000ull})
+    {
+        for (int most : {1, 3, 8})
+        {
+            std::vector<uint64_t> t = picture::scaleTicks(whole, most);
+            CHECK(!t.empty() && t.front() == 0 && t.back() <= whole && (int)t.size() <= most + 1);
+        }
+    }
+    CHECK(picture::scaleTicks(0, 5).empty());
+    CHECK_EQ(picture::scaleLabel(0, 1600), std::string("0"));
+    CHECK_EQ(picture::scaleLabel(512, 1600), std::string("0.5k"));
+    CHECK_EQ(picture::scaleLabel(1024, 1600), std::string("1k"));
+    CHECK_EQ(picture::scaleLabel(200, 293), std::string("200"));
+    // The time axis: 0, 15, 30, 45, 60 s for a minute, minutes past three.
+    std::vector<double> times = picture::timeTicks(60.0, 5);
+    CHECK_EQ(times.size(), (size_t)5);
+    CHECK_EQ(times[1], 15.0);
+    times = picture::timeTicks(600.0, 6);   // 0, 2, 4, 6, 8, 10 min
+    CHECK_EQ(times.size(), (size_t)6);
+    CHECK_EQ(times[1], 120.0);
+    for (double seconds : {0.5, 7.0, 59.0, 170.0, 200.0, 1500.0})
+    {
+        for (int most : {3, 8})
+        {
+            std::vector<double> t = picture::timeTicks(seconds, most);
+            CHECK(!t.empty() && t.front() == 0.0 && t.back() <= seconds && (int)t.size() <= most + 1);
+        }
+    }
+    CHECK(picture::timeTicks(0.0, 5).empty());
+    CHECK_EQ(picture::timeLabel(0.0, 60.0), std::string("0"));
+    CHECK_EQ(picture::timeLabel(30.0, 60.0), std::string("30 s"));
+    CHECK_EQ(picture::timeLabel(120.0, 600.0), std::string("2 min"));
     CHECK(picture::sessionArrival(1000, link::ModeInfo()).empty());
     CHECK(picture::broadcastArrival(0, "sunset.j2k", "AG7EW", fast).empty());
 }
