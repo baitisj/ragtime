@@ -96,7 +96,8 @@ PictureDialog::PictureDialog(wxWindow* parent, const PictureTarget& target, cons
     sizeText_ = new wxStaticText(this, wxID_ANY, "", wxDefaultPosition, wxDefaultSize,
                                  wxALIGN_CENTRE_HORIZONTAL | wxST_NO_AUTORESIZE);
     sizeText_->SetFont(sizeText_->GetFont().Bold());
-    sizer->Add(sizeText_, 0, wxEXPAND | wxLEFT | wxRIGHT | wxTOP, 4);
+    sizer->AddSpacer(4);
+    sizer->Add(sizeText_, 0, wxEXPAND | wxLEFT | wxRIGHT, 12);
 
     // The preview plays the picture arriving, each burst's end and steps
     // of a few percent between, as the far end sees it build up (the
@@ -170,8 +171,13 @@ PictureDialog::PictureDialog(wxWindow* parent, const PictureTarget& target, cons
     seal_ = new wxStaticText(this, wxID_ANY, "");
     seal_->SetForegroundColour(secondaryText());
     sizer->Add(size_, 0, wxEXPAND | wxLEFT | wxRIGHT | wxTOP, 12);
-    sizer->Add(air_, 0, wxEXPAND | wxLEFT | wxRIGHT | wxTOP, 4);
-    sizer->Add(seal_, 0, wxEXPAND | wxLEFT | wxRIGHT | wxTOP, 4);
+    // A sizer's border is the same on every side flagged: the 4 px over
+    // each line goes in as a spacer, so they keep the 12 px margin the
+    // rows above have (Jeff, 2026-10-29).
+    sizer->AddSpacer(4);
+    sizer->Add(air_, 0, wxEXPAND | wxLEFT | wxRIGHT, 12);
+    sizer->AddSpacer(4);
+    sizer->Add(seal_, 0, wxEXPAND | wxLEFT | wxRIGHT, 12);
 
     auto* buttons = new wxBoxSizer(wxHORIZONTAL);
     buttons->AddStretchSpacer();
