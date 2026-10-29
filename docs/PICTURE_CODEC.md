@@ -190,9 +190,10 @@ since nothing more is decoded from the picture.
 
 Reader and writer both refuse a stream outside these limits:
 
-- **Picture:** width and height 1 to 2048 pixels, RGB, 8 bits, one intra
-  frame, no common randomness.
-- **Network:** at most 12 latent grids, 8 synthesis layers of at most 64
+- **Picture:** width and height 1 to 2048 pixels and at most 2048×1536
+  pixels in all (the float synthesis takes a few hundred MB there), RGB,
+  8 bits, one intra frame, no common randomness.
+- **Network:** at most 12 latent grids, 7 synthesis layers (the header has 3 bits) of at most 64
   channels, and 4 ARM hidden layers. Spatial contexts are at most 40
   (Cool-chic's mask).
 - **Lengths:** `nn_n_bytes` and every run must fit inside the stream; the
