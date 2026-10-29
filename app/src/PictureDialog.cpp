@@ -17,6 +17,7 @@
 #include <wx/stattext.h>
 #include <wx/utils.h>
 
+#include "ArrivalBar.h"
 #include "Html.h"
 #include "PictureView.h"
 #include "Pictures.h"
@@ -45,15 +46,16 @@ std::string secondsText(double seconds)
     return ragtime::gearbox::formatDuration(seconds);
 }
 
-// The preview's room: the dialog fits a 1366 × 768 screen.
-const wxSize PREVIEW_DIP(480, 300);
+// The preview's room: the dialog fits a 1366 × 768 screen, with the
+// progress bar and its scale under the picture.
+const wxSize PREVIEW_DIP(480, 250);
 
 } // namespace
 
 PictureDialog::PictureDialog(wxWindow* parent, const PictureTarget& target, const std::string& path)
     : wxDialog(parent, wxID_ANY,
-               target.broadcast ? wxString("Broadcast a picture to D2G")
-                                : "Send a picture to " + utf8(target.peer),
+               // What the preview shows (Jeff, 2026-10-29).
+               "Reception Preview",
                wxDefaultPosition, wxDefaultSize, wxDEFAULT_DIALOG_STYLE | wxRESIZE_BORDER)
     , target_(target)
     , timer_(this)
@@ -64,12 +66,14 @@ PictureDialog::PictureDialog(wxWindow* parent, const PictureTarget& target, cons
     view_ = new PictureView(this, FromDIP(PREVIEW_DIP), false);
     view_->setNote("Reading the picture...");
     sizer->Add(view_, 1, wxEXPAND | wxLEFT | wxRIGHT | wxTOP, 12);
-    // Under it, how much has come of the whole as it plays, "1.2k / 4.0k"
-    // (Jeff, 2026-10-29).
+    // Under it, how much has come of the whole as it plays: a bar with
+    // the picture's size on a scale, and "1.2k / 4.0k" (Jeff, 2026-10-29).
+    arrival_ = new ArrivalBar(this);
+    sizer->Add(arrival_, 0, wxEXPAND | wxLEFT | wxRIGHT | wxTOP, 12);
     sizeText_ = new wxStaticText(this, wxID_ANY, "", wxDefaultPosition, wxDefaultSize,
                                  wxALIGN_CENTRE_HORIZONTAL | wxST_NO_AUTORESIZE);
     sizeText_->SetFont(sizeText_->GetFont().Bold());
-    sizer->Add(sizeText_, 0, wxEXPAND | wxLEFT | wxRIGHT | wxTOP, 12);
+    sizer->Add(sizeText_, 0, wxEXPAND | wxLEFT | wxRIGHT | wxTOP, 4);
 
     // The preview plays the picture arriving, each burst's end and steps
     // of a few percent between, as the far end sees it build up (the
@@ -77,27 +81,27 @@ PictureDialog::PictureDialog(wxWindow* parent, const PictureTarget& target, cons
     // holds on the whole and goes round again (Jeff, 2026-10-27). The
     // slider sets how fast.
     auto* speedRow = new wxBoxSizer(wxHORIZONTAL);
-    speedRow->Add(new wxStaticText(this, wxID_ANY, "Playback speed:"), 0, wxALIGN_CENTER_VERTICAL);
-    speed_ = new wxSlider(this, wxID_ANY, 3, 0, MAX_SPEED_STEP);
+    speedRow->Add(new wxStaticText(this, wxID_ANY, "Simulation speed:"), 0, wxALIGN_CENTER_VERTICAL);
+    // 8× to start with, always (Jeff, 2026-10-29).
+    speed_ = new wxSlider(this, wxID_ANY, DEFAULT_SPEED_STEP, 0, MAX_SPEED_STEP);
     speed_->SetToolTip("How fast the preview plays the picture arriving: from real time to 64 times as fast. "
                        "Only the preview: it changes nothing that is sent");
     speedRow->Add(speed_, 1, wxALIGN_CENTER_VERTICAL | wxLEFT, 6);
     speedText_ = new wxStaticText(this, wxID_ANY, wxString::FromUTF8("64\xc3\x97"), wxDefaultPosition, wxDefaultSize, wxALIGN_RIGHT);
     speedText_->SetMinSize(wxSize(speedText_->GetTextExtent(wxString::FromUTF8("64\xc3\x97")).x + FromDIP(4), -1));
     speedRow->Add(speedText_, 0, wxALIGN_CENTER_VERTICAL | wxLEFT, 4);
-    partialText_ = new wxStaticText(this, wxID_ANY, "");
-    partialText_->SetForegroundColour(secondaryText());
+    showSpeed();
     sizer->Add(speedRow, 0, wxEXPAND | wxLEFT | wxRIGHT | wxTOP, 12);
-    sizer->Add(partialText_, 0, wxEXPAND | wxLEFT | wxRIGHT, 12);
 
     auto* fileRow = new wxBoxSizer(wxHORIZONTAL);
     file_ = new wxStaticText(this, wxID_ANY, "", wxDefaultPosition, wxDefaultSize, wxST_ELLIPSIZE_MIDDLE);
     fileRow->Add(file_, 1, wxALIGN_CENTER_VERTICAL);
-    auto* another = new wxButton(this, wxID_ANY, "Another picture...");
+    auto* another = new wxButton(this, wxID_ANY, "Open...");
+    another->SetToolTip("Pick another picture to send");
     fileRow->Add(another, 0, wxALIGN_CENTER_VERTICAL | wxLEFT, 8);
     sizer->Add(fileRow, 0, wxEXPAND | wxLEFT | wxRIGHT | wxTOP, 12);
 
-    auto* grid = new wxFlexGridSizer(3, FromDIP(4), FromDIP(8));
+    auto* grid = new wxFlexGridSizer(2, FromDIP(4), FromDIP(8));
     side_ = new wxSpinCtrl(this, wxID_ANY, "", wxDefaultPosition, wxDefaultSize, wxSP_ARROW_KEYS, picture::MIN_SIDE,
                            picture::MAX_SIDE, loadInt(keys::PICTURE_SIDE, picture::DEFAULT_MAX_SIDE));
     side_->SetToolTip("The most pixels across or down, whichever is longer; a smaller picture keeps its own size");
@@ -106,12 +110,17 @@ PictureDialog::PictureDialog(wxWindow* parent, const PictureTarget& target, cons
                               loadInt(keys::PICTURE_SECONDS, picture::DEFAULT_SECONDS));
     seconds_->SetToolTip("The most airtime the picture may take in the gear it goes in. It is coded to fit, and "
                          "goes in less when it needs less");
+    // Each field with its unit right beside it (Jeff, 2026-10-29).
+    auto withUnit = [this](wxWindow* field, const char* unit) {
+        auto* row = new wxBoxSizer(wxHORIZONTAL);
+        row->Add(field, 0, wxALIGN_CENTER_VERTICAL);
+        row->Add(new wxStaticText(this, wxID_ANY, unit), 0, wxALIGN_CENTER_VERTICAL | wxLEFT, FromDIP(6));
+        return row;
+    };
     grid->Add(new wxStaticText(this, wxID_ANY, "Longest side:"), 0, wxALIGN_CENTER_VERTICAL);
-    grid->Add(side_, 0, wxALIGN_CENTER_VERTICAL);
-    grid->Add(new wxStaticText(this, wxID_ANY, "pixels"), 0, wxALIGN_CENTER_VERTICAL);
-    grid->Add(new wxStaticText(this, wxID_ANY, "Airtime at most:"), 0, wxALIGN_CENTER_VERTICAL);
-    grid->Add(seconds_, 0, wxALIGN_CENTER_VERTICAL);
-    grid->Add(new wxStaticText(this, wxID_ANY, "seconds"), 0, wxALIGN_CENTER_VERTICAL);
+    grid->Add(withUnit(side_, "pixels"), 0, wxALIGN_CENTER_VERTICAL);
+    grid->Add(new wxStaticText(this, wxID_ANY, "Max airtime:"), 0, wxALIGN_CENTER_VERTICAL);
+    grid->Add(withUnit(seconds_, "seconds"), 0, wxALIGN_CENTER_VERTICAL);
     // The gear: on D2G the one it goes in; in a session only what it is
     // planned for, as Data2G picks the session's gear burst by burst.
     gears_ = new wxChoice(this, wxID_ANY);
@@ -129,7 +138,6 @@ PictureDialog::PictureDialog(wxWindow* parent, const PictureTarget& target, cons
     grid->Add(new wxStaticText(this, wxID_ANY, target_.broadcast ? "Gear:" : "Plan for:"), 0,
               wxALIGN_CENTER_VERTICAL);
     grid->Add(gears_, 0, wxALIGN_CENTER_VERTICAL);
-    grid->AddSpacer(0);
     sizer->Add(grid, 0, wxLEFT | wxRIGHT | wxTOP, 12);
 
     size_ = new wxStaticText(this, wxID_ANY, "");
@@ -156,7 +164,6 @@ PictureDialog::PictureDialog(wxWindow* parent, const PictureTarget& target, cons
     seconds_->Bind(wxEVT_SPINCTRL, [this](wxSpinEvent&) { later(); });
     seconds_->Bind(wxEVT_TEXT, [this](wxCommandEvent&) { later(); });
     speed_->Bind(wxEVT_SLIDER, [this](wxCommandEvent&) {
-        speedPicked_ = true;
         showSpeed();
         // The step on screen waits the new speed's time.
         if (!steps_.empty()) play_.StartOnce(stepMs());
@@ -323,13 +330,10 @@ void PictureDialog::remake()
                      ? picture::broadcastArrival(coded_.bytes.size(), name_, target_.callsign, gear_.mode)
                      : picture::sessionArrival(coded_.bytes.size(), gear_.mode);
         frames_.resize(steps_.size());
-        // Until the operator picks a speed, one that plays it in about 8 s.
-        if (!speedPicked_ && !steps_.empty())
-        {
-            int step = 0;
-            while (step < MAX_SPEED_STEP && steps_.back().seconds / (double)(1 << step) > 8.0) step++;
-            speed_->SetValue(step);
-        }
+        std::vector<uint64_t> ends;
+        for (const picture::ArrivalStep& at : steps_)
+            if (at.burst != 0) ends.push_back(at.bytes);
+        arrival_->setWhole(coded_.bytes.size(), ends, steps_.empty() ? 0.0 : steps_.back().seconds);
         showSpeed();
         step_ = 0;
         showStep();
@@ -337,8 +341,8 @@ void PictureDialog::remake()
     else
     {
         view_->setImage(toWxImage(shrunk_), false);
-        partialText_->SetLabel("");
         sizeText_->SetLabel("");
+        arrival_->setWhole(0, {}, 0.0);
     }
     // Long lines wrap at the preview's width, and the dialog grows to fit
     // them.
@@ -354,12 +358,6 @@ wxImage PictureDialog::blank() const
     wxColour face = wxSystemSettings::GetColour(wxSYS_COLOUR_BTNFACE);
     image.SetRGB(wxRect(0, 0, image.GetWidth(), image.GetHeight()), face.Red(), face.Green(), face.Blue());
     return image;
-}
-
-wxString PictureDialog::farEnd(bool capital) const
-{
-    if (!target_.broadcast) return utf8(target_.peer);
-    return capital ? wxString("A listener") : wxString("a listener");
 }
 
 void PictureDialog::showSpeed()
@@ -400,20 +398,10 @@ void PictureDialog::showStep()
                 frames_[step_] = toWxImage(decoded);
         }
     }
-    int percent = (int)(100 * at.bytes / std::max<uint64_t>(1, coded_.bytes.size()));
-    wxString when = utf8(secondsText(at.seconds));
-    int bursts = steps_.back().burst;
+    // How much has come shows on the bar and in the count under it
+    // (Jeff, 2026-10-29: no line of words beside them).
     sizeText_->SetLabel(utf8(picture::comeText(at.bytes, coded_.bytes.size())));
-    if (whole)
-        partialText_->SetLabel(wxString::Format("%s has all of it, %s in.", farEnd(true), when));
-    else if (!frames_[step_].IsOk())
-        partialText_->SetLabel(wxString::Format("%s in, %s has nothing to show yet.", when, farEnd()));
-    else if (at.burst != 0)
-        partialText_->SetLabel(wxString::Format("What %s sees after burst %d of %d, %s in: %d%%.", farEnd(),
-                                                at.burst, bursts, when, percent));
-    else
-        partialText_->SetLabel(wxString::Format("%d%% of it, %s in (%s sees it as each burst ends).", percent, when,
-                                                farEnd()));
+    arrival_->setDone(at.bytes);
     // Nothing to show yet: a blank the picture's size, not the last frame
     // left standing (the whole picture, when it goes round again).
     if (frames_[step_].IsOk())

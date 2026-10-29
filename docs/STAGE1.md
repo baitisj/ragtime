@@ -1531,8 +1531,10 @@ file with a kind byte (docs/PROTOCOL.md, "Pictures").
   eyes and the strokes of a callsign survive where an area average or
   Lanczos washes them out. Averages are in linear light, differences in
   sRGB. A grey picture is coded as one channel.
-- **Fitting the time.** The dialog takes the most airtime (60 s by
-  default) and the longest side (640 pixels by default, Jeff), and turns
+- **Fitting the time.** The dialog ("Reception Preview", Jeff
+  2026-10-29) takes Max airtime (60 s by default) and the longest side
+  (640 pixels by default, Jeff), each with its unit beside it, and Open...
+  picks another picture. It turns
   the seconds into bytes at a gear: on D2G the broadcast gear, counted
   as `BroadcastFiles` sends it (announces, pieces, bursts and the gaps
   between them, `picture::broadcastBytesFor`); in a session, the mode's
@@ -1559,14 +1561,21 @@ file with a kind byte (docs/PROTOCOL.md, "Pictures").
   codestream, so even a picture of two or three bursts is seen sharpening
   (Jeff, 2026-10-29: it didn't animate, a 60 s picture often being only
   two to seven bursts, the first too small to show). Until enough has come
-  to show anything, the preview is blank. Under it, how much has come of
-  the whole, "1.2k / 40k" (`picture::comeText`, Jeff 2026-10-29), and
-  "What KC2G sees after burst 2 of 4, 1 min 10 s in: 40%" at a burst's
-  end, "40% of it, 1 min 10 s in" between. It holds the whole picture
-  3 s and plays again. The playback speed slider runs it from real time
-  to 64× (Jeff, 2026-10-27: "use the slider to adjust the speed at which
-  the sequence is animated"); until it is moved, the speed makes a
-  playback of about 8 s. It changes nothing sent.
+  to show anything, the preview is blank. Under it, a progress bar of how
+  much has come, with each burst's end a thin line across it, the time
+  on an axis over it (`picture::timeTicks`, `picture::timeLabel`: "0",
+  "15 s", "30 s", whole minutes from 3 minutes up) and the picture's size
+  on a scale beneath (`ArrivalBar`, `picture::scaleTicks`,
+  `picture::scaleLabel`: round steps, "0.2k", "1k", "20k"), then "1.2k /
+  40k" (`picture::comeText`, Jeff 2026-10-29). The bytes come at an even
+  pace across the time, the gaps between bursts shared out, so both axes
+  are even. No line of words under the slider says it again (Jeff,
+  2026-10-29: the bar makes it plain). It holds the whole picture
+  3 s and plays again. The Simulation speed slider (named so by Jeff,
+  2026-10-29) runs it from real time to 64× (Jeff, 2026-10-27: "use the
+  slider to adjust the speed at which the sequence is animated"),
+  starting at 8× each time the dialog opens (Jeff, 2026-10-29). It
+  changes nothing sent.
 - **First parts.** A codestream cut inside a code-block's segment makes
   OpenJPEG drop that code-block whole, all its layers, which in the
   lowest resolution leaves a flat grey picture ("segment too long ...
