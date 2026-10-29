@@ -20,6 +20,7 @@
 #ifndef RAGTIME_IMAGE_COOLCHIC_FIT_TRAIN_H
 #define RAGTIME_IMAGE_COOLCHIC_FIT_TRAIN_H
 
+#include <chrono>
 #include <cstdint>
 #include <functional>
 #include <vector>
@@ -80,6 +81,12 @@ public:
     // The whole fit from Cool-chic's random starts; false if cancelled.
     bool fit(const Schedule& schedule, std::vector<float>& params, const FitProgress& progress);
 
+    // Phases on from params as they stand, with no warm-up and no
+    // steering (Ragtime's: a stream that came out too big fits on a while
+    // at a higher lambda); false if cancelled.
+    bool fitPhases(const std::vector<Phase>& phases, std::vector<float>& params,
+                   const FitProgress& progress);
+
     // One phase on params; false if cancelled (params then as they were
     // at the best validation so far).
     bool train(const Phase& phase, std::vector<float>& params);
@@ -89,22 +96,41 @@ public:
 
     Net& net() { return net_; }
 
+    // The rate's weight now: steer may move it.
+    double lambda() const { return lambda_; }
+    void setLambda(double lambda) { lambda_ = lambda; }
+
     // Each validation's numbers, for the developer's tool.
     std::function<void(int step, const StepResult& r)> onValidation;
 
+    // Ragtime's rate steering: at each validation of the phases after the
+    // warm-up, given what the picture scores now (its rate the latents'
+    // bits) and how far through the phase (0 to 1) the fit is, the lambda
+    // to go on with. The best model so far is scored again under a new one.
+    std::function<double(const StepResult& r, int phase, double phaseDone)> steer;
+
+    // The picture as the fit has it, hard rounded as the decoder would
+    // make it ([3][height][width] in [0, 1]): after each validation, and
+    // between them every pictureSeconds.
+    std::function<void(const std::vector<float>& picture)> onPicture;
+    double pictureSeconds = 1.0;
+
 private:
     bool tick();
+    void showPicture();
 
     const Model& m_;
     const Target& target_;
     Net net_;
-    const double lambda_;
+    double lambda_;
     const Progressive progressive_;
     Random rng_;
     uint64_t steps_ = 0;
     int total_ = 1;
     const FitProgress* progress_ = nullptr;
     std::vector<float> grads_;
+    int phase_ = -1;                    // in fit(): -1 in the warm-up
+    std::chrono::steady_clock::time_point shown_{};
 };
 
 } // namespace coolchic

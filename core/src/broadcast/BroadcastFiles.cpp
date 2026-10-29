@@ -281,7 +281,7 @@ uint64_t BroadcastFiles::send(const std::string& path, const std::string& mode, 
     announce.pieceBytes = (uint16_t)est.pieceBytes;
     announce.digest = protocol::digestOf(content);
     announce.name = name;
-    announce.kind = picture ? protocol::FILE_PICTURE : protocol::FILE_PLAIN;
+    announce.kind = picture ? protocol::pictureKindOf(content.data(), content.size()) : protocol::FILE_PLAIN;
 
     Outgoing out;
     out.announce = chat_.record(announce, seconds(nowMs));
@@ -642,7 +642,7 @@ void BroadcastFiles::heardAnnounce(const protocol::Record& record, uint64_t nowM
     in->announceRecord = record;
     in->file.name = files::safeFileName(a->name);
     in->file.size = a->size;
-    in->file.picture = a->kind == protocol::FILE_PICTURE;
+    in->file.picture = protocol::isPictureKind(a->kind);
     in->file.pieces = pieces;
     in->file.pieceMap.assign(pieces, files::PIECE_WAITING);
 
@@ -1348,7 +1348,7 @@ void BroadcastFiles::loadParts(uint64_t nowMs)
         kept.announceRecord = part.announce;
         kept.file.name = files::safeFileName(a->name);
         kept.file.size = a->size;
-        kept.file.picture = a->kind == protocol::FILE_PICTURE;
+        kept.file.picture = protocol::isPictureKind(a->kind);
         uint16_t pieces = (uint16_t)((a->size + a->pieceBytes - 1) / a->pieceBytes);
         kept.file.pieces = pieces;
         kept.file.pieceMap.assign(pieces, files::PIECE_WAITING);

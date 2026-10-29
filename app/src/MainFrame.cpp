@@ -1999,7 +1999,9 @@ bool MainFrame::sentPicture(const std::string& path) const
     // Each in a folder of its own (sendPicture), so it keeps its name.
     wxFileName parent = wxFileName::DirName(file.GetPath());
     parent.RemoveLastDir();
-    return parent.GetPath() == dir.GetPath() && file.GetExt().Lower() == "j2k";
+    // JPEG 2000 or Cool-chic.
+    const wxString ext = file.GetExt().Lower();
+    return parent.GetPath() == dir.GetPath() && (ext == "j2k" || ext == "rcc");
 }
 
 //-------------------------------------------------------------------------

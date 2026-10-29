@@ -19,6 +19,7 @@
 #include <wx/window.h>
 
 #include "ragtime/image/Codec.h"
+#include "ragtime/image/CoolChic.h"
 
 using ragtime::picture::Image;
 
@@ -115,6 +116,12 @@ wxImage toWxImage(const Image& image)
     return out;
 }
 
+bool decodePicture(const uint8_t* bytes, size_t length, Image& out, std::string& error)
+{
+    if (ragtime::picture::isCodestream(bytes, length)) return ragtime::image::decode(bytes, length, out, error);
+    return ragtime::image::coolchicDecode(bytes, length, out, error);
+}
+
 wxString pictureWildcard()
 {
     wxString kinds = "*.jpg;*.jpeg;*.png;*.gif;*.bmp;*.tif;*.tiff;*.j2k;*.j2c;*.jpc;*.jp2";
@@ -144,14 +151,32 @@ bool PictureShelf::update(const std::string& key, const std::vector<uint8_t>& by
     }
     if (!whole && !final && s.version > 0 && nowMs < e.decodedMs + DECODE_MS) return false;
 
-    if (s.width == 0)
-    {
-        int comps = 0;
-        ragtime::picture::codestreamSize(bytes.data(), bytes.size(), s.width, s.height, comps);
-    }
     Image image;
     std::string error;
-    if (!ragtime::image::decode(bytes.data(), bytes.size(), image, error))
+    bool decoded = false;
+    if (ragtime::picture::isCodestream(bytes.data(), bytes.size()))
+    {
+        if (s.width == 0)
+        {
+            int comps = 0;
+            ragtime::picture::codestreamSize(bytes.data(), bytes.size(), s.width, s.height, comps);
+        }
+        decoded = ragtime::image::decode(bytes.data(), bytes.size(), image, error);
+    }
+    else
+    {
+        // Cool-chic: its decoder kept, fed the bytes so far.
+        if (!e.coolchic) e.coolchic = std::make_shared<ragtime::image::coolchic::Decoder>();
+        e.coolchic->feed(bytes.data(), bytes.size());
+        if (const ragtime::image::coolchic::Architecture* arch = e.coolchic->architecture())
+        {
+            s.width = arch->width;
+            s.height = arch->height;
+        }
+        decoded = e.coolchic->picture(image);
+        if (whole || final) e.coolchic.reset();
+    }
+    if (!decoded)
     {
         // Not a picture after all, or not yet: an ended one isn't read again.
         e.settled = whole || final;

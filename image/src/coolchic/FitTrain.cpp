@@ -9,6 +9,7 @@
 #include "FitTrain.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <numeric>
@@ -112,6 +113,13 @@ StepResult Trainer::test(const std::vector<float>& params)
     return net_.step(params.data(), nullptr, c, target_);
 }
 
+void Trainer::showPicture()
+{
+    shown_ = std::chrono::steady_clock::now();
+    if (onPicture)
+        onPicture(net_.picture());
+}
+
 bool Trainer::tick()
 {
     steps_++;
@@ -179,12 +187,31 @@ bool Trainer::train(const Phase& phase, std::vector<float>& params)
             return false;
         }
 
-        if ((cnt + 1) % phase.freqValid == 0 || cnt + 1 == phase.maxItr)
+        const bool validate = (cnt + 1) % phase.freqValid == 0 || cnt + 1 == phase.maxItr;
+        if (onPicture && !validate &&
+            std::chrono::duration<double>(std::chrono::steady_clock::now() - shown_).count() >=
+                pictureSeconds)
+        {
+            test(params);
+            showPicture();
+        }
+        if (validate)
         {
             const StepResult r = test(params);
-            const double loss = r.loss;
-            if (onValidation)
-                onValidation(cnt + 1, r);
+            if (onPicture)
+                showPicture();
+            if (steer && phase_ >= 0)
+            {
+                const double lambda = steer(r, phase_, (double)(cnt + 1) / (double)phase.maxItr);
+                if (lambda > 0.0 && lambda != lambda_)
+                {
+                    lambda_ = lambda;
+                    best = test(bestParams).loss;
+                }
+            }
+            // As step() scores it, under the lambda steer left.
+            const double loss =
+                r.mse + lambda_ / ((double)m_.height * (double)m_.width) * r.rateBits;
             if (loss < best)
             {
                 best = loss;
@@ -211,6 +238,7 @@ bool Trainer::fit(const Schedule& schedule, std::vector<float>& params,
     progress_ = &progress;
     total_ = std::max(1, schedule.totalSteps());
     steps_ = 0;
+    phase_ = -1;
 
     // The warm-up: every candidate a little, then the best few a little
     // more (warmup.py).
@@ -241,13 +269,39 @@ bool Trainer::fit(const Schedule& schedule, std::vector<float>& params,
     params = std::move(cands[0].params);
 
     for (const Phase& p : schedule.phases)
+    {
+        phase_++;
         if (!train(p, params))
         {
             progress_ = nullptr;
+            phase_ = -1;
             return false;
         }
+    }
     progress_ = nullptr;
+    phase_ = -1;
     return true;
+}
+
+bool Trainer::fitPhases(const std::vector<Phase>& phases, std::vector<float>& params,
+                        const FitProgress& progress)
+{
+    progress_ = &progress;
+    phase_ = -1;
+    total_ = 0;
+    for (const Phase& p : phases)
+        total_ += p.maxItr;
+    total_ = std::max(1, total_);
+    steps_ = 0;
+    bool done = true;
+    for (const Phase& p : phases)
+        if (!train(p, params))
+        {
+            done = false;
+            break;
+        }
+    progress_ = nullptr;
+    return done;
 }
 
 } // namespace coolchic

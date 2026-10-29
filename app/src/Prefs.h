@@ -137,7 +137,7 @@ std::string broadcastPartsDir();
 // The path log, a line for every burst heard, appended and never cut:
 // beside the --config file (<config>.paths.log), or appDataDir()/paths.log.
 std::string pathLogPath();
-// The pictures we send, as they went (JPEG 2000), kept to repair and to
+// The pictures we send, as they went (JPEG 2000 or Cool-chic), kept to repair and to
 // show: beside the --config file (<config>.sent-pictures), or
 // appDataDir()/sent-pictures; each in a folder of its own, named by the
 // UTC time it went, so it keeps its name.
@@ -165,6 +165,7 @@ constexpr const char* AUTO_RECEIVE_BROADCAST = "/Files/AutoReceiveBroadcast";   
 constexpr const char* PICTURE_SECONDS = "/Pictures/Seconds";          // the most airtime a picture may take
 constexpr const char* PICTURE_SIDE = "/Pictures/LargestSide";        // pixels on its longer side
 constexpr const char* PICTURE_FOLDER = "/Pictures/LastFolder";        // where the last picture was picked
+constexpr const char* PICTURE_CODEC = "/Pictures/Codec";              // 0 JPEG 2000, 1 Cool-chic
 constexpr const char* PICTURES_AS_THEY_COME = "/Pictures/ShowAsTheyCome";   // up to 64 KB, from anyone
 constexpr const char* EAR_SOURCE = "/Ear/Source";                    // a PipeWire source's node.name; empty follows data2g-host
 constexpr const char* EAR_SPEED = "/Ear/RowsPerSecond";               // the waterfall's rows a second

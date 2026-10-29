@@ -231,8 +231,17 @@ and the Part 97 check.
   up to 64 KB come without asking and show under their card as they
   come (`PictureShelf` in `app/src/Pictures`); a click opens
   `PictureFrame`, with zoom. In a session the stop sign sends
-  FileCancel `0x84` and the receiver keeps what came. Only a JPEG 2000
-  codestream is ever decoded from the air.
+  FileCancel `0x84` and the receiver keeps what came. From the air only
+  a JPEG 2000 codestream or a Cool-chic stream is ever decoded.
+- Cool-chic pictures (2026-10-29, Jeff's go-ahead): Orange's overfitted
+  codec ported to C++ (`image/src/coolchic/`, BSD-3 notice kept; the
+  decoder `image::coolchicDecode` and streaming `coolchic::Decoder`, the
+  encoder `image::coolchicEncode`, PRs #108 and #109), bitstream in
+  `docs/PICTURE_CODEC.md`. The picture dialog's Codec list offers it;
+  it fits on its own thread to the airtime's bytes with the preview
+  updating, Cancel asks first, then the arrival plays. Kind `0x02`
+  (`protocol::FILE_COOLCHIC`, told from JPEG 2000 by the bytes). What
+  the port taught us and what could be better: `docs/COOLCHIC_NOTES.md`.
 - Data2G PR #98 (merged 2026-10-23) gives SNRs: on `BCAST HEARD` and
   `MISSED`, and `SN` for the session partner. Ragtime shows them in the
   station list's SNR column and feeds the gearshift's Auto the weakest

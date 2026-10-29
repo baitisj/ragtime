@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <fstream>
 #include <iterator>
 #include <system_error>
 
@@ -351,6 +352,15 @@ uint64_t SessionFiles::offer(const std::string& peer, const std::string& path, u
     t.digest = digest;
     t.atMs = nowMs;
     t.picture = picture;
+    entry.kind = protocol::FILE_PLAIN;
+    if (picture)
+    {
+        // The codec, from the picture's first bytes.
+        uint8_t head[4] = {};
+        std::ifstream first(file, std::ios::binary);
+        first.read(reinterpret_cast<char*>(head), sizeof head);
+        entry.kind = protocol::pictureKindOf(head, (size_t)first.gcount());
+    }
     entry.sinceMs = nowMs;
     // Sent again: the far end carries on from its part, and this transfer
     // stands for the part sent.
@@ -837,7 +847,7 @@ std::vector<uint8_t> SessionFiles::takeRecords(const std::string& peer, protocol
         offer.size = (uint32_t)t.size;
         offer.digest = t.digest;
         offer.name = t.name;
-        offer.kind = t.picture ? protocol::FILE_PICTURE : protocol::FILE_PLAIN;
+        offer.kind = t.picture ? entry.kind : protocol::FILE_PLAIN;
         protocol::Record record = numbering.record(offer, time);
         if (!protocol::encodeRecord(record, out))
         {
@@ -1035,7 +1045,7 @@ void SessionFiles::onRecord(const std::string& peer, const protocol::Record& rec
         t.size = offer->size;
         t.digest = offer->digest;
         t.name = safeFileName(offer->name);
-        t.picture = offer->kind == protocol::FILE_PICTURE;
+        t.picture = protocol::isPictureKind(offer->kind);
         t.state = State::Asking;
         t.atMs = nowMs;
         entry.offer = number;

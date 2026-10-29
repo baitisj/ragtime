@@ -134,6 +134,35 @@ void testGrey()
     CHECK(std::fabs(psnr(img, decoded) - r.psnr) < 0.05);
 }
 
+// With a budget, the stream fits it, and not by much less; the preview
+// sees the picture as the fit has it, at its size.
+void testBudgetAndPreview()
+{
+    const picture::Image img = testPicture(96, 64, 3);
+    image::CoolChicOptions o = shortFit();
+    o.maxBytes = 900;
+    o.previewSeconds = 0.0;
+    size_t previews = 0;
+    bool sized = true;
+    image::CoolChicResult r;
+    std::string error;
+    CHECK(image::coolchicEncode(img, o, nullptr, r, error, [&](const picture::Image& now) {
+        previews++;
+        sized = sized && now.width == 96 && now.height == 64 && now.channels == 3;
+    }));
+    std::printf("96x64 in 900 bytes: %zu bytes, %.2f dB, lambda %.4f\n", r.stream.size(), r.psnr, r.lambda);
+    CHECK(!r.stream.empty() && r.stream.size() <= 900);
+    CHECK(r.stream.size() >= 450);
+    CHECK(previews > 10);
+    CHECK(sized);
+    picture::Image decoded;
+    CHECK(image::coolchicDecode(r.stream.data(), r.stream.size(), decoded, error));
+
+    // Fewer bytes than the weights take: refused at once.
+    o.maxBytes = 300;
+    CHECK(!image::coolchicEncode(img, o, nullptr, r, error));
+}
+
 void testCancelAndRefusals()
 {
     const picture::Image img = testPicture(64, 64, 3);
@@ -156,6 +185,7 @@ int main()
 {
     testRoundTrip();
     testGrey();
+    testBudgetAndPreview();
     testCancelAndRefusals();
     return ragtime_test::finish();
 }

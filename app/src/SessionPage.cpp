@@ -284,7 +284,7 @@ SessionPage::SessionPage(wxWindow* parent, const SessionChat& session, const rag
     sendFile_->SetMinSize(wxSize(-1, std::max(sendFile_->GetBestSize().y, send_->GetBestSize().y)));
     // The picture button, just left of the floppy (Jeff, 2026-10-27).
     sendPicture_ = new wxBitmapButton(this, wxID_ANY, pictureIcon(wxSystemSettings::GetColour(wxSYS_COLOUR_BTNTEXT)));
-    sendPicture_->SetToolTip("Send a picture: shrunk and coded as JPEG 2000 to fit the time you allow; the far end "
+    sendPicture_->SetToolTip("Send a picture: shrunk and coded as JPEG 2000 or Cool-chic to fit the time you allow; the far end "
                              "sees it as it comes, and can stop it once they have enough");
     sendPicture_->SetMinSize(wxSize(-1, std::max(sendPicture_->GetBestSize().y, send_->GetBestSize().y)));
     Bind(wxEVT_SYS_COLOUR_CHANGED, [this](wxSysColourChangedEvent& e) {

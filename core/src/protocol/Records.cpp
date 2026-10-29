@@ -577,5 +577,12 @@ bool decodeFrame(const uint8_t* bytes, size_t length, std::vector<Record>& out)
     return true;
 }
 
+uint8_t pictureKindOf(const uint8_t* bytes, size_t length)
+{
+    // A JPEG 2000 codestream's SOC and SIZ markers (picture::isCodestream).
+    const bool j2k = length >= 4 && bytes[0] == 0xFF && bytes[1] == 0x4F && bytes[2] == 0xFF && bytes[3] == 0x51;
+    return j2k ? FILE_PICTURE : FILE_COOLCHIC;
+}
+
 } // namespace protocol
 } // namespace ragtime

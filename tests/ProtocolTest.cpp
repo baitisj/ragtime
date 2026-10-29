@@ -267,6 +267,18 @@ void testEveryRecord()
         Record backPicture = roundTrip(make(offer));
         const FileOffer* p = backPicture.as<FileOffer>();
         CHECK(p != nullptr && p->kind == FILE_PICTURE && p->name == "FRED.TXT");
+        // A Cool-chic picture is kind 2, told from JPEG 2000 by its first
+        // bytes; both are pictures.
+        offer.kind = FILE_COOLCHIC;
+        Record backCoolChic = roundTrip(make(offer));
+        const FileOffer* c = backCoolChic.as<FileOffer>();
+        CHECK(c != nullptr && c->kind == FILE_COOLCHIC);
+        CHECK(isPictureKind(FILE_PICTURE) && isPictureKind(FILE_COOLCHIC) && !isPictureKind(FILE_PLAIN));
+        const uint8_t j2k[] = {0xFF, 0x4F, 0xFF, 0x51, 0x00};
+        const uint8_t other[] = {0x00, 0x01, 0x02, 0x03};
+        CHECK_EQ((int)pictureKindOf(j2k, sizeof j2k), (int)FILE_PICTURE);
+        CHECK_EQ((int)pictureKindOf(other, sizeof other), (int)FILE_COOLCHIC);
+        CHECK_EQ((int)pictureKindOf(j2k, 3), (int)FILE_COOLCHIC);
         offer.name = std::string(MAX_FILE_NAME + 1, 'n');
         CHECK(encodeRecord(make(offer)).empty());
     }

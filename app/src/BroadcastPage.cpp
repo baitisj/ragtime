@@ -465,8 +465,8 @@ BroadcastPage::BroadcastPage(wxWindow* parent, const BroadcastChat& chat)
                       "miss pieces");
     // The picture button, just left of the floppy (Jeff, 2026-10-27).
     picture_ = new wxBitmapButton(this, wxID_ANY, pictureIcon(wxSystemSettings::GetColour(wxSYS_COLOUR_BTNTEXT)));
-    picture_->SetToolTip("Broadcast a picture to everyone on D2G: shrunk and coded as JPEG 2000 to fit the time "
-                         "you allow, shown as it comes");
+    picture_->SetToolTip("Broadcast a picture to everyone on D2G: shrunk and coded as JPEG 2000 or Cool-chic to fit "
+                         "the time you allow, shown as it comes");
     // The gearshift: a speedometer with the gear's short name under it
     // ("A29") in small type, both drawn in the button's picture.
     gear_ = new wxBitmapButton(this, wxID_ANY, wxBitmapBundle(), wxDefaultPosition, wxDefaultSize, wxBU_EXACTFIT);
