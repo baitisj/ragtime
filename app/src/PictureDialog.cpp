@@ -79,6 +79,19 @@ PictureDialog::PictureDialog(wxWindow* parent, const PictureTarget& target, cons
             play_.StartOnce(stepMs());
     };
     arrival_->onSeek = [this](uint64_t bytes) { seek(bytes); };
+    // Over the axes' largest figures, the two settings that make them
+    // light up with them (Jeff, 2026-10-29).
+    arrival_->onLimits = [this](bool lit) {
+        for (wxStaticText* heading : {sideLabel_, airLabel_})
+        {
+            if (!heading) continue;
+            heading->SetForegroundColour(lit ? accentText() : wxNullColour);
+            wxFont font = heading->GetFont();
+            font.SetUnderlined(lit);
+            heading->SetFont(font);
+            heading->Refresh();
+        }
+    };
     sizer->Add(arrival_, 0, wxEXPAND | wxLEFT | wxRIGHT | wxTOP, 12);
     sizeText_ = new wxStaticText(this, wxID_ANY, "", wxDefaultPosition, wxDefaultSize,
                                  wxALIGN_CENTRE_HORIZONTAL | wxST_NO_AUTORESIZE);
@@ -127,9 +140,11 @@ PictureDialog::PictureDialog(wxWindow* parent, const PictureTarget& target, cons
         row->Add(new wxStaticText(this, wxID_ANY, unit), 0, wxALIGN_CENTER_VERTICAL | wxLEFT, FromDIP(6));
         return row;
     };
-    grid->Add(new wxStaticText(this, wxID_ANY, "Longest side:"), 0, wxALIGN_CENTER_VERTICAL);
+    sideLabel_ = new wxStaticText(this, wxID_ANY, "Longest side:");
+    grid->Add(sideLabel_, 0, wxALIGN_CENTER_VERTICAL);
     grid->Add(withUnit(side_, "pixels"), 0, wxALIGN_CENTER_VERTICAL);
-    grid->Add(new wxStaticText(this, wxID_ANY, "Max airtime:"), 0, wxALIGN_CENTER_VERTICAL);
+    airLabel_ = new wxStaticText(this, wxID_ANY, "Max airtime:");
+    grid->Add(airLabel_, 0, wxALIGN_CENTER_VERTICAL);
     grid->Add(withUnit(seconds_, "seconds"), 0, wxALIGN_CENTER_VERTICAL);
     // The gear: on D2G the one it goes in; in a session only what it is
     // planned for, as Data2G picks the session's gear burst by burst.
@@ -355,7 +370,10 @@ void PictureDialog::remake()
     {
         view_->setImage(toWxImage(shrunk_), false);
         sizeText_->SetLabel("");
-        arrival_->setWhole(0, {}, 0.0);
+        if (gear_.mode.valid() && most == 0)
+            arrival_->setTooSlow(seconds);
+        else
+            arrival_->setWhole(0, {}, 0.0);
     }
     // Long lines wrap at the preview's width, and the dialog grows to fit
     // them.

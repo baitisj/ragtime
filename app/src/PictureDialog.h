@@ -97,6 +97,8 @@ private:
     wxSpinCtrl* seconds_ = nullptr;
     wxChoice* gears_ = nullptr;
     wxStaticText* gearLabel_ = nullptr;
+    wxStaticText* sideLabel_ = nullptr;     // lit with the bar's largest figures
+    wxStaticText* airLabel_ = nullptr;
     wxStaticText* size_ = nullptr;
     wxStaticText* air_ = nullptr;
     wxStaticText* seal_ = nullptr;
