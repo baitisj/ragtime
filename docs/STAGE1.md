@@ -1565,8 +1565,8 @@ file with a kind byte (docs/PROTOCOL.md, "Pictures").
   end, "40% of it, 1 min 10 s in" between. It holds the whole picture
   3 s and plays again. The playback speed slider runs it from real time
   to 64× (Jeff, 2026-10-27: "use the slider to adjust the speed at which
-  the sequence is animated"); until it is moved, the speed makes a
-  playback of about 8 s. It changes nothing sent.
+  the sequence is animated"), starting at 8× each time the dialog opens
+  (Jeff, 2026-10-29). It changes nothing sent.
 - **First parts.** A codestream cut inside a code-block's segment makes
   OpenJPEG drop that code-block whole, all its layers, which in the
   lowest resolution leaves a flat grey picture ("segment too long ...

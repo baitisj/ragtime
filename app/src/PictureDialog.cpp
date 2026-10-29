@@ -78,7 +78,8 @@ PictureDialog::PictureDialog(wxWindow* parent, const PictureTarget& target, cons
     // slider sets how fast.
     auto* speedRow = new wxBoxSizer(wxHORIZONTAL);
     speedRow->Add(new wxStaticText(this, wxID_ANY, "Playback speed:"), 0, wxALIGN_CENTER_VERTICAL);
-    speed_ = new wxSlider(this, wxID_ANY, 3, 0, MAX_SPEED_STEP);
+    // 8× to start with, always (Jeff, 2026-10-29).
+    speed_ = new wxSlider(this, wxID_ANY, DEFAULT_SPEED_STEP, 0, MAX_SPEED_STEP);
     speed_->SetToolTip("How fast the preview plays the picture arriving: from real time to 64 times as fast. "
                        "Only the preview: it changes nothing that is sent");
     speedRow->Add(speed_, 1, wxALIGN_CENTER_VERTICAL | wxLEFT, 6);
@@ -156,7 +157,6 @@ PictureDialog::PictureDialog(wxWindow* parent, const PictureTarget& target, cons
     seconds_->Bind(wxEVT_SPINCTRL, [this](wxSpinEvent&) { later(); });
     seconds_->Bind(wxEVT_TEXT, [this](wxCommandEvent&) { later(); });
     speed_->Bind(wxEVT_SLIDER, [this](wxCommandEvent&) {
-        speedPicked_ = true;
         showSpeed();
         // The step on screen waits the new speed's time.
         if (!steps_.empty()) play_.StartOnce(stepMs());
@@ -323,13 +323,6 @@ void PictureDialog::remake()
                      ? picture::broadcastArrival(coded_.bytes.size(), name_, target_.callsign, gear_.mode)
                      : picture::sessionArrival(coded_.bytes.size(), gear_.mode);
         frames_.resize(steps_.size());
-        // Until the operator picks a speed, one that plays it in about 8 s.
-        if (!speedPicked_ && !steps_.empty())
-        {
-            int step = 0;
-            while (step < MAX_SPEED_STEP && steps_.back().seconds / (double)(1 << step) > 8.0) step++;
-            speed_->SetValue(step);
-        }
         showSpeed();
         step_ = 0;
         showStep();
