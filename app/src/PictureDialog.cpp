@@ -1,8 +1,15 @@
 #include "PictureDialog.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
+#include <map>
+#include <memory>
+#include <mutex>
 #include <string>
+#include <thread>
+#include <utility>
+#include <vector>
 
 #include <wx/button.h>
 #include <wx/choice.h>
@@ -15,6 +22,7 @@
 #include <wx/slider.h>
 #include <wx/spinctrl.h>
 #include <wx/stattext.h>
+#include <wx/time.h>
 #include <wx/utils.h>
 
 #include "ArrivalBar.h"
@@ -25,6 +33,7 @@
 #include "ragtime/broadcast/Airtime.h"
 #include "ragtime/files/FileRows.h"
 #include "ragtime/gearbox/Gearbox.h"
+#include "ragtime/image/CoolChic.h"
 
 namespace picture = ragtime::picture;
 
@@ -47,8 +56,9 @@ std::string secondsText(double seconds)
 }
 
 // The preview's room: the dialog fits a 1366 × 768 screen, with the
-// progress bar and its scale under the picture.
-const wxSize PREVIEW_DIP(480, 250);
+// progress bar and its scale under the picture (224 high since the Codec
+// row came, 2026-10-29).
+const wxSize PREVIEW_DIP(480, 224);
 
 } // namespace
 
@@ -60,6 +70,7 @@ PictureDialog::PictureDialog(wxWindow* parent, const PictureTarget& target, cons
     , target_(target)
     , timer_(this)
     , play_(this)
+    , watch_(this)
 {
     if (!target_.gears.empty()) gear_ = target_.gears.front();
     auto* sizer = new wxBoxSizer(wxVERTICAL);
@@ -96,8 +107,19 @@ PictureDialog::PictureDialog(wxWindow* parent, const PictureTarget& target, cons
     sizeText_ = new wxStaticText(this, wxID_ANY, "", wxDefaultPosition, wxDefaultSize,
                                  wxALIGN_CENTRE_HORIZONTAL | wxST_NO_AUTORESIZE);
     sizeText_->SetFont(sizeText_->GetFont().Bold());
+    // Beside it while Cool-chic fits, Cancel; once stopped, Encode. Its
+    // room is kept either side, so the count stays in the middle.
+    stop_ = new wxButton(this, wxID_ANY, "Encode", wxDefaultPosition, wxDefaultSize, wxBU_EXACTFIT);
+    stop_->SetFont(stop_->GetFont().Smaller());
+    const int stopWide = std::max(stop_->GetBestSize().x, stop_->GetSizeFromTextSize(stop_->GetTextExtent("Cancel")).x);
+    stop_->SetMinSize(wxSize(stopWide, -1));
+    auto* countRow = new wxBoxSizer(wxHORIZONTAL);
+    countRow->AddSpacer(stopWide);
+    countRow->Add(sizeText_, 1, wxALIGN_CENTER_VERTICAL);
+    countRow->Add(stop_, 0, wxALIGN_CENTER_VERTICAL | wxRESERVE_SPACE_EVEN_IF_HIDDEN);
+    stop_->Hide();
     sizer->AddSpacer(4);
-    sizer->Add(sizeText_, 0, wxEXPAND | wxLEFT | wxRIGHT, 12);
+    sizer->Add(countRow, 0, wxEXPAND | wxLEFT | wxRIGHT, 12);
 
     // The preview plays the picture arriving, each burst's end and steps
     // of a few percent between, as the far end sees it build up (the
@@ -120,9 +142,9 @@ PictureDialog::PictureDialog(wxWindow* parent, const PictureTarget& target, cons
     auto* fileRow = new wxBoxSizer(wxHORIZONTAL);
     file_ = new wxStaticText(this, wxID_ANY, "", wxDefaultPosition, wxDefaultSize, wxST_ELLIPSIZE_MIDDLE);
     fileRow->Add(file_, 1, wxALIGN_CENTER_VERTICAL);
-    auto* another = new wxButton(this, wxID_ANY, "Open...");
-    another->SetToolTip("Pick another picture to send");
-    fileRow->Add(another, 0, wxALIGN_CENTER_VERTICAL | wxLEFT, 8);
+    another_ = new wxButton(this, wxID_ANY, "Open...");
+    another_->SetToolTip("Pick another picture to send");
+    fileRow->Add(another_, 0, wxALIGN_CENTER_VERTICAL | wxLEFT, 8);
     sizer->Add(fileRow, 0, wxEXPAND | wxLEFT | wxRIGHT | wxTOP, 12);
 
     auto* grid = new wxFlexGridSizer(2, FromDIP(4), FromDIP(8));
@@ -164,18 +186,27 @@ PictureDialog::PictureDialog(wxWindow* parent, const PictureTarget& target, cons
     gearLabel_ = new wxStaticText(this, wxID_ANY, target_.broadcast ? "Gear:" : "Plan for:");
     grid->Add(gearLabel_, 0, wxALIGN_CENTER_VERTICAL);
     grid->Add(gears_, 0, wxALIGN_CENTER_VERTICAL);
+    // The codec (Jeff, 2026-10-29): JPEG 2000 at once, or Cool-chic,
+    // sharper for its bytes but minutes in the making.
+    codec_ = new wxChoice(this, wxID_ANY);
+    codec_->Append("JPEG 2000 (made at once)");
+    codec_->Append("Cool-chic (sharper, takes minutes)");
+    codec_->SetSelection(loadInt(keys::PICTURE_CODEC, JPEG2000) == COOLCHIC ? COOLCHIC : JPEG2000);
+    codec_->SetToolTip("How the picture is coded. JPEG 2000 is made at once. Cool-chic fits a small network to "
+                       "this one picture, which takes this computer a few minutes, and sends the network with "
+                       "it: about 2 dB sharper for the same bytes. Ragtime 0.2 and older can't show a Cool-chic "
+                       "picture, only save it as a file");
+    grid->Add(new wxStaticText(this, wxID_ANY, "Codec:"), 0, wxALIGN_CENTER_VERTICAL);
+    grid->Add(codec_, 0, wxALIGN_CENTER_VERTICAL);
     sizer->Add(grid, 0, wxLEFT | wxRIGHT | wxTOP, 12);
 
-    size_ = new wxStaticText(this, wxID_ANY, "");
     air_ = new wxStaticText(this, wxID_ANY, "");
     seal_ = new wxStaticText(this, wxID_ANY, "");
     seal_->SetForegroundColour(secondaryText());
-    sizer->Add(size_, 0, wxEXPAND | wxLEFT | wxRIGHT | wxTOP, 12);
+    sizer->Add(air_, 0, wxEXPAND | wxLEFT | wxRIGHT | wxTOP, 12);
     // A sizer's border is the same on every side flagged: the 4 px over
-    // each line goes in as a spacer, so they keep the 12 px margin the
+    // the next line goes in as a spacer, so it keeps the 12 px margin the
     // rows above have (Jeff, 2026-10-29).
-    sizer->AddSpacer(4);
-    sizer->Add(air_, 0, wxEXPAND | wxLEFT | wxRIGHT, 12);
     sizer->AddSpacer(4);
     sizer->Add(seal_, 0, wxEXPAND | wxLEFT | wxRIGHT, 12);
 
@@ -189,7 +220,33 @@ PictureDialog::PictureDialog(wxWindow* parent, const PictureTarget& target, cons
     sizer->Add(buttons, 0, wxEXPAND | wxALL, 12);
     SetSizer(sizer);
 
-    another->Bind(wxEVT_BUTTON, [this](wxCommandEvent&) { choose(); });
+    another_->Bind(wxEVT_BUTTON, [this](wxCommandEvent&) { choose(); });
+    codec_->Bind(wxEVT_CHOICE, [this](wxCommandEvent&) { later(); });
+    stop_->Bind(wxEVT_BUTTON, [this](wxCommandEvent&) {
+        if (fitting())
+        {
+            if (!askStop(false) || !fitting()) return;
+            stopFit();
+            cancelled_ = true;
+        }
+        else
+            cancelled_ = false;     // Encode: fit it again
+        remake();
+    });
+    // Closing the dialog throws a fit away too: asked first.
+    cancel->Bind(wxEVT_BUTTON, [this](wxCommandEvent& event) {
+        if (fitting() && !askStop(true)) return;
+        event.Skip();
+    });
+    Bind(wxEVT_CLOSE_WINDOW, [this](wxCloseEvent& event) {
+        if (fitting() && event.CanVeto() && !askStop(true))
+        {
+            event.Veto();
+            return;
+        }
+        event.Skip();
+    });
+    Bind(wxEVT_TIMER, [this](wxTimerEvent&) { watchFit(); }, watch_.GetId());
     side_->Bind(wxEVT_SPINCTRL, [this](wxSpinEvent&) { later(); });
     side_->Bind(wxEVT_TEXT, [this](wxCommandEvent&) { later(); });
     seconds_->Bind(wxEVT_SPINCTRL, [this](wxSpinEvent&) { later(); });
@@ -211,9 +268,11 @@ PictureDialog::PictureDialog(wxWindow* parent, const PictureTarget& target, cons
         timer_.Stop();
         play_.Stop();
         remake();
-        if (coded_.bytes.empty()) return;
+        if (coded_.bytes.empty() || fitting()) return;
         saveInt(keys::PICTURE_SIDE, side_->GetValue());
         saveInt(keys::PICTURE_SECONDS, seconds_->GetValue());
+        saveInt(keys::PICTURE_CODEC, codec());
+        sentAs_ = sentName();
         EndModal(wxID_OK);
     });
 
@@ -222,6 +281,23 @@ PictureDialog::PictureDialog(wxWindow* parent, const PictureTarget& target, cons
     SetMinSize(GetSize());
     CentreOnParent();
     if (load(path)) remake();
+}
+
+PictureDialog::~PictureDialog()
+{
+    watch_.Stop();
+    timer_.Stop();
+    play_.Stop();
+    if (fit_)
+    {
+        fit_->cancel = true;
+        stopped_.push_back(std::move(fit_));
+    }
+    for (std::unique_ptr<Fit>& f : stopped_)
+    {
+        f->cancel = true;
+        if (f->thread.joinable()) f->thread.join();
+    }
 }
 
 void PictureDialog::choose()
@@ -252,6 +328,8 @@ bool PictureDialog::load(const std::string& path)
     }
     path_ = path;
     picked_ = std::move(image);
+    fits_.clear();
+    cancelled_ = false;
     shrunk_ = picture::Image();
     shrunkSide_ = 0;
     name_ = picture::pictureName(path);
@@ -263,13 +341,29 @@ bool PictureDialog::load(const std::string& path)
 
 void PictureDialog::later()
 {
+    // A setting moved: a fit stopped for the old ones doesn't hold.
+    cancelled_ = false;
     timer_.StartOnce(350);
+}
+
+PictureDialog::Codec PictureDialog::codec() const
+{
+    return codec_->GetSelection() == COOLCHIC ? COOLCHIC : JPEG2000;
+}
+
+std::string PictureDialog::sentName() const
+{
+    if (codec() != COOLCHIC) return name_;
+    std::string name = name_;
+    size_t dot = name.find_last_of('.');
+    if (dot != std::string::npos) name.erase(dot);
+    return name + ".rcc";
 }
 
 uint64_t PictureDialog::budget(double seconds) const
 {
     if (!gear_.mode.valid()) return 0;
-    if (target_.broadcast) return picture::broadcastBytesFor(seconds, name_, target_.callsign, gear_.mode);
+    if (target_.broadcast) return picture::broadcastBytesFor(seconds, sentName(), target_.callsign, gear_.mode);
     return picture::sessionBytesFor(seconds, picture::sessionBytesPerSecond(gear_.mode, 0.0));
 }
 
@@ -277,14 +371,16 @@ double PictureDialog::airSeconds(uint64_t bytes) const
 {
     if (!gear_.mode.valid()) return 0.0;
     if (target_.broadcast)
-        return ragtime::broadcast::estimateFile(bytes, name_, target_.callsign, gear_.mode).airSeconds;
+        return ragtime::broadcast::estimateFile(bytes, sentName(), target_.callsign, gear_.mode).airSeconds;
     double rate = picture::sessionBytesPerSecond(gear_.mode, 0.0);
     return rate > 0 ? ((double)bytes * (256.0 + 18.0) / 256.0 + 40.0) / rate : 0.0;
 }
 
 void PictureDialog::remake()
 {
-    if (picked_.empty()) return;
+    // While Cool-chic fits, the settings are held; the fit's end calls
+    // again.
+    if (picked_.empty() || fitting()) return;
     wxBusyCursor busy;
     int side = std::max(picture::MIN_SIDE, std::min(picture::MAX_SIDE, side_->GetValue()));
     if (shrunk_.empty() || shrunkSide_ != side)
@@ -295,14 +391,21 @@ void PictureDialog::remake()
         if (shrunk_.channels == 3 && picture::isGrey(shrunk_)) shrunk_ = picture::toGrey(shrunk_);
         shrunkSide_ = side;
     }
+    // The size it goes at, on the file's line (its own line went to make
+    // room for the Codec row).
     const wxString colour = shrunk_.channels == 1 ? "grey" : "colour";
-    size_->SetLabel(wxString::Format(wxString::FromUTF8("%d \xc3\x97 %d, %s"), shrunk_.width, shrunk_.height, colour));
+    const wxString name = wxFileName(utf8(path_)).GetFullName();
+    if (shrunk_.width == picked_.width && shrunk_.height == picked_.height)
+        file_->SetLabel(wxString::Format(wxString::FromUTF8("%s, %d \xc3\x97 %d, %s"), name, shrunk_.width,
+                                         shrunk_.height, colour));
+    else
+        file_->SetLabel(wxString::Format(wxString::FromUTF8("%s, %d \xc3\x97 %d, sent at %d \xc3\x97 %d, %s"), name,
+                                         picked_.width, picked_.height, shrunk_.width, shrunk_.height, colour));
 
     coded_ = ragtime::image::Coded();
     whole_ = wxImage();
     double seconds = seconds_->GetValue();
     uint64_t most = budget(seconds);
-    wxString gear = gear_.words.empty() ? wxString("this gear") : utf8(gear_.words);
     // A gear too slow for the time is red, light on a dark theme and dark
     // on a light one (Jeff, 2026-10-29).
     showGearTooSlow(gear_.mode.valid() && most == 0);
@@ -313,34 +416,16 @@ void PictureDialog::remake()
     }
     else if (most == 0)
     {
+        wxString gear = gear_.words.empty() ? wxString("this gear") : utf8(gear_.words);
         air_->SetLabel(wxString::Format("Too slow: in %s not even a small picture fits in %s. Allow more time, "
                                         "or pick a faster gear.",
                                         gear, utf8(secondsText(seconds))));
         air_->SetForegroundColour(badText());
     }
+    else if (codec() == COOLCHIC)
+        makeCoolChic(most);
     else
-    {
-        std::string error;
-        if (!ragtime::image::encode(shrunk_, most, coded_, error))
-        {
-            coded_ = ragtime::image::Coded();
-            air_->SetLabel(utf8(error) + " Allow more time, or a smaller side.");
-            air_->SetForegroundColour(badText());
-        }
-        else
-        {
-            picture::Image decoded;
-            if (ragtime::image::decode(coded_.bytes.data(), coded_.bytes.size(), decoded, error))
-                whole_ = toWxImage(decoded);
-            double air = airSeconds(coded_.bytes.size());
-            wxString how = target_.broadcast
-                               ? wxString::Format("about %s on the air in %s", utf8(secondsText(air)), gear)
-                               : wxString::Format("about %s in the session in %s", utf8(secondsText(air)), gear);
-            air_->SetLabel(wxString::Format("%s in %d quality layer%s: %s", utf8(bytesText(coded_.bytes.size())),
-                                            coded_.layers, coded_.layers == 1 ? "" : "s", how));
-            air_->SetForegroundColour(GetForegroundColour());
-        }
-    }
+        makeJpeg2000(most);
     if (target_.broadcast)
     {
         double seal = gear_.mode.valid() ? picture::sealSeconds(target_.callsign, gear_.mode) : 0.0;
@@ -354,27 +439,28 @@ void PictureDialog::remake()
         seal_->SetLabel(utf8(target_.peer) + " sees it as it comes, and can stop it with the stop sign once "
                                               "they have enough.");
     }
-    send_->Enable(!coded_.bytes.empty());
+    send_->Enable(!coded_.bytes.empty() && !fitting());
     play_.Stop();
     steps_.clear();
     frames_.clear();
-    if (whole_.IsOk())
+    stepper_.reset();
+    stop_->Show(fitting() || (codec() == COOLCHIC && cancelled_ && most > 0));
+    if (!fitting())
     {
-        steps_ = target_.broadcast
-                     ? picture::broadcastArrival(coded_.bytes.size(), name_, target_.callsign, gear_.mode)
-                     : picture::sessionArrival(coded_.bytes.size(), gear_.mode);
-        frames_.resize(steps_.size());
-        std::vector<uint64_t> ends;
-        for (const picture::ArrivalStep& at : steps_)
-            if (at.burst != 0) ends.push_back(at.bytes);
-        arrival_->setWhole(coded_.bytes.size(), ends, steps_.empty() ? 0.0 : steps_.back().seconds);
-        showSpeed();
-        step_ = 0;
-        showStep();
+        stop_->SetLabel("Encode");
+        stop_->SetToolTip("Fit the picture with Cool-chic again");
+    }
+    if (whole_.IsOk())
+        showCoded();
+    else if (fitting())
+    {
+        // The fit's own pictures show as they come; till the first, a
+        // blank the picture's size (the fit starts from nothing).
+        view_->setImage(blank(shrunk_.width, shrunk_.height), false);
     }
     else
     {
-        sizeText_->SetLabel("");
+        sizeText_->SetLabel(codec() == COOLCHIC && cancelled_ && most > 0 ? wxString("Stopped") : wxString());
         if (gear_.mode.valid() && most == 0)
         {
             // Too slow: the picture torn, its left third all that would
@@ -394,6 +480,225 @@ void PictureDialog::remake()
     Layout();
     wxSize room = GetSizer()->GetMinSize();
     if (room.y > GetClientSize().y) SetClientSize(GetClientSize().x, room.y);
+}
+
+wxString PictureDialog::onTheAir(uint64_t bytes) const
+{
+    wxString gear = gear_.words.empty() ? wxString("this gear") : utf8(gear_.words);
+    double air = airSeconds(bytes);
+    return target_.broadcast ? wxString::Format("about %s on the air in %s", utf8(secondsText(air)), gear)
+                             : wxString::Format("about %s in the session in %s", utf8(secondsText(air)), gear);
+}
+
+bool PictureDialog::makeJpeg2000(uint64_t most)
+{
+    std::string error;
+    if (!ragtime::image::encode(shrunk_, most, coded_, error))
+    {
+        coded_ = ragtime::image::Coded();
+        air_->SetLabel(utf8(error) + " Allow more time, or a smaller side.");
+        air_->SetForegroundColour(badText());
+        return false;
+    }
+    picture::Image decoded;
+    if (decodePicture(coded_.bytes.data(), coded_.bytes.size(), decoded, error)) whole_ = toWxImage(decoded);
+    air_->SetLabel(wxString::Format("%s in %d quality layer%s: %s", utf8(bytesText(coded_.bytes.size())),
+                                    coded_.layers, coded_.layers == 1 ? "" : "s", onTheAir(coded_.bytes.size())));
+    air_->SetForegroundColour(GetForegroundColour());
+    return true;
+}
+
+bool PictureDialog::makeCoolChic(uint64_t most)
+{
+    auto made = fits_.find({shrunkSide_, most});
+    if (made != fits_.end())
+    {
+        const ragtime::image::CoolChicResult& fit = made->second;
+        if (!fit.stream.empty())
+        {
+            coded_.bytes = fit.stream;
+            std::string error;
+            picture::Image decoded;
+            if (decodePicture(coded_.bytes.data(), coded_.bytes.size(), decoded, error)) whole_ = toWxImage(decoded);
+            air_->SetLabel(wxString::Format("%s, fitted in %s: %s", utf8(bytesText(coded_.bytes.size())),
+                                            utf8(secondsText(fit.seconds)), onTheAir(coded_.bytes.size())));
+            air_->SetForegroundColour(GetForegroundColour());
+            return true;
+        }
+        // It couldn't be made in these bytes: said till a setting moves.
+        if (!cancelled_)
+        {
+            air_->SetLabel(fitError_);
+            air_->SetForegroundColour(badText());
+            return false;
+        }
+    }
+    if (cancelled_)
+    {
+        air_->SetLabel("Cool-chic stopped. Encode fits it again; so does changing a setting.");
+        air_->SetForegroundColour(GetForegroundColour());
+        return false;
+    }
+    startFit(most);
+    air_->SetLabel(wxString::Format("Fitting to at most %s: %s", utf8(bytesText(most)), onTheAir(most)));
+    air_->SetForegroundColour(GetForegroundColour());
+    return false;
+}
+
+void PictureDialog::startFit(uint64_t most)
+{
+    auto fit = std::make_unique<Fit>();
+    fit->side = shrunkSide_;
+    fit->budget = most;
+    Fit* f = fit.get();
+    // The fit's own thread, with the picture as it is now; the dialog
+    // only reads what it hands over, under its lock.
+    fit->thread = std::thread([f, image = shrunk_]() {
+        ragtime::image::CoolChicOptions options;
+        options.maxBytes = f->budget;
+        ragtime::image::CoolChicResult result;
+        std::string error;
+        const bool ok = ragtime::image::coolchicEncode(
+            image, options,
+            [f](double done) {
+                f->done = done;
+                return !f->cancel;
+            },
+            result, error,
+            [f](const picture::Image& now) {
+                std::lock_guard<std::mutex> hold(f->lock);
+                f->preview = now;
+                f->fresh = true;
+            });
+        {
+            std::lock_guard<std::mutex> hold(f->lock);
+            f->ok = ok;
+            f->result = std::move(result);
+            f->error = error;
+        }
+        f->finished = true;
+    });
+    fit_ = std::move(fit);
+    fitStartMs_ = (uint64_t)wxGetLocalTimeMillis().GetValue();
+    holdSettings(true);
+    showFitting(0.0);
+    watch_.Start(WATCH_MS);
+}
+
+void PictureDialog::stopFit()
+{
+    if (!fit_) return;
+    fit_->cancel = true;
+    stopped_.push_back(std::move(fit_));
+    holdSettings(false);
+}
+
+void PictureDialog::holdSettings(bool hold)
+{
+    for (wxWindow* w : {static_cast<wxWindow*>(side_), static_cast<wxWindow*>(seconds_),
+                        static_cast<wxWindow*>(codec_), static_cast<wxWindow*>(another_)})
+        w->Enable(!hold);
+    gears_->Enable(!hold && target_.gears.size() > 1);
+    if (hold) send_->Enable(false);
+}
+
+void PictureDialog::showFitting(double done)
+{
+    arrival_->setEncoding(done);
+    // How far, and a guess at how long is left once it has got going.
+    wxString words = wxString::Format("Encoding: %d%%", (int)std::floor(done * 100.0));
+    const double elapsed = (double)((uint64_t)wxGetLocalTimeMillis().GetValue() - fitStartMs_) / 1000.0;
+    if (done > 0.03 && elapsed > 5.0)
+        words += ", about " + utf8(secondsText(elapsed * (1.0 - done) / done)) + " left";
+    sizeText_->SetLabel(words);
+    if (stop_->GetLabel() != "Cancel")
+    {
+        stop_->SetLabel("Cancel");
+        stop_->SetToolTip("Stop Cool-chic fitting the picture (it asks first)");
+    }
+    if (!stop_->IsShown())
+    {
+        stop_->Show();
+        Layout();
+    }
+}
+
+void PictureDialog::watchFit()
+{
+    // Stopped fits finish on their own (a step or two) and are joined here.
+    for (size_t i = 0; i < stopped_.size();)
+    {
+        if (stopped_[i]->finished)
+        {
+            stopped_[i]->thread.join();
+            stopped_.erase(stopped_.begin() + (std::ptrdiff_t)i);
+        }
+        else
+            i++;
+    }
+    if (!fit_)
+    {
+        if (stopped_.empty()) watch_.Stop();
+        return;
+    }
+    Fit& f = *fit_;
+    picture::Image now;
+    {
+        std::lock_guard<std::mutex> hold(f.lock);
+        if (f.fresh)
+        {
+            now = std::move(f.preview);
+            f.fresh = false;
+        }
+    }
+    if (!now.empty()) view_->setImage(toWxImage(now));
+    if (!f.finished)
+    {
+        showFitting(f.done);
+        return;
+    }
+    f.thread.join();
+    std::unique_ptr<Fit> ended = std::move(fit_);
+    holdSettings(false);
+    if (ended->ok)
+        fits_[{ended->side, ended->budget}] = std::move(ended->result);
+    else
+    {
+        // Kept as an empty stream, so it isn't fitted again and again.
+        fits_[{ended->side, ended->budget}] = ragtime::image::CoolChicResult();
+        fitError_ = "Cool-chic couldn't make it: " + utf8(ended->error) + ". Allow more time, or a smaller side.";
+    }
+    if (stopped_.empty()) watch_.Stop();
+    // The picture made: the lines, Send, and the preview playing it in.
+    remake();
+}
+
+bool PictureDialog::askStop(bool closing)
+{
+    if (!fitting()) return true;
+    const int done = (int)std::floor(fit_->done * 100.0);
+    wxMessageDialog ask(this, closing ? "Stop encoding and close?" : "Stop encoding?", GetTitle(),
+                        wxYES_NO | wxNO_DEFAULT | wxICON_QUESTION);
+    ask.SetExtendedMessage(wxString::Format("Cool-chic is %d%% of the way through fitting this picture. "
+                                            "Stopping throws that work away.",
+                                            done));
+    ask.SetYesNoLabels("Stop encoding", "Keep encoding");
+    return ask.ShowModal() == wxID_YES;
+}
+
+void PictureDialog::showCoded()
+{
+    steps_ = target_.broadcast
+                 ? picture::broadcastArrival(coded_.bytes.size(), sentName(), target_.callsign, gear_.mode)
+                 : picture::sessionArrival(coded_.bytes.size(), gear_.mode);
+    frames_.resize(steps_.size());
+    std::vector<uint64_t> ends;
+    for (const picture::ArrivalStep& at : steps_)
+        if (at.burst != 0) ends.push_back(at.bytes);
+    arrival_->setWhole(coded_.bytes.size(), ends, steps_.empty() ? 0.0 : steps_.back().seconds);
+    showSpeed();
+    step_ = 0;
+    showStep();
 }
 
 void PictureDialog::showGearTooSlow(bool slow)
@@ -450,9 +755,9 @@ wxImage PictureDialog::torn(const wxImage& picture) const
     return image;
 }
 
-wxImage PictureDialog::blank() const
+wxImage PictureDialog::blank(int width, int height) const
 {
-    wxImage image(whole_.GetWidth(), whole_.GetHeight());
+    wxImage image(std::max(1, width), std::max(1, height));
     wxColour face = wxSystemSettings::GetColour(wxSYS_COLOUR_BTNFACE);
     image.SetRGB(wxRect(0, 0, image.GetWidth(), image.GetHeight()), face.Red(), face.Green(), face.Blue());
     return image;
@@ -488,11 +793,21 @@ void PictureDialog::showStep()
     {
         if (whole)
             frames_[step_] = whole_;
+        else if (!ragtime::picture::isCodestream(coded_.bytes.data(), coded_.bytes.size()))
+        {
+            // Cool-chic: one decoder fed more each step, so each decodes
+            // only the latents new since the last; anew when going back.
+            if (!stepper_ || at.bytes < stepperBytes_) stepper_ = std::make_unique<ragtime::image::coolchic::Decoder>();
+            stepper_->feed(coded_.bytes.data(), (size_t)at.bytes);
+            stepperBytes_ = at.bytes;
+            picture::Image decoded;
+            if (stepper_->picture(decoded)) frames_[step_] = toWxImage(decoded);
+        }
         else
         {
             picture::Image decoded;
             std::string error;
-            if (ragtime::image::decode(coded_.bytes.data(), (size_t)at.bytes, decoded, error))
+            if (decodePicture(coded_.bytes.data(), (size_t)at.bytes, decoded, error))
                 frames_[step_] = toWxImage(decoded);
         }
     }
@@ -505,7 +820,7 @@ void PictureDialog::showStep()
     if (frames_[step_].IsOk())
         view_->setImage(frames_[step_]);
     else if (whole_.IsOk())
-        view_->setImage(blank());
+        view_->setImage(blank(whole_.GetWidth(), whole_.GetHeight()));
     if (!paused_) play_.StartOnce(stepMs());
 }
 

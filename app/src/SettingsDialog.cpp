@@ -269,7 +269,7 @@ wxWindow* SettingsDialog::stationPage(wxNotebook* book, const StationPrefs& pref
     pictures_->SetValue(prefs.picturesAsTheyCome);
     pictures_->SetToolTip("A picture sent in a session or broadcast on D2G is received without asking and shows "
                           "among the messages, sharper as more of it comes; it is saved in the received folder. "
-                          "Bigger ones wait for Save or Receive, like other files. Pictures come only as JPEG 2000.");
+                          "Bigger ones wait for Save or Receive, like other files. Pictures come only as JPEG 2000 or Cool-chic.");
     files->Add(pictures_, 0, wxLEFT | wxRIGHT | wxBOTTOM, 6);
 
     auto* broadcast = new wxStaticBoxSizer(wxVERTICAL, page, "Broadcast");

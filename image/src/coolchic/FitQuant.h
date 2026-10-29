@@ -16,6 +16,7 @@
 #define RAGTIME_IMAGE_COOLCHIC_FIT_QUANT_H
 
 #include <cstdint>
+#include <functional>
 #include <vector>
 
 #include "FitModel.h"
@@ -66,11 +67,17 @@ public:
     Quantiser(const Model& model, const Target& target, Net& net, double lambda);
 
     // quantize_model(): every network's steps and orders; params are set to
-    // their quantised values.
-    void quantise(std::vector<float>& params);
+    // their quantised values. False if stopped (going), params then as
+    // they were.
+    bool quantise(std::vector<float>& params);
 
-    // rdoq_model(): the greedy nudges, in a random order from seed.
-    void rdoq(std::vector<float>& params, uint64_t seed);
+    // rdoq_model(): the greedy nudges, in a random order from seed. False
+    // if stopped (going), params then quantised but not all nudged.
+    bool rdoq(std::vector<float>& params, uint64_t seed);
+
+    // Asked now and then (Ragtime's): false stops quantise() or rdoq(),
+    // which take some seconds, so a cancel needn't wait for them.
+    std::function<bool()> going;
 
     // The score the decoder's picture gets, the networks' bits included.
     StepResult test(const std::vector<float>& params);

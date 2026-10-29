@@ -155,7 +155,7 @@ StepResult Quantiser::test(const std::vector<float>& params)
     return r;
 }
 
-void Quantiser::quantise(std::vector<float>& params)
+bool Quantiser::quantise(std::vector<float>& params)
 {
     net_.quantiseHard(params.data());
     double rate = net_.rate(params.data());
@@ -176,6 +176,11 @@ void Quantiser::quantise(std::vector<float>& params)
         for (int ws = range.wLo; ws <= range.wHi; ws++)
             for (int bs = range.bLo; bs <= range.bHi; bs++)
             {
+                if (going && !going())
+                {
+                    params = full;
+                    return false;
+                }
                 // Quantise from the full-precision values, unless a value
                 // needs more than 16 bits.
                 bool ok = true;
@@ -254,9 +259,10 @@ void Quantiser::quantise(std::vector<float>& params)
         rate = bestRate;
         mse = bestMse;
     }
+    return true;
 }
 
-void Quantiser::rdoq(std::vector<float>& params, uint64_t seed)
+bool Quantiser::rdoq(std::vector<float>& params, uint64_t seed)
 {
     Random rng(seed);
     net_.quantiseHard(params.data());
@@ -301,6 +307,8 @@ void Quantiser::rdoq(std::vector<float>& params, uint64_t seed)
             double bestLoss = score();
             for (size_t at : index)
             {
+                if (going && !going())
+                    return false;
                 const float initial = params[at];
                 float bestValue = initial;
                 for (int sign = -1; sign <= 1; sign += 2)
@@ -320,6 +328,7 @@ void Quantiser::rdoq(std::vector<float>& params, uint64_t seed)
             }
         }
     }
+    return true;
 }
 
 } // namespace coolchic

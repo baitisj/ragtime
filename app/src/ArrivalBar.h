@@ -6,6 +6,9 @@
 #include <vector>
 
 #include <wx/control.h>
+#include <wx/timer.h>
+
+class wxGraphicsContext;
 
 // Under the picture dialog's preview (Jeff, 2026-10-29): a progress bar of
 // how much of the picture has come as the preview plays, the bursts' ends
@@ -14,6 +17,10 @@
 // lets the operator drag through it; away from it, the preview plays on.
 // Over either axis's largest figure it lights the settings that set them.
 // When the gear is too slow, the bar bursts red out of its right end.
+// While Cool-chic makes the picture it shows that instead: filling from the
+// right, over a scale of percent with 0% on the right and 100% on the left,
+// with grey lines walking across the part done to show the computer hard
+// at it (Jeff, 2026-10-29).
 class ArrivalBar : public wxControl
 {
 public:
@@ -27,6 +34,10 @@ public:
     // Not even a small picture fits the airtime: the burst bar, under a
     // time axis up to that airtime.
     void setTooSlow(double seconds);
+    // The encoder's work, done of it (0 to 1); setWhole or setTooSlow
+    // ends it.
+    void setEncoding(double done);
+    bool encoding() const { return encoding_; }
 
     // The pointer came over the bar (true) or went away (false).
     std::function<void(bool over)> onHover;
@@ -44,6 +55,8 @@ private:
     void hover(bool over);
     void light(bool lit);
     void seekTo(int x);
+    void paintEncoding(wxGraphicsContext& gc, double left, double width, double top, double bar);
+    void stopEncoding();
 
     uint64_t whole_ = 0;
     uint64_t done_ = 0;
@@ -54,6 +67,10 @@ private:
     bool lit_ = false;      // the pointer over a largest figure
     wxRect timeFigure_;     // where the axes' largest figures are drawn
     wxRect sizeFigure_;
+    bool encoding_ = false;
+    double encoded_ = 0.0;  // of the encoder's work
+    int walk_ = 0;          // the grey lines' step along
+    wxTimer walker_;
 };
 
 #endif

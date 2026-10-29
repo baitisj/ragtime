@@ -330,6 +330,7 @@ private:
         uint64_t arrivingAt = 0;
         std::vector<uint8_t> arrivingData;
         bool spoiled = false;       // theirs: what is written can't be trusted, so it is not kept
+        uint8_t kind = 0;           // ours: what the offer says it is (protocol::FILE_PLAIN, ...)
     };
 
     // A part file kept from a transfer of theirs that ended unfinished,

@@ -162,6 +162,18 @@ constexpr uint8_t FILE_PLAIN = 0;
 // An inline picture: a JPEG 2000 codestream, shown among the messages as
 // it comes, any first part of it a softer whole.
 constexpr uint8_t FILE_PICTURE = 1;
+// An inline picture coded with Cool-chic (docs/PICTURE_CODEC.md): shown
+// the same way once its network's weights have come, its latent grids
+// coarsest first. Ragtime 0.2 takes it as a plain file.
+constexpr uint8_t FILE_COOLCHIC = 2;
+// Either kind of inline picture.
+inline bool isPictureKind(uint8_t kind)
+{
+    return kind == FILE_PICTURE || kind == FILE_COOLCHIC;
+}
+// The kind an inline picture's bytes go as: a JPEG 2000 codestream (SOC,
+// then SIZ) is FILE_PICTURE, anything else FILE_COOLCHIC.
+uint8_t pictureKindOf(const uint8_t* bytes, size_t length);
 
 struct FileOffer
 {

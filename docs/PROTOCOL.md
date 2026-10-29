@@ -163,7 +163,8 @@ Ack and one: with five-character calls, 21 bytes. Reactions, below.
 **FileOffer** (`0x20`), in a session: size (4 bytes, at most 307,200),
 digest (12 bytes, the whole file's: SHA-256, first 12 bytes), name (a
 short string, UTF-8, at most 200 bytes), then kind (1 byte, optional):
-`0x00` a plain file, `0x01` a picture (Pictures, below). Missing, it is
+`0x00` a plain file, `0x01` a JPEG 2000 picture, `0x02` a Cool-chic
+picture (Pictures, below). Missing, it is
 `0x00`, and a sender leaves it off a plain file; a receiver takes a kind
 it doesn't know as `0x00`. The offer is an item; its sequence number
 names the transfer from then on.
@@ -870,7 +871,8 @@ two.
 
 ### Pictures
 
-A picture is a file with kind `0x01`, in a session or on D2G, and goes
+A picture is a file with kind `0x01` (JPEG 2000) or `0x02` (Cool-chic),
+in a session or on D2G, and goes
 by the same rules as any other file: offered or announced, sent, sealed
 on D2G and repaired there. What kind adds is how the far end treats it.
 
@@ -884,6 +886,14 @@ on D2G and repaired there. What kind adds is how the far end treats it.
   decodes nothing else from the air, and nothing over 4,096 pixels
   either way; a file of kind `0x01` that doesn't decode shows only its
   card, as a plain file does.
+- **Or Cool-chic** (kind `0x02`, since 2026-10-29): a stream as
+  `docs/PICTURE_CODEC.md` sets out, its headers and the network's weights
+  first, then its latent grids coarsest first, each flushed on its own.
+  Any first part past the weights decodes to the whole picture, softer;
+  before them there is nothing to show. A receiver decodes it with the
+  same caps (at most 2,048 pixels a side). It tells the two kinds apart
+  by the bytes, a JPEG 2000 codestream starting with SOC and SIZ, so a
+  sender sets the kind from them too.
 - **It shows as it comes.** A receiver may take a picture of up to 64 KB
   without asking, from anyone (Settings, on by default), and shows it
   among the messages, decoding what has come so far. Bigger ones wait
@@ -899,7 +909,8 @@ on D2G and repaired there. What kind adds is how the far end treats it.
   The sender keeps the codestream it sent (its sent-pictures folder), so
   it can repair it and send it again byte for byte; the seal's digest is
   of those bytes, never of the picture first picked.
-- A receiver from 0.2 or before reads a picture as a plain `.j2k` file,
+- A receiver from 0.2 or before reads a picture as a plain `.j2k` (or
+  `.rcc`) file,
   and the stop sign as the receiver stopping it (`0x84` has the
   receiver's bit set).
 

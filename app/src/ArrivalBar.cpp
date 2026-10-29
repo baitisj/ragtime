@@ -22,15 +22,22 @@ constexpr int BAR_DIP = 12;     // the bar's height
 constexpr int TICK_DIP = 4;     // the axes' ticks, over it and under it
 constexpr int SIDE_DIP = 14;    // room each side for a label's half
 constexpr int BURST_DIP = 28;   // the burst's room, right of a bar too slow
+constexpr int WALK_MS = 40;     // the grey lines move a pixel this often
+constexpr int STRIPE_DIP = 9;   // and are this far apart
 
 } // namespace
 
 ArrivalBar::ArrivalBar(wxWindow* parent, wxWindowID id)
     : wxControl(parent, id, wxDefaultPosition, wxDefaultSize, wxBORDER_NONE)
+    , walker_(this)
 {
     SetBackgroundStyle(wxBG_STYLE_PAINT);
     SetFont(GetFont().Smaller());
     Bind(wxEVT_PAINT, &ArrivalBar::OnPaint, this);
+    Bind(wxEVT_TIMER, [this](wxTimerEvent&) {
+        walk_++;
+        if (encoded_ > 0.0) Refresh();
+    });
     for (auto type : {wxEVT_ENTER_WINDOW, wxEVT_LEAVE_WINDOW, wxEVT_LEFT_DOWN, wxEVT_LEFT_UP, wxEVT_MOTION})
         Bind(type, &ArrivalBar::OnMouse, this);
     Bind(wxEVT_MOUSE_CAPTURE_LOST, [this](wxMouseCaptureLostEvent&) {
@@ -97,8 +104,32 @@ void ArrivalBar::OnMouse(wxMouseEvent& event)
     event.Skip();
 }
 
+void ArrivalBar::stopEncoding()
+{
+    encoding_ = false;
+    encoded_ = 0.0;
+    walker_.Stop();
+}
+
+void ArrivalBar::setEncoding(double done)
+{
+    whole_ = 0;
+    done_ = 0;
+    ends_.clear();
+    seconds_ = 0.0;
+    slow_ = false;
+    encoded_ = std::max(0.0, std::min(1.0, done));
+    if (!encoding_)
+    {
+        encoding_ = true;
+        walker_.Start(WALK_MS);
+    }
+    Refresh();
+}
+
 void ArrivalBar::setWhole(uint64_t whole, const std::vector<uint64_t>& burstEnds, double seconds)
 {
+    stopEncoding();
     whole_ = whole;
     ends_ = burstEnds;
     seconds_ = seconds;
@@ -117,6 +148,7 @@ void ArrivalBar::setDone(uint64_t done)
 
 void ArrivalBar::setTooSlow(double seconds)
 {
+    stopEncoding();
     whole_ = 0;
     done_ = 0;
     ends_.clear();
@@ -136,7 +168,7 @@ void ArrivalBar::OnPaint(wxPaintEvent&)
     dc.SetBackground(wxBrush(GetParent()->GetBackgroundColour()));
     dc.Clear();
     timeFigure_ = sizeFigure_ = wxRect();
-    if (whole_ == 0 && !slow_) return;
+    if (whole_ == 0 && !slow_ && !encoding_) return;
     std::unique_ptr<wxGraphicsContext> gc(wxGraphicsContext::Create(dc));
     if (!gc) return;
 
@@ -151,6 +183,11 @@ void ArrivalBar::OnPaint(wxPaintEvent&)
     auto xOf = [&](uint64_t bytes) { return left + width * (double)bytes / (double)std::max<uint64_t>(1, whole_); };
     wxColour edge = wxSystemSettings::GetColour(wxSYS_COLOUR_GRAYTEXT);
     wxColour ink = wxSystemSettings::GetColour(wxSYS_COLOUR_BTNTEXT);
+    if (encoding_)
+    {
+        paintEncoding(*gc, left, width, top, bar);
+        return;
+    }
 
     // The track, and what has come in it.
     gc->SetPen(wxPen(edge, 1));
@@ -259,5 +296,61 @@ void ArrivalBar::OnPaint(wxPaintEvent&)
         bool largest = i + 1 == ticks.size() && i > 0;
         wxRect where = label(ragtime::picture::scaleLabel(ticks[i], whole_), x, bar + tick + 1.0, largest);
         if (largest) sizeFigure_ = where;
+    }
+}
+
+void ArrivalBar::paintEncoding(wxGraphicsContext& gc, double left, double width, double top, double bar)
+{
+    const wxSize size = GetClientSize();
+    const double tick = FromDIP(TICK_DIP);
+    wxColour edge = wxSystemSettings::GetColour(wxSYS_COLOUR_GRAYTEXT);
+    wxColour ink = wxSystemSettings::GetColour(wxSYS_COLOUR_BTNTEXT);
+    const double right = left + width;
+
+    gc.SetPen(wxPen(edge, 1));
+    gc.SetBrush(wxBrush(wxSystemSettings::GetColour(wxSYS_COLOUR_WINDOW)));
+    gc.DrawRectangle(left, top + 0.5, width, bar - top - 1.0);
+    // The work done fills from the right, as the axis under it counts up
+    // to 100% at the left.
+    const double inner = std::max(0.0, width - 1.0);
+    const double from = right - inner * encoded_;
+    if (encoded_ > 0.0 && right - from >= 0.5)
+    {
+        const double y0 = top + 1.5, h = bar - top - 2.5;
+        gc.SetPen(*wxTRANSPARENT_PEN);
+        gc.SetBrush(wxBrush(ACCENT_BLUE));
+        gc.DrawRectangle(from, y0, right - from, h);
+        // Grey lines leaning across it, walking toward the 100% end: the
+        // computer is at work.
+        gc.Clip(from, y0, right - from, h);
+        const double gap = FromDIP(STRIPE_DIP), lean = h;
+        const double offset = std::fmod((double)walk_, gap);
+        gc.SetPen(wxPen(wxColour(0xc8, 0xc8, 0xc8, 0x90), std::max(1, FromDIP(3))));
+        for (double x = right + lean - offset; x > from - gap; x -= gap)
+            gc.StrokeLine(x, y0, x - lean, y0 + h);
+        gc.ResetClip();
+    }
+
+    // Under it, the percent: 0% on the right, 100% on the left, as many
+    // round steps as fit.
+    gc.SetPen(wxPen(ink, 1));
+    gc.SetFont(GetFont(), ink);
+    double wide = 0, high = 0;
+    gc.GetTextExtent("100%", &wide, &high);
+    int step = 100;
+    for (int s : {10, 20, 25, 50})
+        if ((100 / s) * wide * 2.0 <= width)
+        {
+            step = s;
+            break;
+        }
+    for (int p = 0; p <= 100; p += step)
+    {
+        const double x = std::round(right - inner * p / 100.0) + 0.5;
+        gc.StrokeLine(x, bar + 1.0, x, bar + tick);
+        wxString words = wxString::Format("%d%%", p);
+        double w = 0, h = 0;
+        gc.GetTextExtent(words, &w, &h);
+        gc.DrawText(words, std::max(0.0, std::min(size.x - w, x - w / 2.0)), bar + tick + 1.0);
     }
 }

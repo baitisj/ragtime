@@ -1588,6 +1588,27 @@ file with a kind byte (docs/PROTOCOL.md, "Pictures").
   slider to adjust the speed at which the sequence is animated"),
   starting at 8× each time the dialog opens (Jeff, 2026-10-29). It
   changes nothing sent.
+- **Cool-chic** (Jeff, 2026-10-29). The dialog's Codec list picks JPEG
+  2000 (made at once) or Cool-chic (sharper, takes minutes), remembered
+  (`/Pictures/Codec`). Cool-chic (`image::coolchicEncode`,
+  docs/PICTURE_CODEC.md) fits a small network to the shrunk picture on a
+  thread of its own, aimed at the bytes the airtime allows: it guesses
+  λ from the picture's size, steers it late in the fit, and fits on a
+  while at a higher λ if the stream still comes out too big
+  (`CoolChicOptions::maxBytes`). While it fits, the preview shows the
+  fit's picture about once a second; the bar fills from the right over
+  a percent scale, 0% on the right and 100% on the left, with grey lines
+  walking across the part done (`ArrivalBar::setEncoding`); the count
+  under it says how far and about how long is left; and a Cancel button
+  beside it stops the fit after asking, as do the dialog's Cancel and its
+  close box. The settings are held while it fits. A fit stopped waits
+  for Encode, or for a setting to change. Each fit made is kept while
+  the dialog is open (by side and bytes), so going back to it is
+  instant. Then the preview plays the picture arriving as for JPEG 2000,
+  blank until the weights are in. It goes as `name.rcc`, kind `0x02`,
+  and a receiver decodes it as it comes with one `coolchic::Decoder`
+  fed more each time (`PictureShelf`). What the port taught us, and
+  what could be better, is docs/COOLCHIC_NOTES.md.
 - **First parts.** A codestream cut inside a code-block's segment makes
   OpenJPEG drop that code-block whole, all its layers, which in the
   lowest resolution leaves a flat grey picture ("segment too long ...

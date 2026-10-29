@@ -2,7 +2,9 @@
 #define RAGTIME_PICTURES_H
 
 #include <cstdint>
+#include <cstddef>
 #include <map>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -13,6 +15,17 @@
 #include "ragtime/picture/Picture.h"
 
 class wxWindow;
+
+namespace ragtime
+{
+namespace image
+{
+namespace coolchic
+{
+class Decoder;
+}
+} // namespace image
+} // namespace ragtime
 
 // Inline pictures in the window (docs/STAGE1.md, "Inline pictures"): a
 // picture read from disk in any format Ragtime knows, and the shelf of
@@ -26,6 +39,11 @@ class wxWindow;
 bool loadPicture(const std::string& path, ragtime::picture::Image& out, std::string& error);
 
 wxImage toWxImage(const ragtime::picture::Image& image);
+
+// Decodes a picture's bytes, or as much of them as has come: a JPEG 2000
+// codestream (kind 0x01) or a Cool-chic stream (kind 0x02,
+// docs/PICTURE_CODEC.md), told apart by the codestream's first marker.
+bool decodePicture(const uint8_t* bytes, size_t length, ragtime::picture::Image& out, std::string& error);
 
 // The file dialog's wildcard for pictures Ragtime reads.
 wxString pictureWildcard();
@@ -75,6 +93,9 @@ private:
         int thumbPx = 0;
         bool thumbStop = false;
         wxRect stopRect;            // the stop button's, in the thumbnail
+        // A Cool-chic picture's decoder, fed more as it comes: each feed
+        // decodes only the new latents.
+        std::shared_ptr<ragtime::image::coolchic::Decoder> coolchic;
     };
     std::map<std::string, Entry> entries_;
     int nextName_ = 1;
