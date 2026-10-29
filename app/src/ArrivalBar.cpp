@@ -5,9 +5,11 @@
 #include <memory>
 #include <string>
 
+#include <wx/cursor.h>
 #include <wx/dcbuffer.h>
 #include <wx/graphics.h>
 #include <wx/settings.h>
+#include <wx/utils.h>
 
 #include "Html.h"
 #include "ragtime/picture/Picture.h"
@@ -27,6 +29,57 @@ ArrivalBar::ArrivalBar(wxWindow* parent, wxWindowID id)
     SetBackgroundStyle(wxBG_STYLE_PAINT);
     SetFont(GetFont().Smaller());
     Bind(wxEVT_PAINT, &ArrivalBar::OnPaint, this);
+    for (auto type : {wxEVT_ENTER_WINDOW, wxEVT_LEAVE_WINDOW, wxEVT_LEFT_DOWN, wxEVT_LEFT_UP, wxEVT_MOTION})
+        Bind(type, &ArrivalBar::OnMouse, this);
+    Bind(wxEVT_MOUSE_CAPTURE_LOST, [this](wxMouseCaptureLostEvent&) {
+        if (!GetClientRect().Contains(ScreenToClient(wxGetMousePosition()))) hover(false);
+    });
+}
+
+void ArrivalBar::hover(bool over)
+{
+    if (over == over_) return;
+    over_ = over;
+    SetCursor(over && whole_ > 0 ? wxCursor(wxCURSOR_SIZEWE) : wxNullCursor);
+    Refresh();
+    if (onHover) onHover(over);
+}
+
+void ArrivalBar::seekTo(int x)
+{
+    if (whole_ == 0 || !onSeek) return;
+    const double left = FromDIP(SIDE_DIP), width = std::max(1.0, GetClientSize().x - 2.0 * FromDIP(SIDE_DIP) - 1.0);
+    double at = std::max(0.0, std::min(1.0, (x - left) / width));
+    onSeek((uint64_t)std::llround(at * (double)whole_));
+}
+
+void ArrivalBar::OnMouse(wxMouseEvent& event)
+{
+    const wxEventType type = event.GetEventType();
+    if (type == wxEVT_ENTER_WINDOW)
+        hover(true);
+    else if (type == wxEVT_LEAVE_WINDOW)
+    {
+        // Dragging, the bar keeps the mouse till the button comes up.
+        if (!HasCapture()) hover(false);
+    }
+    else if (type == wxEVT_LEFT_DOWN)
+    {
+        hover(true);
+        if (!HasCapture()) CaptureMouse();
+        seekTo(event.GetX());
+    }
+    else if (type == wxEVT_MOTION)
+    {
+        hover(true);
+        if (HasCapture() && event.LeftIsDown()) seekTo(event.GetX());
+    }
+    else if (type == wxEVT_LEFT_UP)
+    {
+        if (HasCapture()) ReleaseMouse();
+        if (!GetClientRect().Contains(event.GetPosition())) hover(false);
+    }
+    event.Skip();
 }
 
 void ArrivalBar::setWhole(uint64_t whole, const std::vector<uint64_t>& burstEnds, double seconds)
@@ -88,6 +141,16 @@ void ArrivalBar::OnPaint(wxPaintEvent&)
         if (end == 0 || end >= whole_) continue;
         double x = std::round(xOf(end)) + 0.5;
         gc->StrokeLine(x, top + 1.0, x, bar - 1.0);
+    }
+
+    // Over the bar, a knob at how much has come, to drag.
+    if (over_)
+    {
+        const double knob = FromDIP(3);
+        double x = xOf(done_);
+        gc->SetPen(wxPen(ink, 1));
+        gc->SetBrush(wxBrush(wxSystemSettings::GetColour(wxSYS_COLOUR_WINDOW)));
+        gc->DrawRoundedRectangle(x - knob, top - FromDIP(2), 2.0 * knob, bar - top + FromDIP(4), knob);
     }
 
     // The axes: ticks a round step apart, each labelled, as many as fit.

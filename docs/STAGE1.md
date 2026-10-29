@@ -1572,7 +1572,10 @@ file with a kind byte (docs/PROTOCOL.md, "Pictures").
   40k" (`picture::comeText`, Jeff 2026-10-29). The bytes come at an even
   pace across the time, the gaps between bursts shared out, so both axes
   are even. No line of words under the slider says it again (Jeff,
-  2026-10-29: the bar makes it plain). It holds the whole picture
+  2026-10-29: the bar makes it plain). Hovering over the bar pauses the
+  preview and shows a knob; pressing or dragging along it shows the step
+  nearest that point, and once the pointer leaves the preview plays on
+  from there (Jeff, 2026-10-29). It holds the whole picture
   3 s and plays again. The Simulation speed slider (named so by Jeff,
   2026-10-29) runs it from real time to 64× (Jeff, 2026-10-27: "use the
   slider to adjust the speed at which the sequence is animated"),

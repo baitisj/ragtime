@@ -69,6 +69,16 @@ PictureDialog::PictureDialog(wxWindow* parent, const PictureTarget& target, cons
     // Under it, how much has come of the whole as it plays: a bar with
     // the picture's size on a scale, and "1.2k / 4.0k" (Jeff, 2026-10-29).
     arrival_ = new ArrivalBar(this);
+    // Over the bar the preview stops for the operator to drag through it,
+    // and plays on from there once the pointer leaves (Jeff, 2026-10-29).
+    arrival_->onHover = [this](bool over) {
+        paused_ = over;
+        if (over)
+            play_.Stop();
+        else if (!steps_.empty())
+            play_.StartOnce(stepMs());
+    };
+    arrival_->onSeek = [this](uint64_t bytes) { seek(bytes); };
     sizer->Add(arrival_, 0, wxEXPAND | wxLEFT | wxRIGHT | wxTOP, 12);
     sizeText_ = new wxStaticText(this, wxID_ANY, "", wxDefaultPosition, wxDefaultSize,
                                  wxALIGN_CENTRE_HORIZONTAL | wxST_NO_AUTORESIZE);
@@ -166,7 +176,7 @@ PictureDialog::PictureDialog(wxWindow* parent, const PictureTarget& target, cons
     speed_->Bind(wxEVT_SLIDER, [this](wxCommandEvent&) {
         showSpeed();
         // The step on screen waits the new speed's time.
-        if (!steps_.empty()) play_.StartOnce(stepMs());
+        if (!steps_.empty() && !paused_) play_.StartOnce(stepMs());
     });
     gears_->Bind(wxEVT_CHOICE, [this](wxCommandEvent&) {
         int n = gears_->GetSelection();
@@ -420,5 +430,21 @@ void PictureDialog::showStep()
         view_->setImage(frames_[step_]);
     else if (whole_.IsOk())
         view_->setImage(blank());
-    play_.StartOnce(stepMs());
+    if (!paused_) play_.StartOnce(stepMs());
+}
+
+void PictureDialog::seek(uint64_t bytes)
+{
+    if (steps_.empty()) return;
+    // The step nearest, and the bar right at the point dragged to.
+    size_t best = 0;
+    for (size_t i = 1; i < steps_.size(); i++)
+    {
+        uint64_t gap = steps_[i].bytes > bytes ? steps_[i].bytes - bytes : bytes - steps_[i].bytes;
+        uint64_t bestGap = steps_[best].bytes > bytes ? steps_[best].bytes - bytes : bytes - steps_[best].bytes;
+        if (gap < bestGap) best = i;
+    }
+    if (best == step_) return;
+    step_ = best;
+    showStep();
 }

@@ -71,6 +71,8 @@ private:
     void showStep();
     void nextStep();
     int stepMs() const;
+    // Dragged on the bar: the step nearest that many bytes.
+    void seek(uint64_t bytes);
     void showSpeed();
     // The gear's label and list in red while the gear is too slow.
     void showGearTooSlow(bool slow);
@@ -103,6 +105,7 @@ private:
     std::vector<ragtime::picture::ArrivalStep> steps_;
     std::vector<wxImage> frames_;       // each step decoded, when first shown
     size_t step_ = 0;
+    bool paused_ = false;               // the pointer over the bar
     static constexpr int MAX_SPEED_STEP = 6;
     static constexpr int DEFAULT_SPEED_STEP = 3;   // 8×
     static constexpr int MIN_STEP_MS = 80;
