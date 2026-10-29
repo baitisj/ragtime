@@ -5,9 +5,22 @@
 # downscaler and the airtime sums are core's, and tested there. With
 # -DRAGTIME_PICTURES=OFF a stand-in says pictures can't be made or shown,
 # and with -DRAGTIME_HEIF=OFF HEIF files can't be picked.
+#
+# Cool-chic pictures (docs/PICTURE_CODEC.md) need no libraries, so they are
+# built either way. The files ported from Cool-chic keep Orange's BSD-3
+# notice (src/coolchic/LICENSE.txt).
+set(RAGTIME_COOLCHIC_DEC_SOURCES
+    src/coolchic/Architecture.cpp
+    src/coolchic/Arm.cpp
+    src/coolchic/Decode.cpp
+    src/coolchic/Latents.cpp
+    src/coolchic/RangeCoder.cpp
+    src/coolchic/Stream.cpp
+    src/coolchic/Upsampling.cpp
+)
 
 if(RAGTIME_PICTURES)
-    add_library(ragtime_image STATIC src/Codec.cpp)
+    add_library(ragtime_image STATIC src/Codec.cpp ${RAGTIME_COOLCHIC_DEC_SOURCES})
     target_link_libraries(ragtime_image PRIVATE ragtime::openjpeg ragtime::webp)
     if(RAGTIME_HEIF)
         target_link_libraries(ragtime_image PRIVATE ragtime::heif)
@@ -19,7 +32,7 @@ if(RAGTIME_PICTURES)
         add_dependencies(ragtime_image image_libs_build)
     endif()
 else()
-    add_library(ragtime_image STATIC src/NoCodec.cpp)
+    add_library(ragtime_image STATIC src/NoCodec.cpp ${RAGTIME_COOLCHIC_DEC_SOURCES})
 endif()
 
 # The Cool-chic encoder (image/src/coolchic/, BSD-3, LICENSE.txt there):

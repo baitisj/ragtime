@@ -56,6 +56,10 @@ ragtime_test(ragtime_file_traffic_test FileTrafficTest.cpp)
 # Inline pictures: the downscaler and airtime sums, and the codecs.
 ragtime_test(ragtime_picture_test PictureTest.cpp)
 target_link_libraries(ragtime_picture_test PRIVATE ragtime_image)
+# Cool-chic pictures: the decoder against tests/data/coolchic/, and a fuzz run.
+ragtime_test(ragtime_coolchic_test CoolChicTest.cpp)
+target_link_libraries(ragtime_coolchic_test PRIVATE ragtime_image)
+target_compile_definitions(ragtime_coolchic_test PRIVATE RAGTIME_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
 if(TARGET ragtime::webp)
     # libwebp's encoder makes the WebP the test reads back.
     target_link_libraries(ragtime_picture_test PRIVATE ragtime::webp)
