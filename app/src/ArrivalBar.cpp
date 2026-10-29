@@ -21,19 +21,12 @@ namespace
 constexpr int BAR_DIP = 12;     // the bar's height
 constexpr int TICK_DIP = 4;     // the axes' ticks, over it and under it
 constexpr int SIDE_DIP = 14;    // room each side for a label's half
-constexpr int TURTLE_DIP = 66;  // the turtle's room, right of a burst bar
-constexpr int BURST_DIP = 26;   // the burst's room between the bar and the turtle
-constexpr int WIGGLE_MS = 350;  // each frame of its legs
-
-// The turtle's colours: drawn, not themed, as a cartoon is.
-const wxColour SHELL(0x4c, 0x9a, 0x3c), SHELL_LINE(0x2d, 0x5e, 0x22), BELLY(0xe6, 0xcf, 0x86),
-    BELLY_LINE(0x9c, 0x85, 0x40), SKIN(0x8c, 0xc0, 0x63), TEAR(0x4a, 0xa3, 0xff);
+constexpr int BURST_DIP = 28;   // the burst's room, right of a bar too slow
 
 } // namespace
 
 ArrivalBar::ArrivalBar(wxWindow* parent, wxWindowID id)
     : wxControl(parent, id, wxDefaultPosition, wxDefaultSize, wxBORDER_NONE)
-    , wiggle_(this)
 {
     SetBackgroundStyle(wxBG_STYLE_PAINT);
     SetFont(GetFont().Smaller());
@@ -43,10 +36,6 @@ ArrivalBar::ArrivalBar(wxWindow* parent, wxWindowID id)
     Bind(wxEVT_MOUSE_CAPTURE_LOST, [this](wxMouseCaptureLostEvent&) {
         if (!GetClientRect().Contains(ScreenToClient(wxGetMousePosition()))) hover(false);
     });
-    Bind(wxEVT_TIMER, [this](wxTimerEvent&) {
-        frame_ = 1 - frame_;
-        Refresh();
-    }, wiggle_.GetId());
 }
 
 void ArrivalBar::hover(bool over)
@@ -114,7 +103,6 @@ void ArrivalBar::setWhole(uint64_t whole, const std::vector<uint64_t>& burstEnds
     ends_ = burstEnds;
     seconds_ = seconds;
     slow_ = false;
-    wiggle_.Stop();
     done_ = std::min(done_, whole_);
     Refresh();
 }
@@ -134,7 +122,6 @@ void ArrivalBar::setTooSlow(double seconds)
     ends_.clear();
     seconds_ = seconds;
     slow_ = true;
-    if (!wiggle_.IsRunning()) wiggle_.Start(WIGGLE_MS);
     Refresh();
 }
 
@@ -155,8 +142,8 @@ void ArrivalBar::OnPaint(wxPaintEvent&)
 
     const wxSize size = GetClientSize();
     const double left = FromDIP(SIDE_DIP);
-    // Too slow, the bar leaves room on its right for the turtle.
-    const double right = slow_ ? size.x - FromDIP(TURTLE_DIP) - FromDIP(BURST_DIP) : size.x - FromDIP(SIDE_DIP) - 1.0;
+    // Too slow, the bar leaves room on its right for the burst.
+    const double right = slow_ ? size.x - FromDIP(BURST_DIP) : size.x - FromDIP(SIDE_DIP) - 1.0;
     const double width = std::max(1.0, right - left);
     const double tick = FromDIP(TICK_DIP);
     const double top = GetCharHeight() + tick + FromDIP(2);    // the bar's top, under the time axis
@@ -198,7 +185,6 @@ void ArrivalBar::OnPaint(wxPaintEvent&)
         gc->SetPen(*wxTRANSPARENT_PEN);
         gc->SetBrush(wxBrush(badText()));
         gc->FillPath(burst);
-        drawTurtle(gc.get(), size.x - FromDIP(TURTLE_DIP), 0.0, FromDIP(TURTLE_DIP), size.y);
     }
     else if (done_ > 0)
     {
@@ -274,106 +260,4 @@ void ArrivalBar::OnPaint(wxPaintEvent&)
         wxRect where = label(ragtime::picture::scaleLabel(ticks[i], whole_), x, bar + tick + 1.0, largest);
         if (largest) sizeFigure_ = where;
     }
-}
-
-void ArrivalBar::drawTurtle(wxGraphicsContext* gc, double x, double y, double w, double h) const
-{
-    // Drawn on a 64 by 48 grid, scaled to fit and centred.
-    const double s = std::min(w / 64.0, h / 48.0);
-    gc->PushState();
-    gc->Translate(x + (w - 64.0 * s) / 2.0, y + (h - 48.0 * s) / 2.0);
-    gc->Scale(s, s);
-    const double flip = frame_ == 0 ? 1.0 : -1.0;
-
-    // The legs, kicking at the sky: outlined, then filled, all leaning
-    // one way and then the other, each kicking higher than the next.
-    const double legs[] = {17, 26, 38, 47};
-    auto tip = [&](int i) { return wxPoint2DDouble(legs[i] + 3.5 * flip, (i + frame_) % 2 == 0 ? 6.0 : 9.0); };
-    for (int pass = 0; pass < 2; pass++)
-    {
-        gc->SetPen(gc->CreatePen(
-            wxGraphicsPenInfo(pass == 0 ? SHELL_LINE : SKIN, pass == 0 ? 6.0 : 4.2).Cap(wxCAP_ROUND)));
-        for (int i = 0; i < 4; i++) gc->StrokeLine(legs[i], 21.0, tip(i).m_x, tip(i).m_y);
-    }
-    // Little marks by the feet, for the wiggle.
-    gc->SetPen(gc->CreatePen(wxGraphicsPenInfo(wxColour(0x9a, 0x9a, 0x9a), 1.0).Cap(wxCAP_ROUND)));
-    for (int i = 0; i < 4; i++)
-    {
-        double side = -4.5 * flip;
-        gc->StrokeLine(tip(i).m_x + side, tip(i).m_y - 2.0, tip(i).m_x + side * 1.5, tip(i).m_y - 4.0);
-        gc->StrokeLine(tip(i).m_x + side, tip(i).m_y + 1.5, tip(i).m_x + side * 1.6, tip(i).m_y + 1.5);
-    }
-
-    // The tail, stuck out.
-    wxGraphicsPath tail = gc->CreatePath();
-    tail.MoveToPoint(53.0, 21.0);
-    tail.AddLineToPoint(60.0, 18.0 + flip);
-    tail.AddLineToPoint(53.0, 25.0);
-    tail.CloseSubpath();
-    gc->SetPen(gc->CreatePen(wxGraphicsPenInfo(SHELL_LINE, 1.2)));
-    gc->SetBrush(wxBrush(SKIN));
-    gc->DrawPath(tail);
-
-    // The shell underneath, its dome to the ground, and its plates.
-    wxGraphicsPath shell = gc->CreatePath();
-    shell.MoveToPoint(10.0, 24.0);
-    shell.AddCurveToPoint(10.0, 47.0, 54.0, 47.0, 54.0, 24.0);
-    shell.CloseSubpath();
-    gc->SetPen(gc->CreatePen(wxGraphicsPenInfo(SHELL_LINE, 1.5)));
-    gc->SetBrush(wxBrush(SHELL));
-    gc->DrawPath(shell);
-    wxGraphicsPath plates = gc->CreatePath();
-    plates.MoveToPoint(13.0, 32.0);
-    plates.AddCurveToPoint(24.0, 36.0, 40.0, 36.0, 51.0, 32.0);
-    plates.MoveToPoint(22.0, 25.0);
-    plates.AddLineToPoint(24.0, 35.0);
-    plates.MoveToPoint(32.0, 25.0);
-    plates.AddLineToPoint(32.0, 36.0);
-    plates.MoveToPoint(42.0, 25.0);
-    plates.AddLineToPoint(40.0, 35.0);
-    plates.MoveToPoint(28.0, 36.0);
-    plates.AddLineToPoint(28.0, 41.5);
-    plates.MoveToPoint(36.0, 36.0);
-    plates.AddLineToPoint(36.0, 41.5);
-    gc->StrokePath(plates);
-
-    // The belly, up.
-    gc->SetPen(gc->CreatePen(wxGraphicsPenInfo(BELLY_LINE, 1.2)));
-    gc->SetBrush(wxBrush(BELLY));
-    gc->DrawRoundedRectangle(11.0, 19.5, 42.0, 6.0, 3.0);
-
-    // The head, thrown back, eyes shut tight, mouth turned down.
-    gc->SetPen(gc->CreatePen(wxGraphicsPenInfo(SHELL_LINE, 1.2)));
-    gc->SetBrush(wxBrush(SKIN));
-    gc->DrawEllipse(-1.0, 15.5 + 0.5 * flip, 15.0, 14.0);
-    wxGraphicsPath face = gc->CreatePath();
-    face.MoveToPoint(2.0, 20.5);
-    face.AddCurveToPoint(4.0, 18.5, 6.5, 18.5, 8.5, 20.5);
-    face.MoveToPoint(3.0, 26.5);
-    face.AddCurveToPoint(5.0, 24.0, 8.0, 24.0, 10.0, 26.5);
-    gc->SetPen(gc->CreatePen(wxGraphicsPenInfo(SHELL_LINE, 1.1).Cap(wxCAP_ROUND)));
-    gc->StrokePath(face);
-    // Tears, falling: one just welling and one on its way in turn.
-    gc->SetPen(*wxTRANSPARENT_PEN);
-    gc->SetBrush(wxBrush(TEAR));
-    auto tear = [&](double cx, double cy, double r) {
-        wxGraphicsPath drop = gc->CreatePath();
-        drop.MoveToPoint(cx, cy - 2.2 * r);
-        drop.AddCurveToPoint(cx + 1.3 * r, cy - 0.6 * r, cx + r, cy + r, cx, cy + r);
-        drop.AddCurveToPoint(cx - r, cy + r, cx - 1.3 * r, cy - 0.6 * r, cx, cy - 2.2 * r);
-        drop.CloseSubpath();
-        gc->FillPath(drop);
-    };
-    if (frame_ == 0)
-    {
-        tear(2.0, 23.5, 1.5);
-        tear(0.5, 33.0, 1.9);
-    }
-    else
-    {
-        tear(2.5, 23.0, 1.2);
-        tear(0.0, 28.5, 1.9);
-        tear(9.5, 23.0, 1.2);
-    }
-    gc->PopState();
 }

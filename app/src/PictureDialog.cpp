@@ -368,12 +368,19 @@ void PictureDialog::remake()
     }
     else
     {
-        view_->setImage(toWxImage(shrunk_), false);
         sizeText_->SetLabel("");
         if (gear_.mode.valid() && most == 0)
+        {
+            // Too slow: the picture torn, its left third all that would
+            // get through (Jeff, 2026-10-29).
+            view_->setImage(torn(toWxImage(shrunk_)), false);
             arrival_->setTooSlow(seconds);
+        }
         else
+        {
+            view_->setImage(toWxImage(shrunk_), false);
             arrival_->setWhole(0, {}, 0.0);
+        }
     }
     // Long lines wrap at the preview's width, and the dialog grows to fit
     // them.
@@ -390,6 +397,51 @@ void PictureDialog::showGearTooSlow(bool slow)
         w->SetForegroundColour(slow ? badText() : wxNullColour);
         w->Refresh();
     }
+}
+
+wxImage PictureDialog::torn(const wxImage& picture) const
+{
+    wxImage image = picture.Copy();
+    const int w = image.GetWidth(), h = image.GetHeight();
+    if (w < 6 || h < 1) return image;
+    wxColour face = wxSystemSettings::GetColour(wxSYS_COLOUR_BTNFACE);
+    unsigned char* rgb = image.GetData();
+    // A ragged edge about a third of the way across: a wander that drifts
+    // a few pixels at a time and is pulled back to the third, with fine
+    // fibres of a pixel or two on top and now and then a sharper jag. The
+    // same every time, so the tear doesn't move as the dialog redraws.
+    uint32_t seed = 0x9e3779b9u;
+    auto next = [&seed]() {
+        seed = seed * 1664525u + 1013904223u;
+        return (int)(seed >> 16);
+    };
+    const int third = w / 3, reach = std::max(2, w / 22), fibre = std::max(1, w / 120);
+    double wander = 0.0, drift = 0.0;
+    for (int y = 0; y < h; y++)
+    {
+        drift = 0.9 * drift + 0.3 * (double)(next() % 9 - 4) - 0.01 * wander;
+        wander = std::max(-(double)reach, std::min((double)reach, wander + drift));
+        int jag = next() % 17 == 0 ? next() % (2 * fibre + 3) : 0;
+        int edge = third + (int)std::lround(wander) + next() % (fibre + 2) - jag;
+        for (int x = std::max(0, edge - fibre - 1); x < w; x++)
+        {
+            unsigned char* p = rgb + 3 * ((size_t)y * (size_t)w + (size_t)x);
+            if (x < edge)
+            {
+                // The paper's torn fibres: pale along the edge.
+                for (int c = 0; c < 3; c++) p[c] = (unsigned char)(p[c] + (255 - p[c]) * 3 / 4);
+            }
+            else
+            {
+                // Beyond it, nothing: a faint shadow just past the edge.
+                int shade = x - edge < 3 ? 18 - 6 * (x - edge) : 0;
+                p[0] = (unsigned char)std::max(0, face.Red() - shade);
+                p[1] = (unsigned char)std::max(0, face.Green() - shade);
+                p[2] = (unsigned char)std::max(0, face.Blue() - shade);
+            }
+        }
+    }
+    return image;
 }
 
 wxImage PictureDialog::blank() const

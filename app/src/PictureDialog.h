@@ -76,6 +76,9 @@ private:
     void showSpeed();
     // The gear's label and list in red while the gear is too slow.
     void showGearTooSlow(bool slow);
+    // The picture torn about a third of the way across, the rest gone:
+    // what a gear too slow would get through.
+    wxImage torn(const wxImage& picture) const;
     // A blank the picture's size, for a step with nothing to show yet.
     wxImage blank() const;
     uint64_t budget(double seconds) const;

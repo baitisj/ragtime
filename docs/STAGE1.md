@@ -1580,8 +1580,9 @@ file with a kind byte (docs/PROTOCOL.md, "Pictures").
   headings light up blue together, the headings underlined, as the
   settings that make them. When the gear is too slow, the bar runs red
   to the airtime allowed and bursts out of its right end in shards, and
-  beside it a turtle on its back cries and wiggles its legs, two frames
-  in turn (Jeff, 2026-10-29). It holds the whole picture
+  the preview shows the picture torn about a third of the way across,
+  only its left third left (Jeff, 2026-10-29: the same ragged edge each
+  time). It holds the whole picture
   3 s and plays again. The Simulation speed slider (named so by Jeff,
   2026-10-29) runs it from real time to 64× (Jeff, 2026-10-27: "use the
   slider to adjust the speed at which the sequence is animated"),
