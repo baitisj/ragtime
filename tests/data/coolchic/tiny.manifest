@@ -1,0 +1,48 @@
+# tiny.rcc: 884 bytes. For each decode: the bytes it had, then each
+# grid (coarsest first) as HxW and how many of its values were good.
+grid 2x3: 6 of 6 values
+grid 2x3: 6 of 6 values
+grid 4x5: 20 of 20 values
+grid 4x5: 20 of 20 values
+grid 8x10: 80 of 80 values
+grid 8x10: 80 of 80 values
+grid 15x20: 300 of 300 values
+grid 30x40: 1200 of 1200 values
+grid 60x80: 4800 of 4800 values
+grid 120x160: 19200 of 19200 values
+884 of 884 bytes -> /home/user/ragtime/tests/data/coolchic/tiny.png
+only 265 of the 450 bytes of headers and weights: nothing to show yet
+only 397 of the 450 bytes of headers and weights: nothing to show yet
+grid 2x3: 6 of 6 values
+grid 2x3: 6 of 6 values
+grid 4x5: 20 of 20 values
+grid 4x5: 20 of 20 values
+grid 8x10: 80 of 80 values
+grid 8x10: 80 of 80 values
+grid 15x20: 300 of 300 values
+grid 30x40: 0 of 1200 values
+grid 60x80: 0 of 4800 values
+grid 120x160: 0 of 19200 values
+530 of 884 bytes -> /home/user/ragtime/tests/data/coolchic/tiny-530.png
+grid 2x3: 6 of 6 values
+grid 2x3: 6 of 6 values
+grid 4x5: 20 of 20 values
+grid 4x5: 20 of 20 values
+grid 8x10: 80 of 80 values
+grid 8x10: 80 of 80 values
+grid 15x20: 300 of 300 values
+grid 30x40: 1200 of 1200 values
+grid 60x80: 4800 of 4800 values
+grid 120x160: 2133 of 19200 values
+663 of 884 bytes -> /home/user/ragtime/tests/data/coolchic/tiny-663.png
+grid 2x3: 6 of 6 values
+grid 2x3: 6 of 6 values
+grid 4x5: 20 of 20 values
+grid 4x5: 20 of 20 values
+grid 8x10: 80 of 80 values
+grid 8x10: 80 of 80 values
+grid 15x20: 300 of 300 values
+grid 30x40: 1200 of 1200 values
+grid 60x80: 4800 of 4800 values
+grid 120x160: 7900 of 19200 values
+795 of 884 bytes -> /home/user/ragtime/tests/data/coolchic/tiny-795.png

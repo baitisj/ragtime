@@ -135,6 +135,21 @@ pretrained model, and every picture is fitted from scratch.
     python metrics.py SSTVAE/wonder_wheel.jpg out/*.png
     ./grid.sh grid.jpg "Original" ww.png "JPEG 2000, 4060 bytes" out/ww_j2k_4096.png
 
+### `rcc/`: Ragtime's Cool-chic stream
+
+The reference for docs/PICTURE_CODEC.md: Cool-chic 5.0.1's bitstream with
+its latents coded by an integer range coder, one flushed run per grid, so
+every machine decodes the same values and a cut-off stream decodes as far
+as it goes. `rcc.py` is the coder (`test_rcc.py` tests it), `tables.py`
+writes its tables, `rcc_cool.py` plugs it into Cool-chic, `rcc_write.py`
+writes a fitted picture as a stream, `rcc_read.py` decodes a stream or its
+first N bytes, and `make_vectors.sh` (with `make_tiny.py`'s picture) makes
+`tests/data/coolchic/`.
+
+    cd Cool-Chic && export PYTHONPATH=.:../rcc
+    python ../rcc/rcc_write.py ../cc/w4 ../ww.png ../lop03.rcc
+    python ../rcc/rcc_read.py ../lop03.rcc ../lop03-2000.png 2000
+
 ## Results
 
 PSNR in dB, SSIM from 0 to 1, both higher-is-better. Decode times are on
