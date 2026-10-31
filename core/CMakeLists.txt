@@ -70,6 +70,12 @@ add_library(ragtime_core STATIC
     # Inline pictures: the detail-preserving downscaler, orientation and
     # what fits the air (the codecs are in image/).
     src/picture/Picture.cpp
+    # Voice: the processing chain from the microphone to sotto (high-pass,
+    # leveller, limiter, resampling) and the level figures; the noise
+    # reducer is handed in (denoise/).
+    src/voice/Chain.cpp
+    src/voice/Dsp.cpp
+    src/voice/Levels.cpp
 )
 
 target_include_directories(ragtime_core PUBLIC

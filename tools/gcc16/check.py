@@ -46,7 +46,8 @@ def main():
     for opt in ("-O2", "-O3"):
         for c in commands:
             args = shlex.split(c["command"])
-            args[0] = "g++"
+            # C files (RNNoise's, in denoise/) go to gcc.
+            args[0] = "gcc" if c["file"].endswith(".c") else "g++"
             args = [re.sub(r"^-O[0-3s]$", opt, a) for a in args]
             # Objects go nowhere: this is a compile check, not a build.
             for i, a in enumerate(args):
