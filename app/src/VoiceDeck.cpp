@@ -437,7 +437,8 @@ void VoiceDeck::buildPanel()
         speaker_->SetMaxSize(FromDIP(wxSize(200, -1)));
         speaker_->SetToolTip("Where Monitor and arriving voice play. The radio's sound card is never offered.");
         auto* vol = new wxStaticText(plate, wxID_ANY, "Volume");
-        volume_ = new wxSlider(plate, wxID_ANY, 0, -30, 10, wxDefaultPosition, FromDIP(wxSize(110, -1)));
+        volume_ = new wxSlider(plate, wxID_ANY, 0, (int)VOICE_VOLUME_MIN_DB, (int)VOICE_VOLUME_MAX_DB, wxDefaultPosition,
+                               FromDIP(wxSize(110, -1)));
         volume_->SetToolTip("The speaker's volume, in dB");
         arriving_ = new wxCheckBox(plate, wxID_ANY, "Play arriving voice");
         arriving_->SetToolTip("While the deck is open, voice that arrives plays by itself, in the order it came.");
@@ -508,9 +509,11 @@ void VoiceDeck::buildPanel()
         hooks_.audio().chooseSpeaker(name);
     });
     volume_->Bind(wxEVT_SLIDER, [this](wxCommandEvent&) {
-        int db = volume_->GetValue();
-        saveInt(keys::VOICE_VOLUME, db);
-        hooks_.audio().setVolume((float)std::pow(10.0, db / 20.0));
+        // Settings > Voice keeps the same, through StationPrefs.
+        StationPrefs p = loadStationPrefs();
+        p.voice.volumeDb = volume_->GetValue();
+        saveStationPrefs(p);
+        hooks_.audio().setVolume(voiceGain(p.voice.volumeDb));
     });
     sendTo_->Bind(wxEVT_CHOICE, [this](wxCommandEvent&) {
         showTarget();
@@ -632,7 +635,8 @@ void VoiceDeck::showDevices()
     };
     fill(microphone_, micNames_, st.devices.microphones, st.chosenMicrophone);
     fill(speaker_, speakerNames_, st.devices.speakers, st.chosenSpeaker);
-    if (volume_->GetValue() != loadInt(keys::VOICE_VOLUME, 0)) volume_->SetValue(loadInt(keys::VOICE_VOLUME, 0));
+    const int volume = (int)std::lround(loadStationPrefs().voice.volumeDb);
+    if (volume_->GetValue() != volume) volume_->SetValue(volume);
 
     // Why the deck can't record, if it can't.
     wxString why;

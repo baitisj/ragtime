@@ -274,6 +274,16 @@ and the Part 97 check.
   uses, both halves, and the ones remembered (`/Voice/RadioCards`);
   `voice::checkMicrophone` for Settings > Voice's Test; the bench's
   `tools/voice/pretend_desk.sh` and `ragtime_voice_probe`.
+- The microphone deck (2026-10-31, voice PR 4, `docs/STAGE1.md`): the
+  microphone button on both tabs (or View > Microphone deck) floats
+  `app/src/VoiceDeck`, a drawn rack panel (`app/src/DeckParts`) over
+  the voice chain: meters, Glissando-feel knobs (`core/src/deck/`,
+  `deck::Knob`), the pitch scope, the Level check lamps, Push to talk
+  (or the space bar) and Monitor. libsotto is loaded at run time, never
+  linked (`voice::Sotto` in `audio/`, `$RAGTIME_SOTTO` to point at
+  one); its commit is pinned in `packaging/sotto.sh` and
+  `packaging/build-sotto.sh` builds it for the AppImage. There is no
+  Windows `sotto.dll` yet (`RAGTIME_SOTTO_DLL_DIR` for make-zip.sh).
 - Data2G PR #98 (merged 2026-10-23) gives SNRs: on `BCAST HEARD` and
   `MISSED`, and `SN` for the session partner. Ragtime shows them in the
   station list's SNR column and feeds the gearshift's Auto the weakest
@@ -384,7 +394,7 @@ and the Part 97 check.
 | `tests/` | ctest unit tests for core, plain executables on `tests/Check.h` (`CHECK`, `CHECK_EQ`). Add one with `ragtime_test(<name> <source>)` in `tests/CMakeLists.txt`. `FakeHost.*` is a fake data2g-host on loopback sockets (POSIX, so its test and the bench build only `if(UNIX)`); `FakeAirMain.cpp` is the bench `ragtime_fake_air`, and `ReplayHost.*` its `--replay`; `VoiceSynth.h` makes synthetic voices for the voice tests, and `VoiceChainMain.cpp` is `ragtime_voice_chain` (a WAV through the voice chain) |
 | `tools/` | Reference scripts: `icon/` (`make_leaf_svg.py` draws the icon, the Maple Leaf Rag's leaf going digital, as `app/res/ragtime.svg`; `make_icons.sh` renders its PNG and ICO), `globe/` (sunlit globe renderer, and the generators of the map tables in `core/src/globus/`: coasts and borders from Natural Earth, the big lakes from `ne_110m_lakes.geojson`, state and province lines from Natural Earth's 1:10m admin-1 lines, fetched for the run, for the countries in `gen_admin1_lines.py`), `gearbox/` (ladders), `ear/` (`pretend_radio.sh`, a pretend radio and data2g-host recorder in PipeWire for the Ear, and `make_radio_noise.py`, its audio), `ham_table/` (text table 0 generator and corpus: `gen_table.py --check`), `gcc16/check.py` (GCC 16 check), `codecs/` (the 2026-10-29 test of Ragtime's JPEG 2000 against JPEG XL, CompressAI and Cool-chic at 1.6 and 4 kB: scripts, bitstreams and results, its README says how to run them; not built) |
 | `cmake/` | CMake helpers. `ragtime_warnings(<target>)` gives every target `-Wall -Wextra` and, with `RAGTIME_WERROR` (on by default), `-Werror`; `Toolchain-mingw64.cmake` (the Windows cross build), `BuildWxWidgets.cmake` (wxWidgets 3.2.9 cloned and built statically with `-DRAGTIME_BUILD_WX=ON`), `BuildHamlib.cmake` (Hamlib 4.5.5 cloned and built statically with autotools, `-DRAGTIME_BUILD_HAMLIB=ON`), `BuildImageLibs.cmake` (OpenJPEG 2.5.3, libwebp 1.4.0, libde265 1.0.15 and libheif 1.18.2 cloned and built statically, `-DRAGTIME_BUILD_IMAGE_LIBS=ON`), `EmbedFile.cmake` (the window icon built in) |
-| `packaging/` | Release recipes: `linux/make-appimage.sh` (with `ragtime.desktop`), `windows/make-zip.sh` (with the zip's `README.txt`). Both write to `dist/`, named by `release-name.sh` |
+| `packaging/` | Release recipes: `linux/make-appimage.sh` (with `ragtime.desktop`), `windows/make-zip.sh` (with the zip's `README.txt`). Both write to `dist/`, named by `release-name.sh`. `sotto.sh` pins sotto's commit and `build-sotto.sh` builds libsotto with its Codec 2 |
 | `docs/` | The plan and specs. Change them in the same PR as the code they describe |
 
 The version is `project(ragtime VERSION ...)` in the top-level
