@@ -15,6 +15,7 @@
 #include "Pictures.h"
 #include "Prefs.h"
 #include "SettingsDialog.h"
+#include "VoiceCards.h"
 #include "ragtime/broadcast/BroadcastChat.h"
 #include "ragtime/broadcast/BroadcastLog.h"
 #include "ragtime/broadcast/BroadcastFiles.h"
@@ -32,6 +33,15 @@
 #include "ragtime/radio/RecentWork.h"
 #include "ragtime/session/SessionChat.h"
 #include "ragtime/session/SessionLog.h"
+#include "ragtime/voice/PlayQueue.h"
+
+namespace ragtime
+{
+namespace audio
+{
+class VoiceAudio;
+}
+} // namespace ragtime
 
 class BroadcastPage;
 struct FileCard;
@@ -64,6 +74,22 @@ class MainFrame : public wxFrame
 public:
     MainFrame();
     ~MainFrame() override;
+
+    // Voice messages (docs/STAGE1.md, "Voice cards"), for the microphone
+    // deck. The program's one microphone and speaker, made and started the
+    // first time it is asked for, so the deck's Monitor and a card's play
+    // replace each other rather than fight.
+    ragtime::audio::VoiceAudio& voiceAudio();
+    // A .sot file already kept (in sentVoiceDir()) goes as a voice message:
+    // to D2G in the broadcast gear, or to the session's partner. False,
+    // with why, if it can't (no session, no callsign, too big).
+    bool sendVoice(const std::string& path, bool broadcast, std::string& why);
+    // The deck open or closed: while it is open, and Play arriving voice
+    // ticked, voice that arrives plays by itself, in order. Closing it
+    // lets the clip playing finish and nothing more.
+    void setVoiceDeckOpen(bool open);
+    // Push to talk held: what plays pauses, and carries on when let go.
+    void holdVoicePlayback(bool held);
 
 private:
     void buildMenus();
@@ -104,7 +130,8 @@ private:
     // partner; to another station, Ragtime offers to call it first: there
     // is no hidden session for a file.
     void sendFilePrompt(const std::string& call);
-    void queueFiles(const std::string& call, const std::vector<std::string>& paths, bool picture = false);
+    void queueFiles(const std::string& call, const std::vector<std::string>& paths, bool picture = false,
+                    bool voice = false);
     void fileAction(const std::string& action, uint64_t id);
     void saveOffer(uint64_t id, bool ask);
     // "Please send FRED.TXT again": a line in the session, now if one is
@@ -115,6 +142,8 @@ private:
     // A picture we sent (kept in sentPicturesDir()) goes again as one.
     void sendAgain(const std::string& peer, const std::string& path);
     bool sentPicture(const std::string& path) const;
+    // A voice message by its bytes (a .sot file), so it goes again as one.
+    static bool isVoiceFile(const std::string& path);
     void sessionFileMenu(const ragtime::files::FileRow& row, wxMenu& menu);
     void finishedFileMenu(const ragtime::files::FinishedFile& file, wxMenu& menu);
     void onFileEvents();
@@ -139,7 +168,7 @@ private:
     // the estimate box, each file's card on the Broadcast tab, what its
     // links do, and keeping the seal chain across restarts.
     // Asks which file when path is empty.
-    void broadcastFile(wxString path = wxString(), bool picture = false);
+    void broadcastFile(wxString path = wxString(), bool picture = false, bool voice = false);
     bool fileCard(uint64_t id, FileCard& card);
     void broadcastFileAction(uint64_t id, const std::string& action);
     void broadcastFileMenu(const ragtime::files::FileRow& row, wxMenu& menu);
@@ -173,6 +202,19 @@ private:
     bool shelvePictureFile(const std::string& path);
     wxString pastPictureHtml(const std::string& path, const wxWindow* list, const wxString& href);
     void showInFrame(const std::string& key);
+
+    // Voice cards (docs/STAGE1.md, "Voice cards"): each voice message's
+    // card as it stands, on the shelf; the play queue; the player.
+    // Received ones arrive in the queue when saved, and play by themselves
+    // while the deck is open.
+    void updateVoices(uint64_t nowMs);
+    wxString voiceHtml(const std::string& key, const wxWindow* list, bool picked);
+    // A card's link ("voice:play:0", "voice:stop:0", "voice:seek:<frame>").
+    void voiceAction(const std::string& key, const std::string& href);
+    void startVoice(const std::optional<ragtime::voice::PlayQueue::Start>& start);
+    void voiceDone(const std::string& key, bool played);
+    void redrawVoices();
+    bool autoPlayVoice() const;
 
     // The gearshift, its button and the 500 Hz switch.
     void loadGearshift();
@@ -264,6 +306,13 @@ private:
     PictureShelf pictures_;
     std::map<std::string, PictureFrame*> pictureFrames_;   // open, by shelf key
     std::set<std::string> unreadablePictures_;             // past pictures whose files are gone
+    VoiceShelf voices_;
+    std::set<std::string> unreadableVoices_;               // past voice files gone or unreadable
+    ragtime::voice::PlayQueue voiceQueue_;
+    std::unique_ptr<ragtime::audio::VoiceAudio> voiceAudio_;
+    std::unique_ptr<VoicePlayer> voicePlayer_;
+    wxTimer voiceTimer_;                                   // the playhead, while a clip plays
+    bool voiceDeckOpen_ = false;
     wxSplitterWindow* outer_ = nullptr;     // station list | the rest
     wxSplitterWindow* left_ = nullptr;      // station list over Recent work
     wxSplitterWindow* inner_ = nullptr;     // the tabs | Globus

@@ -486,6 +486,14 @@ std::string sentPicturesDir()
     return std::string(dir.GetPath().utf8_str());
 }
 
+std::string sentVoiceDir()
+{
+    if (!configPath.empty()) return configPath + ".sent-voice";
+    wxFileName dir = wxFileName::DirName(wxString::FromUTF8(appDataDir()));
+    dir.AppendDir("sent-voice");
+    return std::string(dir.GetPath().utf8_str());
+}
+
 std::string flightRecorderDir()
 {
     if (!configPath.empty()) return configPath + ".flight";
