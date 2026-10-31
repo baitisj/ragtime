@@ -92,6 +92,7 @@ enum
     ID_GEARSHIFT = wxID_HIGHEST + 1,
     ID_STATION_SETTINGS,
     ID_RIG_SETTINGS,
+    ID_VOICE_SETTINGS,
     ID_CLEAR_SWR_TRIP,
     ID_NARROW,
     ID_GLOBUS,
@@ -449,6 +450,7 @@ void MainFrame::buildMenus()
     auto* settings = new wxMenu;
     settings->Append(ID_STATION_SETTINGS, "&Station...\tCtrl+,");
     settings->Append(ID_RIG_SETTINGS, "&Rig...");
+    settings->Append(ID_VOICE_SETTINGS, "&Voice...", "The microphone and speaker for voice messages");
     settings->Append(ID_CLEAR_SWR_TRIP, "&Clear the SWR trip...",
                      "Lets Ragtime send and key the rig again after the SWR went over 3:1");
     settings->Append(ID_GEARSHIFT, "&Gearshift...\tCtrl+G");
@@ -483,6 +485,7 @@ void MainFrame::buildMenus()
     Bind(wxEVT_MENU, [this](wxCommandEvent&) { showGearshift(); }, ID_GEARSHIFT);
     Bind(wxEVT_MENU, [this](wxCommandEvent&) { showSettings(); }, ID_STATION_SETTINGS);
     Bind(wxEVT_MENU, [this](wxCommandEvent&) { showSettings(SettingsDialog::Page::Rig); }, ID_RIG_SETTINGS);
+    Bind(wxEVT_MENU, [this](wxCommandEvent&) { showSettings(SettingsDialog::Page::Voice); }, ID_VOICE_SETTINGS);
     Bind(wxEVT_MENU, [this](wxCommandEvent&) { clearSwrTrip(); }, ID_CLEAR_SWR_TRIP);
     Bind(wxEVT_UPDATE_UI, [this](wxUpdateUIEvent& e) { e.Enable(rig_ && rig_->swrTripped()); }, ID_CLEAR_SWR_TRIP);
     Bind(wxEVT_MENU, [this](wxCommandEvent& e) { setNarrow(e.IsChecked()); }, ID_NARROW);
