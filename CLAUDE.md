@@ -274,7 +274,6 @@ and the Part 97 check.
   uses, both halves, and the ones remembered (`/Voice/RadioCards`);
   `voice::checkMicrophone` for Settings > Voice's Test; the bench's
   `tools/voice/pretend_desk.sh` and `ragtime_voice_probe`.
-<<<<<<< HEAD
 - The microphone deck (2026-10-31, voice PR 4, `docs/STAGE1.md`): the
   microphone button on both tabs (or View > Microphone deck) floats
   `app/src/VoiceDeck`, a drawn rack panel (`app/src/DeckParts`) over
@@ -285,8 +284,7 @@ and the Part 97 check.
   one); its commit is pinned in `packaging/sotto.sh` and
   `packaging/build-sotto.sh` builds it for the AppImage. There is no
   Windows `sotto.dll` yet (`RAGTIME_SOTTO_DLL_DIR` for make-zip.sh).
-=======
-- Voice cards (2026-10-31, voice PR 6 of the sotto plan,
+- Voice cards (2026-10-31, voice PR 5 of the sotto plan,
   `app/src/VoiceCards`, docs/STAGE1.md "Voice cards"): a
   play button, the pitch strip and the length under the line on both
   tabs, Play on the Files tab, decoded with libsotto and played through
@@ -294,7 +292,13 @@ and the Part 97 check.
   (core) queues them and plays arrivals while the deck is open; the
   Broadcast and session logs keep the file's path, so cards (and
   broadcast pictures) come back after a restart.
->>>>>>> origin/claude/project-thread-to01xs
+- Voice while it arrives (2026-10-31, voice PR 6, docs/STAGE1.md "Voice
+  while it arrives"): in a ragchew a clip plays as it comes
+  (`voice::ArrivalPlayer`, core), starting once the bytes will keep
+  ahead of the speech ("starts in 12 s" on the card) and covering a dry
+  spell as sotto covers a lost frame; the stop sign on a session voice
+  card coming in (FileCancel `0x84`, keeping what came); Save as WAV on
+  the cards' menus (`voice::wavFile`).
 - Data2G PR #98 (merged 2026-10-23) gives SNRs: on `BCAST HEARD` and
   `MISSED`, and `SN` for the session partner. Ragtime shows them in the
   station list's SNR column and feeds the gearshift's Auto the weakest
