@@ -274,6 +274,14 @@ and the Part 97 check.
   uses, both halves, and the ones remembered (`/Voice/RadioCards`);
   `voice::checkMicrophone` for Settings > Voice's Test; the bench's
   `tools/voice/pretend_desk.sh` and `ragtime_voice_probe`.
+- Voice cards (2026-10-31, voice PR 6 of the sotto plan,
+  `app/src/VoiceCards`, docs/STAGE1.md "Voice cards"): a
+  play button, the pitch strip and the length under the line on both
+  tabs, Play on the Files tab, decoded with libsotto and played through
+  the one `audio::VoiceAudio` `MainFrame` owns; `voice::PlayQueue`
+  (core) queues them and plays arrivals while the deck is open; the
+  Broadcast and session logs keep the file's path, so cards (and
+  broadcast pictures) come back after a restart.
 - Data2G PR #98 (merged 2026-10-23) gives SNRs: on `BCAST HEARD` and
   `MISSED`, and `SN` for the session partner. Ragtime shows them in the
   station list's SNR column and feeds the gearshift's Auto the weakest
@@ -443,7 +451,12 @@ take a while. The bots react to about one line in two. `--replay FOLDER` plays a
 and take broadcast files without asking; `--loss PCT` has hosts A and B
 lose that share of the group frames they hear, so repairs happen, and
 `--files` has the first bot broadcast a bulletin file a minute in and
-every 6 minutes. A call
+every 6 minutes. `--voice` has the last bot broadcast a made-up voice
+clip 40 s in and every 4 minutes, and bots answer a session voice
+message with one (`RAGTIME_SOTTO` names the `libsotto.so` to play them);
+`--voice-file FILE.sot` has them offer that clip in a ragchew instead
+of their bulletin, so it plays while it arrives (slowly with `--rate
+150`). A call
 from host A or B is answered on its second try, and each host says
 `BUSY ON` and `BUSY OFF` around the others' group bursts. The hosts report SNRs,
 each bot at its own strength; `--no-snr` plays a host from before Data2G

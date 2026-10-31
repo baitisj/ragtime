@@ -243,20 +243,26 @@ wxString VoiceShelf::cardHtml(const std::string& key, const wxWindow* window, co
     if (it == entries_.end()) return wxString();
     Entry& e = it->second;
     const Shelved& s = e.shelved;
+    // Each starts a line of its own: the text ones with a break, the card
+    // with its map, where wxHTML breaks the line anyway.
     auto grey = [picked](const wxString& text) {
         return picked ? text : "<font color=\"" + htmlColour(secondaryText()) + "\">" + text + "</font>";
     };
+    auto line = [&grey](const wxString& text) { return "<br>" + grey(text); };
     switch (s.result)
     {
         case voice::ReadResult::Ok:
             break;
         case voice::ReadResult::Short:
-            return wxString();
+            // Its header rides in the first piece; on D2G that piece can be
+            // the one lost, and the card waits for its repair.
+            if (s.final) return line("<i>Too little of it came to play</i>");
+            return line("<i>The card shows when its first piece comes</i>");
         case voice::ReadResult::UnknownCodec:
         case voice::ReadResult::UnknownFlags:
-            return grey("<i>A voice message this Ragtime can't play (a newer sotto)</i>");
+            return line("<i>A voice message this Ragtime can't play (a newer sotto)</i>");
         default:
-            return grey("<i>Not a voice message Ragtime can read</i>");
+            return line("<i>Not a voice message Ragtime can read</i>");
     }
 
     const int w = window->FromDIP(BUTTON_DIP + GAP_DIP + STRIP_DIP);
@@ -285,9 +291,9 @@ wxString VoiceShelf::cardHtml(const std::string& key, const wxWindow* window, co
 
     // The button plays or stops; the strip plays from where it's clicked.
     const wxString map = wxString::Format("ragtime-voice-map-%d", nextName_++);
-    wxString html = wxString::Format("<img src=\"memory:%s\" width=\"%d\" height=\"%d\" usemap=\"#%s\" align=\"middle\">",
-                                     wxString(e.memoryName), w, h, map);
-    html << "<map name=\"" << map << "\">";
+    // The map before the picture: wxHTML breaks the line at a map, which
+    // starts the card's line, and its length stays beside it.
+    wxString html = "<map name=\"" + map + "\">";
     const int button = window->FromDIP(BUTTON_DIP);
     html << wxString::Format("<area shape=\"rect\" coords=\"0,0,%d,%d\" href=\"voice:%s:0\">", button - 1, h - 1,
                              look.playing ? "stop" : "play");
@@ -305,6 +311,8 @@ wxString VoiceShelf::cardHtml(const std::string& key, const wxWindow* window, co
         }
     }
     html << "</map>";
+    html << wxString::Format("<img src=\"memory:%s\" width=\"%d\" height=\"%d\" usemap=\"#%s\" align=\"center\">",
+                             wxString(e.memoryName), w, h, map);
     // A clip coming to us in a session: the stop sign beside the strip,
     // for when we have heard enough of it.
     if (!look.stopHref.empty()) html << "&nbsp;" << stopSignHtml(window, look.stopHref);
@@ -327,7 +335,7 @@ wxString VoiceShelf::cardHtml(const std::string& key, const wxWindow* window, co
         else
             after << " &middot; " << wxString::Format("starts in %d s", (int)std::ceil(look.startsIn));
     }
-    html << "&nbsp; " << grey(after);
+    html << "&nbsp;&nbsp;" << grey(after);
     return html;
 }
 

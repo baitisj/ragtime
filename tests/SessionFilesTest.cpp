@@ -101,6 +101,7 @@ struct Link
     uint64_t writtenByA = 0, writtenByB = 0;
     uint64_t nowMs = NOW;
     bool holdPieces = false;   // only records, no pieces
+    size_t pieceBytes = SessionFiles::PIECE_BYTES; // A's pieces at most
     int pieces = 0;
     uint32_t lastOfferToB = 0; // the sequence number of the latest FileOffer B heard
 
@@ -123,7 +124,7 @@ struct Link
     void turn()
     {
         std::vector<uint8_t> fromA = a.takeRecords("VK3ABC", numA, nowMs);
-        if (!holdPieces && a.takePiece("VK3ABC", numA, writtenByA + fromA.size(), nowMs, fromA)) pieces++;
+        if (!holdPieces && a.takePiece("VK3ABC", numA, writtenByA + fromA.size(), nowMs, fromA, pieceBytes)) pieces++;
         writtenByA += fromA.size();
         std::vector<uint8_t> fromB = b.takeRecords("W1AW", numB, nowMs);
         b.takePiece("W1AW", numB, writtenByB + fromB.size(), nowMs, fromB);
@@ -1329,6 +1330,21 @@ void testVoiceComesWithoutAsking()
     CHECK(got.voice && !got.picture && got.autoAccepted && got.state == State::Saved);
     CHECK(got.path == utf8FromPath(scratch.dir / "voice" / "hello.sot"));
     CHECK(readFile(got.path) == readFile(source));
+
+    // A longer one is read back as it comes, to fill its card, even in
+    // small pieces that a file's buffer would hold back.
+    std::string longer = scratch.write("longer.sot", 6000);
+    link.pieceBytes = 500;
+    link.a.offer("VK3ABC", longer, link.nowMs, error, false, true);
+    link.turns(4);
+    FileTransfer coming = last(link.b, false);
+    CHECK(coming.voice && coming.state == State::Receiving && coming.done > 0 && coming.done < 6000);
+    std::vector<uint8_t> part;
+    CHECK(link.b.pictureBytes(coming.id, part) && part.size() == coming.done);
+    CHECK(std::string(part.begin(), part.end()) == readFile(longer).substr(0, coming.done));
+    link.pieceBytes = SessionFiles::PIECE_BYTES;
+    link.turns(4);
+    CHECK(last(link.b, false).state == State::Saved);
 
     // Over the cap it asks, still a voice message.
     link.b.setAutoVoice(folder, 1000);

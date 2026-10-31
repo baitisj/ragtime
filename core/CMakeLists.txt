@@ -77,16 +77,16 @@ add_library(ragtime_core STATIC
     # Voice messages: the .sot file, the pitch strip and what a clip costs
     # the air (no audio, no codec).
     src/voice/Voice.cpp
-    # Which voice message plays and which wait (the cards are in app/).
-    src/voice/PlayQueue.cpp
-    # Playing a clip while it arrives in a ragchew, and Save as WAV.
-    src/voice/ArrivalPlayer.cpp
     # Voice: the processing chain from the microphone to sotto (high-pass,
     # leveller, limiter, resampling) and the level figures; the noise
     # reducer is handed in (denoise/).
     src/voice/Chain.cpp
     src/voice/Dsp.cpp
     src/voice/Levels.cpp
+    # Which voice message plays and which wait (the cards are in app/).
+    src/voice/PlayQueue.cpp
+    # Playing a clip while it arrives in a ragchew, and Save as WAV.
+    src/voice/ArrivalPlayer.cpp
 )
 
 target_include_directories(ragtime_core PUBLIC
