@@ -215,6 +215,8 @@ private:
     void voiceDone(const std::string& key, bool played);
     void redrawVoices();
     bool autoPlayVoice() const;
+    // Settings > Voice's speaker, microphone and volume, to voiceAudio_.
+    void applyVoicePrefs();
 
     // The gearshift, its button and the 500 Hz switch.
     void loadGearshift();
@@ -311,7 +313,6 @@ private:
     ragtime::voice::PlayQueue voiceQueue_;
     std::unique_ptr<ragtime::audio::VoiceAudio> voiceAudio_;
     std::unique_ptr<VoicePlayer> voicePlayer_;
-    wxTimer voiceTimer_;                                   // the playhead, while a clip plays
     bool voiceDeckOpen_ = false;
     wxSplitterWindow* outer_ = nullptr;     // station list | the rest
     wxSplitterWindow* left_ = nullptr;      // station list over Recent work
@@ -327,6 +328,7 @@ private:
     GlobusToggle* tabToggle_ = nullptr;
     wxMenu* viewMenu_ = nullptr;
     wxTimer clock_;
+    wxTimer voiceTimer_;        // the voice cards' playhead, while a clip plays
 
     bool globusOn_ = true;
     int listWidth_ = 300;       // the station list beside Globus

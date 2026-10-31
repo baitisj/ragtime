@@ -786,10 +786,12 @@ void MainFrame::buildLayout()
         else broadcastFileMenu(row, menu);
     });
     filesPage_->onFinishedMenu([this](const files::FinishedFile& file, wxMenu& menu) { finishedFileMenu(file, menu); });
-    filesPage_->onPlayVoice([this](const files::FinishedFile& file) {
-        if (!file.path.empty()) voiceAction("p" + file.path, voiceQueue_.playing() == "p" + file.path ? "voice:stop:0" : "voice:play:0");
-    },
-                            [this](const std::string& path) { return voiceQueue_.playing() == "p" + path; });
+    filesPage_->onPlayVoice(
+        [this](const files::FinishedFile& file) {
+            const std::string key = "p" + file.path;
+            voiceAction(key, voiceQueue_.playing() == key ? "voice:stop:0" : "voice:play:0");
+        },
+        [this](const std::string& path) { return voiceQueue_.playing() == "p" + path; });
     filesPage_->onOpenFolder([this]() {
         wxFileName::Mkdir(wxString::FromUTF8(receivedFolder()), wxS_DIR_DEFAULT, wxPATH_MKDIR_FULL);
         openWithDesktop(receivedFolder());
@@ -820,6 +822,7 @@ void MainFrame::buildLayout()
 void MainFrame::applyPrefs(bool reconnect)
 {
     link_.setCallsign(prefs_.callsign);
+    applyVoicePrefs();
     broadcast::BroadcastChat::Settings s;
     s.callsign = prefs_.callsign;
     s.locator = prefs_.locator;
@@ -2951,19 +2954,23 @@ ragtime::audio::VoiceAudio& MainFrame::voiceAudio()
             [this, raw]() {
                 CallAfter([this, raw]() {
                     if (voiceAudio_.get() != raw) return;
-                    std::vector<std::string> before = voice::splitNames(loadString(keys::VOICE_RADIO_CARDS, ""));
+                    std::vector<std::string> before = loadVoiceRadioCards();
                     std::vector<std::string> now = voice::rememberRadio(before, raw->status().devices.radioNow);
-                    if (now != before) saveString(keys::VOICE_RADIO_CARDS, voice::joinNames(now));
+                    if (now != before) saveVoiceRadioCards(now);
                 });
             },
-            voice::splitNames(loadString(keys::VOICE_RADIO_CARDS, "")));
-        voiceAudio_->chooseSpeaker(loadString(keys::VOICE_SPEAKER, ""));
-        voiceAudio_->chooseMicrophone(loadString(keys::VOICE_MICROPHONE, ""));
-        double db = 0.0;
-        wxString(utf8(loadString(keys::VOICE_VOLUME, "0"))).ToCDouble(&db);
-        voiceAudio_->setVolume((float)std::pow(10.0, db / 20.0));
+            loadVoiceRadioCards());
+        applyVoicePrefs();
     }
     return *voiceAudio_;
+}
+
+void MainFrame::applyVoicePrefs()
+{
+    if (!voiceAudio_) return;
+    voiceAudio_->chooseSpeaker(prefs_.voice.speaker);
+    voiceAudio_->chooseMicrophone(prefs_.voice.microphone);
+    voiceAudio_->setVolume(voiceGain(prefs_.voice.volumeDb));
 }
 
 bool MainFrame::sendVoice(const std::string& path, bool broadcast, std::string& why)
@@ -3178,7 +3185,7 @@ void MainFrame::redrawVoices()
 {
     broadcast_->refreshVoices();
     sessionPage_->refreshVoices();
-    filesPage_->refreshHistory(HostConnection::nowMs(), localOffsetSeconds(), true);
+    filesPage_->showPlaying();
     // The ticks stop with the last clip; one more redraw takes the
     // playhead away.
     if (voiceQueue_.playing().empty() || voiceQueue_.paused()) voiceTimer_.Stop();
