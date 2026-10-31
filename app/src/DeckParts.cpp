@@ -491,7 +491,8 @@ void DeckMeter::paint(wxGraphicsContext& gc, const wxSize& size)
     gc.Clip(3, 3, size.x - 6.0, size.y - 6.0);
 
     // The arc's centre sits below the window, as on a real meter.
-    double r = std::min(size.x * 0.52, size.y * 0.95);
+    // Narrow enough that the end labels stay inside the window.
+    double r = std::min(size.x * 0.46, size.y * 0.95);
     double cx = size.x / 2.0, cy = size.y * 0.22 + r;
     auto pt = [&](double angle, double radius, double& x, double& y) {
         x = cx + radius * std::sin(angle);
@@ -770,23 +771,33 @@ void AirtimeBar::paint(wxGraphicsContext& gc, const wxSize& size)
     gc.SetBrush(wxBrush(c.red));
     gc.DrawRectangle(std::max(0.0, mark - 2), 0, 2, barH);
 
-    // The scale under it: 0, quarters, and the mark.
+    // The scale under it: the mark's words, then round steps across the
+    // scale where they don't run into them.
     gc.SetFont(deckart::readoutFont(this, 6.8), c.dimInk);
     double ty = barH + FromDIP(2);
-    for (int i = 0; i < 4; i++)
+    wxString max = wxString::FromUTF8(ragtime::deck::clockText(bar_.maxSeconds)) + " max";
+    if (bar_.maxSeconds < 60) max = wxString::Format("%g s max", std::round(bar_.maxSeconds));
+    double mw = 0, mh = 0;
+    gc.GetTextExtent(max, &mw, &mh);
+    const double maxX = std::max(0.0, std::min(size.x - mw, mark - mw / 2));
+    static const double STEPS[] = {5, 10, 15, 30, 60, 120, 300, 600, 900, 1800};
+    double step = STEPS[0];
+    for (double st : STEPS)
+        if (scale / st <= 5) { step = st; break; }
+    const double gap = FromDIP(6);
+    for (double sec = 0; sec <= scale + 1e-6; sec += step)
     {
-        double s = bar_.maxSeconds * i / 4.0;
-        wxString text = i == 0 ? wxString("0 s") : wxString::Format("%g", std::round(s));
+        wxString text = sec == 0 ? wxString("0 s")
+                        : sec < 60 ? wxString::Format("%g", sec)
+                                   : wxString::FromUTF8(ragtime::deck::clockText(sec));
         double tw = 0, th = 0;
         gc.GetTextExtent(text, &tw, &th);
-        double x = s / scale * size.x - (i == 0 ? 0 : tw / 2);
+        double x = sec == 0 ? 0.0 : std::min(size.x - tw, sec / scale * size.x - tw / 2);
+        if (x + tw + gap > maxX && x < maxX + mw + gap) continue;
         gc.DrawText(text, x, ty);
     }
-    wxString max = wxString::Format("%g s max", std::round(bar_.maxSeconds));
-    double tw = 0, th = 0;
-    gc.GetTextExtent(max, &tw, &th);
     gc.SetFont(deckart::readoutFont(this, 6.8), c.red.ChangeLightness(80));
-    gc.DrawText(max, std::min(size.x - tw, mark - tw), ty);
+    gc.DrawText(max, maxX, ty);
 }
 
 //-------------------------------------------------------------------------

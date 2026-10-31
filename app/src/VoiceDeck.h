@@ -172,6 +172,7 @@ private:
     wxCheckBox* arriving_ = nullptr;
     wxCheckBox* review_ = nullptr;
     wxStaticText* status_ = nullptr;
+    wxString deviceLine_;                   // what showDevices last put there
 
     // What the knobs say, handed to the chain.
     ragtime::voice::ChainSettings settings_;

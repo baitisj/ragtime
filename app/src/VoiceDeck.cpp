@@ -230,20 +230,20 @@ void VoiceDeck::buildPanel()
             auto* cap = engraved(m, caption, 7.0);
             col->Add(cap, 0, wxALIGN_CENTER_HORIZONTAL | wxTOP, FromDIP(2));
             value = readout(m, "", 7.5);
-            value->SetMinSize(FromDIP(wxSize(92, -1)));
+            value->SetMinSize(FromDIP(wxSize(108, -1)));
             col->Add(value, 0, wxALIGN_CENTER_HORIZONTAL);
             return col;
         };
         active_ = new DeckMeter(m, DeckMeter::Face::Cream, deck::ACTIVE_FLOOR_DBFS, deck::ACTIVE_TOP_DBFS,
                                 {-40, -30, -20, -10, 0},
-                                {{deck::ACTIVE_BAND_LOW_DBFS, deck::ACTIVE_BAND_HIGH_DBFS, false}}, FromDIP(wxSize(90, 56)));
+                                {{deck::ACTIVE_BAND_LOW_DBFS, deck::ACTIVE_BAND_HIGH_DBFS, false}}, FromDIP(wxSize(108, 64)));
         active_->SetToolTip("Active level: your speech level with the pauses left out (ITU-T P.56). "
                             "Aim for the green band around -26 dBFS, where sotto codes best.");
         loudest_ = new DeckMeter(m, DeckMeter::Face::Black, deck::LOUDEST_FLOOR_DBFS, deck::LOUDEST_TOP_DBFS,
-                                 {-30, -20, -10, -7.3, 0},
+                                 {-30, -20, -10, 0},
                                  {{deck::LOUDEST_BAND_LOW_DBFS, deck::LOUDEST_BAND_HIGH_DBFS, false},
                                   {deck::LOUDEST_RED_DBFS, deck::LOUDEST_TOP_DBFS, true}},
-                                 FromDIP(wxSize(90, 56)));
+                                 FromDIP(wxSize(108, 64)));
         loudest_->SetToolTip("Loudest 10 ms: the RMS of each 10 ms, sotto's own measure. Green is where sotto's "
                              "test voices peak; past -7.3 dBFS (red) sotto's energy field saturates. The orange "
                              "mark holds the loudest for a second.");
@@ -258,7 +258,7 @@ void VoiceDeck::buildPanel()
         gainRow->Add(gain_, 0, wxALIGN_CENTER_VERTICAL);
         gainRow->Add(clip_, 0, wxALIGN_CENTER_VERTICAL | wxLEFT, FromDIP(8));
         s->Add(gainRow, 0, wxALIGN_CENTER_HORIZONTAL);
-        m->SetMinSize(FromDIP(wxSize(206, -1)));
+        m->SetMinSize(FromDIP(wxSize(240, -1)));
         modules->Add(m, 0, wxEXPAND | wxRIGHT, FromDIP(6));
     }
 
@@ -297,7 +297,7 @@ void VoiceDeck::buildPanel()
         nz.defaultPushed = true;
         const bool haveNoise = denoise::haveRnNoise();
         stage(haveNoise ? wxString::FromUTF8("NOISE \xc2\xb7 RNNOISE") : wxString("NOISE"), noise_, noiseLamp_, nz,
-              haveNoise ? wxString("Keeps fans out of the voicing") : wxString("Built without RNNoise"),
+              haveNoise ? wxString("Fans out, voicing kept") : wxString("Built without RNNoise"),
               "Noise reduction with RNNoise, and how much of it. sotto asks whether a voice's harmonics stand out "
               "from the noise, so a fan behind you turns vowels into hiss: cleaning first protects the voicing. "
               "Push it in to switch it in.");
@@ -344,7 +344,7 @@ void VoiceDeck::buildPanel()
     {
         auto* m = new DeckModule(plate, wxString::FromUTF8("4 \xc2\xb7 SOTTO"));
         auto* s = m->content();
-        scope_ = new PitchScope(m, FromDIP(wxSize(196, 100)));
+        scope_ = new PitchScope(m, FromDIP(wxSize(184, 100)));
         s->Add(scope_, 0, wxALIGN_CENTER_HORIZONTAL);
         codec_ = new wxStaticText(m, wxID_ANY, "", wxDefaultPosition, wxDefaultSize, wxST_ELLIPSIZE_END | wxST_NO_AUTORESIZE);
         codec_->SetFont(deckart::readoutFont(m, 8.0));
@@ -370,7 +370,7 @@ void VoiceDeck::buildPanel()
         row("Noise", checkNoise_, checkNoiseText_,
             "The quietest tenth of the clip against the voice: green at least 30 dB below it.");
         s->Add(grid, 0, wxEXPAND);
-        m->SetMinSize(FromDIP(wxSize(222, -1)));
+        m->SetMinSize(FromDIP(wxSize(208, -1)));
         modules->Add(m, 0, wxEXPAND | wxRIGHT, FromDIP(6));
     }
 
@@ -384,22 +384,24 @@ void VoiceDeck::buildPanel()
         s->Add(sendTo_, 0, wxEXPAND | wxBOTTOM, FromDIP(4));
         talk_ = new TalkButton(m, FromDIP(wxSize(116, 116)));
         s->Add(talk_, 0, wxALIGN_CENTER_HORIZONTAL);
-        monitor_ = new wxButton(m, wxID_ANY, "Monitor");
+        monitor_ = new wxButton(m, wxID_ANY, "Monitor", wxDefaultPosition, wxDefaultSize, wxBU_EXACTFIT);
         monitor_->SetToolTip("Plays your last clip through sotto's encoder and decoder, so you hear what the far "
                              "end will hear. Push to talk stops it.");
-        s->Add(monitor_, 0, wxEXPAND | wxTOP, FromDIP(4));
+        // Monitor, and Send and Discard beside it while a clip is held for
+        // review.
         auto* review = new wxBoxSizer(wxHORIZONTAL);
-        reviewSend_ = new wxButton(m, wxID_ANY, "Send");
-        reviewDiscard_ = new wxButton(m, wxID_ANY, "Discard");
-        review->Add(reviewSend_, 1, wxRIGHT, FromDIP(4));
-        review->Add(reviewDiscard_, 1);
+        reviewSend_ = new wxButton(m, wxID_ANY, "Send", wxDefaultPosition, wxDefaultSize, wxBU_EXACTFIT);
+        reviewDiscard_ = new wxButton(m, wxID_ANY, "Discard", wxDefaultPosition, wxDefaultSize, wxBU_EXACTFIT);
+        review->Add(monitor_, 1);
+        review->Add(reviewSend_, 1, wxLEFT, FromDIP(4));
+        review->Add(reviewDiscard_, 1, wxLEFT, FromDIP(4));
         s->Add(review, 0, wxEXPAND | wxTOP, FromDIP(4));
         s->AddStretchSpacer();
         auto* lamps = new wxGridSizer(4, 0, FromDIP(2));
-        recLamp_ = new DeckLamp(m, "REC", DeckLamp::Colour::Red, true, FromDIP(wxSize(44, 32)));
-        codingLamp_ = new DeckLamp(m, "CODING", DeckLamp::Colour::Amber, true, FromDIP(wxSize(44, 32)));
-        queuedLamp_ = new DeckLamp(m, "QUEUED", DeckLamp::Colour::Amber, true, FromDIP(wxSize(44, 32)));
-        sendingLamp_ = new DeckLamp(m, "SENDING", DeckLamp::Colour::Green, true, FromDIP(wxSize(44, 32)));
+        recLamp_ = new DeckLamp(m, "REC", DeckLamp::Colour::Red, true, FromDIP(wxSize(52, 32)));
+        codingLamp_ = new DeckLamp(m, "CODING", DeckLamp::Colour::Amber, true, FromDIP(wxSize(52, 32)));
+        queuedLamp_ = new DeckLamp(m, "QUEUED", DeckLamp::Colour::Amber, true, FromDIP(wxSize(52, 32)));
+        sendingLamp_ = new DeckLamp(m, "SENDING", DeckLamp::Colour::Green, true, FromDIP(wxSize(52, 32)));
         for (DeckLamp* l : {recLamp_, codingLamp_, queuedLamp_, sendingLamp_}) lamps->Add(l, 0, wxALIGN_CENTER_HORIZONTAL);
         s->Add(lamps, 0, wxEXPAND);
         modules->Add(m, 1, wxEXPAND);
@@ -461,9 +463,10 @@ void VoiceDeck::buildPanel()
     plate->SetSizer(outer);
     for (wxStaticText* t : {where_, gear_}) t->SetBackgroundColour(wxColour(0x1f, 0x1d, 0x1a));
 
-    // About 980 x 560: it fits a 1366 x 768 screen with the chat beside it.
-    SetClientSize(FromDIP(wxSize(1000, 600)));
-    SetMinClientSize(FromDIP(wxSize(980, 560)));
+    // About 1020 x 560: it fits a 1366 x 768 screen.
+    const wxSize best = plate->GetBestSize();
+    SetMinClientSize(wxSize(std::max(best.x, FromDIP(1000)), best.y));
+    SetClientSize(wxSize(std::max(best.x, FromDIP(1020)), best.y));
 
     // The knobs.
     auto knobChanged = [this](wxCommandEvent&) {
@@ -639,7 +642,12 @@ void VoiceDeck::showDevices()
     else if (!sotto_.available()) why = "Voice can't be coded: " + utf8(sotto_.info().why);
     bool canTalk = why.empty();
     if (talk_->IsEnabled() != canTalk && talk_state_.phase() != deck::TalkPhase::Recording) talk_->Enable(canTalk);
-    if (!canTalk && status_->GetLabel() != why) status_->SetLabel(why);
+    // The line says why it can't, or which microphone it uses until a
+    // clip has something to say.
+    const wxString line = canTalk ? utf8(voice::describe(st.microphone, true)) : why;
+    if (line != deviceLine_ && (status_->GetLabel().empty() || status_->GetLabel() == deviceLine_ || !canTalk))
+        status_->SetLabel(line);
+    deviceLine_ = line;
 }
 
 bool VoiceDeck::sendToBroadcast() const
@@ -667,18 +675,20 @@ void VoiceDeck::showTarget()
     where_->SetLabel(broadcast ? wxString("To the D2G net") : "Session with " + utf8(targetNow_.peer));
     const link::ModeInfo& mode = broadcast ? targetNow_.broadcastMode : targetNow_.sessionMode;
     const std::string& gearWords = broadcast ? targetNow_.broadcastGear : targetNow_.sessionGear;
-    wxString gear = utf8(gearWords).Upper();
+    wxString gear = utf8(gearWords);
     if (mode.valid())
     {
-        gear += DOT + utf8(mode.name);
+        // The gear's words often name the mode already.
+        if (!gear.Lower().Contains(utf8(mode.name).Lower())) gear += (gear.empty() ? wxString() : DOT) + utf8(mode.name);
         if (mode.secondsAtMax > 0)
         {
             double bps = 8.0 * mode.bytesPerCodeword * mode.maxCodewords / mode.secondsAtMax;
-            gear += DOT + wxString::Format("%.0f bit/s", bps);
+            gear += (gear.empty() ? wxString() : DOT) + wxString::Format("%.0f bit/s", bps);
         }
     }
     gear_->SetLabel(gear.empty() ? wxString("the host picks the gear") : gear);
     airGear_->SetLabel(gearWords.empty() ? wxString("") : "at " + utf8(gearWords));
+    airGear_->SetToolTip(airGear_->GetLabel());
     gear_->GetParent()->Layout();
 }
 
