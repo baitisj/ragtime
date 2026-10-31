@@ -29,6 +29,12 @@ public:
     {
         if (finished) finished(false);
     }
+    void playStream(int, Finished finished) override
+    {
+        if (finished) finished(false);
+    }
+    void append(const float*, std::size_t) override {}
+    void endStream() override {}
     void stopPlaying() override {}
     double playPosition() const override { return 0; }
     void setVolume(float) override {}
