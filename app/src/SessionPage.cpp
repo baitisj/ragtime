@@ -782,10 +782,18 @@ void SessionPage::showMenu(int row)
         {
             if (onResend_) onResend_(id);
         }
-        else if (e.GetId() == ID_COPY && wxTheClipboard->Open())
+        else if (e.GetId() == ID_COPY)
         {
-            wxTheClipboard->SetData(new wxTextDataObject(text));
-            wxTheClipboard->Close();
+            if (wxTheClipboard->Open())
+            {
+                wxTheClipboard->SetData(new wxTextDataObject(text));
+                wxTheClipboard->Close();
+            }
+        }
+        else
+        {
+            // Save as WAV has its own handler, bound before this one.
+            e.Skip();
         }
     });
     PopupMenu(&menu);

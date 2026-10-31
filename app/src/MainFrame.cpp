@@ -3130,7 +3130,7 @@ wxString MainFrame::voiceHtml(const std::string& key, const wxWindow* list, bool
         if (look.startsIn >= 0) look.playheadFrame = -1.0;
     }
     // A session clip coming to us: the stop sign, as on a picture.
-    if (const files::FileTransfer* t = arrivingVoice(key))
+    if (const std::optional<files::FileTransfer> t = arrivingVoice(key))
         look.stopHref = wxString::Format("enough:%llu", (unsigned long long)t->id);
     return voices_.cardHtml(key, list, look, picked);
 }
@@ -3270,9 +3270,9 @@ void MainFrame::saveVoiceAsWav(const std::string& key)
     showStatus();
 }
 
-const files::FileTransfer* MainFrame::arrivingVoice(const std::string& key) const
+std::optional<files::FileTransfer> MainFrame::arrivingVoice(const std::string& key) const
 {
-    if (key.size() < 2 || key[0] != 's') return nullptr;
+    if (key.size() < 2 || key[0] != 's') return std::nullopt;
     uint64_t id = 0;
     try
     {
@@ -3280,25 +3280,26 @@ const files::FileTransfer* MainFrame::arrivingVoice(const std::string& key) cons
     }
     catch (...)
     {
-        return nullptr;
+        return std::nullopt;
     }
     for (const files::FileTransfer& t : sessionFiles_.transfers())
-        if (t.id == id)
-            return t.voice && !t.outgoing && t.state == files::FileTransfer::State::Receiving ? &t : nullptr;
-    return nullptr;
+        if (t.id == id && t.voice && !t.outgoing && t.state == files::FileTransfer::State::Receiving) return t;
+    return std::nullopt;
 }
 
 bool MainFrame::startArrivingVoice(const std::string& key, uint32_t fromFrame, std::string& why)
 {
-    const files::FileTransfer* t = arrivingVoice(key);
-    if (t == nullptr || !voicePlayer_) return false;
+    const std::optional<files::FileTransfer> t = arrivingVoice(key);
+    if (!t || !voicePlayer_) return false;
     std::vector<uint8_t> bytes;
     if (!sessionFiles_.pictureBytes(t->id, bytes)) return false;
-    // A first guess at how the bytes will come, until they show it: the
-    // session mode's rate, and a burst of it with the far end's turn
-    // after (its ACK burst and two turns, about 4 s).
+    // A first guess at how the bytes will come, until the player sees for
+    // itself: the transfer's own rate so far, else the session mode's; and
+    // a burst of the mode with the far end's turn after (its ACK burst
+    // and two turns, about 4 s).
     const link::ModeInfo& mode = fileTraffic_.mode();
-    const double rate = picture::sessionBytesPerSecond(mode, 0.0);
+    const double measured = fileTraffic_.row(*t, HostConnection::nowMs()).bytesPerSecond;
+    const double rate = measured > 0 ? measured : picture::sessionBytesPerSecond(mode, 0.0);
     const double gap = mode.valid() ? mode.secondsAtMax + 4.0 : 0.0;
     return voicePlayer_->playArriving(voiceAudio(), key, bytes, t->size, fromFrame, rate, gap,
                                       HostConnection::nowMs(), why);

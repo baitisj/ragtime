@@ -2,7 +2,6 @@
 
 #include <algorithm>
 #include <cmath>
-#include <cstdio>
 #include <fstream>
 #include <iterator>
 #include <limits>
@@ -306,6 +305,9 @@ wxString VoiceShelf::cardHtml(const std::string& key, const wxWindow* window, co
         }
     }
     html << "</map>";
+    // A clip coming to us in a session: the stop sign beside the strip,
+    // for when we have heard enough of it.
+    if (!look.stopHref.empty()) html << "&nbsp;" << stopSignHtml(window, look.stopHref);
 
     // Its length, and while it comes, how far it has come.
     wxString after = wxString::FromUTF8(clipLength(s.clip.seconds()));
@@ -326,9 +328,6 @@ wxString VoiceShelf::cardHtml(const std::string& key, const wxWindow* window, co
             after << " &middot; " << wxString::Format("starts in %d s", (int)std::ceil(look.startsIn));
     }
     html << "&nbsp; " << grey(after);
-    // A clip coming to us in a session: the stop sign, for when we have
-    // heard enough of it.
-    if (!look.stopHref.empty()) html << "&nbsp; " << stopSignHtml(window, look.stopHref);
     return html;
 }
 
