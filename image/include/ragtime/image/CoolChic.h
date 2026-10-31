@@ -23,6 +23,11 @@
 
 #include "ragtime/picture/Picture.h"
 
+// Windows' rpcndr.h (through windows.h) defines hyper as a macro.
+#ifdef hyper
+#undef hyper
+#endif
+
 namespace ragtime
 {
 namespace image

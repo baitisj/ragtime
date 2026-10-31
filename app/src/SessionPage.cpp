@@ -251,7 +251,7 @@ protected:
         if (m->kind == Message::Kind::File && m->voice && !m->path.empty() && owner_->voiceHtml_)
         {
             wxString card = owner_->voiceHtml_("p" + m->path, this, picked);
-            if (!card.empty()) html << "<br>" << card;
+            if (!card.empty()) html << card;
         }
         // Its reactions, as chips under it.
         wxString chips = reactionChipsHtml(m->reactions, m->myReaction, m->myWaiting,
@@ -687,7 +687,7 @@ wxString SessionPage::cardHtml(const FileTransfer& t, bool picked, const wxWindo
     if (t.voice && voiceHtml_)
     {
         wxString voice = voiceHtml_("s" + std::to_string(t.id), list, picked);
-        if (!voice.empty()) body << "<br>" << voice;
+        if (!voice.empty()) body << voice;
     }
 
     wxColour surface = wxSystemSettings::GetColour(wxSYS_COLOUR_LISTBOX);

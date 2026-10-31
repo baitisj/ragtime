@@ -77,8 +77,6 @@ add_library(ragtime_core STATIC
     # Voice messages: the .sot file, the pitch strip and what a clip costs
     # the air (no audio, no codec).
     src/voice/Voice.cpp
-    # Which voice message plays and which wait (the cards are in app/).
-    src/voice/PlayQueue.cpp
     # The microphone deck: its knobs (after Glissando's Dial), meters and
     # push to talk, with no drawing (app/src/VoiceDeck draws them).
     src/deck/Knob.cpp
@@ -89,6 +87,8 @@ add_library(ragtime_core STATIC
     src/voice/Chain.cpp
     src/voice/Dsp.cpp
     src/voice/Levels.cpp
+    # Which voice message plays and which wait (the cards are in app/).
+    src/voice/PlayQueue.cpp
 )
 
 target_include_directories(ragtime_core PUBLIC
