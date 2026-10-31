@@ -15,6 +15,7 @@
 class wxBitmapButton;
 class wxBoxSizer;
 class wxMenu;
+class wxBitmapToggleButton;
 class wxButton;
 class wxStaticText;
 class wxTextCtrl;
@@ -104,6 +105,10 @@ public:
     // button, left of the floppy, and a picture card's picture as it
     // stands, an <img> linked to "view" ("" while nothing shows yet).
     void onBroadcastPicture(std::function<void()> fn) { onBroadcastPicture_ = std::move(fn); }
+    // The microphone button, left of the picture's: opens and closes the
+    // microphone deck, and stays pushed in while it is open.
+    void onVoiceDeck(std::function<void()> fn) { onVoiceDeck_ = std::move(fn); }
+    void setVoiceDeckLit(bool lit);
     void pictures(std::function<wxString(uint64_t file, const wxWindow* list, const wxString& href)> fn)
     {
         pictureHtml_ = std::move(fn);
@@ -167,6 +172,7 @@ private:
     wxTextCtrl* compose_ = nullptr;
     wxButton* file_ = nullptr;
     wxButton* picture_ = nullptr;
+    wxBitmapToggleButton* mic_ = nullptr;
     wxBitmapButton* gear_ = nullptr;
     wxString gearName_ = "Gear";
     double gearSpeed_ = 0.0;  // bit/s, for the needle; 0 rests it at the left
@@ -184,7 +190,7 @@ private:
     std::function<void(uint64_t, uint8_t)> onReact_;
     std::function<void(const std::string&)> onPing_;
     std::function<std::string(const std::string&)> whyNoPing_;
-    std::function<void()> onBroadcastFile_, onBroadcastPicture_;
+    std::function<void()> onBroadcastFile_, onBroadcastPicture_, onVoiceDeck_;
     std::function<wxString(uint64_t, const wxWindow*, const wxString&)> pictureHtml_;
     std::function<wxString(const std::string&, const wxWindow*, const wxString&)> pastPictureHtml_;
     std::function<void(const std::string&)> onViewPast_;

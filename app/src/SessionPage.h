@@ -13,6 +13,7 @@
 #include "ragtime/session/SessionChat.h"
 
 class wxBoxSizer;
+class wxBitmapToggleButton;
 class wxButton;
 class wxListBox;
 class wxStaticText;
@@ -57,6 +58,10 @@ public:
     // button linked to stopHref when that isn't empty; and a word that a
     // picture changed, so its card is drawn again.
     void onSendPicture(std::function<void()> fn) { onSendPicture_ = std::move(fn); }
+    // The microphone button, left of the picture's: opens and closes the
+    // microphone deck, and stays pushed in while it is open.
+    void onVoiceDeck(std::function<void()> fn) { onVoiceDeck_ = std::move(fn); }
+    void setVoiceDeckLit(bool lit);
     void pictures(std::function<wxString(uint64_t id, const wxWindow* list, const wxString& href,
                                          const wxString& stopHref)> fn)
     {
@@ -139,6 +144,7 @@ private:
     wxButton* send_ = nullptr;
     wxButton* sendFile_ = nullptr;
     wxButton* sendPicture_ = nullptr;
+    wxBitmapToggleButton* mic_ = nullptr;
     wxPanel* queue_ = nullptr;
     wxStaticText* queueTitle_ = nullptr;
     wxListBox* queueList_ = nullptr;
@@ -148,7 +154,7 @@ private:
     int shownPhase_ = -1;
 
     std::function<bool(const std::string&)> onSend_;
-    std::function<void()> onCancel_, onLeave_, onLeaveNow_, onCallAgain_, onSendFile_, onSendPicture_;
+    std::function<void()> onCancel_, onLeave_, onLeaveNow_, onCallAgain_, onSendFile_, onSendPicture_, onVoiceDeck_;
     std::function<wxString(uint64_t, const wxWindow*, const wxString&, const wxString&)> pictureHtml_;
     std::function<wxString(const std::string&, const wxWindow*, const wxString&)> pastPictureHtml_;
     std::function<wxString(const std::string&, const wxWindow*, bool)> voiceHtml_;

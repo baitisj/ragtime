@@ -9,6 +9,10 @@
 #
 # The AppImage carries the libraries of the system it was built on, so build
 # it on the oldest Linux it should run on (Ubuntu 24.04: glibc 2.39).
+#
+# It carries libsotto, for voice messages, built by packaging/build-sotto.sh
+# at the pinned commit (or set RAGTIME_SOTTO_DIR to its output), with the
+# Codec 2 it links and both licences in usr/share/doc/ragtime/licences.
 
 cd "$(dirname "$(realpath "$0")")/../.."
 ROOT=$PWD
@@ -20,6 +24,11 @@ if [ -z "$BUILD_DIR" ]; then
     BUILD_DIR="$ROOT/build-appimage"
     cmake -S . -B "$BUILD_DIR" -DCMAKE_BUILD_TYPE=Release -DRAGTIME_TESTS=OFF
     cmake --build "$BUILD_DIR" -j"$(nproc)"
+fi
+
+SOTTO_DIR=${RAGTIME_SOTTO_DIR:-$ROOT/build-sotto/out}
+if [ -z "$RAGTIME_SOTTO_DIR" ]; then
+    packaging/build-sotto.sh "$SOTTO_DIR"
 fi
 
 TOOLS="$ROOT/packaging/linux/tools"
@@ -55,6 +64,15 @@ if [ -f "$PLUGIN_DIR/libheif-libde265.so" ]; then
     cp "$PLUGIN_DIR/libheif-libde265.so" AppDir/usr/lib/libheif/plugins/
     DE265=$(ldd "$PLUGIN_DIR/libheif-libde265.so" | awk '/libde265\.so/ {print $3}')
     if [ -n "$DE265" ]; then PLUGIN_ARGS=(--library "$DE265"); fi
+fi
+# libsotto is loaded at run time, so linuxdeploy is told of it; it brings
+# libcodec2 along. Ragtime looks for it in usr/lib (voice/Sotto.cpp).
+PLUGIN_ARGS+=(--library "$SOTTO_DIR/libsotto.so.0")
+mkdir -p AppDir/usr/share/doc/ragtime/licences
+cp "$SOTTO_DIR"/licences/*.txt AppDir/usr/share/doc/ragtime/licences/
+# RNNoise is built into ragtime (BSD-3-Clause).
+if [ -f "$BUILD_DIR/_deps/rnnoise-src/COPYING" ]; then
+    cp "$BUILD_DIR/_deps/rnnoise-src/COPYING" AppDir/usr/share/doc/ragtime/licences/rnnoise.txt
 fi
 export LDAI_OUTPUT="Ragtime.AppImage"
 "linuxdeploy-$ARCH.AppImage" \

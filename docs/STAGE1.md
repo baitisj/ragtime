@@ -1889,6 +1889,87 @@ that records one is its own PR.
   arriving"); a file still coming when Ragtime closed comes back after a
   restart as a plain file line (pictures too).
 
+## The microphone deck
+
+Voice PR 4 of the plan "Ragtime voice messages with sotto" (Jeff,
+2026-10-31): the window you talk into. The microphone button, left of
+the picture button on both tabs, or View > Microphone deck
+(Ctrl+Shift+M), floats it (`app/src/VoiceDeck`); the button stays lit
+while it's open. It is a rack front panel read left to right in the
+order the sound flows, drawn in the theme's colours, light or dark
+(`app/src/DeckParts`), with standard dropdowns, buttons and boxes for
+everything that is a choice rather than an instrument. The logic it
+draws is in core with no window (`core/src/deck/`, `ragtime_deck_test`).
+
+- **sotto, loaded at run time.** libsotto is LGPL through Codec 2, so
+  Ragtime never links it: `voice::Sotto` (`audio/src/Sotto.cpp`) opens
+  it with `dlopen` (`LoadLibrary` on Windows) and refuses one that lacks
+  a function or names a codec Ragtime doesn't know
+  (`sotto_format()`, "sotto v3.6, shape 9-9-8-8" is codec 1). It looks
+  in `$RAGTIME_SOTTO`, beside the program, in `../lib/` from it, then
+  the system's (`libsotto.so.0`, `sotto.dll`). Without it the deck
+  says why and Push to talk stays dark; nothing else changes. The
+  encoder runs on the window's clock: sotto codes in about 1% of real
+  time. `SottoDecoder::decodeClip` gives a clip back with sotto's 20 ms
+  delay taken out, lost frames concealed. The commit is pinned in
+  `packaging/sotto.sh` (baitisj/sotto 08d5047, v3.6 the default), and
+  `packaging/build-sotto.sh` builds it there with its Codec 2 fork.
+- **1 Input.** The microphone (never the radio's card: VoiceAudio leaves
+  it out), the Active level meter (a cream VU face, P.56's live level,
+  a 300 ms needle, the green band -29 to -23 dBFS) and the Loudest 10 ms
+  meter (a black broadcast face, the needle falling 24 dB a second and
+  an orange hold a second long, green -15 to -11, red past -7.3), Gain
+  (-20 to +40 dB) and the Clip lamp, lit for a second after a sample hits full
+  scale.
+- **2 Clean-up.** High-pass (80, 100 or 150 Hz) and Noise (RNNoise, 0 to
+  100%), each a push-pull knob: pushed in it's switched in, and its
+  amber lamp lights.
+- **3 Leveller.** Target (-36 to -16 dBFS, -26 by default) is push-pull:
+  pushed in, level only; popped out, peak mode, and its ring lights.
+  Under it the gain reduction, leveller and limiter together, in eight
+  segments to 20 dB with a green bracket at 3 to 6.
+- **4 sotto.** A green phosphor screen with the pitch trace of the last
+  four seconds, drawn from the frames' own pitch and energy bits as they
+  are coded; the codec, frames and bytes; and the clip's Level check
+  (Active, Loudest, Noise lamps with their figures), so after one try
+  you know which knob to turn.
+- **5 To the air.** Where the clip goes (the session partner, when a
+  session is up, or the D2G net), the big Push to talk button, Monitor,
+  and the REC, CODING, QUEUED and SENDING lamps, which follow the file
+  through the queue (`MainFrame::clipAir`).
+- **On the air.** A bar across the foot that fills as you hold the
+  button, in seconds on the air at the gear in use
+  (`voice::broadcastAirSeconds`, `sessionAirSeconds`), with a red mark at
+  Max airtime (`/Voice/MaxAirSeconds`, 60 s by default, as pictures);
+  past it the bar turns red but Push to talk still works (the plan's
+  default). Words beside it: "0:42 of air for 0:14 of speech".
+- **Knobs.** They feel like Glissando's Dial (`deck::Knob`, its logic
+  ported under MIT): drag up and down over 300 px for the whole range,
+  Shift for a tenth of that; the wheel by a step, Shift finer, Control
+  coarser; a catch at the default; double click for the default; a click
+  that doesn't drag pushes or pulls; and with focus, the arrow keys (Shift
+  finer), Page Up and Down, Home and End, and Return to push. Each knob
+  is kept in wxConfig (`/Voice/Deck*`).
+- **Push to talk.** Hold the button, or the space bar while the deck has
+  focus (not while a dropdown, box or button does). Letting go finishes
+  the chain, codes the tail and writes the clip as a .sot
+  (`voice::makeSot`), kept in `sentVoiceDir()`, and queues it as a voice
+  file (`MainFrame::sendVoice`). Esc while holding throws it away.
+  While you hold it, voice from others waits (`holdVoicePlayback`).
+  "Hold my clips for review" keeps it instead, with Monitor, Send and
+  Discard; a new Push to talk throws a held clip away.
+- **Monitor** plays the last clip as the far end will hear it: the .sot
+  read back and decoded by sotto. Monitor and Push to talk release each
+  other. The speaker, its volume (Settings > Voice's, too) and "Play
+  arriving voice" are on the strip under the panel.
+- **Never on the rig.** The deck keys nothing; data2g-host keys the rig
+  when the file's bursts go, as for text.
+- **Packages.** The AppImage carries libsotto and the Codec 2 it links,
+  built by `packaging/build-sotto.sh`, with their licences (and
+  RNNoise's) in `usr/share/doc/ragtime/licences`. The Windows zip takes
+  `sotto.dll` and its Codec 2 DLL from `RAGTIME_SOTTO_DLL_DIR`; sotto has
+  no MinGW build yet, so until it does the zip has no voice coding.
+
 ## Waiting on Andrew (via Jeff)
 
 - Read from Data2G's source on 2026-10-25 (`docs/DATA2G.md`): `BW1200`

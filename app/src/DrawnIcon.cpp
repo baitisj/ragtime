@@ -218,6 +218,29 @@ wxBitmapBundle earIcon(const wxColour& ink, int sizeDip)
     return drawnIcon([ink](wxGraphicsContext& gc, double size) { drawEarIcon(gc, size, ink); }, sizeDip);
 }
 
+void drawMicrophoneIcon(wxGraphicsContext& gc, double size, const wxColour& ink)
+{
+    // Drawn on a 24-unit grid: a capsule microphone on a yoke and stand.
+    const double u = size / 24.0;
+    gc.SetPen(*wxTRANSPARENT_PEN);
+    gc.SetBrush(wxBrush(ink));
+    gc.DrawRoundedRectangle(8.0 * u, 2.0 * u, 8.0 * u, 13.0 * u, 4.0 * u);
+    gc.SetBrush(*wxTRANSPARENT_BRUSH);
+    gc.SetPen(gc.CreatePen(wxGraphicsPenInfo(ink, 2.0 * u).Cap(wxCAP_ROUND).Join(wxJOIN_ROUND)));
+    wxGraphicsPath yoke = gc.CreatePath();
+    yoke.MoveToPoint(5.0 * u, 10.5 * u);
+    yoke.AddCurveToPoint(5.0 * u, 15.5 * u, 8.5 * u, 18.5 * u, 12.0 * u, 18.5 * u);
+    yoke.AddCurveToPoint(15.5 * u, 18.5 * u, 19.0 * u, 15.5 * u, 19.0 * u, 10.5 * u);
+    gc.StrokePath(yoke);
+    gc.StrokeLine(12.0 * u, 18.5 * u, 12.0 * u, 22.0 * u);
+    gc.StrokeLine(8.0 * u, 22.0 * u, 16.0 * u, 22.0 * u);
+}
+
+wxBitmapBundle microphoneIcon(const wxColour& ink, int sizeDip)
+{
+    return drawnIcon([ink](wxGraphicsContext& gc, double size) { drawMicrophoneIcon(gc, size, ink); }, sizeDip);
+}
+
 wxString bellHtml(const wxWindow* window, int sizeDip, const wxColour& ink)
 {
     int px = window->FromDIP(sizeDip);

@@ -83,6 +83,8 @@ ragtime_test(ragtime_ear_test EarTest.cpp)
 # Voice's microphones and speakers (the radio's card left out) and the
 # microphone Test's verdict.
 ragtime_test(ragtime_voice_devices_test VoiceDevicesTest.cpp)
+# The microphone deck's knobs, meters and push to talk.
+ragtime_test(ragtime_deck_test DeckTest.cpp)
 # libsotto loaded at run time: the refusals always, a round trip when a
 # libsotto is found (RAGTIME_SOTTO_TEST_LIB names one for the test).
 ragtime_test(ragtime_sotto_test SottoTest.cpp)
