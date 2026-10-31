@@ -1702,6 +1702,7 @@ void MainFrame::onFileEvents()
                 line.text = f->name + ", " + files::sizeText(f->size) + ": " + result;
                 line.path = f->path;
                 line.picture = f->picture;
+                line.voice = f->voice;
                 sessionLog_.file(f->peer, line);
             }
         }
@@ -2502,11 +2503,14 @@ void MainFrame::onBroadcastFiles()
                 break;
             case Type::Saved:
                 note_ = "Saved " + f.name + " from " + f.from;
-                chat_.fileEnded(f.id, "Saved");
+                chat_.fileEnded(f.id, "Saved", f.path, f.picture, f.voice);
                 break;
             case Type::Ended:
                 if (f.outgoing) note_ = f.name + ": " + broadcast::stateLabel(f.state);
-                chat_.fileEnded(f.id, broadcast::stateLabel(f.state));
+                // Ours keeps its path whatever became of it (a re-send
+                // reads it); theirs only once saved.
+                chat_.fileEnded(f.id, broadcast::stateLabel(f.state), f.outgoing ? f.path : std::string(), f.picture,
+                                f.voice);
                 break;
             case Type::Repairing:
                 note_ = "Sending repairs of " + f.name

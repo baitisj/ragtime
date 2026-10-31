@@ -31,6 +31,11 @@ bool isSource(const GraphNode& node)
     return node.mediaClass.rfind("Audio/Source", 0) == 0;
 }
 
+bool isSink(const GraphNode& node)
+{
+    return node.mediaClass.rfind("Audio/Sink", 0) == 0;
+}
+
 std::vector<GraphNode> sources(const Graph& graph)
 {
     std::vector<GraphNode> out;

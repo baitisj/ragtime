@@ -67,12 +67,18 @@ add_library(ragtime_core STATIC
     src/ear/Graph.cpp
     src/ear/ProcNet.cpp
     src/ear/Spectrum.cpp
+    # Voice messages: the microphones and speakers, the radio's card left
+    # out (the recording and playing are in audio/).
+    src/voice/Devices.cpp
+    src/voice/MicCheck.cpp
     # Inline pictures: the detail-preserving downscaler, orientation and
     # what fits the air (the codecs are in image/).
     src/picture/Picture.cpp
     # Voice messages: the .sot file, the pitch strip and what a clip costs
     # the air (no audio, no codec).
     src/voice/Voice.cpp
+    # Which voice message plays and which wait (the cards are in app/).
+    src/voice/PlayQueue.cpp
     # The microphone deck: its knobs (after Glissando's Dial), meters and
     # push to talk, with no drawing (app/src/VoiceDeck draws them).
     src/deck/Knob.cpp

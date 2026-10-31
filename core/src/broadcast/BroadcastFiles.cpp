@@ -181,6 +181,12 @@ void BroadcastFiles::setAutoPictures(const std::string& folder, uint64_t maxByte
     pictureMax_ = maxBytes;
 }
 
+void BroadcastFiles::setAutoVoice(const std::string& folder, uint64_t maxBytes)
+{
+    voiceFolder_ = folder;
+    voiceMax_ = maxBytes;
+}
+
 bool BroadcastFiles::pictureBytes(uint64_t id, std::vector<uint8_t>& out) const
 {
     out.clear();
@@ -217,6 +223,39 @@ bool BroadcastFiles::pictureBytes(uint64_t id, std::vector<uint8_t>& out) const
     return false;
 }
 
+bool BroadcastFiles::voiceBytes(uint64_t id, std::vector<uint8_t>& out, std::vector<Hole>& missing) const
+{
+    missing.clear();
+    for (const Incoming& i : incoming_)
+    {
+        if (i.file.id != id || !i.announced) continue;
+        if (i.file.state == State::Saved) break;
+        out.assign((size_t)std::min<uint64_t>(i.file.size, MAX_FILE_BYTES), 0);
+        bool any = false;
+        for (uint16_t p = 0; p < i.file.pieces; p++)
+        {
+            uint64_t start = (uint64_t)p * i.announce.pieceBytes;
+            uint64_t end = std::min<uint64_t>(out.size(), start + pieceLength(i.file.size, i.announce.pieceBytes, p));
+            if (start >= end) break;
+            auto it = i.pieces.find(p);
+            if (it != i.pieces.end() && it->second.size() == end - start)
+            {
+                std::copy(it->second.begin(), it->second.end(), out.begin() + (std::ptrdiff_t)start);
+                any = true;
+                continue;
+            }
+            if (!missing.empty() && missing.back().end == start)
+                missing.back().end = end;
+            else
+                missing.push_back(Hole{start, end});
+        }
+        if (!any) missing.clear();
+        return any;
+    }
+    // Ours, or theirs saved: all of it.
+    return pictureBytes(id, out);
+}
+
 //-------------------------------------------------------------------------
 // Ours
 //-------------------------------------------------------------------------
@@ -227,7 +266,7 @@ FileEstimate BroadcastFiles::estimate(uint64_t size, const std::string& name, co
 }
 
 uint64_t BroadcastFiles::send(const std::string& path, const std::string& mode, uint64_t nowMs, std::string& error,
-                              bool picture)
+                              bool picture, bool voice)
 {
     const std::string& call = chat_.settings().callsign;
     std::filesystem::path p = files::pathFromUtf8(path);
@@ -281,7 +320,9 @@ uint64_t BroadcastFiles::send(const std::string& path, const std::string& mode, 
     announce.pieceBytes = (uint16_t)est.pieceBytes;
     announce.digest = protocol::digestOf(content);
     announce.name = name;
-    announce.kind = picture ? protocol::pictureKindOf(content.data(), content.size()) : protocol::FILE_PLAIN;
+    announce.kind = voice     ? protocol::FILE_VOICE
+                    : picture ? protocol::pictureKindOf(content.data(), content.size())
+                              : protocol::FILE_PLAIN;
 
     Outgoing out;
     out.announce = chat_.record(announce, seconds(nowMs));
@@ -299,7 +340,8 @@ uint64_t BroadcastFiles::send(const std::string& path, const std::string& mode, 
     out.file.startedMs = nowMs;
     out.file.lastMs = nowMs;
     out.file.path = path;
-    out.file.picture = picture;
+    out.file.picture = picture && !voice;
+    out.file.voice = voice;
     out.file.pieceMap.assign(pieces, files::PIECE_WAITING);
     out.rate.sample(0, nowMs);
     outgoing_.push_back(std::move(out));
@@ -380,6 +422,7 @@ void BroadcastFiles::finishOutgoing(Outgoing& out, State state, uint64_t nowMs)
         f.result = state == State::Sent ? files::FinishedFile::Result::Sent : files::FinishedFile::Result::Cancelled;
         f.path = out.file.path;
         f.picture = out.file.picture;
+        f.voice = out.file.voice;
         // The first pass, start to end: repairs come later, sometimes hours.
         if (state == State::Sent && out.firstPassMs > out.file.startedMs)
         {
@@ -643,6 +686,7 @@ void BroadcastFiles::heardAnnounce(const protocol::Record& record, uint64_t nowM
     in->file.name = files::safeFileName(a->name);
     in->file.size = a->size;
     in->file.picture = protocol::isPictureKind(a->kind);
+    in->file.voice = protocol::isVoiceKind(a->kind);
     in->file.pieces = pieces;
     in->file.pieceMap.assign(pieces, files::PIECE_WAITING);
 
@@ -708,14 +752,15 @@ void BroadcastFiles::heardAnnounce(const protocol::Record& record, uint64_t nowM
         finishIncoming(*in, State::Failed, nowMs, "over 300 KB");
         return;
     }
-    // A picture small enough shows as it comes; other files wait for
-    // Receive unless every file is taken without asking.
+    // A picture or a voice message small enough shows as it comes; other
+    // files wait for Receive unless every file is taken without asking.
     bool picture = in->file.picture && !pictureFolder_.empty() && a->size <= pictureMax_;
-    if (in->file.state == State::Heard && (picture || !autoFolder_.empty()))
+    bool voice = in->file.voice && !voiceFolder_.empty() && a->size <= voiceMax_;
+    if (in->file.state == State::Heard && (picture || voice || !autoFolder_.empty()))
     {
         in->file.state = State::Receiving;
         in->file.autoReceived = true;
-        const std::string& folder = picture ? pictureFolder_ : autoFolder_;
+        const std::string& folder = picture ? pictureFolder_ : voice ? voiceFolder_ : autoFolder_;
         in->file.path = files::utf8FromPath(files::pathFromUtf8(folder) / files::pathFromUtf8(in->file.name));
     }
     emit(Event::Type::Announced, in->file.id);
@@ -900,6 +945,7 @@ void BroadcastFiles::finishIncoming(Incoming& in, State state, uint64_t nowMs, c
         f.name = in.file.name;
         f.size = in.file.size;
         f.picture = in.file.picture;
+        f.voice = in.file.voice;
         using Result = files::FinishedFile::Result;
         switch (state)
         {
@@ -1349,6 +1395,7 @@ void BroadcastFiles::loadParts(uint64_t nowMs)
         kept.file.name = files::safeFileName(a->name);
         kept.file.size = a->size;
         kept.file.picture = protocol::isPictureKind(a->kind);
+        kept.file.voice = protocol::isVoiceKind(a->kind);
         uint16_t pieces = (uint16_t)((a->size + a->pieceBytes - 1) / a->pieceBytes);
         kept.file.pieces = pieces;
         kept.file.pieceMap.assign(pieces, files::PIECE_WAITING);

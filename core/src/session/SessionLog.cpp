@@ -179,6 +179,7 @@ std::vector<Message> parseSessionLog(const std::string& text, size_t max)
             {
                 m.path = unescape(f[5]);
                 m.picture = f[6] == "1";
+                m.voice = f[6] == "v";
             }
             rows.push_back(std::move(m));
             if (open) any = true;
@@ -298,7 +299,7 @@ void SessionLog::weReacted(const std::string& peer, const Message& m, uint8_t co
 void SessionLog::file(const std::string& peer, const Message& note)
 {
     append(peer, join({"F", std::to_string(note.atMs), note.ours ? "1" : "0", escape(note.from), escape(note.text),
-                       escape(note.path), note.picture ? "1" : "0"}));
+                       escape(note.path), note.picture ? "1" : note.voice ? "v" : "0"}));
 }
 
 void SessionLog::ended(const std::string& peer, uint64_t nowMs)

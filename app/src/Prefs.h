@@ -170,6 +170,14 @@ constexpr const char* PICTURES_AS_THEY_COME = "/Pictures/ShowAsTheyCome";   // u
 constexpr const char* EAR_SOURCE = "/Ear/Source";                    // a PipeWire source's node.name; empty follows data2g-host
 constexpr const char* EAR_SPEED = "/Ear/RowsPerSecond";               // the waterfall's rows a second
 constexpr const char* EAR_SPAN = "/Ear/SpanHz";                       // how high the picture goes; 0 is Auto
+// Voice messages (audio::VoiceAudio): the devices by node name (PipeWire)
+// or endpoint id (Windows), empty for the system's default; the speaker's
+// volume in dB (0 as it is); and the radio's cards seen before,
+// voice::joinNames, left out of both lists while data2g-host is stopped.
+constexpr const char* VOICE_MICROPHONE = "/Voice/Microphone";
+constexpr const char* VOICE_SPEAKER = "/Voice/Speaker";
+constexpr const char* VOICE_VOLUME = "/Voice/SpeakerVolumeDb";
+constexpr const char* VOICE_RADIO_CARDS = "/Voice/RadioCards";
 } // namespace keys
 
 #endif

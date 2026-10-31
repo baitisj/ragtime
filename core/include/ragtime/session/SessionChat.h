@@ -144,9 +144,11 @@ struct Message
     bool past = false;          // from an earlier session with the peer, read from the SessionLog
     uint64_t beganMs = 0;       // a rule: when that session began (atMs: when it ended); 0 if not known
     // A file row: where it was saved or sent from (UTF-8, "" if not known),
-    // and whether it is an inline picture, shown under its line.
+    // and whether it is an inline picture, shown under its line, or a
+    // voice message, its voice card under its line.
     std::string path;
     bool picture = false;
+    bool voice = false;
 
     // Reactions (docs/PROTOCOL.md, "Reactions"): the far end's, and ours,
     // written or waiting for Pause sending to lift.

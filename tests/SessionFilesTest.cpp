@@ -1312,6 +1312,31 @@ void testPicturesComeWithoutAsking()
     CHECK(last(link.b, false).state == State::Asking && last(link.b, false).picture);
 }
 
+// Voice messages come without asking under their cap, from anyone, into
+// the voice folder, offered as kind 0x03.
+void testVoiceComesWithoutAsking()
+{
+    Scratch scratch("voice");
+    Link link;
+    std::string folder = utf8FromPath(scratch.dir / "voice");
+    link.b.setAutoVoice(folder, 64 * 1024);
+    std::string error;
+    std::string source = scratch.write("hello.sot", 3000);
+    uint64_t id = link.a.offer("VK3ABC", source, link.nowMs, error, false, true);
+    CHECK(id != 0 && transferOf(link.a, id).voice && !transferOf(link.a, id).picture);
+    link.turns(5);
+    FileTransfer got = last(link.b, false);
+    CHECK(got.voice && !got.picture && got.autoAccepted && got.state == State::Saved);
+    CHECK(got.path == utf8FromPath(scratch.dir / "voice" / "hello.sot"));
+    CHECK(readFile(got.path) == readFile(source));
+
+    // Over the cap it asks, still a voice message.
+    link.b.setAutoVoice(folder, 1000);
+    link.a.offer("VK3ABC", scratch.write("long.sot", 5000), link.nowMs, error, false, true);
+    link.turn();
+    CHECK(last(link.b, false).state == State::Asking && last(link.b, false).voice);
+}
+
 // The stop sign: the receiver has enough of a picture. What came is saved
 // as the picture, the sender is told, stops, and counts it delivered.
 void testTheStopSign()
@@ -1391,6 +1416,7 @@ int main()
     testOutOfOrderFails();
     testTheSizeCap();
     testPicturesComeWithoutAsking();
+    testVoiceComesWithoutAsking();
     testTheStopSign();
     return ragtime_test::finish();
 }

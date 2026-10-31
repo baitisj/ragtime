@@ -109,6 +109,8 @@ struct FinishedFile
     // Sent, so a log read by a Ragtime from before pictures still has it.
     bool picture = false;
     uint64_t enough = 0;
+    // A voice message (protocol::FILE_VOICE): its row has a play button.
+    bool voice = false;
 };
 
 // "Saved", "Sent", "Declined", "Cancelled", "Cancelled by W1AW", "Expired",
