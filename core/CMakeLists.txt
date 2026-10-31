@@ -67,6 +67,10 @@ add_library(ragtime_core STATIC
     src/ear/Graph.cpp
     src/ear/ProcNet.cpp
     src/ear/Spectrum.cpp
+    # Voice messages: the microphones and speakers, the radio's card left
+    # out (the recording and playing are in audio/).
+    src/voice/Devices.cpp
+    src/voice/MicCheck.cpp
     # Inline pictures: the detail-preserving downscaler, orientation and
     # what fits the air (the codecs are in image/).
     src/picture/Picture.cpp
