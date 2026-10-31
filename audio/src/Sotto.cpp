@@ -2,6 +2,7 @@
 #include "ragtime/voice/Sotto.h"
 
 #include <algorithm>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <mutex>
@@ -123,6 +124,14 @@ void closeLibrary(void* lib)
 }
 #endif
 
+bool fileExists(const std::string& file)
+{
+    std::FILE* f = std::fopen(file.c_str(), "rb");
+    if (f == nullptr) return false;
+    std::fclose(f);
+    return true;
+}
+
 template <typename F>
 bool bind(void* lib, const char* name, F& f)
 {
@@ -146,6 +155,18 @@ std::vector<std::string> sottoCandidates()
 #ifndef _WIN32
         // The AppImage keeps its libraries in usr/lib beside usr/bin.
         out.push_back(here + "../lib/" + LIBRARY_NAME);
+        // Built from source: packaging/build-sotto.sh leaves it in the
+        // checkout's build-sotto/out, a folder or a few above the program
+        // (build/app/ragtime, build/tests/...).
+        std::string up = here;
+        for (int level = 0; level < 4 && up.size() > 1; level++)
+        {
+            up.pop_back();     // the trailing '/'
+            size_t slash = up.rfind('/');
+            if (slash == std::string::npos) break;
+            up.resize(slash + 1);
+            out.push_back(up + "build-sotto/out/" + LIBRARY_NAME);
+        }
 #endif
     }
     out.push_back(LIBRARY_NAME);    // the system's search path
@@ -165,18 +186,34 @@ Sotto& Sotto::library()
 Sotto::Sotto(const std::string& path)
 {
     std::vector<std::string> tries = path.empty() ? sottoCandidates() : std::vector<std::string>{path};
-    std::string firstWhy;
+    std::string foundWhy;
     for (const std::string& file : tries)
     {
         std::string why;
         if (open(file, why)) return;
-        // The most telling reason: a library found but refused says more
-        // than "not found" on every other path.
-        bool found = why.find("No such file") == std::string::npos && why.find("Windows error 126") == std::string::npos;
-        if (firstWhy.empty() || found) firstWhy = why;
-        if (found && !why.empty()) break;
+        // A library there but refused (a missing libcodec2, the wrong
+        // architecture, not sotto) says more than "not found" on every
+        // other path.
+        bool there = file.find_first_of("\\/") != std::string::npos ? fileExists(file)
+                     : why.find("No such file") == std::string::npos
+                           && why.find("Windows error 126") == std::string::npos;
+        if (there)
+        {
+            foundWhy = why;
+            break;
+        }
     }
-    info_.why = firstWhy.empty() ? "libsotto isn't installed" : firstWhy;
+    if (!foundWhy.empty())
+        info_.why = foundWhy;
+    else if (!path.empty())
+        info_.why = "libsotto isn't at " + path;
+    else
+#ifdef _WIN32
+        info_.why = "sotto.dll isn't installed: put it beside ragtime.exe, or set RAGTIME_SOTTO to its path";
+#else
+        info_.why = "libsotto isn't installed: build it with packaging/build-sotto.sh in Ragtime's checkout, "
+                    "or set RAGTIME_SOTTO to libsotto.so.0's path";
+#endif
 }
 
 Sotto::~Sotto()
