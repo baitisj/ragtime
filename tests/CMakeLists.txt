@@ -56,6 +56,10 @@ ragtime_test(ragtime_file_traffic_test FileTrafficTest.cpp)
 # Inline pictures: the downscaler and airtime sums, and the codecs.
 ragtime_test(ragtime_picture_test PictureTest.cpp)
 target_link_libraries(ragtime_picture_test PRIVATE ragtime_image)
+# Voice messages: the .sot file, the pitch strip and airtime, on
+# tests/data/voice/.
+ragtime_test(ragtime_voice_test VoiceTest.cpp)
+target_compile_definitions(ragtime_voice_test PRIVATE RAGTIME_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
 # Cool-chic pictures: the decoder against tests/data/coolchic/, and a fuzz run.
 ragtime_test(ragtime_coolchic_test CoolChicTest.cpp)
 target_link_libraries(ragtime_coolchic_test PRIVATE ragtime_image)

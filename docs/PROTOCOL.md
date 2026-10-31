@@ -164,7 +164,8 @@ Ack and one: with five-character calls, 21 bytes. Reactions, below.
 digest (12 bytes, the whole file's: SHA-256, first 12 bytes), name (a
 short string, UTF-8, at most 200 bytes), then kind (1 byte, optional):
 `0x00` a plain file, `0x01` a JPEG 2000 picture, `0x02` a Cool-chic
-picture (Pictures, below). Missing, it is
+picture (Pictures, below), `0x03` a voice message (Voice, below).
+Missing, it is
 `0x00`, and a sender leaves it off a plain file; a receiver takes a kind
 it doesn't know as `0x00`. The offer is an item; its sequence number
 names the transfer from then on.
@@ -913,6 +914,94 @@ on D2G and repaired there. What kind adds is how the far end treats it.
   `.rcc`) file,
   and the stop sign as the receiver stopping it (`0x84` has the
   receiver's bit set).
+
+### Voice
+
+A voice message is a file with kind `0x03`, in a session or on D2G: a
+`.sot` file of speech coded with sotto, Jeff's vocoder
+(github.com/baitisj/sotto), at 2,400 bit/s. Like a picture it goes by
+the rules of any file: offered or announced, sent, sealed on D2G and
+repaired there. It needs no record type, no Hello bit and nothing from
+Data2G. Voice sent as data is data (Jeff, 2026-10-31): it goes wherever
+Data2G runs, as pictures do. The format is published here, as 97.309(b)
+asks, and nothing in it obscures what is said (97.113(a)(4)).
+
+**The file** is a 7-byte header, then sotto's frames, 6 bytes each, in
+time order:
+
+| Field | Bytes | Meaning |
+| --- | --- | --- |
+| magic | 2 | `So` (`0x53 0x6F`) |
+| codec | 1 | `0x01`: sotto v3.6 (below) |
+| flags | 1 | `0x00`; a reader refuses a file with a flag it doesn't know |
+| length | 3 | The clip's length in 20 ms frames, every silent frame a run stands for counted |
+| frames | the rest | 6 bytes each |
+
+**Codec 1 is sotto v3.6** (Jeff, 2026-10-31), frozen as text table 0
+is: its frame, its codebook (shape 9-9-8-8), its energy from the
+spectral envelope, its postfilter and its concealment. A library that
+speaks it says `sotto v3.6, shape 9-9-8-8` from `sotto_format()`. A
+later sotto that changes the bits is a new codec number, and a receiver
+plays only numbers it knows; decoder-only changes can come in a Ragtime
+update without one. Each frame is 48 bits for 20 ms, most significant
+bit first:
+
+| Field | Bits | Meaning |
+| --- | --- | --- |
+| voicing | 2 | 0 unvoiced, 1 voiced, 2 mixed, for both 10 ms halves; 3 one half unvoiced and the other mixed, the order following the frame before |
+| pitch | 7 | 50 × 10^(code / 127) Hz, 50 to 500 Hz |
+| energy | 5 | 0 is silence; else 10 + code × 70 / 31 dB, which is the frame's RMS in dBFS + 87.3 (-75.0 to -7.3 dBFS) |
+| shape | 34 | The spectral envelope: four codebook indexes, 9, 9, 8 and 8 bits |
+
+No frame depends on another, so any first part of a clip plays, and a
+lost frame costs 20 ms.
+
+**Silence runs.** A frame with energy 0 is silence, so its other bits
+carry nothing. In a `.sot` file such a frame stands for itself and the
+next run count silent frames, the count in the 16 bits after its energy
+field (bits 14 to 29, so 1 to 65,536 frames a run frame); its voicing,
+pitch and last 18 bits are 0. A two-second pause is then 6 bytes, not
+600. A reader expands each run into frames of all zero bits, which
+sotto decodes as silence. The frames, runs expanded, add up to the
+header's length, or the file is malformed.
+
+**What a sender does before writing.** Silence at both ends goes, and a
+quiet pause becomes silence: a run of frames each at least 30 dB under
+the clip's loud frames (the 95th percentile of their energy), lasting
+200 ms or more, becomes silence but for 40 ms at each end touching
+speech, so word tails and breaths keep their sound. On sotto's test
+clips of read speech this saves about 14% (`tests/VoiceTest.cpp`); a
+message with pauses saves more. Only the sender does this, so a reader
+needs to know nothing of it.
+
+**A clip may be at most 30 minutes long**, silences included (90,000
+frames); a reader refuses a header that says more, so a file can't make
+it fill memory. A file of kind `0x03` that doesn't read shows only its
+card, as a bad picture does.
+
+**Holes.** A frame with a byte missing (a piece lost for good on D2G)
+is one lost frame, for sotto's decoder to cover as it covers a lost
+frame on 2 m: it holds the last sound 40 ms, fades 6 dB each 20 ms, and
+is silent after 80 ms. A lost frame that stood for a silence run makes
+the pause shorter, so whatever frames the holes lose against the
+header's length go back into them as lost frames, shared by how many
+frames each lost: with one hole, everything after it plays in its
+place.
+
+**In a session** the stream is reliable and in order, so the far end
+can play while the bytes arrive. Arriving at R bytes a second, frame t
+(from 0) must be here by the time frame t - 1 plays (sotto's decoder is
+one frame behind); the wait before playing is the worst of those over
+the file, about S / R - S / P for a clip of S bytes playing at P, and
+less where a silence run lets the link catch up. The stop sign
+(FileCancel `0x84`) works as for pictures: the receiver keeps what came.
+
+**On D2G** a voice message is sealed and repaired as any file. A
+receiver plays the first unbroken run of pieces as it comes, and the
+whole clip again once repair fills the holes.
+
+A receiver from 0.2 or before reads a voice message as a plain `.sot`
+file.
 
 ## Growing the protocol
 
