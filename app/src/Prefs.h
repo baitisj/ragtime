@@ -178,6 +178,18 @@ constexpr const char* VOICE_MICROPHONE = "/Voice/Microphone";
 constexpr const char* VOICE_SPEAKER = "/Voice/Speaker";
 constexpr const char* VOICE_VOLUME = "/Voice/SpeakerVolumeDb";
 constexpr const char* VOICE_RADIO_CARDS = "/Voice/RadioCards";
+// The microphone deck's knobs (gains and levels in tenths of a dB, Noise
+// in percent), and its boxes.
+constexpr const char* VOICE_DECK_GAIN = "/Voice/Deck/GainTenthsDb";
+constexpr const char* VOICE_DECK_HIGH_PASS = "/Voice/Deck/HighPassHz";
+constexpr const char* VOICE_DECK_HIGH_PASS_IN = "/Voice/Deck/HighPassIn";
+constexpr const char* VOICE_DECK_NOISE = "/Voice/Deck/NoisePercent";
+constexpr const char* VOICE_DECK_NOISE_IN = "/Voice/Deck/NoiseIn";
+constexpr const char* VOICE_DECK_TARGET = "/Voice/Deck/TargetTenthsDb";
+constexpr const char* VOICE_DECK_PEAKS = "/Voice/Deck/PeakMode";           // Target popped out
+constexpr const char* VOICE_DECK_REVIEW = "/Voice/Deck/HoldForReview";
+// The most airtime a clip should take: the deck's bar turns red past it.
+constexpr const char* VOICE_MAX_AIR = "/Voice/MaxAirSeconds";
 } // namespace keys
 
 #endif

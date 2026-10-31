@@ -30,6 +30,8 @@ add_executable(ragtime WIN32
     src/FilesPage.cpp
     src/GearshiftDialog.cpp
     src/DrawnIcon.cpp
+    src/DeckParts.cpp
+    src/VoiceDeck.cpp
     src/EarControls.cpp
     src/EarFilterBar.cpp
     src/EarFrame.cpp
@@ -93,7 +95,7 @@ else()
         target_compile_options(ragtime PRIVATE ${RAGTIME_WX_CXX_FLAGS})
     endif()
 endif()
-target_link_libraries(ragtime PRIVATE ragtime_core ragtime_rig ragtime_audio ragtime_image ${RAGTIME_WX_LIBS})
+target_link_libraries(ragtime PRIVATE ragtime_core ragtime_rig ragtime_audio ragtime_image ragtime_denoise ${RAGTIME_WX_LIBS})
 ragtime_warnings(ragtime)
 
 if(RAGTIME_TESTS AND NOT WIN32)
