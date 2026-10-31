@@ -22,3 +22,10 @@ find_package(Threads REQUIRED)
 target_link_libraries(ragtime_audio PUBLIC ragtime_core Threads::Threads)
 target_include_directories(ragtime_audio PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 ragtime_warnings(ragtime_audio)
+
+# libsotto, the voice codec, loaded at run time (ragtime/voice/Sotto.h):
+# LGPL-2.1 through Codec 2, so never linked.
+target_sources(ragtime_audio PRIVATE src/Sotto.cpp)
+if(NOT WIN32)
+    target_link_libraries(ragtime_audio PRIVATE ${CMAKE_DL_LIBS})
+endif()

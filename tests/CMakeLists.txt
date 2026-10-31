@@ -76,6 +76,15 @@ if(RAGTIME_HAMLIB)
 endif()
 ragtime_test(ragtime_flight_recorder_test FlightRecorderTest.cpp)
 ragtime_test(ragtime_ear_test EarTest.cpp)
+# libsotto loaded at run time: the refusals always, a round trip when a
+# libsotto is found (RAGTIME_SOTTO_TEST_LIB names one for the test).
+ragtime_test(ragtime_sotto_test SottoTest.cpp)
+target_link_libraries(ragtime_sotto_test PRIVATE ragtime_audio)
+set(RAGTIME_SOTTO_TEST_LIB "" CACHE FILEPATH "A libsotto for ragtime_sotto_test's round trip")
+if(RAGTIME_SOTTO_TEST_LIB)
+    set_tests_properties(ragtime_sotto_test PROPERTIES ENVIRONMENT "RAGTIME_SOTTO=${RAGTIME_SOTTO_TEST_LIB}")
+endif()
+
 # The Ear without its window, for the bench and checking a station by hand
 # (it only records). Not a test: it needs a running PipeWire.
 add_executable(ragtime_ear_probe EarProbe.cpp)
