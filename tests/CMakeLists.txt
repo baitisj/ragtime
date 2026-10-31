@@ -76,6 +76,8 @@ if(RAGTIME_HAMLIB)
 endif()
 ragtime_test(ragtime_flight_recorder_test FlightRecorderTest.cpp)
 ragtime_test(ragtime_ear_test EarTest.cpp)
+# The microphone deck's knobs, meters and push to talk.
+ragtime_test(ragtime_deck_test DeckTest.cpp)
 # libsotto loaded at run time: the refusals always, a round trip when a
 # libsotto is found (RAGTIME_SOTTO_TEST_LIB names one for the test).
 ragtime_test(ragtime_sotto_test SottoTest.cpp)
