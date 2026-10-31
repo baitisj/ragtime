@@ -27,6 +27,7 @@ enum
     ID_OPEN = wxID_HIGHEST + 700,
     ID_OPEN_FOLDER,
     ID_REMOVE,
+    ID_PLAY_VOICE,
 };
 
 // In progress and parts.
@@ -207,7 +208,13 @@ FilesPage::FilesPage(wxWindow* parent, FileHistory& history) : wxPanel(parent), 
     going_->Bind(wxEVT_DATAVIEW_ITEM_CONTEXT_MENU, [this](wxDataViewEvent& e) { showRowMenu(e); });
     done_->Bind(wxEVT_DATAVIEW_ITEM_CONTEXT_MENU, [this](wxDataViewEvent& e) { showFinishedMenu(e); });
     done_->Bind(wxEVT_DATAVIEW_ITEM_ACTIVATED, [this](wxDataViewEvent& e) {
-        if (const FinishedFile* f = finishedAt(done_->ItemToRow(e.GetItem()))) openFinished(*f, false);
+        const FinishedFile* f = finishedAt(done_->ItemToRow(e.GetItem()));
+        if (f == nullptr) return;
+        // A voice message plays (or stops) rather than open elsewhere.
+        if (f->voice && onPlayVoice_ && !f->path.empty() && wxFileName::FileExists(utf8(f->path)))
+            onPlayVoice_(*f);
+        else
+            openFinished(*f, false);
     });
 }
 
@@ -283,7 +290,7 @@ void FilesPage::refreshHistory(uint64_t nowMs, long utcOffsetS)
         const FinishedFile& f = *it;
         wxVector<wxVariant> v;
         v.push_back(utf8(dateText(f.atMs, nowMs, utcOffsetS)));
-        v.push_back(utf8(f.name));
+        v.push_back(finishedName(f));
         v.push_back(utf8(sizeText(f.size)));
         v.push_back(utf8(bpsText(f)));
         v.push_back(utf8(peerText(f.outgoing, f.peer)));
@@ -297,6 +304,27 @@ void FilesPage::refreshHistory(uint64_t nowMs, long utcOffsetS)
     doneTitle_->SetLabel(entries.empty() ? wxString("Completed: none yet")
                                          : wxString::Format("Completed (%zu)", entries.size()));
     Layout();
+}
+
+wxString FilesPage::finishedName(const FinishedFile& f) const
+{
+    if (!f.voice || f.path.empty()) return utf8(f.name);
+    const bool playing = isPlaying_ && isPlaying_(f.path);
+    // U+25B6 and U+25A0: the play and stop signs, as on a voice card.
+    return wxString::FromUTF8(playing ? "\xe2\x96\xa0 " : "\xe2\x96\xb6 ") + utf8(f.name);
+}
+
+void FilesPage::showPlaying()
+{
+    for (size_t i = 0; i < finishedIds_.size(); i++)
+    {
+        const FinishedFile* f = history_.find(finishedIds_[i]);
+        if (f == nullptr || !f->voice) continue;
+        wxVariant old;
+        done_->GetValue(old, (unsigned)i, 1);
+        wxVariant now(finishedName(*f));
+        if (old != now) done_->SetValue(now, (unsigned)i, 1);
+    }
 }
 
 const FinishedFile* FilesPage::finishedAt(int row) const
@@ -325,9 +353,17 @@ void FilesPage::showFinishedMenu(wxDataViewEvent& e)
     done_->SelectRow((unsigned)row);
     FinishedFile f = *found;
     wxMenu menu;
-    if (onFinishedMenu_) onFinishedMenu_(f, menu);
-    if (menu.GetMenuItemCount() > 0) menu.AppendSeparator();
     bool there = !f.path.empty() && wxFileName::FileExists(utf8(f.path));
+    if (f.voice && onPlayVoice_ && there)
+    {
+        const bool playing = isPlaying_ && isPlaying_(f.path);
+        menu.Append(ID_PLAY_VOICE, playing ? "&Stop" : "&Play");
+        menu.Bind(wxEVT_MENU, [this, f](wxCommandEvent&) { onPlayVoice_(f); }, ID_PLAY_VOICE);
+        menu.AppendSeparator();
+    }
+    if (onFinishedMenu_) onFinishedMenu_(f, menu);
+    if (menu.GetMenuItemCount() > 0 && !menu.FindItemByPosition(menu.GetMenuItemCount() - 1)->IsSeparator())
+        menu.AppendSeparator();
     menu.Append(ID_OPEN, "&Open");
     menu.Enable(ID_OPEN, there);
     menu.Append(ID_OPEN_FOLDER, "Open &folder");
