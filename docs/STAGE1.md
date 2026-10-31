@@ -1963,9 +1963,11 @@ draws is in core with no window (`core/src/deck/`, `ragtime_deck_test`).
   a function or names a codec Ragtime doesn't know
   (`sotto_format()`, "sotto v3.6, shape 9-9-8-8" is codec 1). It looks
   in `$RAGTIME_SOTTO`, beside the program, in `../lib/` from it, in
-  the checkout's `build-sotto/out/` (where `packaging/build-sotto.sh`
-  leaves it, up to four folders above the program), then the system's
-  (`libsotto.so.0`, `sotto.dll`). Without it the deck
+  `build-sotto/out/` up to four folders above the program (where
+  configuring leaves it, `cmake/BuildSotto.cmake`, or
+  `packaging/build-sotto.sh` run by hand), then the system's
+  (`libsotto.so.0`, `sotto.dll`). On Linux, configuring builds it
+  when none is found (`RAGTIME_BUILD_SOTTO`, on by default). Without it the deck
   says why and Push to talk stays dark; nothing else changes. The
   encoder runs on the window's clock: sotto codes in about 1% of real
   time. `SottoDecoder::decodeClip` gives a clip back with sotto's 20 ms
