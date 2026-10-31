@@ -7,6 +7,7 @@
 
 #include <wx/bmpbuttn.h>
 #include <wx/button.h>
+#include <wx/tglbtn.h>
 #include <wx/clipbrd.h>
 #include <wx/datetime.h>
 #include <wx/dnd.h>
@@ -309,7 +310,13 @@ SessionPage::SessionPage(wxWindow* parent, const SessionChat& session, const rag
     sendPicture_->SetToolTip("Send a picture: shrunk and coded as JPEG 2000 or Cool-chic to fit the time you allow; the far end "
                              "sees it as it comes, and can stop it once they have enough");
     sendPicture_->SetMinSize(wxSize(-1, std::max(sendPicture_->GetBestSize().y, send_->GetBestSize().y)));
+    // The microphone deck's button, left of the picture's.
+    mic_ = new wxBitmapToggleButton(this, wxID_ANY, microphoneIcon(wxSystemSettings::GetColour(wxSYS_COLOUR_BTNTEXT)));
+    mic_->SetToolTip("The microphone deck: hold Push to talk to record a voice message for the station you're in a "
+                     "session with");
+    mic_->SetMinSize(wxSize(-1, std::max(mic_->GetBestSize().y, send_->GetBestSize().y)));
     Bind(wxEVT_SYS_COLOUR_CHANGED, [this](wxSysColourChangedEvent& e) {
+        mic_->SetBitmap(microphoneIcon(wxSystemSettings::GetColour(wxSYS_COLOUR_BTNTEXT)));
         sendFile_->SetBitmap(floppyIcon(wxSystemSettings::GetColour(wxSYS_COLOUR_BTNTEXT)));
         sendPicture_->SetBitmap(pictureIcon(wxSystemSettings::GetColour(wxSYS_COLOUR_BTNTEXT)));
         shownPhase_ = -1;   // the strip takes its colours again at the next refresh
@@ -318,6 +325,7 @@ SessionPage::SessionPage(wxWindow* parent, const SessionChat& session, const rag
     auto* row = new wxBoxSizer(wxHORIZONTAL);
     row->Add(compose_, 1, wxALIGN_CENTER_VERTICAL);
     row->Add(send_, 0, wxALIGN_CENTER_VERTICAL | wxLEFT, 6);
+    row->Add(mic_, 0, wxALIGN_CENTER_VERTICAL | wxLEFT, 6);
     row->Add(sendPicture_, 0, wxALIGN_CENTER_VERTICAL | wxLEFT, 6);
     row->Add(sendFile_, 0, wxALIGN_CENTER_VERTICAL | wxLEFT, 6);
 
@@ -370,6 +378,11 @@ SessionPage::SessionPage(wxWindow* parent, const SessionChat& session, const rag
     sendPicture_->Bind(wxEVT_BUTTON, [this](wxCommandEvent&) {
         if (onSendPicture_) onSendPicture_();
     });
+    mic_->Bind(wxEVT_TOGGLEBUTTON, [this](wxCommandEvent&) {
+        // The deck says whether it is open (setVoiceDeckLit).
+        mic_->SetValue(!mic_->GetValue());
+        if (onVoiceDeck_) onVoiceDeck_();
+    });
     // Drop targets are each window's own.
     SetDropTarget(new FileDrop(&onDropFiles_));
     list_->SetDropTarget(new FileDrop(&onDropFiles_));
@@ -407,6 +420,11 @@ SessionPage::SessionPage(wxWindow* parent, const SessionChat& session, const rag
         e.Skip();
     });
     refresh(0, 0);
+}
+
+void SessionPage::setVoiceDeckLit(bool lit)
+{
+    if (mic_->GetValue() != lit) mic_->SetValue(lit);
 }
 
 void SessionPage::refresh(uint64_t nowMs, long utcOffsetS)

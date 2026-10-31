@@ -49,6 +49,7 @@
 #include "HostConnection.h"
 #include "PathsDialog.h"
 #include "PictureDialog.h"
+#include "VoiceDeck.h"
 #include "PictureFrame.h"
 #include "VoiceCards.h"
 #include "QuitSignal.h"
@@ -97,6 +98,7 @@ enum
     ID_NARROW,
     ID_GLOBUS,
     ID_EAR,
+    ID_VOICE_DECK,
     ID_MESSAGE_STATION,
     ID_CHECK_IN,
     ID_PAUSE,
@@ -331,6 +333,8 @@ MainFrame::MainFrame()
         // What is under way ends here; a part received is kept, and the
         // log keeps it for next time.
         sessionFiles_.stopAll("Ragtime was closed");
+        // The deck lets go of the microphone before the audio stops.
+        if (voiceDeck_) voiceDeck_->Close(true);
         voiceTimer_.Stop();
         if (voiceAudio_) voiceAudio_->stop();
         // The Ear's change goes back, and a filter Ragtime changed is put
@@ -434,6 +438,8 @@ void MainFrame::buildMenus()
     viewMenu_ = new wxMenu;
     viewMenu_->AppendCheckItem(ID_GLOBUS, "&Globus\tCtrl+Shift+G");
     viewMenu_->AppendCheckItem(ID_EAR, "&Ear\tCtrl+E", "A waterfall of what the radio hears");
+    viewMenu_->AppendCheckItem(ID_VOICE_DECK, "&Microphone deck\tCtrl+Shift+M",
+                               "Push to talk: record a voice message for the net or the session");
     auto* columns = new wxMenu;
     for (broadcast::Column c : broadcast::ALL_COLUMNS)
     {
@@ -490,6 +496,7 @@ void MainFrame::buildMenus()
     Bind(wxEVT_MENU, [this](wxCommandEvent& e) { setNarrow(e.IsChecked()); }, ID_NARROW);
     Bind(wxEVT_MENU, [this](wxCommandEvent& e) { setGlobus(e.IsChecked()); }, ID_GLOBUS);
     Bind(wxEVT_MENU, [this](wxCommandEvent& e) { setEar(e.IsChecked()); }, ID_EAR);
+    Bind(wxEVT_MENU, [this](wxCommandEvent& e) { setVoiceDeck(e.IsChecked()); }, ID_VOICE_DECK);
     Bind(wxEVT_MENU, [this](wxCommandEvent& e) { setPaused(e.IsChecked()); }, ID_PAUSE);
     Bind(wxEVT_MENU, [this](wxCommandEvent&) { checkIn(); }, ID_CHECK_IN);
     Bind(wxEVT_MENU, [this](wxCommandEvent&) { showWatchList(); }, ID_WATCH_LIST);
@@ -737,6 +744,7 @@ void MainFrame::buildLayout()
     broadcast_->fileCards([this](uint64_t id, FileCard& card) { return fileCard(id, card); });
     broadcast_->onFileAction([this](uint64_t id, const std::string& action) { broadcastFileAction(id, action); });
     broadcast_->onBroadcastPicture([this]() { sendPicture(true); });
+    broadcast_->onVoiceDeck([this]() { setVoiceDeck(voiceDeck_ == nullptr); });
     broadcast_->pictures([this](uint64_t id, const wxWindow* list, const wxString& href) {
         return pictureHtml("b" + std::to_string(id), list, href);
     });
@@ -770,6 +778,7 @@ void MainFrame::buildLayout()
     });
     sessionPage_->onSendFile([this]() { sendFilePrompt(session_.peer()); });
     sessionPage_->onSendPicture([this]() { sendPicture(false); });
+    sessionPage_->onVoiceDeck([this]() { setVoiceDeck(voiceDeck_ == nullptr); });
     sessionPage_->pictures([this](uint64_t id, const wxWindow* list, const wxString& href, const wxString& stopHref) {
         return pictureHtml("s" + std::to_string(id), list, href, stopHref);
     });
@@ -3476,6 +3485,122 @@ void MainFrame::setEar(bool open)
     }
     bar_->setEarOpen(ear_ != nullptr);
     GetMenuBar()->Check(ID_EAR, ear_ != nullptr);
+}
+
+void MainFrame::setVoiceDeck(bool open)
+{
+    if (open && voiceDeck_ == nullptr)
+    {
+        VoiceDeckHooks hooks;
+        hooks.audio = [this]() -> audio::VoiceAudio& { return voiceAudio(); };
+        hooks.target = [this]() { return deckTarget(); };
+        hooks.send = [this](const std::vector<uint8_t>& sot, bool broadcast, std::string& error) {
+            return keepAndSendVoice(sot, broadcast, error);
+        };
+        hooks.clipAir = [this](const std::string& path) { return clipAir(path); };
+        hooks.holdPlayback = [this](bool hold) { holdVoicePlayback(hold); };
+        hooks.onClosed = [this]() {
+            voiceDeck_ = nullptr;
+            setVoiceDeckOpen(false);
+            broadcast_->setVoiceDeckLit(false);
+            sessionPage_->setVoiceDeckLit(false);
+            GetMenuBar()->Check(ID_VOICE_DECK, false);
+        };
+        voiceDeck_ = new VoiceDeck(this, std::move(hooks));
+        setVoiceDeckOpen(true);
+        voiceDeck_->CentreOnParent();
+        voiceDeck_->Show();
+    }
+    else if (open)
+    {
+        voiceDeck_->Raise();
+    }
+    else if (voiceDeck_ != nullptr)
+    {
+        voiceDeck_->Close();
+    }
+    broadcast_->setVoiceDeckLit(voiceDeck_ != nullptr);
+    sessionPage_->setVoiceDeckLit(voiceDeck_ != nullptr);
+    GetMenuBar()->Check(ID_VOICE_DECK, voiceDeck_ != nullptr);
+}
+
+DeckTarget MainFrame::deckTarget() const
+{
+    DeckTarget t;
+    t.callsign = prefs_.callsign;
+    uint64_t now = HostConnection::nowMs();
+    // The gears a picture would be planned for are the voice's too: on D2G
+    // the gear in effect, in a session the one for the far station's path.
+    std::vector<PictureGear> net = pictureGears(true, "", now);
+    if (!net.empty())
+    {
+        t.broadcastMode = net.front().mode;
+        t.broadcastGear = net.front().words;
+    }
+    if (session_.phase() == session::SessionChat::Phase::Connected)
+    {
+        t.peer = session_.peer();
+        std::vector<PictureGear> one = pictureGears(false, t.peer, now);
+        if (!one.empty())
+        {
+            t.sessionMode = one.front().mode;
+            t.sessionGear = one.front().words;
+            t.sessionBytesPerSecond = picture::sessionBytesPerSecond(t.sessionMode, 0.0);
+        }
+    }
+    return t;
+}
+
+std::string MainFrame::keepAndSendVoice(const std::vector<uint8_t>& sot, bool broadcast, std::string& error)
+{
+    // Kept as it goes, each clip in a folder of its own named by the time,
+    // as pictures are: what repairs and a re-send are made from.
+    wxDateTime when = wxDateTime::Now().ToUTC();
+    wxString stamp = when.Format("%Y%m%d-%H%M%S");
+    wxFileName dir = wxFileName::DirName(utf8(sentVoiceDir()));
+    dir.AppendDir(stamp);
+    for (int n = 2; dir.DirExists(); n++)
+    {
+        dir.RemoveLastDir();
+        dir.AppendDir(stamp + wxString::Format("-%d", n));
+    }
+    std::string folder = std::string(dir.GetPath().utf8_str());
+    wxFileName::Mkdir(utf8(folder), wxS_DIR_DEFAULT, wxPATH_MKDIR_FULL);
+    std::string name = "voice-" + std::string(stamp.utf8_str()) + ".sot";
+    std::string path = files::utf8FromPath(files::freeSavePath(files::pathFromUtf8(folder), name));
+    {
+        wxFile out;
+        if (!out.Create(utf8(path), true) || out.Write(sot.data(), sot.size()) != sot.size())
+        {
+            error = "The clip couldn't be kept in " + folder;
+            return std::string();
+        }
+    }
+    if (!sendVoice(path, broadcast, error)) return std::string();
+    if (broadcast) tabs_->SetSelection(TAB_BROADCAST);
+    refreshFiles();
+    return path;
+}
+
+deck::ClipAir MainFrame::clipAir(const std::string& path) const
+{
+    uint64_t now = HostConnection::nowMs();
+    for (const broadcast::BroadcastFile& f : broadcastFiles_.files(now))
+    {
+        if (!f.outgoing || f.path != path) continue;
+        using S = broadcast::BroadcastFile::State;
+        if (f.state == S::Sending) return f.held == 0 ? deck::ClipAir::Queued : deck::ClipAir::Sending;
+        return deck::ClipAir::Sent;
+    }
+    for (const files::FileTransfer& t : sessionFiles_.transfers(now))
+    {
+        if (!t.outgoing || t.path != path) continue;
+        using S = files::FileTransfer::State;
+        if (t.state == S::Waiting || t.state == S::Offered) return deck::ClipAir::Queued;
+        if (t.state == S::Sending) return t.handed == 0 ? deck::ClipAir::Queued : deck::ClipAir::Sending;
+        return deck::ClipAir::Sent;
+    }
+    return deck::ClipAir::None;
 }
 
 void MainFrame::setNarrow(bool narrow)

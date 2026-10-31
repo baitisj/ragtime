@@ -22,6 +22,7 @@
 #include "ragtime/broadcast/Seals.h"
 #include "ragtime/broadcast/Stations.h"
 #include "ragtime/broadcast/WatchList.h"
+#include "ragtime/deck/Meters.h"
 #include "ragtime/ear/FilterControl.h"
 #include "ragtime/files/FileRows.h"
 #include "ragtime/files/FileTraffic.h"
@@ -47,6 +48,8 @@ class BroadcastPage;
 struct FileCard;
 class ConnectionBar;
 class EarFrame;
+class VoiceDeck;
+struct DeckTarget;
 class FilesPage;
 class GlobusPanel;
 class GlobusToggle;
@@ -284,6 +287,13 @@ private:
     void setGlobus(bool on);
     // The Ear, opened or closed (the ear button, View > Ear).
     void setEar(bool open);
+    // The microphone deck, opened or closed (the microphone buttons, View >
+    // Microphone deck): where a clip can go and what it costs, keeping a
+    // clip and queueing it, and how one sent is getting on.
+    void setVoiceDeck(bool open);
+    DeckTarget deckTarget() const;
+    std::string keepAndSendVoice(const std::vector<uint8_t>& sot, bool broadcast, std::string& error);
+    ragtime::deck::ClipAir clipAir(const std::string& path) const;
     // The Ear sets the rig's filter (RigControl writes only with the box
     // ticked), noted in the flight recorder with why.
     void setRigFilter(const ragtime::radio::RigFilter& filter, const std::string& why);
@@ -313,6 +323,7 @@ private:
 
     ConnectionBar* bar_ = nullptr;
     EarFrame* ear_ = nullptr;               // while the Ear is open
+    VoiceDeck* voiceDeck_ = nullptr;        // while the microphone deck is open
     PictureShelf pictures_;
     std::map<std::string, PictureFrame*> pictureFrames_;   // open, by shelf key
     std::set<std::string> unreadablePictures_;             // past pictures whose files are gone
