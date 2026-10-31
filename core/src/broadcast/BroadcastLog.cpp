@@ -197,7 +197,15 @@ std::vector<Message> parseBroadcastLog(const std::string& text, size_t max)
             uint64_t id = 0;
             if (!number(f[1], id)) continue;
             auto it = ids.find(id);
-            if (it != ids.end() && rows[it->second].kind == Kind::File) rows[it->second].outcome = unescape(f[2]);
+            if (it == ids.end() || rows[it->second].kind != Kind::File) continue;
+            Message& row = rows[it->second];
+            row.outcome = unescape(f[2]);
+            if (f.size() >= 5)
+            {
+                row.path = unescape(f[3]);
+                row.picture = f[4] == "p";
+                row.voice = f[4] == "v";
+            }
         }
     }
     // The last run never got its E: Ragtime stopped under it.
@@ -320,9 +328,15 @@ void BroadcastLog::weReacted(const Message& line, uint8_t code)
                  std::to_string(code)}));
 }
 
-void BroadcastLog::fileEnded(const Message& card, const std::string& outcome)
+void BroadcastLog::fileEnded(const Message& card, const std::string& outcome, const std::string& path)
 {
-    append(join({"R", std::to_string(card.id), escape(outcome)}));
+    if (path.empty())
+    {
+        append(join({"R", std::to_string(card.id), escape(outcome)}));
+        return;
+    }
+    append(join({"R", std::to_string(card.id), escape(outcome), escape(path),
+                 card.picture ? "p" : card.voice ? "v" : "-"}));
 }
 
 void BroadcastLog::ended(uint64_t nowMs)

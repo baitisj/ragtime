@@ -77,6 +77,8 @@ add_library(ragtime_core STATIC
     # Voice messages: the .sot file, the pitch strip and what a clip costs
     # the air (no audio, no codec).
     src/voice/Voice.cpp
+    # Which voice message plays and which wait (the cards are in app/).
+    src/voice/PlayQueue.cpp
 )
 
 target_include_directories(ragtime_core PUBLIC

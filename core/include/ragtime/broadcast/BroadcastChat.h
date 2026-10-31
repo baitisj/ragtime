@@ -98,6 +98,12 @@ struct Message
     uint64_t file = 0;
     bool past = false;          // from before Ragtime last closed, read from the BroadcastLog
     std::string outcome;        // a file line from the log: how it ended, when known
+    // A file line from the log: where it was saved or sent from ("" if not
+    // known), and whether it is an inline picture or a voice message, shown
+    // under its line from that file.
+    std::string path;
+    bool picture = false;
+    bool voice = false;
 
     // A ping row (Kind::Ping): ours to `to`, or `from`'s to us. State is
     // its burst's (ours: the Ping's; theirs: our Pong's), and Acknowledged
@@ -202,8 +208,11 @@ public:
     // Something a file card shows has changed.
     void fileChanged() { version_++; }
     // A file card's file has ended, as outcome ("Saved", "Sent"), for the
-    // log to show next time.
-    void fileEnded(uint64_t file, const std::string& outcome);
+    // log to show next time: with the file's path ("" if not kept) and, for
+    // an inline picture or a voice message, which, so the log shows it
+    // under its line from that file.
+    void fileEnded(uint64_t file, const std::string& outcome, const std::string& path = std::string(),
+                   bool picture = false, bool voice = false);
 
     // "@W1AW" at the start of typed text: the station, and the text after
     // it. False when it isn't addressed.

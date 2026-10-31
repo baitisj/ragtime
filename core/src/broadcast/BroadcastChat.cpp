@@ -677,12 +677,16 @@ uint64_t BroadcastChat::addFile(uint64_t file, bool ours, const std::string& fro
     return messages_.back().id;
 }
 
-void BroadcastChat::fileEnded(uint64_t file, const std::string& outcome)
+void BroadcastChat::fileEnded(uint64_t file, const std::string& outcome, const std::string& path, bool picture,
+                              bool voice)
 {
-    if (log_ == nullptr || file == 0) return;
-    for (const Message& m : messages_)
+    if (file == 0) return;
+    for (Message& m : messages_)
     {
-        if (m.file == file) log_->fileEnded(m, outcome);
+        if (m.file != file) continue;
+        m.picture = picture;
+        m.voice = voice;
+        if (log_ != nullptr) log_->fileEnded(m, outcome, path);
     }
 }
 

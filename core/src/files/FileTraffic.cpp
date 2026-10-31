@@ -264,6 +264,7 @@ void FileTraffic::collect(uint64_t nowMs)
             f.reason = t.outgoing ? t.peer + " couldn't save it" : t.peer + " couldn't read it";
         if (t.outgoing || t.state == State::Saved) f.path = t.path;
         f.picture = t.picture;
+        f.voice = t.voice;
         // A picture stopped part way: as far as it went.
         uint64_t crossed = t.enough ? std::min(t.done, t.size) : t.size;
         if (t.enough && crossed < t.size) f.enough = std::max<uint64_t>(1, crossed);
