@@ -14,6 +14,9 @@
 
 using namespace ragtime;
 
+// M_PI is POSIX, not C++: MinGW has none without _USE_MATH_DEFINES.
+constexpr double PI = 3.14159265358979323846;
+
 namespace
 {
 
@@ -28,8 +31,8 @@ std::vector<int16_t> buzz(double seconds, double levelDbfs)
     for (size_t i = lead; i + lead < s.size(); i++)
     {
         double t = (double)i / rate;
-        double f0 = 120.0 + 15.0 * std::sin(2 * M_PI * 1.5 * t);
-        phase += 2 * M_PI * f0 / rate;
+        double f0 = 120.0 + 15.0 * std::sin(2 * PI * 1.5 * t);
+        phase += 2 * PI * f0 / rate;
         double v = 0.0;
         for (int h = 1; h * 120 < 3600; h++)
         {
