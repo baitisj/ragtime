@@ -166,6 +166,14 @@ constexpr uint8_t FILE_PICTURE = 1;
 // the same way once its network's weights have come, its latent grids
 // coarsest first. Ragtime 0.2 takes it as a plain file.
 constexpr uint8_t FILE_COOLCHIC = 2;
+// A voice message: a .sot file, sotto's frames behind a small header
+// (ragtime/voice/Voice.h, docs/PROTOCOL.md "Voice"). Ragtime 0.2 takes it
+// as a plain file.
+constexpr uint8_t FILE_VOICE = 3;
+inline bool isVoiceKind(uint8_t kind)
+{
+    return kind == FILE_VOICE;
+}
 // Either kind of inline picture.
 inline bool isPictureKind(uint8_t kind)
 {
