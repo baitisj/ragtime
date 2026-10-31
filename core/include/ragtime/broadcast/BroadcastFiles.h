@@ -126,6 +126,9 @@ struct BroadcastFile
     // An inline picture (protocol::FILE_PICTURE): shown among the messages
     // as it comes.
     bool picture = false;
+    // A voice message (protocol::FILE_VOICE, a .sot file): a voice card
+    // among the messages, its pitch strip filling as it comes.
+    bool voice = false;
 
     bool live() const;
 };
@@ -180,9 +183,11 @@ public:
     // Broadcasts a file in mode (empty: the group's mode as it stands).
     // 0, with the reason, if it can't go: empty, unreadable, over 300 KB,
     // or longer on the air than REFUSE_AIR_SECONDS.
-    // picture: it is an inline picture, a JPEG 2000 codestream.
+    // picture: it is an inline picture, a JPEG 2000 codestream or a
+    // Cool-chic stream. voice: it is a voice message, a .sot file (kind
+    // 0x03).
     uint64_t send(const std::string& path, const std::string& mode, uint64_t nowMs, std::string& error,
-                  bool picture = false);
+                  bool picture = false, bool voice = false);
     // What send would take, without sending.
     FileEstimate estimate(uint64_t size, const std::string& name, const std::string& mode) const;
 
@@ -232,11 +237,24 @@ public:
     // Pictures of at most maxBytes are received without asking into this
     // folder, so they show as they come; empty: they wait as other files do.
     void setAutoPictures(const std::string& folder, uint64_t maxBytes);
+    // Voice messages of at most maxBytes likewise, so their cards fill as
+    // they come and can play; empty: they wait as other files do.
+    void setAutoVoice(const std::string& folder, uint64_t maxBytes);
 
     // A picture's bytes as they stand: all of one of ours or one saved, or
     // the pieces held of one coming, from the first up to the first one
     // missing (any first part of a picture shows). False if there are none.
     bool pictureBytes(uint64_t id, std::vector<uint8_t>& out) const;
+    // A voice message's bytes as they stand, holes and all: out is the
+    // whole file's size, with the byte ranges not held yet in missing
+    // (zeros in out), so voice::readSot plays round them. All of one of
+    // ours or one saved, with nothing missing. False if nothing is held.
+    struct Hole
+    {
+        uint64_t begin = 0;
+        uint64_t end = 0;
+    };
+    bool voiceBytes(uint64_t id, std::vector<uint8_t>& out, std::vector<Hole>& missing) const;
 
     std::vector<BroadcastFile> files(uint64_t nowMs) const;
     bool find(uint64_t id, uint64_t nowMs, BroadcastFile& out) const;
@@ -377,6 +395,8 @@ private:
     std::string autoFolder_;
     std::string pictureFolder_;
     uint64_t pictureMax_ = 0;
+    std::string voiceFolder_;
+    uint64_t voiceMax_ = 0;
     uint64_t nextId_ = 1;
     uint64_t version_ = 0;
 };

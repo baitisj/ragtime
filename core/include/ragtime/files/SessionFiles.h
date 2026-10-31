@@ -88,6 +88,9 @@ struct FileTransfer
     // An inline picture (protocol::FILE_PICTURE): shown among the messages
     // as it comes, any first part of it the whole picture, softer.
     bool picture = false;
+    // A voice message (protocol::FILE_VOICE, a .sot file): a voice card
+    // among the messages.
+    bool voice = false;
     // A picture the receiver stopped with the stop sign once it had enough
     // (CancelReason::ReceiverHasEnough): theirs is Saved with done of it,
     // ours Delivered with done of it gone.
@@ -156,8 +159,9 @@ public:
     // Queues a file for a station: it is offered once a session with the
     // station is up and nothing else is going to it. 0, with the reason,
     // if the file can't be sent.
+    // picture: an inline picture; voice: a voice message (kind 0x03).
     uint64_t offer(const std::string& peer, const std::string& path, uint64_t nowMs, std::string& error,
-                   bool picture = false);
+                   bool picture = false, bool voice = false);
 
     // Answers an offer: the file is written to path plus ".part" (or a
     // numbered part file, if that name is taken), and renamed to path once
@@ -180,6 +184,8 @@ public:
     // asking too, into folder, so they show as they come. An empty folder
     // turns it off.
     void setAutoPictures(const std::string& folder, uint64_t maxBytes);
+    // Voice messages likewise, so their cards fill as they come and play.
+    void setAutoVoice(const std::string& folder, uint64_t maxBytes);
 
     // A picture of theirs being received: the stop sign. What has come is
     // saved as the picture, softer than the whole, and the sender is told
@@ -398,6 +404,8 @@ private:
     std::set<std::string> autoCalls_;
     std::string pictureFolder_;
     uint64_t pictureMax_ = 0;
+    std::string voiceFolder_;
+    uint64_t voiceMax_ = 0;
     bool inhibited_ = false;
 };
 

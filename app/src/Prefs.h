@@ -163,6 +163,10 @@ std::string pathLogPath();
 // appDataDir()/sent-pictures; each in a folder of its own, named by the
 // UTC time it went, so it keeps its name.
 std::string sentPicturesDir();
+// The voice messages we send (.sot files), kept to repair and to play
+// again: beside the --config file (<config>.sent-voice), or
+// appDataDir()/sent-voice; each in a folder of its own, as pictures are.
+std::string sentVoiceDir();
 
 namespace keys
 {
@@ -199,6 +203,11 @@ constexpr const char* VOICE_MICROPHONE = "/Voice/Microphone";
 constexpr const char* VOICE_SPEAKER = "/Voice/Speaker";
 constexpr const char* VOICE_VOLUME = "/Voice/SpeakerVolumeDb";
 constexpr const char* VOICE_RADIO_CARDS = "/Voice/RadioCards";
+// Voice cards: arriving voice plays by itself while the microphone deck is
+// open (its strip's box, on by default); voice messages up to 64 KB are
+// taken without asking, from anyone, so their cards fill and can play.
+constexpr const char* PLAY_ARRIVING_VOICE = "/Voice/PlayArriving";
+constexpr const char* VOICE_AS_IT_COMES = "/Voice/TakeAsItComes";
 } // namespace keys
 
 #endif

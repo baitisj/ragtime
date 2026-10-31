@@ -83,6 +83,18 @@ ragtime_test(ragtime_ear_test EarTest.cpp)
 # Voice's microphones and speakers (the radio's card left out) and the
 # microphone Test's verdict.
 ragtime_test(ragtime_voice_devices_test VoiceDevicesTest.cpp)
+# libsotto loaded at run time: the refusals always, a round trip when a
+# libsotto is found (RAGTIME_SOTTO_TEST_LIB names one for the test).
+ragtime_test(ragtime_sotto_test SottoTest.cpp)
+target_link_libraries(ragtime_sotto_test PRIVATE ragtime_audio)
+set(RAGTIME_SOTTO_TEST_LIB "" CACHE FILEPATH "A libsotto for ragtime_sotto_test's round trip")
+if(RAGTIME_SOTTO_TEST_LIB)
+    set_tests_properties(ragtime_sotto_test PROPERTIES ENVIRONMENT "RAGTIME_SOTTO=${RAGTIME_SOTTO_TEST_LIB}")
+endif()
+
+# Voice cards: the play queue, voice through the file machinery and the
+# chat logs.
+ragtime_test(ragtime_voice_cards_test VoiceCardsTest.cpp)
 # The Ear without its window, for the bench and checking a station by hand
 # (it only records). Not a test: it needs a running PipeWire.
 add_executable(ragtime_ear_probe EarProbe.cpp)

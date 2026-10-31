@@ -1665,9 +1665,7 @@ file with a kind byte (docs/PROTOCOL.md, "Pictures").
   or received folder, and a click opens it (Jeff, 2026-10-27: a session
   dropped by QSB took its pictures with it). An older Ragtime reads the
   line and skips the two fields.
-- Not built: a broadcast picture in the chat after a restart (the
-  Broadcast log brings back its line, not the picture; the Files tab
-  keeps it, with View the picture), pictures from the clipboard, a crop before
+- Not built: pictures from the clipboard, a crop before
   sending, and
   sending a smaller side by itself when the budget is very small (a
   smaller picture at the same bytes looks sharper).
@@ -1829,6 +1827,67 @@ its knobs and reads its meters.
   `--gain`, `--hp`, `--noise`, `--target` and `--peaks` set the knobs.
   The unit tests use synthetic voices (`tests/VoiceSynth.h`, a formant
   synthesiser), so no recordings are committed.
+
+## Voice cards
+
+Jeff's idea (2026-10-31; plan in the thread "Plan Ragtime voice messages
+with sotto", its PR 6): a voice message among the messages, on both tabs
+and the Files tab, played with libsotto. The file is docs/PROTOCOL.md's
+"Voice" (kind `0x03`, the `.sot` file in `core/src/voice/`); the deck
+that records one is its own PR.
+
+- **The card.** Under the message's line: a round play button, then the
+  pitch strip, then the length ("0:12"). The strip is the clip's melody,
+  one column per few frames: height is pitch, thickness loudness, a gap
+  silence, unvoiced frames softer, frames lost to a broken file hatched,
+  and frames not yet here a hairline. It comes straight from the frames'
+  bits (`voice::pitchStrip`), with no decoding, so a hundred cards cost
+  nothing. While a clip arrives the strip fills from the left and the
+  length says "40% here"; a clip that ended broken says "part of it". A
+  clip from a newer sotto (a codec or flags this Ragtime doesn't know)
+  says so instead of a strip (`app/src/VoiceCards`, `VoiceShelf`).
+- **Playing.** The button plays, and is a stop square while it plays; a
+  red playhead runs along the strip; a click on the strip plays from
+  there (an image map: `voice:play`, `voice:stop`, `voice:seek:<frame>`).
+  `VoicePlayer` decodes the clip with libsotto (`voice::Sotto`, loaded at
+  run time; sotto's synthesis runs at about a thousandth of real time,
+  so it decodes on the spot) and hands the sound to the one
+  `audio::VoiceAudio` that `MainFrame` owns, the deck's too, at the
+  speaker and volume in Settings > Voice. With no libsotto the card still
+  draws, and Play says why it can't. On the Files tab a voice row has
+  Play (and a double-click plays it), and its name shows ▶ or ■.
+- **The queue.** `voice::PlayQueue` (core) keeps what plays and what
+  waits: clips that come while one plays wait their turn ("next to
+  play"), in the order they came; Play on a card plays it at once, and
+  Stop clears the queue. While the microphone deck is open, a clip that
+  comes whole plays by itself (`/Voice/PlayArriving`, on by default;
+  `MainFrame::setVoiceDeckOpen`), each once; closing the deck drops what
+  waits. Push to talk holds playback (`holdVoicePlayback`): it pauses
+  where it was and goes on from there on release.
+- **Taking them.** Like pictures, voice messages up to 64 KB (about
+  three and a half minutes) come without asking, into the received
+  folder, on D2G and in a session (`BroadcastFiles::setAutoVoice`,
+  `SessionFiles::setAutoVoice`; `/Voice/TakeAsItComes`, on by default).
+  On D2G the card plays what has come, with the holes read as lost
+  frames (`BroadcastFiles::voiceBytes`), and again whole once repair
+  fills them. Ours are kept as sent in `sentVoiceDir()`.
+- **In the logs.** The Broadcast log's file outcome line carries the
+  file's path and whether it is a picture or a voice message
+  (`R <id> <outcome> <path> p|v`), and a session log's file line ends in
+  `v` for voice, so after a restart (or the next session with the
+  station) the card comes back under its line, read from the file on
+  disk. The same works for broadcast pictures now, which before came
+  back as a line only. The Files tab's log marks a voice row `voice`.
+  An older Ragtime reads these lines and skips the new fields.
+- **The bench.** `ragtime_fake_air --voice` has the last bot broadcast
+  a short made-up clip (synthetic syllables, not speech) 40 s in and
+  every 4 minutes, and bots answer a voice message in a session with one
+  of their own. Run Ragtime with `RAGTIME_SOTTO` pointing at a
+  `libsotto.so` to hear them.
+- Not built: playing while a clip arrives, the stop sign on a voice
+  message coming in a session, and Save as WAV (the next PR, "play while
+  arriving"); a file still coming when Ragtime closed comes back after a
+  restart as a plain file line (pictures too).
 
 ## Waiting on Andrew (via Jeff)
 

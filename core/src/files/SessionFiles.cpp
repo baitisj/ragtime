@@ -301,7 +301,7 @@ void SessionFiles::prune()
 }
 
 uint64_t SessionFiles::offer(const std::string& peer, const std::string& path, uint64_t nowMs, std::string& error,
-                            bool picture)
+                            bool picture, bool voice)
 {
     if (peer.empty())
     {
@@ -351,9 +351,10 @@ uint64_t SessionFiles::offer(const std::string& peer, const std::string& path, u
     t.state = FileTransfer::State::Waiting;
     t.digest = digest;
     t.atMs = nowMs;
-    t.picture = picture;
-    entry.kind = protocol::FILE_PLAIN;
-    if (picture)
+    t.picture = picture && !voice;
+    t.voice = voice;
+    entry.kind = voice ? protocol::FILE_VOICE : protocol::FILE_PLAIN;
+    if (t.picture)
     {
         // The codec, from the picture's first bytes.
         uint8_t head[4] = {};
@@ -725,6 +726,12 @@ void SessionFiles::setAutoPictures(const std::string& folder, uint64_t maxBytes)
     pictureMax_ = maxBytes;
 }
 
+void SessionFiles::setAutoVoice(const std::string& folder, uint64_t maxBytes)
+{
+    voiceFolder_ = folder;
+    voiceMax_ = maxBytes;
+}
+
 bool SessionFiles::enough(uint64_t id)
 {
     Entry* entry = find(id);
@@ -847,7 +854,7 @@ std::vector<uint8_t> SessionFiles::takeRecords(const std::string& peer, protocol
         offer.size = (uint32_t)t.size;
         offer.digest = t.digest;
         offer.name = t.name;
-        offer.kind = t.picture ? entry.kind : protocol::FILE_PLAIN;
+        offer.kind = t.picture || t.voice ? entry.kind : protocol::FILE_PLAIN;
         protocol::Record record = numbering.record(offer, time);
         if (!protocol::encodeRecord(record, out))
         {
@@ -997,12 +1004,13 @@ void SessionFiles::arriving(const std::string& peer, uint32_t offer, uint32_t of
 
 void SessionFiles::autoAccept(Entry& entry)
 {
-    // A picture small enough shows as it comes, from anyone; other files
-    // only from the stations listed.
+    // A picture or a voice message small enough shows as it comes, from
+    // anyone; other files only from the stations listed.
     bool fromListed = !autoFolder_.empty() && autoCalls_.count(entry.transfer.peer) != 0;
     bool picture = entry.transfer.picture && !pictureFolder_.empty() && entry.transfer.size <= pictureMax_;
-    if (inhibited_ || (!fromListed && !picture)) return;
-    const std::string& into = picture ? pictureFolder_ : autoFolder_;
+    bool voice = entry.transfer.voice && !voiceFolder_.empty() && entry.transfer.size <= voiceMax_;
+    if (inhibited_ || (!fromListed && !picture && !voice)) return;
+    const std::string& into = picture ? pictureFolder_ : voice ? voiceFolder_ : autoFolder_;
     if (!entry.transfer.keptPath.empty() && resumePart(entry, entry.transfer.keptPath))
     {
         entry.transfer.autoAccepted = true;
@@ -1046,6 +1054,7 @@ void SessionFiles::onRecord(const std::string& peer, const protocol::Record& rec
         t.digest = offer->digest;
         t.name = safeFileName(offer->name);
         t.picture = protocol::isPictureKind(offer->kind);
+        t.voice = protocol::isVoiceKind(offer->kind);
         t.state = State::Asking;
         t.atMs = nowMs;
         entry.offer = number;

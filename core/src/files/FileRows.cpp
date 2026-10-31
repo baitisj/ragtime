@@ -298,7 +298,7 @@ std::string saveFilesText(const FileHistory& history, const std::vector<KeptPart
                                            f.path,
                                            std::to_string(f.movedBytes),
                                            std::to_string(f.movedMs),
-                                           f.picture ? "picture" : "",
+                                           f.picture ? "picture" : f.voice ? "voice" : "",
                                            std::to_string(f.enough)};
         for (size_t i = 0; i < fields.size(); i++) out += (i ? "\t" : "") + escape(fields[i]);
         out += "\n";
@@ -363,6 +363,7 @@ bool loadFilesText(const std::string& text, FileHistory& history, std::vector<Ke
             if (f.size() >= 14)
             {
                 file.picture = f[12] == "picture";
+                file.voice = f[12] == "voice";
                 if (!number(f[13], file.enough) || file.enough >= file.size) file.enough = 0;
             }
             history.add(std::move(file));

@@ -10,7 +10,9 @@
 //   M <id> <atMs> <time> <seq> <ours> <state> <from> <to> <ack> <mode> <text> [<before>]
 //   S <id> <state> <mode>                  a message of ours settled
 //   F <id> <atMs> <ours> <from> <name>     a broadcast file's card
-//   R <id> <outcome>                       how that file ended ("Saved")
+//   R <id> <outcome> [<path> <inline>]     how that file ended ("Saved"),
+//                                          where it is, and p for a
+//                                          picture, v for a voice message
 //   X <from> <seq> <time> <call> <code>    call reacted to a line (its
 //                                          sender, number and record time)
 //   Y <from> <seq> <time> <code>           our reaction to a line went
@@ -69,7 +71,9 @@ public:
     // A station's reaction to a line, and ours once it has gone.
     void reacted(const Message& line, const std::string& call, uint8_t code);
     void weReacted(const Message& line, uint8_t code);
-    void fileEnded(const Message& card, const std::string& outcome);
+    // path: where it was saved or sent from, "" if not kept; the card's
+    // picture and voice say what it is.
+    void fileEnded(const Message& card, const std::string& outcome, const std::string& path = std::string());
     void ended(uint64_t nowMs);
 
 private:

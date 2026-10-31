@@ -2239,6 +2239,71 @@ void testPictures()
     }
 }
 
+// A voice message: its announce says kind 0x03, a listener that takes
+// voice as it comes takes it under its cap into the voice folder, and
+// while pieces are missing voiceBytes gives the whole file's size with the
+// holes named, the rest as sent.
+void testVoice()
+{
+    Air air;
+    Station& a = air.add("AG7EW", 1);
+    Station& b = air.add("KC2G", 2);
+    std::filesystem::path bDir = freshFolder("voice-b");
+    b.files.setAutoVoice(bDir.string(), 64 * 1024);
+    // Piece 2 is lost the first time it goes.
+    auto lost = std::make_shared<bool>(false);
+    b.lose = [lost](protocol::Record& r) {
+        const protocol::FilePiece* p = r.as<protocol::FilePiece>();
+        if (p == nullptr || p->index != 2 || *lost) return false;
+        *lost = true;
+        return true;
+    };
+    air.run(2000);
+
+    std::string path = makeFile("hello.sot", 3000, 11);
+    std::vector<uint8_t> want = readAll(path);
+    std::string error;
+    uint64_t id = a.files.send(path, "qpsk-r1/3", now, error, false, true);
+    CHECK(id != 0);
+    BroadcastFile mine;
+    CHECK(a.files.find(id, now, mine) && mine.voice && !mine.picture);
+    std::vector<uint8_t> ours;
+    std::vector<BroadcastFiles::Hole> holes;
+    CHECK(a.files.voiceBytes(id, ours, holes) && ours == want && holes.empty());
+
+    bool sawHole = false;
+    for (int i = 0; i < 180; i++)
+    {
+        air.run(1000);
+        BroadcastFile f = fileFrom(b, "AG7EW");
+        if (f.id == 0) continue;
+        CHECK(f.voice && !f.picture);
+        std::vector<uint8_t> part;
+        if (!b.files.voiceBytes(f.id, part, holes)) continue;
+        CHECK_EQ(part.size(), want.size());
+        // What is held is as sent; the holes are whole pieces.
+        std::vector<bool> missing(part.size(), false);
+        for (const BroadcastFiles::Hole& h : holes)
+        {
+            CHECK(h.begin < h.end && h.end <= part.size());
+            for (uint64_t x = h.begin; x < h.end && x < part.size(); x++) missing[(size_t)x] = true;
+        }
+        bool same = true;
+        for (size_t x = 0; x < part.size() && x < want.size(); x++)
+            if (!missing[x] && part[x] != want[x]) same = false;
+        CHECK(same);
+        bool middle = false;
+        for (const BroadcastFiles::Hole& h : holes) middle = middle || (h.begin > 0 && h.end < part.size());
+        sawHole = sawHole || middle;
+        if (f.state == FileState::Saved) break;
+    }
+    CHECK(sawHole);
+    BroadcastFile fb = fileFrom(b, "AG7EW");
+    CHECK(fb.state == FileState::Saved && fb.voice);
+    CHECK(fb.path.find("voice-b") != std::string::npos);
+    if (fb.id != 0) CHECK(readAll(fb.path) == want);
+}
+
 int main()
 {
     testAirtime();
@@ -2282,6 +2347,7 @@ int main()
     testCloseTakesBack();
     testRepairsShown();
     testPictures();
+    testVoice();
     std::filesystem::remove_all(scratch());
     return ragtime_test::finish();
 }

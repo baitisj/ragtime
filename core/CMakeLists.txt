@@ -83,6 +83,8 @@ add_library(ragtime_core STATIC
     src/voice/Chain.cpp
     src/voice/Dsp.cpp
     src/voice/Levels.cpp
+    # Which voice message plays and which wait (the cards are in app/).
+    src/voice/PlayQueue.cpp
 )
 
 target_include_directories(ragtime_core PUBLIC

@@ -71,6 +71,18 @@ public:
         pastPictureHtml_ = std::move(html);
         onViewPast_ = std::move(view);
     }
+    // Voice cards (docs/STAGE1.md, "Voice cards"): a card's button and
+    // strip by its key ("s<id>" a transfer, "p<path>" an earlier
+    // session's, from its file; "" while nothing shows), and a card's link
+    // ("voice:play:0", "voice:stop:0", "voice:seek:<frame>") clicked.
+    void voices(std::function<wxString(const std::string& key, const wxWindow* list, bool picked)> html,
+                std::function<void(const std::string& key, const std::string& href)> act)
+    {
+        voiceHtml_ = std::move(html);
+        onVoice_ = std::move(act);
+    }
+    // Redraws the cards in view (a playhead moving), without a rebuild.
+    void refreshVoices();
     // Files dropped on the tab.
     void onDropFiles(std::function<void(const std::vector<std::string>& paths)> fn) { onDropFiles_ = std::move(fn); }
     // A card's link or the queue's buttons: "save", "saveas", "decline",
@@ -139,6 +151,8 @@ private:
     std::function<void()> onCancel_, onLeave_, onLeaveNow_, onCallAgain_, onSendFile_, onSendPicture_;
     std::function<wxString(uint64_t, const wxWindow*, const wxString&, const wxString&)> pictureHtml_;
     std::function<wxString(const std::string&, const wxWindow*, const wxString&)> pastPictureHtml_;
+    std::function<wxString(const std::string&, const wxWindow*, bool)> voiceHtml_;
+    std::function<void(const std::string&, const std::string&)> onVoice_;
     std::function<void(const std::string&)> onViewPast_;
     std::function<void(const std::vector<std::string>&)> onDropFiles_;
     std::function<void(const std::string&, uint64_t)> onFileAction_;

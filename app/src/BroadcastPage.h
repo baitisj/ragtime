@@ -29,6 +29,7 @@ struct FileCard
     bool good = false;          // shown green: Saved, Sent
     bool bad = false;           // shown red: Failed
     bool picture = false;       // an inline picture, shown under its line
+    bool voice = false;         // a voice message, its voice card under its line
     // The card's links, in order: (action, label), such as
     // ("receive", "Receive...") and ("ignore", "Ignore").
     std::vector<std::pair<std::string, std::string>> actions;
@@ -107,6 +108,26 @@ public:
     {
         pictureHtml_ = std::move(fn);
     }
+    // A picture under a file line from the log (from its path), and that
+    // picture clicked.
+    void pastPictures(std::function<wxString(const std::string& path, const wxWindow* list, const wxString& href)> html,
+                      std::function<void(const std::string& path)> view)
+    {
+        pastPictureHtml_ = std::move(html);
+        onViewPast_ = std::move(view);
+    }
+    // Voice cards (docs/STAGE1.md, "Voice cards"): a card's button and
+    // strip by its key ("b<id>" a broadcast file, "p<path>" a file line
+    // from the log; "" while nothing shows), and a card's link
+    // ("voice:play:0", "voice:stop:0", "voice:seek:<frame>") clicked.
+    void voices(std::function<wxString(const std::string& key, const wxWindow* list, bool picked)> html,
+                std::function<void(const std::string& key, const std::string& href)> act)
+    {
+        voiceHtml_ = std::move(html);
+        onVoice_ = std::move(act);
+    }
+    // Redraws the cards in view (a playhead moving), without a rebuild.
+    void refreshVoices();
     // Each message's seal badge, and a number that moves when any changes.
     using SealMark = ragtime::broadcast::Seals::ItemMark;
     void sealMarks(std::function<SealMark(const ragtime::broadcast::Message&)> fn, std::function<uint64_t()> version)
@@ -165,6 +186,10 @@ private:
     std::function<std::string(const std::string&)> whyNoPing_;
     std::function<void()> onBroadcastFile_, onBroadcastPicture_;
     std::function<wxString(uint64_t, const wxWindow*, const wxString&)> pictureHtml_;
+    std::function<wxString(const std::string&, const wxWindow*, const wxString&)> pastPictureHtml_;
+    std::function<void(const std::string&)> onViewPast_;
+    std::function<wxString(const std::string&, const wxWindow*, bool)> voiceHtml_;
+    std::function<void(const std::string&, const std::string&)> onVoice_;
     std::function<bool(uint64_t, FileCard&)> fileCard_;
     std::function<void(uint64_t, const std::string&)> onFileAction_;
     std::function<std::string(const std::string&)> nameMode_;

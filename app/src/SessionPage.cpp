@@ -45,6 +45,7 @@ constexpr int BADGE_ROOM = SEAL_BADGE_PX + 4;
 
 const int ID_COPY = wxID_HIGHEST + 501;
 const int ID_RESEND = wxID_HIGHEST + 502;
+const int ID_PLAY_VOICE = wxID_HIGHEST + 503;
 const int ID_REACT = wxID_HIGHEST + 520;    // and REACTION_MENU_IDS after it
 
 // "14:32" today, "22 Oct 14:32" on another day (an earlier session's).
@@ -150,6 +151,20 @@ protected:
             owner_->CallAfter([owner, message, code]() { owner->onReact_(message, code); });
             return;
         }
+        if (href.StartsWith("voice:"))
+        {
+            // A voice card: a transfer's, or an earlier session's from its file.
+            std::string key;
+            if (const FileTransfer* t = fileAt(n))
+                key = "s" + std::to_string(t->id);
+            else if (const Message* m = at(n); m != nullptr && !m->path.empty())
+                key = "p" + m->path;
+            if (key.empty() || !owner_->onVoice_) return;
+            std::string what(href.utf8_str());
+            SessionPage* owner = owner_;
+            owner_->CallAfter([owner, key, what]() { owner->onVoice_(key, what); });
+            return;
+        }
         if (href == "pastpicture")
         {
             const Message* m = at(n);
@@ -203,7 +218,7 @@ protected:
             return html;
         }
         wxString what = htmlEscape(m->text);
-        if (m->kind == Message::Kind::File) what = "<i>File</i>&nbsp; " + what;
+        if (m->kind == Message::Kind::File) what = (m->voice ? "<i>Voice</i>&nbsp; " : "<i>File</i>&nbsp; ") + what;
 
         // Each state of ours is a badge on the left, its words on hover
         // (Jeff, 2026-10-24: in place of the words on the right).
@@ -230,6 +245,12 @@ protected:
         {
             wxString img = owner_->pastPictureHtml_(m->path, this, "pastpicture");
             if (!img.empty()) html << "<br>" << img;
+        }
+        // A voice message likewise, its card from its file.
+        if (m->kind == Message::Kind::File && m->voice && !m->path.empty() && owner_->voiceHtml_)
+        {
+            wxString card = owner_->voiceHtml_("p" + m->path, this, picked);
+            if (!card.empty()) html << card;
         }
         // Its reactions, as chips under it.
         wxString chips = reactionChipsHtml(m->reactions, m->myReaction, m->myWaiting,
@@ -523,9 +544,16 @@ wxString SessionPage::cardHtml(const FileTransfer& t, bool picked, const wxWindo
     std::string size = ragtime::files::sizeText(t.size);
     std::string progress = ragtime::files::progressText(t.handed > t.done && !t.outgoing ? t.handed : t.done, t.size);
     std::string rate = ragtime::files::rateText(row.bytesPerSecond);
-    // A picture says so: "the picture shack.j2k", "The picture shack.j2k".
-    wxString name = (t.picture ? "the picture <b>" : "<b>") + htmlEscape(t.name) + "</b>";
-    wxString Name = (t.picture ? "The picture <b>" : "<b>") + htmlEscape(t.name) + "</b>";
+    // A picture or a voice message says so: "the picture shack.j2k", "The
+    // voice message hello.sot".
+    const char* kind = t.picture ? "picture " : t.voice ? "voice message " : "";
+    wxString name = "the " + wxString(kind) + "<b>" + htmlEscape(t.name) + "</b>";
+    wxString Name = "The " + wxString(kind) + "<b>" + htmlEscape(t.name) + "</b>";
+    if (!t.picture && !t.voice)
+    {
+        name = "<b>" + htmlEscape(t.name) + "</b>";
+        Name = name;
+    }
     wxString who = "<b>" + htmlEscape(t.peer) + "</b>";
     auto grey = [picked](const wxString& text) {
         return picked ? text : "<font color=\"" + htmlColour(secondaryText()) + "\">" + text + "</font>";
@@ -637,6 +665,12 @@ wxString SessionPage::cardHtml(const FileTransfer& t, bool picked, const wxWindo
                                     stop ? wxString::Format("enough:%llu", (unsigned long long)t.id) : wxString());
         if (!img.empty()) body << "<br>" << img;
     }
+    // A voice message's card under its line, filling as it comes.
+    if (t.voice && voiceHtml_)
+    {
+        wxString voice = voiceHtml_("s" + std::to_string(t.id), list, picked);
+        if (!voice.empty()) body << voice;
+    }
 
     wxColour surface = wxSystemSettings::GetColour(wxSYS_COLOUR_LISTBOX);
     wxString card = picked ? wxString() : " bgcolor=\"" + htmlColour(blendColour(surface, ACCENT_BLUE, 0.07)) + "\"";
@@ -647,6 +681,11 @@ wxString SessionPage::cardHtml(const FileTransfer& t, bool picked, const wxWindo
          << "<td valign=\"top\" width=\"100%\"" << card << ">" << body << "</td>"
          << "</tr></table>";
     return html;
+}
+
+void SessionPage::refreshVoices()
+{
+    list_->RefreshAll();
 }
 
 void SessionPage::setPaused(bool paused, const wxString& why)
@@ -673,10 +712,32 @@ void SessionPage::send()
 void SessionPage::showMenu(int row)
 {
     const Message* m = row == wxNOT_FOUND ? nullptr : list_->at((size_t)row);
-    if (m == nullptr || m->kind == Message::Kind::Rule) return;
+    // A voice card, a transfer's or an earlier session's: Play, or Stop
+    // while it plays (the card's own button says which).
+    std::string voiceKey;
+    if (const FileTransfer* t = row == wxNOT_FOUND ? nullptr : list_->fileAt((size_t)row); t != nullptr && t->voice)
+        voiceKey = "s" + std::to_string(t->id);
+    else if (m != nullptr && m->kind == Message::Kind::File && m->voice && !m->path.empty())
+        voiceKey = "p" + m->path;
+    if (m == nullptr && voiceKey.empty()) return;
+    if (m != nullptr && m->kind == Message::Kind::Rule) return;
+    wxMenu menu;
+    if (!voiceKey.empty() && onVoice_)
+    {
+        menu.Append(ID_PLAY_VOICE, "&Play");
+        if (m == nullptr)
+        {
+            menu.Bind(wxEVT_MENU, [this, voiceKey](wxCommandEvent&) {
+                std::string key = voiceKey;
+                CallAfter([this, key]() { onVoice_(key, "voice:play:0"); });
+            }, ID_PLAY_VOICE);
+            PopupMenu(&menu);
+            return;
+        }
+        menu.AppendSeparator();
+    }
     uint64_t id = m->id;
     wxString text = wxString::FromUTF8(m->text);
-    wxMenu menu;
     if (session_.canReact(*m))
     {
         uint8_t current = m->myWaiting != 0 ? m->myWaiting : m->myReaction;
@@ -705,7 +766,12 @@ void SessionPage::showMenu(int row)
     }
     menu.Append(ID_COPY, "Copy text");
     menu.Bind(wxEVT_MENU, [=](wxCommandEvent& e) {
-        if (e.GetId() == ID_RESEND)
+        if (e.GetId() == ID_PLAY_VOICE)
+        {
+            std::string key = voiceKey;
+            if (onVoice_) CallAfter([this, key]() { onVoice_(key, "voice:play:0"); });
+        }
+        else if (e.GetId() == ID_RESEND)
         {
             if (onResend_) onResend_(id);
         }

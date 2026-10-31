@@ -4,6 +4,7 @@
 #include <cmath>
 #include <cstdio>
 #include <ctime>
+#include <fstream>
 #include <optional>
 #include <string>
 #include <utility>
@@ -49,6 +50,7 @@
 #include "PathsDialog.h"
 #include "PictureDialog.h"
 #include "PictureFrame.h"
+#include "VoiceCards.h"
 #include "QuitSignal.h"
 #include "ReactionChips.h"
 #include "RecentWorkPane.h"
@@ -71,6 +73,10 @@
 #include "ragtime/globus/Sun.h"
 #include "ragtime/image/Codec.h"
 #include "ragtime/picture/Picture.h"
+#include "ragtime/audio/VoiceAudio.h"
+#include "ragtime/voice/Devices.h"
+#include "ragtime/voice/Sotto.h"
+#include "ragtime/voice/Voice.h"
 #include "ragtime/radio/Bands.h"
 #include "ragtime/radio/RigFilter.h"
 
@@ -234,6 +240,7 @@ MainFrame::MainFrame()
     , session_(link_)
     , fileTraffic_(sessionFiles_, history_)
     , clock_(this)
+    , voiceTimer_(this)
 {
     session_.setTraffic(&fileTraffic_);
     sessionLog_.setFolder(sessionLogDir());
@@ -308,12 +315,19 @@ MainFrame::MainFrame()
     if (!IsMaximized() && GetPosition() == wxDefaultPosition) Centre();
 
     refreshRecent(true);
-    Bind(wxEVT_TIMER, [this](wxTimerEvent&) { onClock(); });
+    Bind(wxEVT_TIMER, [this](wxTimerEvent& e) {
+        if (&e.GetTimer() == &voiceTimer_)
+            redrawVoices();
+        else
+            onClock();
+    });
     clock_.Start(CLOCK_MS);
     Bind(wxEVT_CLOSE_WINDOW, [this](wxCloseEvent& e) {
         // What is under way ends here; a part received is kept, and the
         // log keeps it for next time.
         sessionFiles_.stopAll("Ragtime was closed");
+        voiceTimer_.Stop();
+        if (voiceAudio_) voiceAudio_->stop();
         // The Ear's change goes back, and a filter Ragtime changed is put
         // back as it was found, before the rig closes.
         if (ear_) ear_->Close(true);
@@ -351,6 +365,9 @@ MainFrame::MainFrame()
 MainFrame::~MainFrame()
 {
     clock_.Stop();
+    voiceTimer_.Stop();
+    // No callback from the audio thread after this.
+    if (voiceAudio_) voiceAudio_->stop();
     rig_.reset();
     host_.reset();
     // The panes go now, while the engines their callbacks read are still
@@ -718,6 +735,13 @@ void MainFrame::buildLayout()
     broadcast_->pictures([this](uint64_t id, const wxWindow* list, const wxString& href) {
         return pictureHtml("b" + std::to_string(id), list, href);
     });
+    broadcast_->pastPictures(
+        [this](const std::string& path, const wxWindow* list, const wxString& href) {
+            return pastPictureHtml(path, list, href);
+        },
+        [this](const std::string& path) { viewPictureFile(path, wxFileName(utf8(path)).GetFullName()); });
+    broadcast_->voices([this](const std::string& key, const wxWindow* list, bool picked) { return voiceHtml(key, list, picked); },
+                       [this](const std::string& key, const std::string& href) { voiceAction(key, href); });
     // The Session tab.
     sessionPage_->onSend([this](const std::string& typed) {
         if (session_.send(typed, HostConnection::nowMs()) == 0) return false;
@@ -749,6 +773,8 @@ void MainFrame::buildLayout()
             return pastPictureHtml(path, list, href);
         },
         [this](const std::string& path) { viewPictureFile(path, wxFileName(utf8(path)).GetFullName()); });
+    sessionPage_->voices([this](const std::string& key, const wxWindow* list, bool picked) { return voiceHtml(key, list, picked); },
+                         [this](const std::string& key, const std::string& href) { voiceAction(key, href); });
     sessionPage_->onDropFiles([this](const std::vector<std::string>& paths) {
         if (session_.phase() == session::SessionChat::Phase::Connected)
             queueFiles(session_.peer(), paths);
@@ -763,6 +789,12 @@ void MainFrame::buildLayout()
         else broadcastFileMenu(row, menu);
     });
     filesPage_->onFinishedMenu([this](const files::FinishedFile& file, wxMenu& menu) { finishedFileMenu(file, menu); });
+    filesPage_->onPlayVoice(
+        [this](const files::FinishedFile& file) {
+            const std::string key = "p" + file.path;
+            voiceAction(key, voiceQueue_.playing() == key ? "voice:stop:0" : "voice:play:0");
+        },
+        [this](const std::string& path) { return voiceQueue_.playing() == "p" + path; });
     filesPage_->onOpenFolder([this]() {
         wxFileName::Mkdir(wxString::FromUTF8(receivedFolder()), wxS_DIR_DEFAULT, wxPATH_MKDIR_FULL);
         openWithDesktop(receivedFolder());
@@ -793,6 +825,7 @@ void MainFrame::buildLayout()
 void MainFrame::applyPrefs(bool reconnect)
 {
     link_.setCallsign(prefs_.callsign);
+    applyVoicePrefs();
     broadcast::BroadcastChat::Settings s;
     s.callsign = prefs_.callsign;
     s.locator = prefs_.locator;
@@ -1572,6 +1605,7 @@ void MainFrame::onSessionEvents()
 void MainFrame::refreshSession()
 {
     updateSessionPictures(HostConnection::nowMs());
+    updateVoices(HostConnection::nowMs());
     sessionPage_->refresh(HostConnection::nowMs(), localOffsetSeconds());
     updateTabLabels();
     refreshStations();
@@ -1591,6 +1625,11 @@ void MainFrame::applyFilePrefs()
     std::string folder = asTheyCome ? receivedFolder() : std::string();
     sessionFiles_.setAutoPictures(folder, picture::AUTO_PICTURE_BYTES);
     broadcastFiles_.setAutoPictures(folder, picture::AUTO_PICTURE_BYTES);
+    // Voice messages likewise (64 KB is three and a half minutes of
+    // speech), so their cards fill and play; the strip needs no codec.
+    std::string voiceFolder = loadBool(keys::VOICE_AS_IT_COMES, true) ? receivedFolder() : std::string();
+    sessionFiles_.setAutoVoice(voiceFolder, picture::AUTO_PICTURE_BYTES);
+    broadcastFiles_.setAutoVoice(voiceFolder, picture::AUTO_PICTURE_BYTES);
 }
 
 void MainFrame::loadFilesLog()
@@ -1705,6 +1744,7 @@ void MainFrame::onFileEvents()
                 line.text = f->name + ", " + files::sizeText(f->size) + ": " + result;
                 line.path = f->path;
                 line.picture = f->picture;
+                line.voice = f->voice;
                 sessionLog_.file(f->peer, line);
             }
         }
@@ -1747,14 +1787,14 @@ void MainFrame::sendFilePrompt(const std::string& call)
     if (!inSession) callStation(them);
 }
 
-void MainFrame::queueFiles(const std::string& call, const std::vector<std::string>& paths, bool picture)
+void MainFrame::queueFiles(const std::string& call, const std::vector<std::string>& paths, bool picture, bool voice)
 {
     uint64_t now = HostConnection::nowMs();
     std::string problems;
     for (const std::string& path : paths)
     {
         std::string error;
-        if (sessionFiles_.offer(call, path, now, error, picture) == 0) problems += error + "\n";
+        if (sessionFiles_.offer(call, path, now, error, picture, voice) == 0) problems += error + "\n";
     }
     fileTraffic_.update(now);
     host_->flush();
@@ -1953,8 +1993,9 @@ void MainFrame::finishedFileMenu(const files::FinishedFile& file, wxMenu& menu)
             std::string path = file.path;
             menu.Append(ID_FILE_SEND_AGAIN, "&Broadcast it again...");
             menu.Enable(ID_FILE_SEND_AGAIN, wxFileName::FileExists(utf8(path)));
-            bool picture = file.picture;
-            menu.Bind(wxEVT_MENU, [=](wxCommandEvent&) { CallAfter([=]() { broadcastFile(utf8(path), picture); }); },
+            bool picture = file.picture, voice = file.voice;
+            menu.Bind(wxEVT_MENU,
+                      [=](wxCommandEvent&) { CallAfter([=]() { broadcastFile(utf8(path), picture, voice); }); },
                       ID_FILE_SEND_AGAIN);
             return;
         }
@@ -1989,8 +2030,16 @@ void MainFrame::finishedFileMenu(const files::FinishedFile& file, wxMenu& menu)
 void MainFrame::sendAgain(const std::string& peer, const std::string& path)
 {
     bool inSession = session_.peer() == peer && session_.phase() == session::SessionChat::Phase::Connected;
-    queueFiles(peer, {path}, sentPicture(path));
+    queueFiles(peer, {path}, sentPicture(path), isVoiceFile(path));
     if (!inSession) callStation(peer);
+}
+
+bool MainFrame::isVoiceFile(const std::string& path)
+{
+    std::ifstream in(files::pathFromUtf8(path), std::ios::binary);
+    uint8_t head[voice::HEADER_BYTES] = {};
+    in.read(reinterpret_cast<char*>(head), sizeof head);
+    return in.gcount() > 0 && voice::isSot(head, (size_t)in.gcount());
 }
 
 bool MainFrame::sentPicture(const std::string& path) const
@@ -2103,7 +2152,7 @@ void MainFrame::applySending()
 // Broadcast files
 //-------------------------------------------------------------------------
 
-void MainFrame::broadcastFile(wxString path, bool picture)
+void MainFrame::broadcastFile(wxString path, bool picture, bool voice)
 {
     if (prefs_.callsign.empty())
     {
@@ -2181,7 +2230,8 @@ void MainFrame::broadcastFile(wxString path, bool picture)
     if (confirm.ShowModal() != wxID_YES) return;
 
     std::string error;
-    uint64_t id = broadcastFiles_.send(std::string(path.utf8_str()), mode, HostConnection::nowMs(), error, picture);
+    uint64_t id = broadcastFiles_.send(std::string(path.utf8_str()), mode, HostConnection::nowMs(), error, picture,
+                                       voice);
     if (id == 0)
     {
         wxMessageBox(utf8(error) + ".", "Broadcast a file", wxOK | wxICON_INFORMATION, this);
@@ -2201,6 +2251,7 @@ bool MainFrame::fileCard(uint64_t id, FileCard& card)
     if (!broadcastFiles_.find(id, now, f)) return false;
     card.what = f.name + " \xc2\xb7 " + files::sizeText(f.size);
     card.picture = f.picture;
+    card.voice = f.voice;
     std::string pieces = std::to_string(f.held) + " of " + std::to_string(f.pieces) + " pieces";
     auto capital = [](std::string text) {
         if (!text.empty() && text[0] >= 'a' && text[0] <= 'z') text[0] = (char)(text[0] - 'a' + 'A');
@@ -2326,6 +2377,19 @@ bool MainFrame::fileCard(uint64_t id, FileCard& card)
             card.state = "Not received";
             break;
     }
+    // A voice message plays from its card's menu too, once any of it has
+    // come (the card's button says the same).
+    if (f.voice)
+    {
+        if (card.menu.empty()) card.menu = card.actions;
+        const std::string key = "b" + std::to_string(f.id);
+        const VoiceShelf::Shelved* s = voices_.find(key);
+        if (s != nullptr && s->playable())
+        {
+            bool playing = voiceQueue_.playing() == key;
+            card.menu.insert(card.menu.begin(), {playing ? "voice:stop:0" : "voice:play:0", playing ? "Stop" : "Play"});
+        }
+    }
     return true;
 }
 
@@ -2374,7 +2438,9 @@ void MainFrame::broadcastFileAction(uint64_t id, const std::string& action)
     else if (action == "reopenuntil")
         keepRepairsUntil(id, now + 30 * 60 * 1000, true);
     else if (action == "again" && !f.path.empty())
-        broadcastFile(utf8(f.path), f.picture);
+        broadcastFile(utf8(f.path), f.picture, f.voice);
+    else if (action.rfind("voice:", 0) == 0)
+        voiceAction("b" + std::to_string(id), action);
     else if (action.rfind("gear:", 0) == 0)
         broadcastFiles_.setRepairGear(id, action.substr(5));
     else if (action == "close")
@@ -2505,11 +2571,14 @@ void MainFrame::onBroadcastFiles()
                 break;
             case Type::Saved:
                 note_ = "Saved " + f.name + " from " + f.from;
-                chat_.fileEnded(f.id, "Saved");
+                chat_.fileEnded(f.id, "Saved", f.path, f.picture, f.voice);
                 break;
             case Type::Ended:
                 if (f.outgoing) note_ = f.name + ": " + broadcast::stateLabel(f.state);
-                chat_.fileEnded(f.id, broadcast::stateLabel(f.state));
+                // Ours keeps its path whatever became of it (a re-send
+                // reads it); theirs only once saved.
+                chat_.fileEnded(f.id, broadcast::stateLabel(f.state), f.outgoing ? f.path : std::string(), f.picture,
+                                f.voice);
                 break;
             case Type::Repairing:
                 note_ = "Sending repairs of " + f.name
@@ -2535,6 +2604,7 @@ void MainFrame::onBroadcastFiles()
         history_.add(std::move(done));
     }
     updateBroadcastPictures(now);
+    updateVoices(now);
     if (broadcastFiles_.version() != broadcastFilesVersion_)
     {
         broadcastFilesVersion_ = broadcastFiles_.version();
@@ -2862,6 +2932,266 @@ void MainFrame::showInFrame(const std::string& key)
     const PictureShelf::Shelved* shelved = pictures_.find(key);
     if (open == pictureFrames_.end() || shelved == nullptr) return;
     open->second->show(shelved->image, shelved->width, shelved->height, shelved->bytes, shelved->size);
+}
+
+//-------------------------------------------------------------------------
+// Voice cards
+//-------------------------------------------------------------------------
+
+namespace
+{
+// The playhead moves this often while a clip plays.
+constexpr int VOICE_TICK_MS = 150;
+} // namespace
+
+ragtime::audio::VoiceAudio& MainFrame::voiceAudio()
+{
+    if (!voiceAudio_)
+    {
+        voiceAudio_ = audio::makeVoiceAudio();
+        // The devices change on the audio thread: the radio's cards seen
+        // are remembered here, so they stay left out while the host is
+        // stopped.
+        audio::VoiceAudio* raw = voiceAudio_.get();
+        voiceAudio_->start(
+            [this, raw]() {
+                CallAfter([this, raw]() {
+                    if (voiceAudio_.get() != raw) return;
+                    std::vector<std::string> before = loadVoiceRadioCards();
+                    std::vector<std::string> now = voice::rememberRadio(before, raw->status().devices.radioNow);
+                    if (now != before) saveVoiceRadioCards(now);
+                });
+            },
+            loadVoiceRadioCards());
+        applyVoicePrefs();
+    }
+    return *voiceAudio_;
+}
+
+void MainFrame::applyVoicePrefs()
+{
+    if (!voiceAudio_) return;
+    voiceAudio_->chooseSpeaker(prefs_.voice.speaker);
+    voiceAudio_->chooseMicrophone(prefs_.voice.microphone);
+    voiceAudio_->setVolume(voiceGain(prefs_.voice.volumeDb));
+}
+
+bool MainFrame::sendVoice(const std::string& path, bool broadcast, std::string& why)
+{
+    uint64_t now = HostConnection::nowMs();
+    if (prefs_.callsign.empty())
+    {
+        why = "Set your callsign first (Settings).";
+        return false;
+    }
+    if (broadcast)
+    {
+        uint64_t id = broadcastFiles_.send(path, broadcastMode(), now, why, false, true);
+        if (id == 0) return false;
+        saveNewestItem(chat_.settings().callsign, chat_.newestItem());
+        onBroadcastFiles();
+        host_->flush();
+        return true;
+    }
+    if (session_.phase() != session::SessionChat::Phase::Connected)
+    {
+        why = "Voice to one station goes in a session: call it first.";
+        return false;
+    }
+    if (sessionFiles_.offer(session_.peer(), path, now, why, false, true) == 0) return false;
+    fileTraffic_.update(now);
+    host_->flush();
+    refreshSession();
+    refreshFiles();
+    return true;
+}
+
+void MainFrame::setVoiceDeckOpen(bool open)
+{
+    voiceDeckOpen_ = open;
+    if (!open) voiceQueue_.clearWaiting();
+    redrawVoices();
+}
+
+void MainFrame::holdVoicePlayback(bool held)
+{
+    if (held)
+    {
+        double at = voicePlayer_ ? voicePlayer_->positionFrames(voiceAudio()) : -1.0;
+        if (voiceQueue_.hold(at > 0 ? (uint32_t)at : 0) && voicePlayer_) voicePlayer_->stop(voiceAudio());
+        redrawVoices();
+        return;
+    }
+    startVoice(voiceQueue_.release());
+    redrawVoices();
+}
+
+bool MainFrame::autoPlayVoice() const
+{
+    return voiceDeckOpen_ && loadBool(keys::PLAY_ARRIVING_VOICE, true);
+}
+
+void MainFrame::updateVoices(uint64_t nowMs)
+{
+    (void)nowMs;
+    bool changed = false;
+    std::vector<std::string> arrived;
+    using BState = broadcast::BroadcastFile::State;
+    for (const broadcast::BroadcastFile& f : broadcastFiles_.files(nowMs))
+    {
+        if (!f.voice) continue;
+        const std::string key = "b" + std::to_string(f.id);
+        if (!voices_.settled(key))
+        {
+            std::vector<uint8_t> bytes;
+            std::vector<broadcast::BroadcastFiles::Hole> holes;
+            if (broadcastFiles_.voiceBytes(f.id, bytes, holes))
+            {
+                std::vector<voice::ByteRange> missing;
+                for (const auto& h : holes) missing.push_back(voice::ByteRange{h.begin, h.end});
+                bool final = f.outgoing || f.state == BState::Saved || !f.live();
+                changed = voices_.update(key, bytes, bytes.size(), bytes.size(), missing, final) || changed;
+            }
+        }
+        if (!f.outgoing && f.state == BState::Saved) arrived.push_back(key);
+    }
+    using SState = files::FileTransfer::State;
+    for (const files::FileTransfer& t : sessionFiles_.transfers())
+    {
+        if (!t.voice) continue;
+        const std::string key = "s" + std::to_string(t.id);
+        if (!voices_.settled(key))
+        {
+            std::vector<uint8_t> bytes;
+            if (sessionFiles_.pictureBytes(t.id, bytes))
+            {
+                bool final = t.outgoing || !t.live();
+                changed = voices_.update(key, bytes, t.size, bytes.size(), {}, final) || changed;
+            }
+        }
+        if (!t.outgoing && t.state == SState::Saved) arrived.push_back(key);
+    }
+    // Saved: whole, it can play. While the deck is open it plays by itself.
+    for (const std::string& key : arrived)
+    {
+        const VoiceShelf::Shelved* s = voices_.find(key);
+        if (s == nullptr || !s->playable()) continue;
+        startVoice(voiceQueue_.arrived(key, autoPlayVoice()));
+    }
+    if (changed)
+    {
+        chat_.fileChanged();
+        sessionPage_->picturesChanged();
+    }
+}
+
+wxString MainFrame::voiceHtml(const std::string& key, const wxWindow* list, bool picked)
+{
+    if (key.empty()) return wxString();
+    if (key[0] == 'p')
+    {
+        const std::string path = key.substr(1);
+        if (unreadableVoices_.count(path) != 0) return wxString();
+        if (!voices_.settled(key) && !voices_.shelveFile(path) && voices_.find(key) == nullptr)
+        {
+            unreadableVoices_.insert(path);
+            return wxString();
+        }
+    }
+    VoiceShelf::Look look;
+    look.playing = voiceQueue_.playing() == key;
+    look.paused = look.playing && voiceQueue_.paused();
+    look.waiting = voiceQueue_.waiting(key);
+    if (look.playing && voicePlayer_ && voicePlayer_->playing() == key)
+        look.playheadFrame = voicePlayer_->positionFrames(voiceAudio());
+    return voices_.cardHtml(key, list, look, picked);
+}
+
+void MainFrame::voiceAction(const std::string& key, const std::string& href)
+{
+    // "voice:<action>:<frame>"
+    const size_t a = href.find(':');
+    const size_t b = href.find(':', a == std::string::npos ? a : a + 1);
+    if (a == std::string::npos || b == std::string::npos) return;
+    const std::string action = href.substr(a + 1, b - a - 1);
+    unsigned long frame = 0;
+    try
+    {
+        frame = std::stoul(href.substr(b + 1));
+    }
+    catch (...)
+    {
+        frame = 0;
+    }
+    if (action == "stop")
+    {
+        voiceQueue_.stop();
+        if (voicePlayer_) voicePlayer_->stop(voiceAudio());
+        redrawVoices();
+        return;
+    }
+    if (action != "play" && action != "seek") return;
+    if (key[0] == 'p') voices_.shelveFile(key.substr(1));
+    startVoice(voiceQueue_.play(key, (uint32_t)frame));
+    redrawVoices();
+}
+
+void MainFrame::startVoice(const std::optional<voice::PlayQueue::Start>& start)
+{
+    // A clip that can't play is passed over, and the next tried, a few at
+    // most so a run of bad ones can't loop.
+    std::optional<voice::PlayQueue::Start> next = start;
+    for (int tries = 0; next && tries < 8; tries++)
+    {
+        const VoiceShelf::Shelved* s = voices_.find(next->key);
+        std::string why;
+        if (!voicePlayer_)
+        {
+            voicePlayer_ = std::make_unique<VoicePlayer>(
+                [this](std::function<void()> fn) { CallAfter(std::move(fn)); },
+                [this](const std::string& key, bool played) { voiceDone(key, played); });
+        }
+        if (s != nullptr && s->playable() && voicePlayer_->play(voiceAudio(), next->key, s->clip, next->fromFrame, why))
+        {
+            voiceTimer_.Start(VOICE_TICK_MS);
+            return;
+        }
+        if (why.empty()) why = "Nothing of it to play yet.";
+        note_ = "Voice message: " + why;
+        showStatus();
+        next = voiceQueue_.finished(next->key);
+    }
+}
+
+void MainFrame::voiceDone(const std::string& key, bool played)
+{
+    // Stopped for Push to talk: it carries on at release.
+    if (voiceQueue_.held() && voiceQueue_.playing() == key)
+    {
+        redrawVoices();
+        return;
+    }
+    if (played)
+    {
+        startVoice(voiceQueue_.finished(key));
+    }
+    else if (voiceQueue_.playing() == key)
+    {
+        // Replaced from outside (the deck's Monitor) or the speaker failed:
+        // it stops, and the queue waits for the next arrival or a click.
+        voiceQueue_.forget(key);
+    }
+    redrawVoices();
+}
+
+void MainFrame::redrawVoices()
+{
+    broadcast_->refreshVoices();
+    sessionPage_->refreshVoices();
+    filesPage_->showPlaying();
+    // The ticks stop with the last clip; one more redraw takes the
+    // playhead away.
+    if (voiceQueue_.playing().empty() || voiceQueue_.paused()) voiceTimer_.Stop();
 }
 
 void MainFrame::saveBroadcastState()
