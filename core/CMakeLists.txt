@@ -81,6 +81,12 @@ add_library(ragtime_core STATIC
     src/voice/PlayQueue.cpp
     # Playing a clip while it arrives in a ragchew, and Save as WAV.
     src/voice/ArrivalPlayer.cpp
+    # Voice: the processing chain from the microphone to sotto (high-pass,
+    # leveller, limiter, resampling) and the level figures; the noise
+    # reducer is handed in (denoise/).
+    src/voice/Chain.cpp
+    src/voice/Dsp.cpp
+    src/voice/Levels.cpp
 )
 
 target_include_directories(ragtime_core PUBLIC
