@@ -219,6 +219,7 @@ const int ID_CANCEL = wxID_HIGHEST + 402;
 const int ID_RESEND = wxID_HIGHEST + 403;
 const int ID_COPY = wxID_HIGHEST + 404;
 const int ID_SEAL_LINE = wxID_HIGHEST + 405;
+const int ID_SAVE_WAV = wxID_HIGHEST + 406;
 const int ID_FILE_ACTION = wxID_HIGHEST + 410;     // and FILE_MENU_IDS after it
 const int ID_REACT = wxID_HIGHEST + 470;           // and REACTION_MENU_IDS after it
 
@@ -867,6 +868,22 @@ void BroadcastPage::showFileMenu(const Message& m)
     fillFileMenu(menu, card, ID_FILE_ACTION, [this, file](const std::string& action) {
         if (onFileAction_) onFileAction_(file, action);
     });
+    // A voice message: its sound as a WAV file, for keeping or playing
+    // anywhere (a live file's, or a kept one's from its file).
+    std::string voiceKey;
+    if (card.voice && file != 0)
+        voiceKey = "b" + std::to_string(file);
+    else if (m.voice && !m.path.empty())
+        voiceKey = "p" + m.path;
+    if (!voiceKey.empty() && onVoice_)
+    {
+        if (menu.GetMenuItemCount() > 0) menu.AppendSeparator();
+        menu.Append(ID_SAVE_WAV, "Save as &WAV...");
+        menu.Bind(wxEVT_MENU, [this, voiceKey](wxCommandEvent&) {
+            std::string key = voiceKey;
+            CallAfter([this, key]() { onVoice_(key, "voice:wav:0"); });
+        }, ID_SAVE_WAV);
+    }
     if (menu.GetMenuItemCount() > 0) menu.AppendSeparator();
     menu.Append(ID_COPY, "Copy file name");
     menu.Bind(wxEVT_MENU, [=](wxCommandEvent& e) {

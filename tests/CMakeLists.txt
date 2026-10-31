@@ -21,6 +21,7 @@ ragtime_test(ragtime_data2g_link_test Data2GLinkTest.cpp)
 ragtime_test(ragtime_protocol_test ProtocolTest.cpp)
 ragtime_test(ragtime_host_link_test HostLinkTest.cpp)
 ragtime_test(ragtime_session_files_test SessionFilesTest.cpp)
+ragtime_test(ragtime_arrival_player_test ArrivalPlayerTest.cpp)
 
 # Two stations on loopback sockets to fake data2g-hosts (POSIX sockets).
 if(UNIX)

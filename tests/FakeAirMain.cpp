@@ -8,7 +8,8 @@
 // up, a laugh, a cheer or FB.
 //
 //   ragtime_fake_air [--bots N] [--airtime MS] [--call CALL] [--fade] [--rate BPS]
-//                    [--loss PCT] [--files] [--voice] [--no-snr] [--no-cut] [--no-reasons]
+//                    [--loss PCT] [--files] [--voice] [--voice-file FILE.sot] [--no-snr] [--no-cut]
+//                    [--no-reasons]
 //                    [--rig PORT [--dial HZ] [--dial-hop] [--rig-vfo] [--rig-swr X] [--rig-noise DB]]
 //   ragtime_fake_air --replay FILE|FOLDER... [--from TIME] [--speed X]
 //
@@ -21,6 +22,9 @@
 // session bytes at most that fast (default 400 bytes a second), so files
 // take a while and show their progress. A call from host A
 // or B is answered on its second try, so "try 2 of 5" shows.
+// --voice-file FILE.sot has the bots offer that voice message (kind 0x03)
+// where they would offer their bulletin, so a clip plays while it arrives
+// (at --rate 150 it starts after a wait; at 400 at once).
 //
 // The bots seal what they broadcast and answer repair requests, and take
 // broadcast files without asking. --loss PCT has hosts A and B lose that
@@ -396,6 +400,10 @@ std::filesystem::path botFolder(const char* call)
     return dir;
 }
 
+// --voice-file: a .sot the bots offer as a voice message in place of their
+// bulletin.
+std::string voiceClip;
+
 std::string writeBulletin(const Profile& p)
 {
     std::filesystem::path path = botFolder(p.call) / (std::string(p.call) + "-bulletin.txt");
@@ -577,7 +585,10 @@ struct Bot
         if (offerMs != 0 && now >= offerMs && session.phase() == session::SessionChat::Phase::Connected)
         {
             std::string error;
-            files.offer(session.peer(), bulletin, now, error);
+            if (voiceClip.empty())
+                files.offer(session.peer(), bulletin, now, error);
+            else
+                files.offer(session.peer(), voiceClip, now, error, false, true);
             offerMs = 0;
         }
         if (!sayText.empty() && now >= sayMs && session.phase() == session::SessionChat::Phase::Connected)
@@ -845,6 +856,8 @@ int main(int argc, char** argv)
             rate = std::atoi(argv[++i]);
         else if (std::strcmp(argv[i], "--loss") == 0 && i + 1 < argc)
             lossPct = std::atoi(argv[++i]);
+        else if (std::strcmp(argv[i], "--voice-file") == 0 && i + 1 < argc)
+            voiceClip = argv[++i];
         else if (std::strcmp(argv[i], "--files") == 0)
             share = true;
         else if (std::strcmp(argv[i], "--voice") == 0)
@@ -879,7 +892,8 @@ int main(int argc, char** argv)
         else
         {
             std::fprintf(stderr, "usage: ragtime_fake_air [--bots N] [--airtime MS] [--call CALL] [--fade] "
-                                 "[--rate BPS] [--loss PCT] [--files] [--voice] [--no-snr] [--no-cut] [--no-reasons] "
+                                 "[--rate BPS] [--loss PCT] [--files] [--voice] [--voice-file FILE.sot] "
+                                 "[--no-snr] [--no-cut] [--no-reasons] "
                                  "[--rig PORT [--dial HZ] [--dial-hop] [--rig-vfo] [--rig-swr X] [--rig-noise DB]]\n"
                                  "       ragtime_fake_air --replay FILE|FOLDER... [--from 2026-10-25T16:20] "
                                  "[--speed X]\n");

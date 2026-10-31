@@ -466,7 +466,10 @@ lose that share of the group frames they hear, so repairs happen, and
 `--files` has the first bot broadcast a bulletin file a minute in and
 every 6 minutes. `--voice` has the last bot broadcast a made-up voice
 clip 40 s in and every 4 minutes, and bots answer a session voice
-message with one (`RAGTIME_SOTTO` names the `libsotto.so` to play them). A call
+message with one (`RAGTIME_SOTTO` names the `libsotto.so` to play them);
+`--voice-file FILE.sot` has them offer that clip in a ragchew instead
+of their bulletin, so it plays while it arrives (slowly with `--rate
+150`). A call
 from host A or B is answered on its second try, and each host says
 `BUSY ON` and `BUSY OFF` around the others' group bursts. The hosts report SNRs,
 each bot at its own strength; `--no-snr` plays a host from before Data2G
@@ -527,7 +530,9 @@ The bench's fake hosts are POSIX, but `wine ragtime.exe` talks to a Linux
 4. Draft release notes: say whether it talks to the last release (a
    protocol change breaks that), that data2g-host is the operator's to run
    (never bundled or started), and how the gearshift finds Data2G's
-   `mode_thresholds.json`.
+   `mode_thresholds.json`. From the release with voice on: credit sotto,
+   Codec 2 (LGPL-2.1, why libsotto is a shared library) and the CC BY 4.0
+   datasets its codebook was trained on, as the README's "Credits" does.
 5. Jeff tags `v<version>-beta` on the merge commit and publishes.
 
 ## Code

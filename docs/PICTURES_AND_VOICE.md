@@ -24,13 +24,23 @@ swapped for Ragtime's:
 | Preferences, Audio Config | Settings |
 | `UsDataSegments.h` | `core/src/radio/Bands.cpp` |
 
-Where this file and `docs/PLAN.md` ("Pictures and voice, *later*")
+Where this file and `docs/PLAN.md` ("Pictures and voice")
 disagree, the plan wins.
 
 Digital pictures are another thing, and are built: a picture sent as a
 progressive JPEG 2000 file, on D2G or in a ragchew (docs/STAGE1.md,
 "Inline pictures", and docs/PROTOCOL.md, "Pictures"). They are data,
 so they need none of the analogue rules below.
+
+**RADE voice is retired** (2026-10-31). Voice messages are built
+instead as sotto files, digital like the pictures: kind `0x03`, coded
+with Jeff's 2,400 bit/s vocoder [sotto](https://github.com/baitisj/sotto),
+recorded on the microphone deck and played from voice cards, and in a
+ragchew played while they arrive (docs/PLAN.md, "Pictures and voice";
+docs/PROTOCOL.md, "Voice"; docs/STAGE1.md, "Voice while it arrives").
+Jeff ruled them data, so they go wherever Data2G runs. What this file
+says about RADE, Voicegrams and voice on the phone side stays only as a
+record; the SSTVAE picture parts are still a draft.
 
 ## Summary
 

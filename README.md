@@ -26,6 +26,11 @@ chats on the D2G broadcast group. Current features include:
 - "Recent work," under the station list: the stations you hear and
   work, the ones likely around at this hour first, from two weeks of
   the path log (who was heard when, and on which band).
+- Voice messages, coded with [sotto](https://github.com/baitisj/sotto),
+  Jeff's 2,400 bit/s vocoder: 300 bytes for each second of speech, sent
+  as a file the way pictures go, and in a ragchew played while it is
+  still arriving. Voice over Data2G is data, so it goes wherever Data2G
+  runs; it is a gear 5-and-up feature.
 
 ## Downloads
 
@@ -217,9 +222,25 @@ Messages are signed, never encrypted, as Part 97 requires.
 | [docs/HOW_SEALS_WORK.md](docs/HOW_SEALS_WORK.md) | Seals in plain words, with pictures: what is inside one, how repairs work, and what a late joiner asks for |
 | [docs/GEARBOX.md](docs/GEARBOX.md) | The gearshift: how a Data2G mode is picked from the Submode Map |
 | [docs/MOCKUPS.md](docs/MOCKUPS.md) | The screens, colours, Globus and seal icons |
-| [docs/PICTURES_AND_VOICE.md](docs/PICTURES_AND_VOICE.md) | Draft spec for SSTVAE pictures and RADE voice clips in chat, with the US band segments and Part 97 notes (not built; waits on Data2G) |
+| [docs/PICTURES_AND_VOICE.md](docs/PICTURES_AND_VOICE.md) | Draft spec for analogue SSTVAE pictures in chat, with the US band segments and Part 97 notes (not built; waits on Data2G). Its RADE voice clips are retired in favour of sotto voice messages |
 | [CLAUDE.md](CLAUDE.md) | Working notes and ground rules for contributors |
 
 ## Licence
 
 MIT. See [LICENSE](LICENSE).
+
+## Credits
+
+Voice messages are coded with [sotto](https://github.com/baitisj/sotto),
+by Jeff Baitis (AG7EW). Ragtime loads it at run time as a shared library
+(`libsotto.so`, `sotto.dll`), because sotto's analysis and synthesis come
+from David Rowe's [Codec 2](https://github.com/drowe67/codec2), which is
+LGPL-2.1; the rest of sotto is MIT. sotto's codebook was trained on
+Codec 2's own test recordings and on these datasets, both under
+[CC BY 4.0](https://creativecommons.org/licenses/by/4.0/):
+
+- [Speech Commands](https://arxiv.org/abs/1804.03209), Pete Warden,
+  Google, 2018.
+- [LibriSpeech](https://www.openslr.org/12) (dev-clean), Vassil Panayotov,
+  Guoguo Chen, Daniel Povey and Sanjeev Khudanpur, 2015, from LibriVox
+  recordings.

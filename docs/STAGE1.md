@@ -1831,7 +1831,7 @@ its knobs and reads its meters.
 ## Voice cards
 
 Jeff's idea (2026-10-31; plan in the thread "Plan Ragtime voice messages
-with sotto", its PR 6): a voice message among the messages, on both tabs
+with sotto", its PR 5): a voice message among the messages, on both tabs
 and the Files tab, played with libsotto. The file is docs/PROTOCOL.md's
 "Voice" (kind `0x03`, the `.sot` file in `core/src/voice/`); the deck
 that records one is its own PR.
@@ -1884,10 +1884,66 @@ that records one is its own PR.
   every 4 minutes, and bots answer a voice message in a session with one
   of their own. Run Ragtime with `RAGTIME_SOTTO` pointing at a
   `libsotto.so` to hear them.
-- Not built: playing while a clip arrives, the stop sign on a voice
-  message coming in a session, and Save as WAV (the next PR, "play while
-  arriving"); a file still coming when Ragtime closed comes back after a
-  restart as a plain file line (pictures too).
+- Playing while a clip arrives, the stop sign on a voice message coming
+  in a session, and Save as WAV are the next section's. Not built: a
+  file still coming when Ragtime closed comes back after a restart as a
+  plain file line (pictures too).
+
+## Voice while it arrives
+
+The last of the six voice pull requests (Jeff, 2026-10-31; the plan is
+the Claude Doc "Ragtime voice messages with sotto"). A voice message is
+a sotto file, kind `0x03` (docs/PROTOCOL.md, "Voice"), and in a ragchew
+the stream is reliable and in order, so the far end plays it while the
+bytes still come rather than waiting for the whole file.
+
+- **When to start** (`voice::ArrivalPlayer`, core). The professor's sum:
+  a clip of S bytes arriving at R bytes a second, played at P = 300
+  bytes a second (sotto's 2,400 bit/s), can start after S/R − S/P
+  seconds and never stall. A session's bytes come a burst at a time,
+  though, with the other station's turn between, so the player also
+  waits out one gap between bursts, less the speech it already holds,
+  and adds half a second. It counts on 85% of the rate it measures (the
+  slower of the rate since the first burst and over the last few), and
+  on the gaps it sees; until a second burst gives a rate, on the
+  session mode's rate and the pacing window's two longest bursts. The
+  rest of the clip is taken as all speech (6 bytes for each 20 ms),
+  though a silence run plays far longer for its 6 bytes, so it errs
+  late. At gear 7 and up the link outruns the speech and a clip starts
+  as soon as its first burst is in; at gear 6 a 10 s clip starts after
+  about 5 s, and at gear 5 after most of it has come.
+- **Running dry.** If the link slows and the bytes fall behind, the
+  player tells sotto's decoder the next frame is lost, so it does what
+  it does for a lost frame on 2 m: holds the sound, fades it 6 dB each
+  20 ms and is quiet after 80 ms (v3.6 conceals as v3.5 does). Then it
+  waits by the same rule, with at least a second in hand, and carries
+  on from the frame where it stopped, fading back in. Nothing is
+  skipped: a stall is a pause, not a gap in the words.
+- **The stop sign.** A session voice card coming in has the stop sign,
+  as a session picture does. Pressed, it sends FileCancel `0x84`, keeps
+  what came (the sender logs "had enough at 41%"), and the clip plays to
+  the end of what came and fades out there. A transfer cancelled by
+  either side or cut by a dropped link ends the same way.
+- **Save as WAV.** A voice card's right-click menu (and the Files
+  tab's) saves the clip's sound as an 8 kHz, 16-bit mono WAV
+  (`voice::wavFile`), decoded with lost frames covered. Ragtime itself
+  keeps only the `.sot` file: 3 KB for 10 s against 160 KB of WAV.
+- **D2G.** Not here: on D2G a clip plays from what has come when the
+  card is pressed, and holes left by lost pieces are covered by sotto as
+  lost frames (`voice::readSot` with the missing ranges), the same
+  decoder calls `ArrivalPlayer` makes.
+- **Tests.** `ragtime_arrival_player_test` plays clips through a
+  pretend sotto that marks each frame, arriving in bursts at gear 7, at
+  half the speech's rate, with no rate known, with a 20 s fade, with the
+  stop sign and with long pauses, and checks that every frame is heard
+  once and in order, when it starts, and where the fades fall.
+- **The bench.** `ragtime_fake_air --voice-file FILE.sot` has the bots
+  offer that clip in a ragchew where they would offer their bulletin
+  (with `--call`, half a minute into the session). At `--rate 150` a
+  41 s clip of speech waits about half a minute and then plays straight
+  through; at 400 it starts at once. For a clip of real speech, wrap
+  the frames of `tests/data/voice/libri198-v36.bit` with
+  `voice::makeSot`.
 
 ## The microphone deck
 

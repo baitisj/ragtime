@@ -329,16 +329,22 @@ The gear list beside the map gives each gear's short name, Data2G mode, speed, i
 
 The window opens at its last size and place, works at 1280×720, and uses the system font, so it reads well on a small laptop at the operating position. Dark mode follows the system until the operator picks light or dark with the status bar's button, which Ragtime then keeps. Every colour that means something (delivered, not delivered, Link quiet, links) has a light and a dark shade. The button switches the GTK theme's own dark variant (Adwaita's, where the desktop's theme has none); wxWidgets 3.2 has no dark mode for Windows, so there it isn't shown.
 
-## Pictures and voice, *later*
+## Pictures and voice
 
-The SSTVAE pictures and RADE voice clips you decided on 2026-10-19 were already Data2G only, so they move to this client unchanged. The spec stays in its own doc, [docs/PICTURES_AND_VOICE.md](PICTURES_AND_VOICE.md) (captured from the Claude Doc "Images and voice in chat" on 2026-10-26), and this plan only leaves room for it:
-
-- Session and broadcast timelines take **object cards** (a picture or a clip with its caption, sender and how many copies were stacked), beside text and file cards.
-- The client will need its own microphone and speaker devices for voice clips. Today it never plays to the radio sound card, which Data2G owns; the Ear only listens to it.
-- The Part 97 notes in that doc apply: text in the data segment, pictures and voice on the phone side, and CW or spoken ID every 10 minutes.
-- It waits on Andrew's latents spec and the "latents over KISS" extension in data2g-host. No work on it in the first versions.
+The SSTVAE pictures and RADE voice clips you decided on 2026-10-19 were Data2G only, as analogue latents inside Data2G's framing, and their draft spec is still [docs/PICTURES_AND_VOICE.md](PICTURES_AND_VOICE.md) (captured from the Claude Doc "Images and voice in chat" on 2026-10-26). Andrew shelved Data2G's analogue slots on 2026-10-21 (data and phone can't share a frequency), and both went digital instead.
 
 Digital pictures came first (Jeff, 2026-10-27): a picture shrunk and coded as progressive JPEG 2000 to fit an airtime, sent as a file that shows among the messages and sharpens as it comes, with a stop sign in a session. They are data, so they stay in the data segments with the rest. See docs/STAGE1.md, "Inline pictures", and docs/PROTOCOL.md, "Pictures".
+
+Voice messages followed (Jeff, 2026-10-31), coded with his vocoder [sotto](https://github.com/baitisj/sotto) in place of RADE. The plan is the Claude Doc "Ragtime voice messages with sotto" (https://claude.ai/artifact/TwATMvbfL9Uj7JxKvycZ5w, private to Jeff); what was decided:
+
+- **A voice message is a sotto file**, kind `0x03` on FileOffer and FileAnnounce, exactly as pictures are kinds `0x01` and `0x02` (docs/PROTOCOL.md, "Voice"). sotto spends 48 bits on each 20 ms of speech (voicing, pitch, energy and the shape of the voice's spectrum), so speech costs 300 bytes a second, and a pause between sentences costs 6 bytes. No frame depends on another, so any first part of a clip plays, and a lost frame costs 20 ms. No new record, no Hello bit, nothing from Data2G.
+- **Codec 1 is sotto v3.6** (Jeff, 2026-10-31: first v3.5, then v3.6, "not very different"): its frame, its 9-9-8-8 codebook, its postfilter and its concealment, frozen as text table 0 is. A later sotto that changes the bits is codec 2, and a receiver plays only the numbers it knows.
+- **Part 97: data.** A voice file over Data2G is a computer file over a data mode, as a picture is, so it goes wherever Data2G runs, with no phone-only switch. sotto is openly documented and its format is in PROTOCOL.md (97.113(a)(4), 97.309(b)).
+- **Licence.** sotto borrows Codec 2's sinusoidal analysis and synthesis (LGPL-2.1), so libsotto is an LGPL shared library (`libsotto.so`, `sotto.dll`) that Ragtime loads at run time, and Ragtime stays MIT. Its codebook was trained on Speech Commands and LibriSpeech dev-clean, both CC BY 4.0, credited in the README and the release notes.
+- **The microphone deck** is a floating panel like the Ear: microphone, clean-up (high-pass and noise reduction), a leveller to sotto's −26 dBFS, push to talk, and the airtime it costs at the gear in use. Ragtime's first microphone and speaker never touch the radio's sound card, and the deck never keys the rig: data2g-host keys it when the file's bursts go out.
+- **Voice cards** sit among the messages on both tabs, with a pitch strip drawn from the frames' bits and a play button; the `.sot` file is what is kept, never the audio, and Save as WAV gives the sound.
+- **In a ragchew a clip plays while it arrives**, starting as soon as the bytes will keep ahead of the speech; on D2G it is sealed and repaired like any file. See docs/STAGE1.md, "Voice while it arrives".
+- **It is a gear 5-and-up feature.** At gear 7 (3,278 bit/s) speech goes in real time; at gear 5 one second of speech takes about four on the air, and at gear 3 about sixteen.
 
 ## Signed, never secret: messages, pages and boards
 
@@ -822,4 +828,4 @@ Steps 1 to 7 are Stage 1, parity with Glissando.
 9. **Signing:** station keys, session seals and receipts, broadcast seals with repair requests, badges, trust on first use.
 10. **Pages:** a station's own gemtext pages, fetched in a session, cached signed copies.
 11. **Boards:** topics, posts, mail, then forwarding between boards, after a Part 97 automatic-control check.
-12. **Pictures and voice**, after Andrew's latents spec.
+12. **Pictures and voice**: digital pictures (2026-10-27) and sotto voice messages (2026-10-31) are built; analogue SSTVAE pictures would still wait on Andrew's latents spec.

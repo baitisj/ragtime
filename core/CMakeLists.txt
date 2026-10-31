@@ -89,6 +89,8 @@ add_library(ragtime_core STATIC
     src/voice/Levels.cpp
     # Which voice message plays and which wait (the cards are in app/).
     src/voice/PlayQueue.cpp
+    # Playing a clip while it arrives in a ragchew, and Save as WAV.
+    src/voice/ArrivalPlayer.cpp
 )
 
 target_include_directories(ragtime_core PUBLIC

@@ -10,6 +10,7 @@
 
 #include <wx/string.h>
 
+#include "ragtime/voice/ArrivalPlayer.h"
 #include "ragtime/voice/Voice.h"
 
 class wxWindow;
@@ -77,6 +78,13 @@ public:
         bool paused = false;
         bool waiting = false;
         double playheadFrame = -1.0;    // < 0: none
+        // Playing as it arrives, but waiting for the bytes to keep ahead:
+        // about how long until it starts, in seconds (0: any moment), or
+        // < 0 if not (docs/STAGE1.md, "Voice while it arrives").
+        double startsIn = -1.0;     // infinite: can't tell yet
+        // A session clip coming to us: the stop sign after the strip,
+        // linked here (FileCancel 0x84, keeping what came).
+        wxString stopHref;
     };
     // The card's button and strip, then its length ("0:12") and, while it
     // arrives, how much has come; a line saying why while its header hasn't.
@@ -129,6 +137,27 @@ public:
     // if it can't (no libsotto, an empty clip).
     bool play(ragtime::audio::VoiceAudio& audio, const std::string& key, const ragtime::voice::Clip& clip,
               uint32_t fromFrame, std::string& why);
+    // A session clip still arriving (docs/STAGE1.md, "Voice while it
+    // arrives"): plays from its bytes as they stand, starting once they
+    // will keep ahead of the speech, and fed more by arriving(). The
+    // session's mode gives a first guess at the rate (bytes a second) and
+    // the gap between its bursts (seconds), until arrivals show them.
+    bool playArriving(ragtime::audio::VoiceAudio& audio, const std::string& key, const std::vector<uint8_t>& bytes,
+                      uint64_t size, uint32_t fromFrame, double expectedRate, double expectedGap, uint64_t nowMs,
+                      std::string& why);
+    // More of the clip playing as it arrives (the same bytes, longer), and
+    // whether the transfer has ended: whole, or short (the stop sign, a
+    // cancel, the link gone), when what came plays out and fades.
+    void arriving(const std::string& key, const std::vector<uint8_t>& bytes, uint64_t size, bool ended,
+                  uint64_t nowMs);
+    // Hands the speaker the sound now due, a little ahead; call often
+    // (each of the window's voice ticks) while a clip plays as it arrives.
+    void tick(ragtime::audio::VoiceAudio& audio, uint64_t nowMs);
+    // The clip playing is one still arriving.
+    bool isArriving() const { return arrival_ != nullptr; }
+    // Playing as it arrives but not started (or run dry): about how long
+    // until it plays, as Look::startsIn has it.
+    double startsIn(uint64_t nowMs) const;
     // Stops at once; done(key, false) follows.
     void stop(ragtime::audio::VoiceAudio& audio);
     // The clip playing ("" if none) and how far into it, in frames.
@@ -142,6 +171,13 @@ private:
     uint32_t fromFrame_ = 0;
     uint64_t generation_ = 0;
     std::shared_ptr<uint64_t> current_ = std::make_shared<uint64_t>(0);
+    // Playing as it arrives: the engine (its decoder in its calls), and
+    // the samples handed to the speaker so far.
+    std::unique_ptr<ragtime::voice::ArrivalPlayer> arrival_;
+    uint64_t appended_ = 0;
+    bool streamEnded_ = false;
+    // Starts a clip on the speaker; done when it has been heard.
+    std::function<void(bool)> finisher(const std::string& key, uint64_t generation);
 };
 
 #endif

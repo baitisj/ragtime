@@ -2,9 +2,9 @@
 
 #include <algorithm>
 #include <cmath>
-#include <cstdio>
 #include <fstream>
 #include <iterator>
+#include <limits>
 #include <memory>
 #include <utility>
 
@@ -17,6 +17,7 @@
 #include <wx/window.h>
 
 #include "Html.h"
+#include "Pictures.h"
 #include "Theme.h"
 #include "ragtime/audio/VoiceAudio.h"
 #include "ragtime/files/SessionFiles.h"
@@ -312,6 +313,9 @@ wxString VoiceShelf::cardHtml(const std::string& key, const wxWindow* window, co
     html << "</map>";
     html << wxString::Format("<img src=\"memory:%s\" width=\"%d\" height=\"%d\" usemap=\"#%s\" align=\"center\">",
                              wxString(e.memoryName), w, h, map);
+    // A clip coming to us in a session: the stop sign beside the strip,
+    // for when we have heard enough of it.
+    if (!look.stopHref.empty()) html << "&nbsp;" << stopSignHtml(window, look.stopHref);
 
     // Its length, and while it comes, how far it has come.
     wxString after = wxString::FromUTF8(clipLength(s.clip.seconds()));
@@ -321,6 +325,16 @@ wxString VoiceShelf::cardHtml(const std::string& key, const wxWindow* window, co
     else if (!s.clip.whole)
         after << " &middot; part of it";
     if (look.waiting) after << " &middot; next to play";
+    // Playing as it comes, but holding back until the bytes keep ahead.
+    if (look.startsIn >= 0)
+    {
+        if (std::isinf(look.startsIn))
+            after << " &middot; waiting for more of it";
+        else if (look.startsIn < 1.0)
+            after << " &middot; starting";
+        else
+            after << " &middot; " << wxString::Format("starts in %d s", (int)std::ceil(look.startsIn));
+    }
     html << "&nbsp;&nbsp;" << grey(after);
     return html;
 }
@@ -359,25 +373,125 @@ bool VoicePlayer::play(audio::VoiceAudio& audio, const std::string& key, const v
     std::vector<float> samples(sound.size() - start);
     for (size_t i = 0; i < samples.size(); i++) samples[i] = sound[start + i] / 32768.0f;
 
-    // A clip replaced or stopped says so later, on the audio thread: only
-    // the latest one's word counts.
     const uint64_t generation = ++generation_;
     *current_ = generation;
     playing_ = key;
     fromFrame_ = fromFrame;
+    arrival_.reset();
+    audio.play(std::move(samples), voice::SOTTO_RATE, finisher(key, generation));
+    return true;
+}
+
+std::function<void(bool)> VoicePlayer::finisher(const std::string& key, uint64_t generation)
+{
+    // A clip replaced or stopped says so later, on the audio thread: only
+    // the latest one's word counts.
     std::weak_ptr<uint64_t> alive = current_;
     Post post = post_;
     Done done = done_;
     VoicePlayer* self = this;
-    audio.play(std::move(samples), voice::SOTTO_RATE, [alive, post, done, self, generation, key](bool played) {
+    return [alive, post, done, self, generation, key](bool played) {
         post([alive, done, self, generation, key, played]() {
             std::shared_ptr<uint64_t> current = alive.lock();
             if (!current || *current != generation) return;
             self->playing_.clear();
+            self->arrival_.reset();
             done(key, played);
         });
-    });
+    };
+}
+
+namespace
+{
+
+// Sound handed to the speaker ahead of the ear while a clip plays as it
+// arrives: enough to ride over a late tick, little enough that the stop
+// sign or Push to talk is heard at once.
+constexpr uint64_t LEAD_MS = 400;
+
+} // namespace
+
+bool VoicePlayer::playArriving(audio::VoiceAudio& audio, const std::string& key, const std::vector<uint8_t>& bytes,
+                               uint64_t size, uint32_t fromFrame, double expectedRate, double expectedGap,
+                               uint64_t nowMs, std::string& why)
+{
+    if (!canDecode(why)) return false;
+    std::shared_ptr<voice::SottoDecoder> decoder(voice::Sotto::library().decoder());
+    if (!decoder)
+    {
+        why = "libsotto couldn't make a decoder.";
+        return false;
+    }
+    voice::FrameDecoder calls;
+    calls.decode = [decoder](const voice::Frame& f, bool good, int16_t* out) { decoder->decode(f, good, out); };
+    calls.flush = [decoder](int16_t* out) { decoder->flush(out); };
+    auto player = std::make_unique<voice::ArrivalPlayer>(calls);
+    player->setExpectedRate(expectedRate);
+    if (expectedGap > 0) player->setExpectedGap(expectedGap);
+    if (player->arrived(bytes.data(), size, bytes.size(), nowMs) != voice::ReadResult::Ok)
+    {
+        why = "Not enough of it has come to play.";
+        return false;
+    }
+    if (fromFrame > 0) player->seek(fromFrame);
+
+    const uint64_t generation = ++generation_;
+    *current_ = generation;
+    playing_ = key;
+    fromFrame_ = 0;
+    arrival_ = std::move(player);
+    appended_ = 0;
+    streamEnded_ = false;
+    audio.playStream(voice::SOTTO_RATE, finisher(key, generation));
+    tick(audio, nowMs);
     return true;
+}
+
+void VoicePlayer::arriving(const std::string& key, const std::vector<uint8_t>& bytes, uint64_t size, bool ended,
+                           uint64_t nowMs)
+{
+    if (!arrival_ || key != playing_) return;
+    arrival_->arrived(bytes.data(), size, bytes.size(), nowMs);
+    if (ended && !arrival_->hasEnded()) arrival_->ended();
+}
+
+void VoicePlayer::tick(audio::VoiceAudio& audio, uint64_t nowMs)
+{
+    if (!arrival_ || streamEnded_) return;
+    // How far ahead of the ear the speaker has been handed sound.
+    const uint64_t heard = (uint64_t)std::llround(std::max(0.0, audio.playPosition()) * voice::SOTTO_RATE);
+    const uint64_t lead = LEAD_MS * voice::SOTTO_RATE / 1000;
+    uint64_t ahead = appended_ > heard ? appended_ - heard : 0;
+    std::vector<int16_t> pcm;
+    std::vector<float> samples;
+    while (ahead < lead)
+    {
+        pcm.assign((size_t)(lead - ahead), 0);
+        const size_t got = arrival_->pull(pcm.data(), pcm.size(), nowMs + ahead * 1000 / voice::SOTTO_RATE);
+        if (got == 0) break;
+        samples.resize(got);
+        for (size_t i = 0; i < got; i++) samples[i] = pcm[i] / 32768.0f;
+        audio.append(samples.data(), got);
+        appended_ += got;
+        ahead += got;
+    }
+    if (arrival_->state() == voice::ArrivalPlayer::State::Done)
+    {
+        // All it will get has been handed over: the speaker says when it
+        // has been heard.
+        audio.endStream();
+        streamEnded_ = true;
+    }
+}
+
+double VoicePlayer::startsIn(uint64_t nowMs) const
+{
+    if (!arrival_) return -1.0;
+    using State = voice::ArrivalPlayer::State;
+    if (arrival_->state() != State::Waiting && arrival_->state() != State::Stalled) return -1.0;
+    // No rate yet to tell by: waiting for more of it.
+    const double s = arrival_->startsIn(nowMs);
+    return s < 0 ? std::numeric_limits<double>::infinity() : s;
 }
 
 void VoicePlayer::stop(audio::VoiceAudio& audio)
@@ -389,5 +503,12 @@ void VoicePlayer::stop(audio::VoiceAudio& audio)
 double VoicePlayer::positionFrames(const audio::VoiceAudio& audio) const
 {
     if (playing_.empty()) return -1.0;
+    if (arrival_)
+    {
+        // Frames decoded, less what the speaker still holds of them.
+        const double heard = std::max(0.0, audio.playPosition()) * voice::SOTTO_RATE;
+        const double ahead = std::max(0.0, (double)appended_ - heard) / voice::SOTTO_SAMPLES;
+        return std::max(0.0, arrival_->playedFrames() - ahead);
+    }
     return fromFrame_ + audio.playPosition() * voice::FRAMES_PER_SECOND;
 }

@@ -342,3 +342,29 @@ wxRect drawStopButton(wxImage& thumb, const wxWindow* window)
 
 } // namespace
 
+wxString stopSignHtml(const wxWindow* window, const wxString& href, int side)
+{
+    // One picture for each size asked, kept in wxHTML's memory files.
+    static std::set<int> drawn;
+    const int px = window->FromDIP(side);
+    const wxString name = wxString::Format("ragtime-stop-sign-%d.png", px);
+    if (drawn.count(px) == 0)
+    {
+        addMemoryHandlers();
+        // drawStopButton draws inside a margin, at most half the picture:
+        // a transparent picture twice the button's side, cut to it.
+        const int margin = window->FromDIP(6);
+        wxImage canvas(2 * (px + margin), 2 * (px + margin));
+        canvas.InitAlpha();
+        std::fill(canvas.GetAlpha(), canvas.GetAlpha() + canvas.GetWidth() * canvas.GetHeight(), (unsigned char)0);
+        const wxRect r = drawStopButton(canvas, window);
+        if (r.IsEmpty()) return wxString();
+        // Room for the shadow below and right.
+        const int extra = std::max(2, window->FromDIP(2));
+        wxRect cut(r.x, r.y, std::min(r.width + extra, canvas.GetWidth() - r.x),
+                   std::min(r.height + extra, canvas.GetHeight() - r.y));
+        wxMemoryFSHandler::AddFile(name, canvas.GetSubImage(cut), wxBITMAP_TYPE_PNG);
+        drawn.insert(px);
+    }
+    return "<a href=\"" + href + "\"><img src=\"memory:" + name + "\" align=\"middle\" alt=\"Stop: I have enough\"></a>";
+}
