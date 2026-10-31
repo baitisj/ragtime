@@ -1197,8 +1197,8 @@ void SessionFiles::receive(Entry& entry, const protocol::FileData& data)
     }
 
     entry.out.write((const char*)data.bytes.data(), (std::streamsize)length);
-    // A picture is read back as it comes, to show it.
-    if (entry.transfer.picture) entry.out.flush();
+    // A picture or a voice message is read back as it comes, to show it.
+    if (entry.transfer.picture || entry.transfer.voice) entry.out.flush();
     if (!entry.out)
     {
         entry.spoiled = true;
