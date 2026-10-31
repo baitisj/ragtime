@@ -212,6 +212,14 @@ private:
     // A card's link ("voice:play:0", "voice:stop:0", "voice:seek:<frame>").
     void voiceAction(const std::string& key, const std::string& href);
     void startVoice(const std::optional<ragtime::voice::PlayQueue::Start>& start);
+    // A session voice message coming to us, not yet whole; null if key
+    // names none.
+    const ragtime::files::FileTransfer* arrivingVoice(const std::string& key) const;
+    // Plays one of those as its bytes come (VoicePlayer::playArriving).
+    // False, why empty, if key isn't one.
+    bool startArrivingVoice(const std::string& key, uint32_t fromFrame, std::string& why);
+    // The clip's sound saved as a WAV file the operator picks.
+    void saveVoiceAsWav(const std::string& key);
     void voiceDone(const std::string& key, bool played);
     void redrawVoices();
     bool autoPlayVoice() const;

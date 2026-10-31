@@ -46,6 +46,7 @@ constexpr int BADGE_ROOM = SEAL_BADGE_PX + 4;
 const int ID_COPY = wxID_HIGHEST + 501;
 const int ID_RESEND = wxID_HIGHEST + 502;
 const int ID_PLAY_VOICE = wxID_HIGHEST + 503;
+const int ID_SAVE_WAV = wxID_HIGHEST + 504;
 const int ID_REACT = wxID_HIGHEST + 520;    // and REACTION_MENU_IDS after it
 
 // "14:32" today, "22 Oct 14:32" on another day (an earlier session's).
@@ -725,6 +726,12 @@ void SessionPage::showMenu(int row)
     if (!voiceKey.empty() && onVoice_)
     {
         menu.Append(ID_PLAY_VOICE, "&Play");
+        // Its sound as a WAV file, for keeping or playing anywhere.
+        menu.Append(ID_SAVE_WAV, "Save as &WAV...");
+        menu.Bind(wxEVT_MENU, [this, voiceKey](wxCommandEvent&) {
+            std::string key = voiceKey;
+            CallAfter([this, key]() { onVoice_(key, "voice:wav:0"); });
+        }, ID_SAVE_WAV);
         if (m == nullptr)
         {
             menu.Bind(wxEVT_MENU, [this, voiceKey](wxCommandEvent&) {

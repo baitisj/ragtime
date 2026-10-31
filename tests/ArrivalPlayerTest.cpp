@@ -321,6 +321,23 @@ void testSeek()
     player.pull(pcm, FRAME_SAMPLES, 20);
     CHECK_EQ(pcm[0], 61);
     CHECK_EQ(player.playedFrames(), 61u);
+
+    // In a clip still coming, a seek past what has come waits there, and
+    // plays from it once enough is in.
+    FakeSotto sotto2;
+    ArrivalPlayer coming(sotto2.decoder());
+    coming.setExpectedRate(1000);
+    coming.setExpectedGap(1.0);
+    std::vector<uint8_t> big = clipFile(500);
+    coming.arrived(big.data(), big.size(), 607, 0);     // 100 frames
+    CHECK(coming.seek(300));
+    CHECK(coming.state() == ArrivalPlayer::State::Waiting);
+    CHECK_EQ(coming.pull(pcm, FRAME_SAMPLES, 0), (size_t)0);
+    coming.arrived(big, big.size(), 2000);
+    coming.ended();
+    CHECK_EQ(coming.pull(pcm, FRAME_SAMPLES, 2000), (size_t)FRAME_SAMPLES);
+    CHECK_EQ(pcm[0], 300 % 120 + 1);
+    CHECK(!coming.seek(500));
 }
 
 void testSilenceRunsGiveTheLinkTime()

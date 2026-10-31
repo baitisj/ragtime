@@ -104,5 +104,10 @@ private:
 // The stop button's side over a picture in a session's card.
 constexpr int STOP_BUTTON_DIP = 40;
 
+// The same button on its own, side DIPs square, as an <img> linked to
+// href: a voice card's stop sign, beside its strip.
+constexpr int VOICE_STOP_DIP = 28;
+wxString stopSignHtml(const wxWindow* window, const wxString& href, int side = VOICE_STOP_DIP);
+
 
 #endif

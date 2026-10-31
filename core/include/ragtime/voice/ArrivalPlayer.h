@@ -111,8 +111,11 @@ public:
     // be heard.
     size_t pull(int16_t* out, size_t n, uint64_t nowMs);
 
-    // Play from frame (a click on the card's strip), if it has come; true
-    // if it moved.
+    // Play from frame (a click on the card's strip, or carrying on after
+    // Push to talk). In a clip all here it plays from there at once; in
+    // one still coming it waits there, by the same rule, for the bytes to
+    // keep ahead (frames not yet come included). False past the clip's
+    // end, or past what came of one that ended short.
     bool seek(uint32_t frame);
 
     State state() const { return state_; }

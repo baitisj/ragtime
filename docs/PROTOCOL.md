@@ -993,8 +993,13 @@ can play while the bytes arrive. Arriving at R bytes a second, frame t
 (from 0) must be here by the time frame t - 1 plays (sotto's decoder is
 one frame behind); the wait before playing is the worst of those over
 the file, about S / R - S / P for a clip of S bytes playing at P, and
-less where a silence run lets the link catch up. The stop sign
-(FileCancel `0x84`) works as for pictures: the receiver keeps what came.
+less where a silence run lets the link catch up. When to start is the
+receiver's own business and puts nothing on the air: Ragtime also waits
+out one gap between bursts, since a session's bytes come a burst at a
+time, and if it runs dry anyway it covers the gap as a lost frame and
+carries on from where it stopped (docs/STAGE1.md, "Voice while it
+arrives"). The stop sign (FileCancel `0x84`) works as for pictures: the
+receiver keeps what came, and plays it to the end.
 
 **On D2G** a voice message is sealed and repaired as any file. A
 receiver plays the first unbroken run of pieces as it comes, and the

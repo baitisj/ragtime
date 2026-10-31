@@ -77,6 +77,7 @@
 #include "ragtime/voice/Devices.h"
 #include "ragtime/voice/Sotto.h"
 #include "ragtime/voice/Voice.h"
+#include "ragtime/voice/Wav.h"
 #include "ragtime/radio/Bands.h"
 #include "ragtime/radio/RigFilter.h"
 
@@ -122,6 +123,7 @@ enum
     // A file's right-click menu.
     ID_FILE_SAVE,
     ID_FILE_VIEW_PICTURE,
+    ID_FILE_SAVE_WAV,
     ID_FILE_SAVE_AS,
     ID_FILE_DECLINE,
     ID_FILE_CANCEL,
@@ -317,7 +319,10 @@ MainFrame::MainFrame()
     refreshRecent(true);
     Bind(wxEVT_TIMER, [this](wxTimerEvent& e) {
         if (&e.GetTimer() == &voiceTimer_)
+        {
+            if (voicePlayer_) voicePlayer_->tick(voiceAudio(), HostConnection::nowMs());
             redrawVoices();
+        }
         else
             onClock();
     });
@@ -1981,6 +1986,14 @@ void MainFrame::finishedFileMenu(const files::FinishedFile& file, wxMenu& menu)
         menu.Bind(wxEVT_MENU, [=](wxCommandEvent&) { CallAfter([=]() { viewPictureFile(path, title); }); },
                   ID_FILE_VIEW_PICTURE);
     }
+    // A voice message, saved or sent: its sound as a WAV file.
+    if (file.voice && !file.path.empty() && wxFileName::FileExists(utf8(file.path)))
+    {
+        std::string key = "p" + file.path;
+        menu.Append(ID_FILE_SAVE_WAV, "Save as &WAV...");
+        menu.Bind(wxEVT_MENU, [=](wxCommandEvent&) { CallAfter([=]() { saveVoiceAsWav(key); }); },
+                  ID_FILE_SAVE_WAV);
+    }
     if (file.via == files::Via::Broadcast)
     {
         // Ours: Re-open repairs while its seal is held (Jeff, 2026-10-25),
@@ -3067,9 +3080,17 @@ void MainFrame::updateVoices(uint64_t nowMs)
             {
                 bool final = t.outgoing || !t.live();
                 changed = voices_.update(key, bytes, t.size, bytes.size(), {}, final) || changed;
+                // Playing as it arrives: more of it, or its end.
+                if (voicePlayer_ && voicePlayer_->isArriving() && voicePlayer_->playing() == key)
+                    voicePlayer_->arriving(key, bytes, t.size, final, nowMs);
             }
         }
         if (!t.outgoing && t.state == SState::Saved) arrived.push_back(key);
+        // In a ragchew a clip can play while it comes (docs/STAGE1.md,
+        // "Voice while it arrives"): with the deck open it takes its turn
+        // as soon as its first frames are in, not once it is whole.
+        else if (!t.outgoing && t.state == SState::Receiving && autoPlayVoice())
+            arrived.push_back(key);
     }
     // Saved: whole, it can play. While the deck is open it plays by itself.
     for (const std::string& key : arrived)
@@ -3103,7 +3124,14 @@ wxString MainFrame::voiceHtml(const std::string& key, const wxWindow* list, bool
     look.paused = look.playing && voiceQueue_.paused();
     look.waiting = voiceQueue_.waiting(key);
     if (look.playing && voicePlayer_ && voicePlayer_->playing() == key)
+    {
         look.playheadFrame = voicePlayer_->positionFrames(voiceAudio());
+        look.startsIn = voicePlayer_->startsIn(HostConnection::nowMs());
+        if (look.startsIn >= 0) look.playheadFrame = -1.0;
+    }
+    // A session clip coming to us: the stop sign, as on a picture.
+    if (const files::FileTransfer* t = arrivingVoice(key))
+        look.stopHref = wxString::Format("enough:%llu", (unsigned long long)t->id);
     return voices_.cardHtml(key, list, look, picked);
 }
 
@@ -3130,6 +3158,11 @@ void MainFrame::voiceAction(const std::string& key, const std::string& href)
         redrawVoices();
         return;
     }
+    if (action == "wav")
+    {
+        saveVoiceAsWav(key);
+        return;
+    }
     if (action != "play" && action != "seek") return;
     if (key[0] == 'p') voices_.shelveFile(key.substr(1));
     startVoice(voiceQueue_.play(key, (uint32_t)frame));
@@ -3151,7 +3184,13 @@ void MainFrame::startVoice(const std::optional<voice::PlayQueue::Start>& start)
                 [this](std::function<void()> fn) { CallAfter(std::move(fn)); },
                 [this](const std::string& key, bool played) { voiceDone(key, played); });
         }
-        if (s != nullptr && s->playable() && voicePlayer_->play(voiceAudio(), next->key, s->clip, next->fromFrame, why))
+        if (startArrivingVoice(next->key, next->fromFrame, why))
+        {
+            voiceTimer_.Start(VOICE_TICK_MS);
+            return;
+        }
+        if (why.empty() && s != nullptr && s->playable()
+            && voicePlayer_->play(voiceAudio(), next->key, s->clip, next->fromFrame, why))
         {
             voiceTimer_.Start(VOICE_TICK_MS);
             return;
@@ -3161,6 +3200,108 @@ void MainFrame::startVoice(const std::optional<voice::PlayQueue::Start>& start)
         showStatus();
         next = voiceQueue_.finished(next->key);
     }
+}
+
+void MainFrame::saveVoiceAsWav(const std::string& key)
+{
+    // The clip as it stands: whole, or what came of it, lost frames
+    // covered as sotto covers them.
+    if (key.size() > 1 && key[0] == 'p') voices_.shelveFile(key.substr(1));
+    const VoiceShelf::Shelved* s = voices_.find(key);
+    std::string why;
+    if (s == nullptr || !s->playable())
+    {
+        note_ = "Save as WAV: nothing of that voice message can play yet.";
+        showStatus();
+        return;
+    }
+    if (!VoicePlayer::canDecode(why))
+    {
+        note_ = "Save as WAV: " + why;
+        showStatus();
+        return;
+    }
+    std::unique_ptr<voice::SottoDecoder> decoder = voice::Sotto::library().decoder();
+    if (!decoder)
+    {
+        note_ = "Save as WAV: libsotto couldn't make a decoder.";
+        showStatus();
+        return;
+    }
+    // Named after the clip's file where it has one.
+    wxString name = "voice";
+    if (key[0] == 'p')
+        name = wxFileName(utf8(key.substr(1))).GetName();
+    else if (key[0] == 's' || key[0] == 'b')
+    {
+        uint64_t id = 0;
+        try
+        {
+            id = std::stoull(key.substr(1));
+        }
+        catch (...)
+        {
+            id = 0;
+        }
+        if (key[0] == 's')
+        {
+            for (const files::FileTransfer& t : sessionFiles_.transfers())
+                if (t.id == id) name = wxFileName(utf8(t.name)).GetName();
+        }
+        else
+        {
+            for (const broadcast::BroadcastFile& f : broadcastFiles_.files(HostConnection::nowMs()))
+                if (f.id == id) name = wxFileName(utf8(f.name)).GetName();
+        }
+    }
+    wxFileDialog dialog(this, "Save the voice message as WAV", wxString(), name + ".wav", "WAV files (*.wav)|*.wav",
+                        wxFD_SAVE | wxFD_OVERWRITE_PROMPT);
+    if (dialog.ShowModal() != wxID_OK) return;
+    std::vector<voice::SottoFrame> frames(s->clip.frames.begin(), s->clip.frames.end());
+    const std::vector<uint8_t> wav = voice::wavFile(decoder->decodeClip(frames, s->clip.good), voice::SOTTO_RATE);
+    wxFile out;
+    if (!out.Create(dialog.GetPath(), true) || out.Write(wav.data(), wav.size()) != wav.size())
+    {
+        note_ = "Save as WAV: couldn't write " + std::string(dialog.GetPath().utf8_str());
+        showStatus();
+        return;
+    }
+    note_ = "Saved the voice message as " + std::string(dialog.GetPath().utf8_str());
+    showStatus();
+}
+
+const files::FileTransfer* MainFrame::arrivingVoice(const std::string& key) const
+{
+    if (key.size() < 2 || key[0] != 's') return nullptr;
+    uint64_t id = 0;
+    try
+    {
+        id = std::stoull(key.substr(1));
+    }
+    catch (...)
+    {
+        return nullptr;
+    }
+    for (const files::FileTransfer& t : sessionFiles_.transfers())
+        if (t.id == id)
+            return t.voice && !t.outgoing && t.state == files::FileTransfer::State::Receiving ? &t : nullptr;
+    return nullptr;
+}
+
+bool MainFrame::startArrivingVoice(const std::string& key, uint32_t fromFrame, std::string& why)
+{
+    const files::FileTransfer* t = arrivingVoice(key);
+    if (t == nullptr || !voicePlayer_) return false;
+    std::vector<uint8_t> bytes;
+    if (!sessionFiles_.pictureBytes(t->id, bytes)) return false;
+    // A first guess at how the bytes will come, until they show it: the
+    // session mode's rate, and a burst of it with the far end's turn
+    // after (its ACK burst and two turns, about 4 s).
+    const link::ModeInfo& mode = fileTraffic_.mode();
+    const double rate = picture::sessionBytesPerSecond(mode, 0.0);
+    const double gap = mode.valid() ? mode.secondsAtMax + 4.0 : 0.0;
+    return voicePlayer_->playArriving(voiceAudio(), key, bytes, t->size, fromFrame, rate, gap,
+                                      HostConnection::nowMs(), why);
 }
 
 void MainFrame::voiceDone(const std::string& key, bool played)

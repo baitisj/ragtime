@@ -265,9 +265,9 @@ size_t ArrivalPlayer::pull(int16_t* out, size_t n, uint64_t nowMs)
 
 bool ArrivalPlayer::seek(uint32_t frame)
 {
-    const size_t n = clip_.frames.size();
-    const bool complete = n >= clip_.length || ended_;
-    if (read_ != ReadResult::Ok || frame >= n || (!complete && (size_t)frame + 1 >= n)) return false;
+    if (read_ != ReadResult::Ok || frame >= clip_.length) return false;
+    const bool complete = clip_.frames.size() >= clip_.length || ended_;
+    if (complete && frame >= clip_.frames.size()) return false;
     fed_ = frame;
     slot_ = frame;
     primed_ = false;
@@ -275,7 +275,9 @@ bool ArrivalPlayer::seek(uint32_t frame)
     fading_ = 0;
     resuming_ = false;
     frameAt_ = FRAME_SAMPLES;
-    state_ = State::Playing;
+    // A clip all here plays from there at once; one still coming waits
+    // until the bytes will keep ahead from there.
+    state_ = complete ? State::Playing : State::Waiting;
     return true;
 }
 
