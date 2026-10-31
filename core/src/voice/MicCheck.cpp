@@ -72,6 +72,24 @@ MicCheck checkMicrophone(const float* samples, std::size_t n, int rate)
     return c;
 }
 
+std::vector<float> testChime(int rate)
+{
+    // C5 D5 E5 G5, a fifth of a second each, struck and dying away.
+    const double notes[] = {523.25, 587.33, 659.25, 783.99};
+    const double pi = 3.14159265358979323846;
+    std::vector<float> out;
+    if (rate <= 0) return out;
+    const int n = rate / 5;
+    for (double hz : notes)
+        for (int i = 0; i < n; i++)
+        {
+            const double t = (double)i / rate;
+            const double envelope = std::min(1.0, t * 200.0) * std::exp(-t * 6.0);
+            out.push_back((float)(0.316 * envelope * std::sin(2 * pi * hz * t)));
+        }
+    return out;
+}
+
 std::string MicCheck::summary() const
 {
     using V = MicCheck::Verdict;

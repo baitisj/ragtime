@@ -86,6 +86,15 @@ public:
     // replacing anything playing. finished(true) once it has all been
     // heard, finished(false) if it was stopped, replaced or couldn't play.
     virtual void play(std::vector<float> samples, int rate, Finished finished) = 0;
+    // A clip that plays as it comes (voice arriving in a ragchew): it
+    // starts empty, replacing anything playing; append() adds to it and it
+    // plays on with no gap; while nothing new has come the speaker plays
+    // silence. endStream() says nothing more is coming, and finished(true)
+    // follows once it has all been heard. append and endStream do nothing
+    // once the clip has been stopped or replaced.
+    virtual void playStream(int rate, Finished finished) = 0;
+    virtual void append(const float* samples, std::size_t n) = 0;
+    virtual void endStream() = 0;
     virtual void stopPlaying() = 0;
     // How far into the clip playing the speaker has been handed, in
     // seconds (a buffer, 100 ms or so, ahead of the ear): for a playhead.
