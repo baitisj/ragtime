@@ -3,11 +3,15 @@
 // cards seen before stay left out while data2g-host is stopped; and the
 // pick falls past a default that is the radio's, refuses the radio picked
 // by hand and never swaps a missing pick for another.
+#include <algorithm>
+#include <cmath>
+#include <cstddef>
 #include <string>
 #include <vector>
 
 #include "Check.h"
 #include "ragtime/voice/Devices.h"
+#include "ragtime/voice/MicCheck.h"
 
 using namespace ragtime;
 using ragtime::ear::Graph;
@@ -104,7 +108,7 @@ void bothHalves()
     CHECK(!has(d.speakers, CODEC_OUT));
     CHECK(d.isRadio(CODEC_OUT));
     CHECK_EQ(d.radio.size(), 2u);
-    if (d.radio.size() == 2) CHECK(!d.radio[1].inUse);
+    if (d.radio.size() == 2) CHECK(!d.radio[1].inUse && d.radio[1].sameCard);
     CHECK_EQ(d.radioNow.size(), 2u);
 
     // On Windows built-in devices have no card id: their other half stays.
@@ -218,6 +222,68 @@ void picks()
     CHECK(!voice::describe(p, true).empty());
 }
 
+// A buzz at its loudest 10 ms RMS of dBFS, half the time, over hiss.
+std::vector<float> talk(double loudestDbfs, double noiseDbfs, int rate)
+{
+    std::vector<float> x((std::size_t)rate * 3);
+    const double square = std::pow(10.0, loudestDbfs / 20.0);
+    const double hiss = std::pow(10.0, noiseDbfs / 20.0) * std::sqrt(3.0);
+    unsigned seed = 1;
+    for (std::size_t i = 0; i < x.size(); i++)
+    {
+        seed = seed * 1103515245u + 12345u;
+        const double noise = hiss * (((double)(seed >> 8) / (double)(1u << 24)) * 2.0 - 1.0);
+        const bool talking = (i / ((std::size_t)rate / 2)) % 2 == 0;
+        // A square wave's RMS is its height.
+        const double buzz = talking ? (((i / 40) % 2) ? square : -square) : 0.0;
+        x[i] = (float)(buzz + noise);
+    }
+    return x;
+}
+
+void micCheck()
+{
+    using V = voice::MicCheck::Verdict;
+    const int rate = 48000;
+    std::vector<float> x = talk(-13.0, -60.0, rate);
+    voice::MicCheck c = voice::checkMicrophone(x.data(), x.size(), rate);
+    CHECK(std::fabs(c.loudestDbfs + 13.0) < 0.5);
+    CHECK(std::fabs(c.noiseDbfs + 60.0) < 1.5);
+    CHECK(c.verdict == V::Good && !c.noisy && !c.clipped);
+    CHECK_EQ(c.summary(), std::string("Loudest -13 dBFS, room -60 dBFS: good"));
+
+    x = talk(-25.0, -60.0, rate);
+    CHECK(voice::checkMicrophone(x.data(), x.size(), rate).verdict == V::Quiet);
+    x = talk(-45.0, -70.0, rate);
+    CHECK(voice::checkMicrophone(x.data(), x.size(), rate).verdict == V::TooQuiet);
+    x = talk(-9.0, -60.0, rate);
+    CHECK(voice::checkMicrophone(x.data(), x.size(), rate).verdict == V::Loud);
+    // Over sotto's ceiling, by RMS.
+    x = talk(-5.0, -60.0, rate);
+    CHECK(voice::checkMicrophone(x.data(), x.size(), rate).verdict == V::TooLoud);
+    // A noisy room: the voice only 20 dB over it.
+    x = talk(-13.0, -33.0, rate);
+    c = voice::checkMicrophone(x.data(), x.size(), rate);
+    CHECK(c.noisy);
+    CHECK(c.summary().find("noisy") != std::string::npos);
+    // One clipped sample is clipping, however quiet the rest.
+    x = talk(-25.0, -60.0, rate);
+    x[1000] = 1.0f;
+    c = voice::checkMicrophone(x.data(), x.size(), rate);
+    CHECK(c.clipped && c.verdict == V::TooLoud);
+    // Digital silence, and nothing at all.
+    std::vector<float> silence((std::size_t)rate, 0.0f);
+    CHECK(voice::checkMicrophone(silence.data(), silence.size(), rate).verdict == V::Silent);
+    CHECK(voice::checkMicrophone(nullptr, 0, rate).verdict == V::Silent);
+
+    // The speaker's chime: under a second, never near full scale.
+    std::vector<float> chime = voice::testChime(8000);
+    CHECK_EQ(chime.size(), 6400u);
+    float peak = 0;
+    for (float v : chime) peak = std::max(peak, std::fabs(v));
+    CHECK(peak > 0.2f && peak < 0.35f);
+}
+
 } // namespace
 
 int main()
@@ -228,5 +294,6 @@ int main()
     twoHosts();
     remembered();
     picks();
+    micCheck();
     return ragtime_test::finish();
 }

@@ -13,6 +13,7 @@
 
 #include <cstddef>
 #include <string>
+#include <vector>
 
 namespace ragtime
 {
@@ -50,6 +51,10 @@ struct MicCheck
 };
 
 MicCheck checkMicrophone(const float* samples, std::size_t n, int rate);
+
+// What the speaker's Test plays: four notes of the pentatonic, rising, in
+// under a second, at -10 dBFS.
+std::vector<float> testChime(int rate);
 
 } // namespace voice
 } // namespace ragtime

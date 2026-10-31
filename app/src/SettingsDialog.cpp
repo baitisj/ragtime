@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <chrono>
 #include <cmath>
 #include <cstddef>
 #include <string>
@@ -11,10 +12,12 @@
 #include <wx/choice.h>
 #include <wx/combobox.h>
 #include <wx/filepicker.h>
+#include <wx/gauge.h>
 #include <wx/notebook.h>
 #include <wx/panel.h>
 #include <wx/radiobut.h>
 #include <wx/sizer.h>
+#include <wx/slider.h>
 #include <wx/spinctrl.h>
 #include <wx/statbox.h>
 #include <wx/stattext.h>
@@ -26,6 +29,7 @@
 #include "ragtime/link/HostLink.h"
 #include "ragtime/protocol/Fields.h"
 #include "ragtime/radio/Bands.h"
+#include "ragtime/voice/MicCheck.h"
 
 using namespace ragtime;
 
@@ -85,6 +89,15 @@ wxChoice* numberChoice(wxWindow* parent, const int (&values)[N], int value)
     return choice;
 }
 
+int64_t steadyMs()
+{
+    return std::chrono::duration_cast<std::chrono::milliseconds>(
+               std::chrono::steady_clock::now().time_since_epoch())
+        .count();
+}
+
+constexpr int MIC_TEST_MS = 3000;
+
 wxChoice* wordChoice(wxWindow* parent, const std::vector<wxString>& words, int selection)
 {
     auto* choice = new wxChoice(parent, wxID_ANY);
@@ -102,6 +115,7 @@ SettingsDialog::SettingsDialog(wxWindow* parent, const StationPrefs& prefs,
     : wxDialog(parent, wxID_ANY, "Settings")
     , setTxLevel_(std::move(setTxLevel))
     , txLevelTimer_(this)
+    , voiceTimer_(this)
     , openRig_(std::move(openRig))
     , testTimer_(this)
     , rigctldTimer_(this)
@@ -109,7 +123,14 @@ SettingsDialog::SettingsDialog(wxWindow* parent, const StationPrefs& prefs,
     auto* book = new wxNotebook(this, wxID_ANY);
     book->AddPage(stationPage(book, prefs, gears, txLevel), "Station");
     book->AddPage(rigPage(book, prefs), "Rig");
-    book->SetSelection(page == Page::Rig ? 1 : 0);
+    book->AddPage(voicePage(book, prefs), "Voice");
+    book->SetSelection(page == Page::Rig ? 1 : page == Page::Voice ? 2 : 0);
+    // Voice's audio opens only once its tab is looked at.
+    if (page == Page::Voice) CallAfter([this] { startVoice(); });
+    book->Bind(wxEVT_NOTEBOOK_PAGE_CHANGED, [this](wxBookCtrlEvent& event) {
+        if (event.GetSelection() == 2) startVoice();
+        event.Skip();
+    });
 
     problem_ = new wxStaticText(this, wxID_ANY, "");
     problem_->SetForegroundColour(badText());
@@ -167,6 +188,10 @@ SettingsDialog::~SettingsDialog()
     testTimer_.Stop();
     rigctldTimer_.Stop();
     txLevelTimer_.Stop();
+    voiceTimer_.Stop();
+    // Before the members its callbacks touch go.
+    if (voice_) voice_->stop();
+    voice_.reset();
 }
 
 //-------------------------------------------------------------------------
@@ -705,6 +730,11 @@ void SettingsDialog::onTestTimer(wxTimerEvent& event)
         sendTxLevel();
         return;
     }
+    if (&event.GetTimer() == &voiceTimer_)
+    {
+        onVoiceTimer();
+        return;
+    }
     if (!testRig_) return;
     rig::HamlibRig::Status s = testRig_->status();
     bool done = false;
@@ -800,6 +830,373 @@ void SettingsDialog::onRigctldTimer()
 }
 
 //-------------------------------------------------------------------------
+// Voice
+//-------------------------------------------------------------------------
+
+wxWindow* SettingsDialog::voicePage(wxNotebook* book, const StationPrefs& prefs)
+{
+    auto* page = new wxPanel(book);
+    rememberedRadio_ = loadVoiceRadioCards();
+    // The saved picks, until the audio says what is there.
+    microphoneNames_ = {""};
+    speakerNames_ = {""};
+    if (!prefs.voice.microphone.empty()) microphoneNames_.push_back(prefs.voice.microphone);
+    if (!prefs.voice.speaker.empty()) speakerNames_.push_back(prefs.voice.speaker);
+
+    auto* mic = new wxStaticBoxSizer(wxVERTICAL, page, "Microphone");
+    wxWindow* box = mic->GetStaticBox();
+    microphone_ = new wxChoice(box, wxID_ANY);
+    microphone_->Append("System default");
+    if (!prefs.voice.microphone.empty()) microphone_->Append(utf8(prefs.voice.microphone));
+    microphone_->SetSelection(microphone_->GetCount() - 1);
+    microphone_->SetMinSize(wxSize(FromDIP(340), -1));
+    microphone_->SetToolTip("Your microphone, for voice messages. The radio's sound card is never offered: Ragtime "
+                            "never records the band as your voice.");
+    microphoneTest_ = new wxButton(box, wxID_ANY, "Test");
+    microphoneTest_->SetToolTip("Records three seconds, says how the level suits sotto, and plays them back on the "
+                                "speaker below. Say a sentence as you would on the air.");
+    level_ = new wxGauge(box, wxID_ANY, 60, wxDefaultPosition, wxSize(-1, FromDIP(10)));
+    level_->SetToolTip("The microphone's loudest 10 ms, from -60 to 0 dBFS, while it tests");
+    microphoneStatus_ = new wxStaticText(box, wxID_ANY, "", wxDefaultPosition, wxDefaultSize, wxST_ELLIPSIZE_END);
+    auto* micRow = new wxBoxSizer(wxHORIZONTAL);
+    micRow->Add(microphone_, 1, wxALIGN_CENTER_VERTICAL | wxRIGHT, 6);
+    micRow->Add(microphoneTest_, 0, wxALIGN_CENTER_VERTICAL);
+    mic->Add(micRow, 0, wxEXPAND | wxLEFT | wxRIGHT | wxTOP, 6);
+    mic->Add(level_, 0, wxEXPAND | wxLEFT | wxRIGHT | wxTOP, 6);
+    mic->Add(microphoneStatus_, 0, wxEXPAND | wxALL, 6);
+
+    auto* spk = new wxStaticBoxSizer(wxVERTICAL, page, "Speaker");
+    box = spk->GetStaticBox();
+    speaker_ = new wxChoice(box, wxID_ANY);
+    speaker_->Append("System default");
+    if (!prefs.voice.speaker.empty()) speaker_->Append(utf8(prefs.voice.speaker));
+    speaker_->SetSelection(speaker_->GetCount() - 1);
+    speaker_->SetMinSize(wxSize(FromDIP(340), -1));
+    speaker_->SetToolTip("Where voice messages play. The radio's sound card is never offered: Ragtime never plays "
+                         "to the radio.");
+    speakerTest_ = new wxButton(box, wxID_ANY, "Test");
+    speakerTest_->SetToolTip("Plays a short chime");
+    volume_ = new wxSlider(box, wxID_ANY, (int)std::lround(prefs.voice.volumeDb), (int)VOICE_VOLUME_MIN_DB,
+                           (int)VOICE_VOLUME_MAX_DB);
+    volume_->SetToolTip("The voice messages' volume, in dB; 0 plays them as they came");
+    volumeLabel_ = new wxStaticText(box, wxID_ANY, "+00 dB");
+    volumeLabel_->SetMinSize(volumeLabel_->GetBestSize());
+    speakerStatus_ = new wxStaticText(box, wxID_ANY, "", wxDefaultPosition, wxDefaultSize, wxST_ELLIPSIZE_END);
+    auto* spkRow = new wxBoxSizer(wxHORIZONTAL);
+    spkRow->Add(speaker_, 1, wxALIGN_CENTER_VERTICAL | wxRIGHT, 6);
+    spkRow->Add(speakerTest_, 0, wxALIGN_CENTER_VERTICAL);
+    auto* volumeRow = new wxBoxSizer(wxHORIZONTAL);
+    volumeRow->Add(new wxStaticText(box, wxID_ANY, "Volume"), 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 6);
+    volumeRow->Add(volume_, 1, wxALIGN_CENTER_VERTICAL | wxRIGHT, 6);
+    volumeRow->Add(volumeLabel_, 0, wxALIGN_CENTER_VERTICAL);
+    spk->Add(spkRow, 0, wxEXPAND | wxLEFT | wxRIGHT | wxTOP, 6);
+    spk->Add(volumeRow, 0, wxEXPAND | wxLEFT | wxRIGHT | wxTOP, 6);
+    spk->Add(speakerStatus_, 0, wxEXPAND | wxALL, 6);
+
+    auto* radio = new wxStaticBoxSizer(wxVERTICAL, page, "Left out: the radio's sound card");
+    box = radio->GetStaticBox();
+    auto* why = new wxStaticText(box, wxID_ANY,
+                                 "Every card data2g-host records from or plays to is the radio's, with its other "
+                                 "half, and is remembered for when data2g-host isn't running.");
+    why->SetForegroundColour(secondaryText());
+    why->Wrap(FromDIP(460));
+    radioCards_ = new wxStaticText(box, wxID_ANY, "");
+    forgetRadio_ = new wxButton(box, wxID_ANY, "Forget");
+    forgetRadio_->SetToolTip("Forgets the cards remembered from before, for a radio you no longer use. The ones "
+                             "data2g-host uses now stay left out.");
+    auto* cardsRow = new wxBoxSizer(wxHORIZONTAL);
+    cardsRow->Add(radioCards_, 1, wxALIGN_CENTER_VERTICAL | wxRIGHT, 6);
+    cardsRow->Add(forgetRadio_, 0, wxALIGN_TOP);
+    radio->Add(why, 0, wxEXPAND | wxLEFT | wxRIGHT | wxTOP, 6);
+    radio->Add(cardsRow, 0, wxEXPAND | wxALL, 6);
+
+    auto* sizer = new wxBoxSizer(wxVERTICAL);
+    sizer->Add(mic, 0, wxEXPAND | wxLEFT | wxRIGHT | wxTOP, 12);
+    sizer->Add(spk, 0, wxEXPAND | wxLEFT | wxRIGHT | wxTOP, 12);
+    sizer->Add(radio, 0, wxEXPAND | wxALL, 12);
+    page->SetSizer(sizer);
+
+    auto showVolume = [this] {
+        const int dB = volume_->GetValue();
+        volumeLabel_->SetLabel(wxString::Format("%+d dB", dB));
+        if (voice_) voice_->setVolume(voiceGain(dB));
+    };
+    showVolume();
+    volume_->Bind(wxEVT_SLIDER, [showVolume](wxCommandEvent&) { showVolume(); });
+    microphone_->Bind(wxEVT_CHOICE, [this](wxCommandEvent&) {
+        if (voice_) voice_->chooseMicrophone(pickedMicrophone());
+    });
+    speaker_->Bind(wxEVT_CHOICE, [this](wxCommandEvent&) {
+        if (voice_) voice_->chooseSpeaker(pickedSpeaker());
+    });
+    microphoneTest_->Bind(wxEVT_BUTTON, [this](wxCommandEvent&) { testMicrophone(); });
+    speakerTest_->Bind(wxEVT_BUTTON, [this](wxCommandEvent&) { testSpeaker(); });
+    forgetRadio_->Bind(wxEVT_BUTTON, [this](wxCommandEvent&) {
+        rememberedRadio_.clear();
+        saveVoiceRadioCards(rememberedRadio_);
+        if (voice_) voice_->forgetRadio();
+    });
+    microphoneTest_->Disable();
+    speakerTest_->Disable();
+    forgetRadio_->Disable();
+    microphoneStatus_->SetForegroundColour(secondaryText());
+    microphoneStatus_->SetLabel("Looking for the sound cards...");
+    return page;
+}
+
+void SettingsDialog::startVoice()
+{
+    if (voice_) return;
+    voice_ = audio::makeVoiceAudio();
+    voice_->start(nullptr, rememberedRadio_);
+    voice_->chooseMicrophone(pickedMicrophone());
+    voice_->chooseSpeaker(pickedSpeaker());
+    voice_->setVolume(voiceGain(volume_->GetValue()));
+    voiceTimer_.Start(100);
+}
+
+std::string SettingsDialog::pickedMicrophone() const
+{
+    const int i = microphone_->GetSelection();
+    return i >= 0 && (size_t)i < microphoneNames_.size() ? microphoneNames_[(size_t)i] : std::string();
+}
+
+std::string SettingsDialog::pickedSpeaker() const
+{
+    const int i = speaker_->GetSelection();
+    return i >= 0 && (size_t)i < speakerNames_.size() ? speakerNames_[(size_t)i] : std::string();
+}
+
+namespace
+{
+
+// A dropdown's entries: the default, the devices, and the pick if it is
+// gone or the radio's, so it is never lost by opening Settings.
+void fillDevices(wxChoice* choice, std::vector<std::string>& names, const std::vector<ear::GraphNode>& devices,
+                 const voice::Devices& all, const std::string& picked)
+{
+    choice->Freeze();
+    choice->Clear();
+    names.clear();
+    choice->Append("System default");
+    names.push_back("");
+    int selection = 0;
+    for (const ear::GraphNode& n : devices)
+    {
+        if (n.name == picked) selection = (int)names.size();
+        choice->Append(utf8(voice::label(n)));
+        names.push_back(n.name);
+    }
+    if (!picked.empty() && selection == 0)
+    {
+        wxString text = utf8(picked) + "  (not plugged in)";
+        for (const voice::RadioCard& r : all.radio)
+            if (r.node.name == picked) text = utf8(voice::label(r.node)) + "  (the radio's: refused)";
+        selection = (int)names.size();
+        choice->Append(text);
+        names.push_back(picked);
+    }
+    choice->SetSelection(selection);
+    choice->Thaw();
+}
+
+std::string radioLine(const voice::RadioCard& r)
+{
+    std::string why;
+    if (r.inUse)
+        why = r.input ? "data2g-host records from it" : "data2g-host plays to it";
+    else if (r.sameCard)
+        why = "on the card data2g-host uses";
+    else if (r.remembered)
+        why = "data2g-host used it before";
+    else
+        why = "the other half of data2g-host's card";
+    return voice::label(r.node) + (r.input ? ", input: " : ", output: ") + why;
+}
+
+} // namespace
+
+void SettingsDialog::showVoiceDevices(const audio::VoiceStatus& status)
+{
+    // Refilled only when what they show changes, so an open list stays put.
+    std::string key;
+    for (const ear::GraphNode& n : status.devices.microphones) key += "m" + n.name + "\n";
+    for (const ear::GraphNode& n : status.devices.speakers) key += "s" + n.name + "\n";
+    for (const voice::RadioCard& r : status.devices.radio)
+        key += "r" + r.node.name + (r.inUse ? "1" : "0") + (r.remembered ? "1" : "0") + "\n";
+    if (key == shownDevices_) return;
+    shownDevices_ = key;
+    fillDevices(microphone_, microphoneNames_, status.devices.microphones, status.devices, pickedMicrophone());
+    fillDevices(speaker_, speakerNames_, status.devices.speakers, status.devices, pickedSpeaker());
+    std::string lines;
+    bool remembered = false;
+    for (const voice::RadioCard& r : status.devices.radio)
+    {
+        lines += (lines.empty() ? "" : "\n") + radioLine(r);
+        remembered = remembered || (r.remembered && !r.inUse && !r.sameCard);
+    }
+    if (lines.empty()) lines = "None seen yet: start data2g-host and it is found";
+    radioCards_->SetLabel(utf8(lines));
+    radioCards_->SetForegroundColour(status.devices.radio.empty() ? secondaryText() : GetForegroundColour());
+    forgetRadio_->Enable(remembered || !rememberedRadio_.empty());
+    radioCards_->GetParent()->GetParent()->Layout();
+    Layout();
+}
+
+void SettingsDialog::onVoiceTimer()
+{
+    if (!voice_) return;
+    const audio::VoiceStatus status = voice_->status();
+    if (!status.available)
+    {
+        microphoneStatus_->SetForegroundColour(badText());
+        microphoneStatus_->SetLabel(utf8(status.problem.empty() ? "Connecting..." : status.problem));
+        speakerStatus_->SetLabel("");
+        microphoneTest_->Disable();
+        speakerTest_->Disable();
+        return;
+    }
+    showVoiceDevices(status);
+    const std::vector<std::string> remembered = voice::rememberRadio(rememberedRadio_, status.devices.radioNow);
+    if (remembered != rememberedRadio_)
+    {
+        rememberedRadio_ = remembered;
+        saveVoiceRadioCards(rememberedRadio_);
+    }
+
+    if (voiceTest_ == VoiceTest::Recording)
+    {
+        // The meter: the loudest 10 ms since it last looked.
+        double loudest = -120.0;
+        bool done = steadyMs() - voiceTestMs_ >= MIC_TEST_MS;
+        {
+            std::lock_guard<std::mutex> lock(testMutex_);
+            const std::size_t step = testRate_ > 0 ? (std::size_t)testRate_ / 100 : 0;
+            for (std::size_t at = testLevelFrom_; step > 0 && at + step <= testSamples_.size(); at += step)
+            {
+                double sum = 0;
+                for (std::size_t i = at; i < at + step; i++) sum += (double)testSamples_[i] * testSamples_[i];
+                loudest = std::max(loudest, sum > 1e-12 ? 10.0 * std::log10(sum / (double)step) : -120.0);
+                testLevelFrom_ = at + step;
+            }
+        }
+        if (loudest > -120.0) level_->SetValue(std::max(0, std::min(60, (int)std::lround(loudest + 60.0))));
+        const int left = (int)((MIC_TEST_MS - (steadyMs() - voiceTestMs_) + 999) / 1000);
+        microphoneTest_->SetLabel(wxString::Format("Recording %d", std::max(1, left)));
+        if (!status.microphoneProblem.empty())
+        {
+            voiceTestResult_ = status.microphoneProblem;
+            done = true;
+        }
+        if (done) finishVoiceTest();
+    }
+    else if (voiceTest_ == VoiceTest::Playing)
+    {
+        const int finished = testFinished_.load();
+        if (finished >= 0)
+        {
+            voiceTest_ = VoiceTest::None;
+            microphoneTest_->SetLabel("Test");
+            const audio::VoiceStatus after = voice_->status();
+            if (finished == 0 && !after.speakerProblem.empty())
+            {
+                speakerStatus_->SetForegroundColour(badText());
+                speakerStatus_->SetLabel(utf8(after.speakerProblem));
+            }
+        }
+    }
+
+    if (voiceTest_ == VoiceTest::None)
+    {
+        level_->SetValue(0);
+        microphoneTest_->SetLabel("Test");
+        if (!voiceTestResult_.empty())
+        {
+            microphoneStatus_->SetLabel(utf8(voiceTestResult_));
+        }
+        else
+        {
+            microphoneStatus_->SetForegroundColour(status.microphone.usable() ? secondaryText() : badText());
+            microphoneStatus_->SetLabel(utf8(voice::describe(status.microphone, true)));
+        }
+        if (speakerStatus_->GetForegroundColour() != badText() || status.speaker.usable())
+        {
+            speakerStatus_->SetForegroundColour(status.speaker.usable() ? secondaryText() : badText());
+            speakerStatus_->SetLabel(utf8(voice::describe(status.speaker, false)));
+        }
+    }
+    microphoneTest_->Enable(voiceTest_ == VoiceTest::None && status.microphone.usable() && status.speaker.usable());
+    speakerTest_->Enable(voiceTest_ == VoiceTest::None && status.speaker.usable());
+    microphone_->Enable(voiceTest_ == VoiceTest::None);
+    speaker_->Enable(voiceTest_ == VoiceTest::None);
+}
+
+void SettingsDialog::testMicrophone()
+{
+    if (!voice_ || voiceTest_ != VoiceTest::None) return;
+    {
+        std::lock_guard<std::mutex> lock(testMutex_);
+        testSamples_.clear();
+        testRate_ = 0;
+        testLevelFrom_ = 0;
+    }
+    voiceTestResult_.clear();
+    voice_->listen([this](const float* samples, std::size_t n, int rate) {
+        std::lock_guard<std::mutex> lock(testMutex_);
+        // Three seconds and a little, never more.
+        if (testSamples_.size() > (std::size_t)rate * 4) return;
+        testSamples_.insert(testSamples_.end(), samples, samples + n);
+        testRate_ = rate;
+    });
+    voiceTest_ = VoiceTest::Recording;
+    voiceTestMs_ = steadyMs();
+    microphoneStatus_->SetForegroundColour(secondaryText());
+    microphoneStatus_->SetLabel("Say a sentence, as you would on the air...");
+    onVoiceTimer();
+}
+
+void SettingsDialog::finishVoiceTest()
+{
+    voice_->stopListening();
+    std::vector<float> samples;
+    int rate = 0;
+    {
+        std::lock_guard<std::mutex> lock(testMutex_);
+        samples.swap(testSamples_);
+        rate = testRate_;
+    }
+    if (rate <= 0 || samples.empty())
+    {
+        if (voiceTestResult_.empty()) voiceTestResult_ = "Nothing came from the microphone";
+        microphoneStatus_->SetForegroundColour(badText());
+        voiceTest_ = VoiceTest::None;
+        return;
+    }
+    const voice::MicCheck check = voice::checkMicrophone(samples.data(), samples.size(), rate);
+    voiceTestResult_ = check.summary();
+    const bool good = check.verdict == voice::MicCheck::Verdict::Good && !check.noisy;
+    const bool bad = check.verdict == voice::MicCheck::Verdict::Silent ||
+                     check.verdict == voice::MicCheck::Verdict::TooQuiet ||
+                     check.verdict == voice::MicCheck::Verdict::TooLoud;
+    microphoneStatus_->SetForegroundColour(good ? goodText() : bad ? badText() : GetForegroundColour());
+    microphoneStatus_->SetLabel(utf8(voiceTestResult_));
+    microphoneTest_->SetLabel("Playing back");
+    testFinished_ = -1;
+    voiceTest_ = VoiceTest::Playing;
+    voice_->play(std::move(samples), rate, [this](bool played) { testFinished_ = played ? 1 : 0; });
+}
+
+void SettingsDialog::testSpeaker()
+{
+    if (!voice_ || voiceTest_ != VoiceTest::None) return;
+    testFinished_ = -1;
+    voiceTest_ = VoiceTest::Playing;
+    speakerStatus_->SetForegroundColour(secondaryText());
+    voice_->play(voice::testChime(8000), 8000, [this](bool played) { testFinished_ = played ? 1 : 0; });
+    onVoiceTimer();
+}
+
+//-------------------------------------------------------------------------
 // Both
 //-------------------------------------------------------------------------
 
@@ -850,6 +1247,9 @@ StationPrefs SettingsDialog::prefs() const
     p.repairCapMinutes = repairCapMinutes_->GetValue();
     p.rig = rig();
     p.usSegmentsOnly = p.readsDial() && usSegmentsOnly_->GetValue();
+    p.voice.microphone = pickedMicrophone();
+    p.voice.speaker = pickedSpeaker();
+    p.voice.volumeDb = volume_->GetValue();
     return p;
 }
 

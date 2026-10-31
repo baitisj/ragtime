@@ -101,6 +101,11 @@ ragtime_test(ragtime_voice_cards_test VoiceCardsTest.cpp)
 add_executable(ragtime_ear_probe EarProbe.cpp)
 target_link_libraries(ragtime_ear_probe PRIVATE ragtime_audio)
 ragtime_warnings(ragtime_ear_probe)
+# Voice's microphone and speaker without the window: lists them, records
+# and plays back. Not a test: it needs a running PipeWire.
+add_executable(ragtime_voice_probe VoiceProbe.cpp)
+target_link_libraries(ragtime_voice_probe PRIVATE ragtime_audio)
+ragtime_warnings(ragtime_voice_probe)
 
 # The Cool-chic encoder's backward passes against PyTorch and finite differences.
 ragtime_test(ragtime_coolchic_fit_test CoolChicFitTest.cpp)
