@@ -83,6 +83,12 @@ add_library(ragtime_core STATIC
     # push to talk, with no drawing (app/src/VoiceDeck draws them).
     src/deck/Knob.cpp
     src/deck/Meters.cpp
+    # Voice: the processing chain from the microphone to sotto (high-pass,
+    # leveller, limiter, resampling) and the level figures; the noise
+    # reducer is handed in (denoise/).
+    src/voice/Chain.cpp
+    src/voice/Dsp.cpp
+    src/voice/Levels.cpp
 )
 
 target_include_directories(ragtime_core PUBLIC

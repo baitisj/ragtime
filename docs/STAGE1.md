@@ -1672,6 +1672,87 @@ file with a kind byte (docs/PROTOCOL.md, "Pictures").
   sending a smaller side by itself when the budget is very small (a
   smaller picture at the same bytes looks sharper).
 
+## Voice: the processing chain
+
+Voice PR 3 of the plan "Ragtime voice messages with sotto" (Jeff,
+2026-10-31): what the microphone deck does to a voice before sotto codes
+it, in core with no window (`core/src/voice/`, `voice::Chain`), and its
+noise reducer in `denoise/` (`ragtime_denoise`). The deck (PR 4) turns
+its knobs and reads its meters.
+
+    Gain -> 48 kHz -> high-pass -> noise reduction -> leveller
+         -> 8 kHz -> limiter -> sotto
+
+- **Levels.** sotto's own figures (sotto.h, the same in v3.5 and v3.6):
+  speech is aimed at an active level of -26 dBFS (ITU-T P.56), each 10 ms
+  saturates sotto's energy field above -7.3 dBFS RMS, and below
+  -76.2 dBFS it is sent as silence. Samples are floats where 1.0 is full
+  scale, levels dBFS of RMS (a full-scale sine is -3 dBFS). From v3.6
+  sotto codes the 200 to 3,700 Hz band's energy, never more than the full
+  band's, so measuring the full band errs on the safe side.
+- **Rates.** The microphone comes in at its own rate and is resampled to
+  48 kHz, where RNNoise works, in 10 ms blocks; the end of the chain is
+  sotto's 8 kHz. `voice::Resampler` is polyphase windowed sinc (Kaiser,
+  80 dB down, flat to 90% of the lower Nyquist frequency) for any ratio
+  of whole rates. The chain delays the voice about 21 ms, 31 with
+  RNNoise; `finish()` drains it when Push to talk is let go.
+- **High-pass.** Fourth-order Butterworth (24 dB an octave) at 80, 100 or
+  150 Hz: at 100 Hz, 60 Hz hum comes down 18 dB and 50 Hz 24 dB. Pushed
+  out, it passes the voice unchanged.
+- **Noise reduction.** RNNoise (Jean-Marc Valin, Xiph.Org, BSD-3-Clause),
+  fetched with git at 0.1.1 and built in: the last release with its
+  trained model in the repository, as 0.2 downloads its model from
+  media.xiph.org at build time (blocked in the cloud sandbox; 0.2's model
+  is better, and could replace it where the download works). It always
+  runs, so the Noise knob pushed in or out changes nothing but the mix:
+  the amount (70% by default) mixes the cleaned voice with the voice as
+  it was, delayed to match (RNNoise is one 10 ms frame behind). On a
+  synthetic voice 20 dB over fan noise, at 100% the quiet stretches fall
+  another 25 dB and the voice keeps its level. Plain white noise takes it
+  several seconds to learn; real noises, which fall with frequency, it
+  takes at once. `-DRAGTIME_RNNOISE=OFF` builds without, and the Noise
+  stage passes the voice through.
+- **Leveller.** A slow hand on the fader (`voice::Leveller`): it measures
+  the active level coming in over about 2 s of speech (`voice::LiveLevel`,
+  10 ms blocks over a gate 15.9 dB under the level found, as P.56's
+  threshold, and above the noise floor, with P.56's 200 ms hangover) and
+  moves its gain so that comes out at the Target, at most 3 dB a second
+  up and 6 down, on speech only, so pauses don't pump the room up. For the
+  first half second of speech it moves fast; after that it keeps its gain
+  from clip to clip. Gain from -30 to +30 dB.
+- **Peak mode** (Target popped out): a 10 ms block that would come out
+  over -10 dBFS (3 dB under sotto's ceiling) turns the gain down by its
+  overshoot at once, and that cut wears off at 1 dB a second of speech,
+  slower than the leveller moves, so a voice that keeps shouting stays
+  turned down. Pushed back in, the cut goes.
+- **Limiter.** Last, at 8 kHz, so it sees exactly what sotto gets: every
+  10 ms window's RMS under -8.3 dBFS (1 dB under sotto's ceiling) and
+  every sample under -1 dBFS, looking ahead 15 ms so the gain falls over
+  5 ms before a burst; it recovers with a 50 ms time constant. Below its
+  ceilings it leaves no trace.
+- **Meters.** `Chain::takeReadings()`, from any thread: the live active
+  level and the loudest 10 ms at the input (after Gain) and at the output,
+  the clip flag (a sample at full scale from the microphone), the
+  leveller's gain, the limiter's reduction, and RNNoise's voice
+  probability. Loudest, clip and reduction are the most since the last
+  call, so a window polling at 30 Hz misses nothing; it draws the hold
+  and fall itself. Settings (`ChainSettings`, clamped to the knobs'
+  ranges) may change from any thread and take effect at the next block.
+- **Level check** (`Chain::levelReport()`, per clip from `startClip()` to
+  `finish()`): Active is P.56 method B on the 8 kHz output, green within
+  3 dB of the Target, amber within 6. Loudest is the loudest 10 ms
+  (windows every 5 ms) before the limiter, green under -7.3 dBFS, amber up
+  to 3 dB over (the limiter took it), red beyond or if the microphone
+  clipped at all. Noise is the quietest tenth of the clip's 20 ms frames
+  (sotto's frames), green at least 30 dB under the voice, amber from 20.
+  The amber edges are first guesses.
+- **Trying it.** `build/tests/ragtime_voice_chain IN.wav OUT.wav` runs a
+  recording (16-bit or float WAV, any rate) through the chain with
+  RNNoise and writes what sotto would get, printing the Level check;
+  `--gain`, `--hp`, `--noise`, `--target` and `--peaks` set the knobs.
+  The unit tests use synthetic voices (`tests/VoiceSynth.h`, a formant
+  synthesiser), so no recordings are committed.
+
 ## Waiting on Andrew (via Jeff)
 
 - Read from Data2G's source on 2026-10-25 (`docs/DATA2G.md`): `BW1200`
