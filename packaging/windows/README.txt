@@ -58,12 +58,27 @@ pick and coded as JPEG 2000 to fit the airtime you allow. Pictures come
 from the air only as JPEG 2000. The ones you send are kept in
 %APPDATA%\Ragtime\sent-pictures.
 
+Voice
+-----
+
+The microphone button beside the picture button opens the microphone
+deck: hold Push to talk (or the space bar) to record a voice message for
+the net or the station you're in a session with, and let go to send it.
+It needs sotto.dll beside ragtime.exe. The radio's sound card is never
+offered as a microphone or speaker. The clips you send are kept in
+%APPDATA%\Ragtime\sent-voice.
+
 Ragtime is MIT licensed: see LICENSE.txt. It includes wxWidgets
 (https://wxwidgets.org, the wxWindows Library Licence), Hamlib
 (https://hamlib.github.io, LGPL 2.1), OpenJPEG (https://www.openjpeg.org,
 BSD), libwebp (https://chromium.googlesource.com/webm/libwebp, BSD),
-libde265 and libheif (https://github.com/strukturag, LGPL 3), each under
-its licence in the licences folder. Ragtime's source and the recipe that
+libde265 and libheif (https://github.com/strukturag, LGPL 3) and RNNoise
+(https://github.com/xiph/rnnoise, BSD), each under its licence in the
+licences folder. Voice messages are coded with sotto
+(https://github.com/baitisj/sotto, MIT), in sotto.dll beside ragtime.exe,
+which links Codec 2 (https://github.com/drowe67/codec2, LGPL 2.1) in its
+own DLL: Ragtime loads them when it starts and works without them, with no
+voice coding, so you can swap in your own build. Ragtime's source and the recipe that
 builds this zip (packaging/windows/make-zip.sh) are at
 https://github.com/baitisj/ragtime, to build it with your own copies of
 these libraries.

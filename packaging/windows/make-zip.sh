@@ -11,7 +11,12 @@
 # Hamlib, OpenJPEG, libwebp, libde265 and libheif into build-win (set
 # RAGTIME_WX_SOURCE or RAGTIME_HAMLIB_SOURCE to a checkout to use that
 # instead) and takes a while the first time. Set
-# BUILD_DIR to use another build tree. With Wine installed,
+# BUILD_DIR to use another build tree. For voice messages, set
+# RAGTIME_SOTTO_DLL_DIR to a folder holding sotto.dll and the libcodec2
+# DLL it links (a MinGW-w64 build of baitisj/sotto at the commit in
+# packaging/sotto.sh) and, if it has them, licences/sotto.txt and
+# licences/codec2.txt: they go beside ragtime.exe. Without it the zip has
+# no voice coding, and the microphone deck says so. With Wine installed,
 # `ctest --test-dir build-win` runs the unit tests as Windows programs.
 
 cd "$(dirname "$(realpath "$0")")/../.."
@@ -45,9 +50,22 @@ for pair in \
     "OpenJPEG:$DEPS/openjpeg/src/openjpeg_build/LICENSE" \
     "libwebp:$DEPS/webp/src/webp_build/COPYING" \
     "libde265:$DEPS/de265/src/de265_build/COPYING" \
-    "libheif:$DEPS/heif/src/heif_build/COPYING"; do
+    "libheif:$DEPS/heif/src/heif_build/COPYING" \
+    "RNNoise:$DEPS/rnnoise-src/COPYING"; do
     sed 's/$/\r/' "${pair#*:}" > "$WORK/$NAME/licences/${pair%%:*}.txt"
 done
+
+if [ -n "$RAGTIME_SOTTO_DLL_DIR" ]; then
+    cp "$RAGTIME_SOTTO_DLL_DIR"/sotto.dll "$WORK/$NAME/"
+    cp "$RAGTIME_SOTTO_DLL_DIR"/libcodec2*.dll "$WORK/$NAME/" 2>/dev/null || true
+    for l in sotto codec2; do
+        if [ -f "$RAGTIME_SOTTO_DLL_DIR/licences/$l.txt" ]; then
+            sed 's/$/\r/' "$RAGTIME_SOTTO_DLL_DIR/licences/$l.txt" > "$WORK/$NAME/licences/$l.txt"
+        fi
+    done
+else
+    echo "No RAGTIME_SOTTO_DLL_DIR: the zip goes without sotto.dll (no voice coding)" >&2
+fi
 
 mkdir -p dist
 rm -f "dist/$NAME.zip"
