@@ -80,11 +80,19 @@ if(RAGTIME_HAMLIB)
 endif()
 ragtime_test(ragtime_flight_recorder_test FlightRecorderTest.cpp)
 ragtime_test(ragtime_ear_test EarTest.cpp)
+# Voice's microphones and speakers (the radio's card left out) and the
+# microphone Test's verdict.
+ragtime_test(ragtime_voice_devices_test VoiceDevicesTest.cpp)
 # The Ear without its window, for the bench and checking a station by hand
 # (it only records). Not a test: it needs a running PipeWire.
 add_executable(ragtime_ear_probe EarProbe.cpp)
 target_link_libraries(ragtime_ear_probe PRIVATE ragtime_audio)
 ragtime_warnings(ragtime_ear_probe)
+# Voice's microphone and speaker without the window: lists them, records
+# and plays back. Not a test: it needs a running PipeWire.
+add_executable(ragtime_voice_probe VoiceProbe.cpp)
+target_link_libraries(ragtime_voice_probe PRIVATE ragtime_audio)
+ragtime_warnings(ragtime_voice_probe)
 
 # The Cool-chic encoder's backward passes against PyTorch and finite differences.
 ragtime_test(ragtime_coolchic_fit_test CoolChicFitTest.cpp)

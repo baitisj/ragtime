@@ -13,6 +13,21 @@
 #include "ragtime/radio/RigFilter.h"
 #include "ragtime/radio/RigSettings.h"
 
+// Settings > Voice: the microphone and speaker voice messages use, by
+// node name (PipeWire) or endpoint id (Windows), empty for the system's
+// default, and the speaker's volume in dB (keys::VOICE_*).
+struct VoicePrefs
+{
+    std::string microphone;
+    std::string speaker;
+    double volumeDb = 0.0;
+};
+
+constexpr double VOICE_VOLUME_MIN_DB = -30.0;
+constexpr double VOICE_VOLUME_MAX_DB = 6.0;
+// The volume as audio::VoiceAudio::setVolume takes it.
+float voiceGain(double volumeDb);
+
 // What Ragtime remembers between runs, in wxConfig (~/.Ragtime on Linux,
 // the registry on Windows, or the file given with --config). One place for
 // the keys, so the window, the dialogs and the connection agree on them.
@@ -45,6 +60,7 @@ struct StationPrefs
     // Receive only outside the US data segments, and while the dial isn't
     // known (needs a rig).
     bool usSegmentsOnly = false;
+    VoicePrefs voice;
 
     bool readsDial() const { return rig.source != ragtime::radio::RigSource::None; }
 };
@@ -79,6 +95,11 @@ void saveEarCalibration(const std::string& rig, const std::string& mode, int wid
 // (/Ear/Notch), or the IC-7100's line.
 ragtime::ear::NotchModel loadEarNotch(const std::string& rig, const std::string& mode);
 void saveEarNotch(const std::string& rig, const std::string& mode, const ragtime::ear::NotchModel& model);
+
+// The radio's sound cards voice has seen data2g-host use, left out of its
+// lists while data2g-host is stopped (voice::rememberRadio).
+std::vector<std::string> loadVoiceRadioCards();
+void saveVoiceRadioCards(const std::vector<std::string>& names);
 
 // The broadcast numbering is kept across restarts, one for each callsign
 // (docs/PROTOCOL.md, "Sequence numbers").
@@ -170,6 +191,14 @@ constexpr const char* PICTURES_AS_THEY_COME = "/Pictures/ShowAsTheyCome";   // u
 constexpr const char* EAR_SOURCE = "/Ear/Source";                    // a PipeWire source's node.name; empty follows data2g-host
 constexpr const char* EAR_SPEED = "/Ear/RowsPerSecond";               // the waterfall's rows a second
 constexpr const char* EAR_SPAN = "/Ear/SpanHz";                       // how high the picture goes; 0 is Auto
+// Voice messages (audio::VoiceAudio): the devices by node name (PipeWire)
+// or endpoint id (Windows), empty for the system's default; the speaker's
+// volume in dB (0 as it is); and the radio's cards seen before,
+// voice::joinNames, left out of both lists while data2g-host is stopped.
+constexpr const char* VOICE_MICROPHONE = "/Voice/Microphone";
+constexpr const char* VOICE_SPEAKER = "/Voice/Speaker";
+constexpr const char* VOICE_VOLUME = "/Voice/SpeakerVolumeDb";
+constexpr const char* VOICE_RADIO_CARDS = "/Voice/RadioCards";
 } // namespace keys
 
 #endif
