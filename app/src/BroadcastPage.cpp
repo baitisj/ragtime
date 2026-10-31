@@ -252,8 +252,27 @@ protected:
             if (owner_->onReact_) owner_->CallAfter([owner, id, code, takeBack]() { owner->onReact_(id, takeBack ? 0 : code); });
             return;
         }
+        const wxString href = link.GetHref();
+        if (href.StartsWith("voice:"))
+        {
+            // A voice card: a live file's, or a file line's from its file.
+            std::string key = m->file != 0 ? "b" + std::to_string(m->file) : m->path.empty() ? "" : "p" + m->path;
+            if (key.empty() || !owner_->onVoice_) return;
+            std::string what(href.utf8_str());
+            BroadcastPage* owner = owner_;
+            owner_->CallAfter([owner, key, what]() { owner->onVoice_(key, what); });
+            return;
+        }
+        if (href == "pastpicture")
+        {
+            if (m->path.empty() || !owner_->onViewPast_) return;
+            std::string path = m->path;
+            BroadcastPage* owner = owner_;
+            owner_->CallAfter([owner, path]() { owner->onViewPast_(path); });
+            return;
+        }
         if (m->file != 0 && owner_->onFileAction_)
-            owner_->onFileAction_(m->file, std::string(link.GetHref().utf8_str()));
+            owner_->onFileAction_(m->file, std::string(href.utf8_str()));
     }
 
     wxString OnGetItemMarkup(size_t n) const override
@@ -389,8 +408,22 @@ private:
         html << "<table width=\"100%\" cellspacing=\"0\" cellpadding=\"2\"><tr>"
              << "<td width=\"" << BADGE_ROOM << "\"></td>"
              << "<td valign=\"top\" nowrap><font" << font << ">" << clock(m.atMs) << "</font></td>"
-             << "<td valign=\"top\" width=\"100%\"><font" << font << "><b>" << who << "</b> a file: "
-             << htmlEscape(m.text) << "</font></td>"
+             << "<td valign=\"top\" width=\"100%\"><font" << font << "><b>" << who << "</b>"
+             << (m.voice ? " a voice message: " : m.picture ? " a picture: " : " a file: ") << htmlEscape(m.text)
+             << "</font>";
+        // A picture or a voice message kept, under its line from its file,
+        // as Ragtime showed it before it closed.
+        if (m.picture && !m.path.empty() && owner_->pastPictureHtml_)
+        {
+            wxString img = owner_->pastPictureHtml_(m.path, this, "pastpicture");
+            if (!img.empty()) html << "<br>" << img;
+        }
+        if (m.voice && !m.path.empty() && owner_->voiceHtml_)
+        {
+            wxString card = owner_->voiceHtml_("p" + m.path, this, picked);
+            if (!card.empty()) html << "<br>" << card;
+        }
+        html << "</td>"
              << "<td valign=\"top\" nowrap align=\"right\"><font" << font << ">" << htmlEscape(m.outcome)
              << "</font></td>"
              << "</tr></table>";
@@ -420,8 +453,14 @@ private:
              << "<td width=\"" << BADGE_ROOM << "\"></td>"
              << "<td valign=\"top\" nowrap><font" << colour(secondaryText()) << ">" << clock(m.atMs)
              << "</font></td>"
-             << "<td valign=\"top\" width=\"100%\"><b>" << who << "</b>" << (card.picture ? " a picture: " : " a file: ")
-             << htmlEscape(card.what);
+             << "<td valign=\"top\" width=\"100%\"><b>" << who << "</b>"
+             << (card.voice ? " a voice message: " : card.picture ? " a picture: " : " a file: ") << htmlEscape(card.what);
+        // A voice message's card, filling as it comes.
+        if (card.voice && owner_->voiceHtml_)
+        {
+            wxString voice = owner_->voiceHtml_("b" + std::to_string(m.file), this, picked);
+            if (!voice.empty()) html << "<br>" << voice;
+        }
         // A picture shows as it stands, sharper as more of it comes.
         if (card.picture && owner_->pictureHtml_)
         {
@@ -604,6 +643,11 @@ void BroadcastPage::refresh()
     shownVersion_ = chat_.version();
     shownSeals_ = seals;
     list_->showRows(chat_.messages().size());
+}
+
+void BroadcastPage::refreshVoices()
+{
+    list_->RefreshAll();
 }
 
 void BroadcastPage::setGearLabel(const wxString& label, const wxString& tooltip, double bitsPerSecond)

@@ -60,6 +60,7 @@ add_executable(ragtime WIN32
     src/Thresholds.cpp
     src/ToggleSwitch.cpp
     src/Theme.cpp
+    src/VoiceCards.cpp
     src/SwrBar.cpp
     src/ArrivalBar.cpp
     src/TxLamp.cpp

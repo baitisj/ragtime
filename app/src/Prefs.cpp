@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <cstdlib>
 #include <locale>
 #include <optional>
@@ -14,6 +15,7 @@
 #include <wx/utils.h>
 
 #include "ragtime/protocol/Fields.h"
+#include "ragtime/voice/Devices.h"
 
 using namespace ragtime;
 
@@ -118,6 +120,10 @@ StationPrefs loadStationPrefs()
     p.repairCapMinutes = std::min(std::max(p.repairCapMinutes, REPAIR_CAP_MIN_MINUTES), REPAIR_CAP_MAX_MINUTES);
     p.rig = loadRig();
     p.usSegmentsOnly = config().ReadBool("/Radio/UsSegmentsOnly", p.usSegmentsOnly);
+    p.voice.microphone = readString(keys::VOICE_MICROPHONE, "");
+    p.voice.speaker = readString(keys::VOICE_SPEAKER, "");
+    p.voice.volumeDb = std::min(std::max(config().ReadDouble(keys::VOICE_VOLUME, 0.0), VOICE_VOLUME_MIN_DB),
+                                VOICE_VOLUME_MAX_DB);
     return p;
 }
 
@@ -139,6 +145,25 @@ void saveStationPrefs(const StationPrefs& p)
     config().Write("/Broadcast/RepairCapMinutes", (long)p.repairCapMinutes);
     saveRig(p.rig);
     config().Write("/Radio/UsSegmentsOnly", p.usSegmentsOnly);
+    config().Write(keys::VOICE_MICROPHONE, wxString::FromUTF8(p.voice.microphone));
+    config().Write(keys::VOICE_SPEAKER, wxString::FromUTF8(p.voice.speaker));
+    config().Write(keys::VOICE_VOLUME, p.voice.volumeDb);
+    config().Flush();
+}
+
+float voiceGain(double volumeDb)
+{
+    return (float)std::pow(10.0, volumeDb / 20.0);
+}
+
+std::vector<std::string> loadVoiceRadioCards()
+{
+    return ragtime::voice::splitNames(readString(keys::VOICE_RADIO_CARDS, ""));
+}
+
+void saveVoiceRadioCards(const std::vector<std::string>& names)
+{
+    config().Write(keys::VOICE_RADIO_CARDS, wxString::FromUTF8(ragtime::voice::joinNames(names)));
     config().Flush();
 }
 
@@ -483,6 +508,14 @@ std::string sentPicturesDir()
     if (!configPath.empty()) return configPath + ".sent-pictures";
     wxFileName dir = wxFileName::DirName(wxString::FromUTF8(appDataDir()));
     dir.AppendDir("sent-pictures");
+    return std::string(dir.GetPath().utf8_str());
+}
+
+std::string sentVoiceDir()
+{
+    if (!configPath.empty()) return configPath + ".sent-voice";
+    wxFileName dir = wxFileName::DirName(wxString::FromUTF8(appDataDir()));
+    dir.AppendDir("sent-voice");
     return std::string(dir.GetPath().utf8_str());
 }
 

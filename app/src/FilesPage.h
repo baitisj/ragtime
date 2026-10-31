@@ -47,6 +47,17 @@ public:
         onFinishedMenu_ = std::move(fn);
     }
     void onOpenFolder(std::function<void()> fn) { onOpenFolder_ = std::move(fn); }
+    // Voice messages (docs/STAGE1.md, "Voice cards"): a finished one shows
+    // a play sign before its name (a stop sign while it plays), and a
+    // double click or Play on its menu plays it, or stops it.
+    void onPlayVoice(std::function<void(const ragtime::files::FinishedFile&)> play,
+                     std::function<bool(const std::string& path)> playing)
+    {
+        onPlayVoice_ = std::move(play);
+        isPlaying_ = std::move(playing);
+    }
+    // The play and stop signs again, when what plays has changed.
+    void showPlaying();
 
     // Draws the bar in the Progress column.
     const ragtime::files::FileRow* rowAt(size_t n) const { return n < rows_.size() ? &rows_[n] : nullptr; }
@@ -55,6 +66,8 @@ private:
     void showRowMenu(wxDataViewEvent& e);
     void showFinishedMenu(wxDataViewEvent& e);
     void openFinished(const ragtime::files::FinishedFile& f, bool folder);
+    // A finished file's name in the list: a voice message's with its sign.
+    wxString finishedName(const ragtime::files::FinishedFile& f) const;
     const ragtime::files::FinishedFile* finishedAt(int row) const;
 
     ragtime::files::FileHistory& history_;
@@ -72,6 +85,8 @@ private:
     std::function<void(const ragtime::files::FileRow&, wxMenu&)> onRowMenu_;
     std::function<void(const ragtime::files::FinishedFile&, wxMenu&)> onFinishedMenu_;
     std::function<void()> onOpenFolder_;
+    std::function<void(const ragtime::files::FinishedFile&)> onPlayVoice_;
+    std::function<bool(const std::string&)> isPlaying_;
 };
 
 // Opens a file or a folder with the desktop's own program.
