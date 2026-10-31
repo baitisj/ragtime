@@ -157,18 +157,39 @@ public:
 
     void play(std::vector<float> samples, int rate, Finished finished) override
     {
+        begin(std::move(samples), rate, false, std::move(finished));
+    }
+
+    void playStream(int rate, Finished finished) override { begin({}, rate, true, std::move(finished)); }
+
+    void append(const float* samples, std::size_t n) override
+    {
+        locked([&] {
+            if (open_ && samples) clip_.insert(clip_.end(), samples, samples + n);
+        });
+    }
+
+    void endStream() override
+    {
+        locked([&] { open_ = false; });
+    }
+
+private:
+    void begin(std::vector<float> samples, int rate, bool open, Finished finished)
+    {
         Finished before;
         locked([&] {
             before = endPlayback();
             clip_ = std::move(samples);
             clipRate_ = rate;
+            open_ = open;
             position_ = 0;
             finished_ = std::move(finished);
             {
                 std::lock_guard<std::mutex> lock(statusMutex_);
                 status_.speakerProblem.clear();
             }
-            if (!core_ || rate <= 0 || clip_.empty())
+            if (!core_ || rate <= 0 || (clip_.empty() && !open_))
                 failPlayback(core_ ? "Nothing to play" : "No sound: PipeWire isn't connected");
             else if (!speaker_.usable())
                 failPlayback(voice::describe(speaker_, false));
@@ -186,6 +207,7 @@ public:
         notify();
     }
 
+public:
     void stopPlaying() override
     {
         Finished finished;
@@ -606,6 +628,7 @@ private:
     {
         destroyPlayback();
         clip_.clear();
+        open_ = false;
         position_ = 0;
         handed_ = 0;
         playingRate_ = 0;
@@ -622,6 +645,13 @@ private:
     {
         PipeWireApi& pw = api();
         if (!playback_ || flushed_) return;
+        if (position_ >= clip_.size() && !open_)
+        {
+            // All written: drained says when it has all been heard.
+            flushed_ = true;
+            pw.streamFlush(playback_, true);
+            return;
+        }
         pw_buffer* b = pw.streamDequeueBuffer(playback_);
         if (!b) return;
         spa_buffer* buf = b->buffer;
@@ -631,20 +661,28 @@ private:
             return;
         }
         spa_data& d = buf->datas[0];
-        std::size_t room = std::min<std::size_t>(d.maxsize / sizeof(float), MOST_FRAMES);
-        const std::size_t n = std::min(room, clip_.size() - position_);
+        const std::size_t room = std::min<std::size_t>(d.maxsize / sizeof(float), MOST_FRAMES);
         float* out = static_cast<float*>(d.data);
-        const float gain = volume_.load();
-        for (std::size_t i = 0; i < n; i++) out[i] = clip_[position_ + i] * gain;
-        position_ += n;
-        handed_ = position_;
+        std::size_t n = std::min(room, clip_.size() - position_);
+        if (n > 0)
+        {
+            const float gain = volume_.load();
+            for (std::size_t i = 0; i < n; i++) out[i] = clip_[position_ + i] * gain;
+            position_ += n;
+            handed_ = position_;
+        }
+        else
+        {
+            // Waiting for more of a clip still coming: 20 ms of silence.
+            n = std::min(room, (std::size_t)std::max(1, clipRate_ / 50));
+            std::memset(out, 0, n * sizeof(float));
+        }
         d.chunk->offset = 0;
         d.chunk->stride = sizeof(float);
         d.chunk->size = (uint32_t)(n * sizeof(float));
         pw.streamQueueBuffer(playback_, b);
-        if (position_ >= clip_.size())
+        if (position_ >= clip_.size() && !open_)
         {
-            // All written: drained says when it has all been heard.
             flushed_ = true;
             pw.streamFlush(playback_, true);
         }
@@ -710,6 +748,7 @@ private:
     int captureRate_ = 0;
     uint32_t playbackTarget_ = 0;
     std::vector<float> clip_;
+    bool open_ = false;     // more of the clip is coming (playStream)
     int clipRate_ = 0;
     std::size_t position_ = 0;
     bool flushed_ = false;
