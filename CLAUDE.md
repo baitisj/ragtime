@@ -245,6 +245,16 @@ and the Part 97 check.
   updating, Cancel asks first, then the arrival plays. Kind `0x02`
   (`protocol::FILE_COOLCHIC`, told from JPEG 2000 by the bytes). What
   the port taught us and what could be better: `docs/COOLCHIC_NOTES.md`.
+- Voice messages (2026-10-31, Jeff's idea; plan in the thread "Plan
+  Ragtime voice messages with sotto"): clips coded with sotto, Jeff's
+  2,400 bit/s vocoder, go as files of kind `0x03`
+  (`protocol::FILE_VOICE`). `core/src/voice/` has the `.sot` file (a
+  7-byte header, sotto's 6-byte frames, silence runs, the pause gate,
+  reading a prefix or a file with holes), the pitch strip drawn from the
+  frames' bits, and the airtime sums (docs/PROTOCOL.md, "Voice"). Codec
+  1 is sotto v3.6 (Jeff, 2026-10-31), frozen; libsotto (LGPL) is loaded
+  at run time, never linked. Its test clip `tests/data/voice/` is
+  LibriSpeech, CC BY 4.0.
 - The voice chain (2026-10-31, voice PR 3 of the sotto plan,
   `docs/STAGE1.md`): `voice::Chain` in `core/src/voice/` takes the
   microphone through Gain, 48 kHz, a high-pass, noise reduction, the
@@ -353,7 +363,7 @@ and the Part 97 check.
 
 | Path | What |
 | --- | --- |
-| `core/` | `ragtime_core`, the socket-free library: no wx, no sockets in the engines, all unit-tested. Headers in `core/include/ragtime/`, sources in `core/src/`, one subfolder per area: `protocol/`, `link/`, `text/`, `files/` (package B; G adds `FileRows`, `FileTraffic`), `globus/` (C), `gearbox/` (D), `broadcast/` (E, with `BroadcastLog`; H adds `Airtime`, `Seals`, `BroadcastFiles`), `session/` (F, and `SessionLog`; `StreamLog` for cuts), `radio/` (the dial from rigctld, the US data segments, the path log, Recent work, the rig settings and the PTT follower), `picture/` (inline pictures with no codec: the image, DPID downscaling, EXIF orientation, what fits a number of seconds), `ear/` (the Ear's spectrum, finding data2g-host's sound card in PipeWire's graph, the host's process by its port, Data2G's passbands, the filter's edges from the noise, the filter model, its trials and Calibrate), `voice/` (the voice chain from the microphone to sotto: high-pass, leveller, limiter, resampler, P.56 and the Level check; the noise reducer is handed in). Add sources to `core/CMakeLists.txt` |
+| `core/` | `ragtime_core`, the socket-free library: no wx, no sockets in the engines, all unit-tested. Headers in `core/include/ragtime/`, sources in `core/src/`, one subfolder per area: `protocol/`, `link/`, `text/`, `files/` (package B; G adds `FileRows`, `FileTraffic`), `globus/` (C), `gearbox/` (D), `broadcast/` (E, with `BroadcastLog`; H adds `Airtime`, `Seals`, `BroadcastFiles`), `session/` (F, and `SessionLog`; `StreamLog` for cuts), `radio/` (the dial from rigctld, the US data segments, the path log, Recent work, the rig settings and the PTT follower), `picture/` (inline pictures with no codec: the image, DPID downscaling, EXIF orientation, what fits a number of seconds), `ear/` (the Ear's spectrum, finding data2g-host's sound card in PipeWire's graph, the host's process by its port, Data2G's passbands, the filter's edges from the noise, the filter model, its trials and Calibrate), `voice/` (the `.sot` voice file, the pitch strip, voice airtime; and the voice chain from the microphone to sotto: high-pass, leveller, limiter, resampler, P.56 and the Level check, with the noise reducer handed in; no codec). Add sources to `core/CMakeLists.txt` |
 | `denoise/` | `ragtime_denoise`: RNNoise as the voice chain's `voice::Denoiser` (`denoise::makeRnNoise`). RNNoise 0.1.1 (BSD-3) is fetched with git at configure time and its C built here without our warning flags; `-DFETCHCONTENT_SOURCE_DIR_RNNOISE=<checkout>` builds offline, and `-DRAGTIME_RNNOISE=OFF` gives a stand-in that makes none |
 | `audio/` | `ragtime_audio`: `audio::EarAudio`, the Ear's listener, PipeWire loaded with `dlopen` (never linked) on its own thread, or on Windows WASAPI in shared mode (`WasapiEar.cpp`) on a thread of its own; `processListeningOn` (the host's process by its port: /proc, or Windows' TCP table); with `-DRAGTIME_PIPEWIRE=OFF` (and on the Mac) a stand-in that says the Ear can't listen |
 | `image/` | `ragtime_image`: the picture codecs, `image::load` (JPEG 2000, WebP, HEIF from disk), `image::encode` and `image::decode` (JPEG 2000 only, from the air). Kept out of core (no codecs there); with `-DRAGTIME_PICTURES=OFF` a stand-in that says pictures can't be made or shown. `cmake/BuildImageLibs.cmake` builds the four libraries statically for Windows (`-DRAGTIME_BUILD_IMAGE_LIBS=ON`) |
