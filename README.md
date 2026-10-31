@@ -109,16 +109,17 @@ To build it (needs `cmake`, `make`, a C compiler, `git` and
 
 It clones sotto, builds the Codec 2 fork that sotto carries (Ubuntu's own
 `libcodec2` won't do), and puts `libsotto.so.0` in `build-sotto/out/`.
-Then point Ragtime at it:
+A Ragtime built in the same checkout (`build/app/ragtime`, or any build
+folder there) finds it by itself, so just run Ragtime again. Ragtime looks
+for libsotto in these places, in order:
 
-    RAGTIME_SOTTO=$PWD/build-sotto/out/libsotto.so.0 ./build/app/ragtime
-
-Ragtime looks for libsotto in these places, in order:
-
-1. `$RAGTIME_SOTTO`, the full path to the file.
+1. `$RAGTIME_SOTTO`, the full path to the file, for a libsotto kept
+   anywhere else.
 2. Beside the `ragtime` program.
 3. `../lib/` from the program (where the AppImage keeps it).
-4. The system's library path (`libsotto.so.0`; `sotto.dll` on Windows).
+4. `build-sotto/out/` in the checkout the program was built in, up to
+   four folders above it.
+5. The system's library path (`libsotto.so.0`; `sotto.dll` on Windows).
 
 libsotto finds its `libcodec2` in the `build-sotto` folder, so leave that
 folder where it is. The microphone deck shows which sotto loaded (hover
