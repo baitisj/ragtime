@@ -108,7 +108,7 @@ void bothHalves()
     CHECK(!has(d.speakers, CODEC_OUT));
     CHECK(d.isRadio(CODEC_OUT));
     CHECK_EQ(d.radio.size(), 2u);
-    if (d.radio.size() == 2) CHECK(!d.radio[1].inUse);
+    if (d.radio.size() == 2) CHECK(!d.radio[1].inUse && d.radio[1].sameCard);
     CHECK_EQ(d.radioNow.size(), 2u);
 
     // On Windows built-in devices have no card id: their other half stays.

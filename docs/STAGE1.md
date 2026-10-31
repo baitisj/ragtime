@@ -1672,6 +1672,83 @@ file with a kind byte (docs/PROTOCOL.md, "Pictures").
   sending a smaller side by itself when the budget is very small (a
   smaller picture at the same bytes looks sharper).
 
+## Voice audio
+
+Voice messages (Jeff, 2026-10-31; the plan is the Claude Doc
+"Ragtime voice messages with sotto: plan",
+https://claude.ai/artifact/TwATMvbfL9Uj7JxKvycZ5w, private to Jeff) need
+Ragtime's first microphone and speaker. This part is the audio and
+Settings > Voice; the deck, the voice cards and the file format come in
+their own PRs and use it.
+
+**`audio::VoiceAudio`** (`audio/include/ragtime/audio/VoiceAudio.h`), on
+the Ear's foundations: PipeWire loaded with `dlopen` on Linux
+(`PipeWireVoice.cpp`, sharing `PipeWireApi.h` with the Ear), WASAPI in
+shared mode on Windows (`WasapiVoice.cpp`, sharing `WasapiCommon.h`), and
+a stand-in that says why not with `-DRAGTIME_PIPEWIRE=OFF` or on the Mac.
+
+- The microphone is open only between `listen()` and `stopListening()`,
+  mono floats at the device's own rate (48 kHz typically).
+- `play()` plays one clip of mono floats at any rate: PipeWire, or the
+  Windows audio engine (`AUTOCONVERTPCM`), converts it to the speaker's.
+  It replaces anything playing; `finished(true)` comes once it has all
+  been heard. `playStream()`, `append()` and `endStream()` play a clip as
+  it comes, for voice arriving in a ragchew: one stream, no gap between
+  pieces, silence while it waits for more. `playPosition()` is for a
+  playhead, `setVolume()` applies at once.
+- Each stream is pinned to its device (`target.object`,
+  `node.dont-reconnect` on PipeWire), so the session manager never moves
+  it, least of all onto the radio.
+
+**Never the radio's sound card** (`voice::devices`, `core/src/voice/`).
+Every sound card a data2g program records from or plays to is the
+radio's: the source linked to each data2g capture and the sink linked
+from each data2g playback (or their targets while no link is up), for
+every data2g-host on the machine, since on the two-host bench both cards
+are radios. A card's other half goes too: a USB codec's input and output
+share PipeWire's `device.id` (on Windows, the endpoints' container id;
+built-in devices all share one container, so it isn't used for them).
+The names seen are remembered (`/Voice/RadioCards`), so the radio stays
+left out while data2g-host isn't running; Settings > Voice's Forget
+clears the ones not in use now. A pick that is the radio's is refused,
+a pick that has gone is reported missing rather than swapped for another
+(as the Ear does), and with no pick the system's default is used unless
+it is the radio's (plugging a USB codec in can make it the default),
+when the first other device is used instead.
+
+**Settings > Voice** (also Settings > Voice...): Microphone and Speaker,
+each a dropdown of the allowed devices with System default first, each
+with Test, the speaker's volume (-30 to +6 dB), and the radio's cards
+listed apart with why each is left out. The microphone's Test records
+three seconds with a level bar, says what sotto would make of the level
+(`voice::checkMicrophone`: the loudest 10 ms RMS against sotto's test
+voices at -15 to -11 dBFS and its ceiling at -7.3; the quietest tenth of
+20 ms frames for the room; a full-scale sample is clipping), and plays
+them back on the speaker. The speaker's Test plays a chime. The audio
+opens only once the tab is looked at. Keys: `/Voice/Microphone`,
+`/Voice/Speaker` (node name or endpoint id, empty for the default),
+`/Voice/SpeakerVolumeDb`.
+
+![Settings > Voice on the bench, the pretend radio left out](images/settings-voice.png)
+
+**The bench.** `tools/voice/pretend_desk.sh up` makes a pretend
+microphone, a pretend speaker and a pretend radio (input and output on
+one card, `device.id` 9999) with a stand-in data2g-host playing to the
+radio's output; `... down` removes them. `build/tests/ragtime_voice_probe`
+lists what voice may use and what it leaves out, and `--record N`,
+`--play` and `--stream` try the microphone, a clip and a clip in pieces.
+
+- Tested: on PipeWire 1.0 headless with the pretend desk (the radio's
+  input left out by its card, recording, the Test's verdict, playback to
+  the end, a streamed clip with a stall); under Wine 9 the WASAPI side
+  records and plays, an 8 kHz clip converted by the engine and a streamed
+  one. Wine lists no audio sessions, so leaving out the radio by data2g's
+  sessions is untested on Windows until someone tries a real one.
+- Not built: a radio card that data2g-host has never been seen to use
+  and that is the system's default output would be played to. A list of
+  radio interfaces by name (Burr-Brown "USB Audio CODEC", SignaLink,
+  Digirig) could catch that; it is left for now.
+
 ## Waiting on Andrew (via Jeff)
 
 - Read from Data2G's source on 2026-10-25 (`docs/DATA2G.md`): `BW1200`

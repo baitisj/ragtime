@@ -245,6 +245,15 @@ and the Part 97 check.
   updating, Cancel asks first, then the arrival plays. Kind `0x02`
   (`protocol::FILE_COOLCHIC`, told from JPEG 2000 by the bytes). What
   the port taught us and what could be better: `docs/COOLCHIC_NOTES.md`.
+- Voice audio (2026-10-31, voice PR 2 of the plan in
+  `docs/STAGE1.md`, "Voice audio"): `audio::VoiceAudio`, the
+  microphone and speaker on PipeWire and WASAPI (`PipeWireVoice.cpp`,
+  `WasapiVoice.cpp`; `PipeWireApi.h` and `WasapiCommon.h` shared with
+  the Ear), clips played whole or as they come; `voice::devices`
+  (`core/src/voice/Devices`) leaves out every card a data2g program
+  uses, both halves, and the ones remembered (`/Voice/RadioCards`);
+  `voice::checkMicrophone` for Settings > Voice's Test; the bench's
+  `tools/voice/pretend_desk.sh` and `ragtime_voice_probe`.
 - Data2G PR #98 (merged 2026-10-23) gives SNRs: on `BCAST HEARD` and
   `MISSED`, and `SN` for the session partner. Ragtime shows them in the
   station list's SNR column and feeds the gearshift's Auto the weakest
@@ -276,7 +285,10 @@ and the Part 97 check.
   `docs/DATA2G.md`, or Data2G has moved past its commit, read the source
   and update that page in the same PR.
 - Never start `data2g-host`; the operator runs it. Ragtime never plays
-  to the sound card or opens its ALSA devices. The Ear only records,
+  to the radio's sound card or opens its ALSA devices. Voice records
+  and plays only on the operator's own microphone and speaker, never a
+  card a data2g program uses (`voice::devices`, docs/STAGE1.md, "Voice
+  audio"). The Ear only records,
   through PipeWire (WASAPI's shared mode on Windows), alongside
   data2g-host, passive on the host's card and with a long latency so
   the host never notices (docs/STAGE1.md, "The Ear"). It keys the rig only with "Key the rig when
@@ -343,8 +355,8 @@ and the Part 97 check.
 
 | Path | What |
 | --- | --- |
-| `core/` | `ragtime_core`, the socket-free library: no wx, no sockets in the engines, all unit-tested. Headers in `core/include/ragtime/`, sources in `core/src/`, one subfolder per area: `protocol/`, `link/`, `text/`, `files/` (package B; G adds `FileRows`, `FileTraffic`), `globus/` (C), `gearbox/` (D), `broadcast/` (E, with `BroadcastLog`; H adds `Airtime`, `Seals`, `BroadcastFiles`), `session/` (F, and `SessionLog`; `StreamLog` for cuts), `radio/` (the dial from rigctld, the US data segments, the path log, Recent work, the rig settings and the PTT follower), `picture/` (inline pictures with no codec: the image, DPID downscaling, EXIF orientation, what fits a number of seconds), `ear/` (the Ear's spectrum, finding data2g-host's sound card in PipeWire's graph, the host's process by its port, Data2G's passbands, the filter's edges from the noise, the filter model, its trials and Calibrate). Add sources to `core/CMakeLists.txt` |
-| `audio/` | `ragtime_audio`: `audio::EarAudio`, the Ear's listener, PipeWire loaded with `dlopen` (never linked) on its own thread, or on Windows WASAPI in shared mode (`WasapiEar.cpp`) on a thread of its own; `processListeningOn` (the host's process by its port: /proc, or Windows' TCP table); with `-DRAGTIME_PIPEWIRE=OFF` (and on the Mac) a stand-in that says the Ear can't listen |
+| `core/` | `ragtime_core`, the socket-free library: no wx, no sockets in the engines, all unit-tested. Headers in `core/include/ragtime/`, sources in `core/src/`, one subfolder per area: `protocol/`, `link/`, `text/`, `files/` (package B; G adds `FileRows`, `FileTraffic`), `globus/` (C), `gearbox/` (D), `broadcast/` (E, with `BroadcastLog`; H adds `Airtime`, `Seals`, `BroadcastFiles`), `session/` (F, and `SessionLog`; `StreamLog` for cuts), `radio/` (the dial from rigctld, the US data segments, the path log, Recent work, the rig settings and the PTT follower), `picture/` (inline pictures with no codec: the image, DPID downscaling, EXIF orientation, what fits a number of seconds), `ear/` (the Ear's spectrum, finding data2g-host's sound card in PipeWire's graph, the host's process by its port, Data2G's passbands, the filter's edges from the noise, the filter model, its trials and Calibrate), `voice/` (voice messages: the microphones and speakers with the radio's card left out, the microphone Test's verdict). Add sources to `core/CMakeLists.txt` |
+| `audio/` | `ragtime_audio`: `audio::VoiceAudio`, voice's microphone and speaker (PipeWire or WASAPI, never the radio's card); `audio::EarAudio`, the Ear's listener, PipeWire loaded with `dlopen` (never linked) on its own thread, or on Windows WASAPI in shared mode (`WasapiEar.cpp`) on a thread of its own; `processListeningOn` (the host's process by its port: /proc, or Windows' TCP table); with `-DRAGTIME_PIPEWIRE=OFF` (and on the Mac) stand-ins that say the Ear can't listen and voice can't record |
 | `image/` | `ragtime_image`: the picture codecs, `image::load` (JPEG 2000, WebP, HEIF from disk), `image::encode` and `image::decode` (JPEG 2000 only, from the air). Kept out of core (no codecs there); with `-DRAGTIME_PICTURES=OFF` a stand-in that says pictures can't be made or shown. `cmake/BuildImageLibs.cmake` builds the four libraries statically for Windows (`-DRAGTIME_BUILD_IMAGE_LIBS=ON`) |
 | `rig/` | `ragtime_rig`: `rig::HamlibRig`, the rig opened with Hamlib on a thread of its own, Hamlib's rig list and the serial ports. Kept out of core (no ports there); with `-DRAGTIME_HAMLIB=OFF` a stand-in that says Hamlib is missing |
 | `app/` | The wxWidgets app (`app/src/`). It draws and wires; logic goes in core. `MainFrame` is the one main window and owns the engines; `HostConnection` (data2g-host) and `RigConnection` (rigctld: questions, and the Ear's filter settings) are the only code with sockets, and `RigControl` holds the rig as Settings > Rig has it; `Prefs` holds every wxConfig key, and `appDataDir()` is where Ragtime keeps its own files (never wx's `GetUserDataDir()`: on Linux that is `~/.Ragtime`, the settings file); `app/src/globus/` is the Globus pane (`GlobusPanel`, `GlobusView`, `GlobusToggle`) |

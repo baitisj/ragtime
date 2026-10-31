@@ -33,9 +33,10 @@ struct RadioCard
 {
     ear::GraphNode node;
     bool input = false;         // a source; otherwise a sink
-    // data2g-host records from it or plays to it now; otherwise it is
-    // the other half of such a card, or remembered from before.
+    // data2g-host records from it or plays to it now; or it is on the
+    // same card as one it does; or it is remembered from before.
     bool inUse = false;
+    bool sameCard = false;
     bool remembered = false;
 };
 

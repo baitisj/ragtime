@@ -1005,6 +1005,8 @@ std::string radioLine(const voice::RadioCard& r)
     std::string why;
     if (r.inUse)
         why = r.input ? "data2g-host records from it" : "data2g-host plays to it";
+    else if (r.sameCard)
+        why = "on the card data2g-host uses";
     else if (r.remembered)
         why = "data2g-host used it before";
     else
@@ -1031,12 +1033,13 @@ void SettingsDialog::showVoiceDevices(const audio::VoiceStatus& status)
     for (const voice::RadioCard& r : status.devices.radio)
     {
         lines += (lines.empty() ? "" : "\n") + radioLine(r);
-        remembered = remembered || (r.remembered && !r.inUse);
+        remembered = remembered || (r.remembered && !r.inUse && !r.sameCard);
     }
     if (lines.empty()) lines = "None seen yet: start data2g-host and it is found";
     radioCards_->SetLabel(utf8(lines));
     radioCards_->SetForegroundColour(status.devices.radio.empty() ? secondaryText() : GetForegroundColour());
     forgetRadio_->Enable(remembered || !rememberedRadio_.empty());
+    radioCards_->GetParent()->GetParent()->Layout();
     Layout();
 }
 
