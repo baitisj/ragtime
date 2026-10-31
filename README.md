@@ -51,7 +51,7 @@ thresholds...** in the gearshift. See [docs/GEARBOX.md](docs/GEARBOX.md).
 On Ubuntu 24.04:
 
     sudo apt-get install build-essential cmake pkg-config libwxgtk3.2-dev libgtk-3-dev libhamlib-dev libpipewire-0.3-dev \
-        libopenjp2-7-dev libwebp-dev libheif-dev libheif-plugin-libde265
+        libopenjp2-7-dev libwebp-dev libheif-dev libheif-plugin-libde265 git python3-numpy
     cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
     cmake --build build -j$(nproc)
     ctest --test-dir build --output-on-failure
@@ -72,6 +72,7 @@ have them under their own names.
 | PipeWire 0.3 headers | `libpipewire-0.3-dev` | The Ear's listening | `-DRAGTIME_PIPEWIRE=OFF` |
 | OpenJPEG 2.5 and libwebp | `libopenjp2-7-dev libwebp-dev` | Inline pictures: JPEG 2000 both ways, WebP read | `-DRAGTIME_PICTURES=OFF` |
 | libheif, with its libde265 plugin | `libheif-dev libheif-plugin-libde265` | Pictures read from HEIF (phones' `.heic`) | `-DRAGTIME_HEIF=OFF` |
+| git and NumPy | `git python3-numpy` | Building libsotto for voice when configuring (below) | `-DRAGTIME_BUILD_SOTTO=OFF`, or a warning and no voice |
 
 Warnings are errors by default. If a compiler we haven't tried stops
 the build on a warning, `-DRAGTIME_WERROR=OFF` lets it finish, and we'd
@@ -102,27 +103,35 @@ Play and the deck say libsotto is missing. Codec 1 is sotto v3.6, at
 the commit pinned in `packaging/sotto.sh`. Use that commit, because a
 different sotto codes differently.
 
-To build it (needs `cmake`, `make`, a C compiler, `git` and
-`python3-numpy`; about ten seconds):
+**The build makes it for you.** On Linux, configuring Ragtime (`cmake -S
+. -B build`) builds libsotto when none is found, in about ten seconds,
+into `build/build-sotto/out/`, where the program finds it. It runs once,
+and again only when the pinned commit changes. It needs `git`, `cmake`,
+`make`, a C compiler and `python3-numpy`
+(`sudo apt-get install python3-numpy`). If it can't build libsotto
+(offline, say), configuring goes on with a warning, and the next
+configure tries again. `-DRAGTIME_BUILD_SOTTO=OFF` turns it off.
+
+To build it by hand instead:
 
     packaging/build-sotto.sh      # build-sotto/out/libsotto.so.0 and libcodec2.so.1.2
 
-It clones sotto, builds the Codec 2 fork that sotto carries (Ubuntu's own
-`libcodec2` won't do), and puts `libsotto.so.0` in `build-sotto/out/`.
-A Ragtime built in the same checkout (`build/app/ragtime`, or any build
-folder there) finds it by itself, so just run Ragtime again. Ragtime looks
-for libsotto in these places, in order:
+Either way, it clones sotto, builds the Codec 2 fork that sotto carries
+(Ubuntu's own `libcodec2` won't do), and leaves `libsotto.so.0` in a
+`build-sotto/out/` folder. Ragtime looks for libsotto in these places,
+in order:
 
 1. `$RAGTIME_SOTTO`, the full path to the file, for a libsotto kept
    anywhere else.
 2. Beside the `ragtime` program.
 3. `../lib/` from the program (where the AppImage keeps it).
-4. `build-sotto/out/` in the checkout the program was built in, up to
-   four folders above it.
+4. `build-sotto/out/` in any of the four folders above the program:
+   the build folder's (from configuring) or the checkout's (from
+   `build-sotto.sh`).
 5. The system's library path (`libsotto.so.0`; `sotto.dll` on Windows).
 
-libsotto finds its `libcodec2` in the `build-sotto` folder, so leave that
-folder where it is. The microphone deck shows which sotto loaded (hover
+libsotto finds its `libcodec2` in its `build-sotto` folder, so leave
+that folder where it is. The microphone deck shows which sotto loaded (hover
 over its codec line to see the path), or why none did.
 
 The AppImage carries libsotto and its Codec 2 (`make-appimage.sh` runs

@@ -22,7 +22,7 @@ OUT="$ROOT/dist/Ragtime-$RAGTIME_RELEASE-$ARCH.AppImage"
 
 if [ -z "$BUILD_DIR" ]; then
     BUILD_DIR="$ROOT/build-appimage"
-    cmake -S . -B "$BUILD_DIR" -DCMAKE_BUILD_TYPE=Release -DRAGTIME_TESTS=OFF
+    cmake -S . -B "$BUILD_DIR" -DCMAKE_BUILD_TYPE=Release -DRAGTIME_TESTS=OFF -DRAGTIME_BUILD_SOTTO=OFF
     cmake --build "$BUILD_DIR" -j"$(nproc)"
 fi
 

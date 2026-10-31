@@ -41,9 +41,20 @@ option(RAGTIME_PICTURES "Inline pictures: JPEG 2000 (OpenJPEG) and WebP (libwebp
 option(RAGTIME_HEIF "Pictures read from HEIF files (libheif with libde265); needs libheif-dev." ON)
 option(RAGTIME_RNNOISE "Noise reduction for voice with RNNoise, fetched with git and built in (denoise/)." ON)
 option(RAGTIME_BUILD_IMAGE_LIBS "Fetch and build OpenJPEG, libwebp, libde265 and libheif statically instead of using the system's (the Windows build)." OFF)
+if(UNIX AND NOT APPLE AND NOT CMAKE_CROSSCOMPILING)
+    set(RAGTIME_BUILD_SOTTO_DEFAULT ON)
+else()
+    set(RAGTIME_BUILD_SOTTO_DEFAULT OFF)
+endif()
+option(RAGTIME_BUILD_SOTTO "Build libsotto for voice when configuring, if none is found (packaging/build-sotto.sh; Linux)." ${RAGTIME_BUILD_SOTTO_DEFAULT})
 
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
 include(RagtimeWarnings)
+
+# libsotto, loaded at run time for voice: built here if none is found.
+if(RAGTIME_BUILD_SOTTO)
+    include(BuildSotto)
+endif()
 
 if(RAGTIME_TESTS)
     enable_testing()
