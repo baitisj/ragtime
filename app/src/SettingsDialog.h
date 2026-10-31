@@ -1,8 +1,11 @@
 #ifndef RAGTIME_SETTINGS_DIALOG_H
 #define RAGTIME_SETTINGS_DIALOG_H
 
+#include <atomic>
+#include <cstdint>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <utility>
@@ -13,6 +16,7 @@
 
 #include "Prefs.h"
 #include "RigConnection.h"
+#include "ragtime/audio/VoiceAudio.h"
 #include "ragtime/rig/HamlibRig.h"
 
 class wxButton;
@@ -20,6 +24,8 @@ class wxCheckBox;
 class wxChoice;
 class wxComboBox;
 class wxDirPickerCtrl;
+class wxGauge;
+class wxSlider;
 class wxNotebook;
 class wxRadioButton;
 class wxSpinCtrl;
@@ -27,7 +33,7 @@ class wxSpinCtrlDouble;
 class wxStaticText;
 class wxTextCtrl;
 
-// Settings, in two tabs.
+// Settings, in three tabs.
 //
 // Station: the callsign and locator Ragtime sends, where data2g-host is,
 // where files go (the received folder, and the stations whose files are
@@ -42,6 +48,11 @@ class wxTextCtrl;
 // data2g-host keys" (off by default). Then receive only outside the US
 // data segments.
 //
+// Voice: the microphone and speaker voice messages use (audio::VoiceAudio),
+// never the radio's sound card, which is listed apart with why; Test on
+// each (three seconds recorded, what the level says, played back; a chime),
+// and the speaker's volume.
+//
 // Small enough for a 1366x768 screen.
 class SettingsDialog : public wxDialog
 {
@@ -50,6 +61,7 @@ public:
     {
         Station,
         Rig,
+        Voice,
     };
 
     // gears: the gearshift's ladder, most robust first, as (Data2G's mode,
@@ -78,6 +90,15 @@ private:
                           const std::vector<std::pair<std::string, std::string>>& gears,
                           std::optional<double> txLevel);
     wxWindow* rigPage(wxNotebook* book, const StationPrefs& prefs);
+    wxWindow* voicePage(wxNotebook* book, const StationPrefs& prefs);
+    void startVoice();
+    void onVoiceTimer();
+    void showVoiceDevices(const ragtime::audio::VoiceStatus& status);
+    std::string pickedMicrophone() const;
+    std::string pickedSpeaker() const;
+    void testMicrophone();
+    void testSpeaker();
+    void finishVoiceTest();
     ragtime::radio::RigSettings rig() const;
     // The model picked, if Hamlib knows it.
     const ragtime::rig::Model* pickedModel() const;
@@ -147,6 +168,38 @@ private:
     wxComboBox* pttPort_ = nullptr;
     std::vector<wxWindow*> keying_;                // what keyRig_ enables
     wxCheckBox* usSegmentsOnly_ = nullptr;
+
+    // Voice.
+    wxChoice* microphone_ = nullptr;
+    wxChoice* speaker_ = nullptr;
+    std::vector<std::string> microphoneNames_;     // microphone_'s, in order; "" (the default) first
+    std::vector<std::string> speakerNames_;
+    std::string shownDevices_;                     // what the lists were filled from
+    wxButton* microphoneTest_ = nullptr;
+    wxButton* speakerTest_ = nullptr;
+    wxGauge* level_ = nullptr;
+    wxStaticText* microphoneStatus_ = nullptr;
+    wxStaticText* speakerStatus_ = nullptr;
+    wxSlider* volume_ = nullptr;
+    wxStaticText* volumeLabel_ = nullptr;
+    wxStaticText* radioCards_ = nullptr;
+    wxButton* forgetRadio_ = nullptr;
+    std::unique_ptr<ragtime::audio::VoiceAudio> voice_;
+    wxTimer voiceTimer_;
+    std::vector<std::string> rememberedRadio_;
+    enum class VoiceTest
+    {
+        None,
+        Recording,
+        Playing,
+    } voiceTest_ = VoiceTest::None;
+    int64_t voiceTestMs_ = 0;
+    std::string voiceTestResult_;                  // the microphone Test's verdict, kept while it plays back
+    std::mutex testMutex_;                         // the audio thread adds, the timer reads
+    std::vector<float> testSamples_;
+    int testRate_ = 0;
+    std::size_t testLevelFrom_ = 0;                // the meter has read up to here
+    std::atomic<int> testFinished_{-1};            // the play back's finished: -1 not yet, 0 stopped, 1 heard
 
     wxStaticText* problem_ = nullptr;
 

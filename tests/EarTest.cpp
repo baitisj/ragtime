@@ -149,13 +149,13 @@ Graph hamlet()
     g.clients = {{33, "WirePlumber", 2000}, {851, "data2g-gui", 205757}, {867, "Firefox", 3000}};
     g.nodes = {
         {55, 30, "alsa_input.usb-Burr-Brown_USB_Audio_CODEC-00.analog-stereo-input", "USB Audio CODEC Analog Stereo",
-         "Audio/Source", "", ""},
+         "Audio/Source", "", "", ""},
         {54, 30, "alsa_output.usb-Burr-Brown_USB_Audio_CODEC-00.analog-stereo-output", "USB Audio CODEC Analog Stereo",
-         "Audio/Sink", "", ""},
-        {60, 30, "alsa_input.pci-0000_00_1f.3.analog-stereo", "Built-in Audio Analog Stereo", "Audio/Source", "", ""},
-        {129, 851, "data2g-gui", "", "Stream/Input/Audio", "data2g-gui", "55"},
-        {130, 851, "data2g-gui", "", "Stream/Output/Audio", "data2g-gui", "54"},
-        {140, 867, "Firefox", "", "Stream/Output/Audio", "Firefox", ""},
+         "Audio/Sink", "", "", ""},
+        {60, 30, "alsa_input.pci-0000_00_1f.3.analog-stereo", "Built-in Audio Analog Stereo", "Audio/Source", "", "", ""},
+        {129, 851, "data2g-gui", "", "Stream/Input/Audio", "data2g-gui", "55", ""},
+        {130, 851, "data2g-gui", "", "Stream/Output/Audio", "data2g-gui", "54", ""},
+        {140, 867, "Firefox", "", "Stream/Output/Audio", "Firefox", "", ""},
     };
     g.links = {{55, 129}, {130, 54}, {140, 54}};
     return g;
@@ -251,10 +251,10 @@ void twoHostsByPort()
     Graph g;
     g.clients = {{10, "data2g-host", 111}, {11, "data2g-host", 222}};
     g.nodes = {
-        {1, 0, "radio-a", "Radio A", "Audio/Source/Virtual", "", ""},
-        {2, 0, "radio-b", "Radio B", "Audio/Source/Virtual", "", ""},
-        {3, 10, "data2g-host", "", "Stream/Input/Audio", "", ""},
-        {4, 11, "data2g-host", "", "Stream/Input/Audio", "", ""},
+        {1, 0, "radio-a", "Radio A", "Audio/Source/Virtual", "", "", ""},
+        {2, 0, "radio-b", "Radio B", "Audio/Source/Virtual", "", "", ""},
+        {3, 10, "data2g-host", "", "Stream/Input/Audio", "", "", ""},
+        {4, 11, "data2g-host", "", "Stream/Input/Audio", "", "", ""},
     };
     g.links = {{1, 3}, {2, 4}};
     HostSearch s = findHostCapture(g, 222);
@@ -271,7 +271,7 @@ void twoHostsByPort()
     // No data2g at all; a recorder of another name doesn't count.
     Graph other;
     other.clients = {{5, "pw-record", 9}};
-    other.nodes = {{1, 0, "radio", "", "Audio/Source", "", ""}, {2, 5, "pw-record", "", "Stream/Input/Audio", "", ""}};
+    other.nodes = {{1, 0, "radio", "", "Audio/Source", "", "", ""}, {2, 5, "pw-record", "", "Stream/Input/Audio", "", "", ""}};
     other.links = {{1, 2}};
     s = findHostCapture(other, std::nullopt);
     CHECK(!s.found);
