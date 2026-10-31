@@ -169,6 +169,7 @@ private:
     wxStaticText* airGear_ = nullptr;
     wxChoice* speaker_ = nullptr;
     wxSlider* volume_ = nullptr;
+    wxCheckBox* arriving_ = nullptr;
     wxCheckBox* review_ = nullptr;
     wxStaticText* status_ = nullptr;
 

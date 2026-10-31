@@ -6,6 +6,7 @@
 
 #include <wx/bmpbuttn.h>
 #include <wx/button.h>
+#include <wx/tglbtn.h>
 #include <wx/clipbrd.h>
 #include <wx/datetime.h>
 #include <wx/htmllbox.h>
@@ -506,6 +507,10 @@ BroadcastPage::BroadcastPage(wxWindow* parent, const BroadcastChat& chat)
     picture_ = new wxBitmapButton(this, wxID_ANY, pictureIcon(wxSystemSettings::GetColour(wxSYS_COLOUR_BTNTEXT)));
     picture_->SetToolTip("Broadcast a picture to everyone on D2G: shrunk and coded as JPEG 2000 or Cool-chic to fit "
                          "the time you allow, shown as it comes");
+    // The microphone deck's button, left of the picture's.
+    mic_ = new wxBitmapToggleButton(this, wxID_ANY, microphoneIcon(wxSystemSettings::GetColour(wxSYS_COLOUR_BTNTEXT)));
+    mic_->SetToolTip("The microphone deck: hold Push to talk to record a voice message for the net, or for the "
+                     "station you're in a session with");
     // The gearshift: a speedometer with the gear's short name under it
     // ("A29") in small type, both drawn in the button's picture.
     gear_ = new wxBitmapButton(this, wxID_ANY, wxBitmapBundle(), wxDefaultPosition, wxDefaultSize, wxBU_EXACTFIT);
@@ -514,15 +519,18 @@ BroadcastPage::BroadcastPage(wxWindow* parent, const BroadcastChat& chat)
     send_ = new wxButton(this, wxID_ANY, "Send");
     file_->SetMinSize(wxSize(-1, std::max(file_->GetBestSize().y, send_->GetBestSize().y)));
     picture_->SetMinSize(wxSize(-1, std::max(picture_->GetBestSize().y, send_->GetBestSize().y)));
+    mic_->SetMinSize(wxSize(-1, std::max(mic_->GetBestSize().y, send_->GetBestSize().y)));
     gear_->SetMinSize(wxSize(FromDIP(48), send_->GetBestSize().y));
 
     // Send, the file button, then the gearshift, as on the Session tab
     // (Jeff, 2026-10-23); Tab moves through them in the same order.
-    picture_->MoveAfterInTabOrder(send_);
+    mic_->MoveAfterInTabOrder(send_);
+    picture_->MoveAfterInTabOrder(mic_);
     file_->MoveAfterInTabOrder(picture_);
     gear_->MoveAfterInTabOrder(file_);
     buttons_ = new wxBoxSizer(wxHORIZONTAL);
     buttons_->Add(send_, 0, wxALIGN_CENTER_VERTICAL | wxLEFT, 6);
+    buttons_->Add(mic_, 0, wxALIGN_CENTER_VERTICAL | wxLEFT, 6);
     buttons_->Add(picture_, 0, wxALIGN_CENTER_VERTICAL | wxLEFT, 6);
     buttons_->Add(file_, 0, wxALIGN_CENTER_VERTICAL | wxLEFT, 6);
     buttons_->Add(gear_, 0, wxALIGN_CENTER_VERTICAL | wxLEFT, 6);
@@ -560,11 +568,17 @@ BroadcastPage::BroadcastPage(wxWindow* parent, const BroadcastChat& chat)
     picture_->Bind(wxEVT_BUTTON, [this](wxCommandEvent&) {
         if (onBroadcastPicture_) onBroadcastPicture_();
     });
+    mic_->Bind(wxEVT_TOGGLEBUTTON, [this](wxCommandEvent&) {
+        // The deck says whether it is open (setVoiceDeckLit).
+        mic_->SetValue(!mic_->GetValue());
+        if (onVoiceDeck_) onVoiceDeck_();
+    });
     // The picture, the floppy and the speedometer follow the theme's text colour, light or dark.
     Bind(wxEVT_SYS_COLOUR_CHANGED, [this](wxSysColourChangedEvent& e) {
         const wxColour ink = wxSystemSettings::GetColour(wxSYS_COLOUR_BTNTEXT);
         file_->SetBitmap(floppyIcon(ink));
         picture_->SetBitmap(pictureIcon(ink));
+        mic_->SetBitmap(microphoneIcon(ink));
         drawGearButton();
         e.Skip();
     });
@@ -599,6 +613,11 @@ BroadcastPage::BroadcastPage(wxWindow* parent, const BroadcastChat& chat)
         e.Skip();
     });
     refresh();
+}
+
+void BroadcastPage::setVoiceDeckLit(bool lit)
+{
+    if (mic_->GetValue() != lit) mic_->SetValue(lit);
 }
 
 void BroadcastPage::arrange(int width)

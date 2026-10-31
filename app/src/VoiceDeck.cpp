@@ -437,6 +437,9 @@ void VoiceDeck::buildPanel()
         auto* vol = new wxStaticText(plate, wxID_ANY, "Volume");
         volume_ = new wxSlider(plate, wxID_ANY, 0, -30, 10, wxDefaultPosition, FromDIP(wxSize(110, -1)));
         volume_->SetToolTip("The speaker's volume, in dB");
+        arriving_ = new wxCheckBox(plate, wxID_ANY, "Play arriving voice");
+        arriving_->SetToolTip("While the deck is open, voice that arrives plays by itself, in the order it came.");
+        arriving_->SetValue(loadBool(keys::PLAY_ARRIVING_VOICE, true));
         review_ = new wxCheckBox(plate, wxID_ANY, "Hold my clips for review");
         review_->SetToolTip("Letting go of Push to talk keeps the clip here, with Monitor, Send and Discard, "
                             "instead of sending it at once.");
@@ -448,6 +451,7 @@ void VoiceDeck::buildPanel()
         strip->Add(speaker_, 1, wxALIGN_CENTER_VERTICAL | wxLEFT, FromDIP(6));
         strip->Add(vol, 0, wxALIGN_CENTER_VERTICAL | wxLEFT, FromDIP(14));
         strip->Add(volume_, 0, wxALIGN_CENTER_VERTICAL | wxLEFT, FromDIP(6));
+        strip->Add(arriving_, 0, wxALIGN_CENTER_VERTICAL | wxLEFT, FromDIP(14));
         strip->Add(review_, 0, wxALIGN_CENTER_VERTICAL | wxLEFT, FromDIP(14));
         strip->Add(status_, 2, wxALIGN_CENTER_VERTICAL | wxLEFT, FromDIP(14));
         strip->Add(close, 0, wxALIGN_CENTER_VERTICAL | wxLEFT, FromDIP(10));
@@ -487,6 +491,7 @@ void VoiceDeck::buildPanel()
         lastFrames_.clear();
     });
     review_->Bind(wxEVT_CHECKBOX, [this](wxCommandEvent&) { saveSettings(); });
+    arriving_->Bind(wxEVT_CHECKBOX, [this](wxCommandEvent&) { saveBool(keys::PLAY_ARRIVING_VOICE, arriving_->GetValue()); });
     microphone_->Bind(wxEVT_CHOICE, [this](wxCommandEvent&) {
         int i = microphone_->GetSelection();
         std::string name = i >= 0 && i < (int)micNames_.size() ? micNames_[(size_t)i] : std::string();
