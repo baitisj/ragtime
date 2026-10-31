@@ -70,6 +70,9 @@ add_library(ragtime_core STATIC
     # Inline pictures: the detail-preserving downscaler, orientation and
     # what fits the air (the codecs are in image/).
     src/picture/Picture.cpp
+    # Voice messages: the .sot file, the pitch strip and what a clip costs
+    # the air (no audio, no codec).
+    src/voice/Voice.cpp
     # Voice: the processing chain from the microphone to sotto (high-pass,
     # leveller, limiter, resampling) and the level figures; the noise
     # reducer is handed in (denoise/).
