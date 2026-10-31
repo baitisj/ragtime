@@ -97,6 +97,7 @@ Devices devices(const ear::Graph& graph, const std::vector<std::string>& remembe
         r.input = source;
         r.inUse = used.count(n.id) != 0;
         const bool twin = !n.device.empty() && cards.count(n.device) != 0;
+        r.sameCard = twin && !r.inUse;
         r.remembered = contains(remembered, n.name);
         if (r.inUse || twin)
         {

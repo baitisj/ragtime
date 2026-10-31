@@ -1670,6 +1670,164 @@ file with a kind byte (docs/PROTOCOL.md, "Pictures").
   sending a smaller side by itself when the budget is very small (a
   smaller picture at the same bytes looks sharper).
 
+## Voice audio
+
+Voice messages (Jeff, 2026-10-31; the plan is the Claude Doc
+"Ragtime voice messages with sotto: plan",
+https://claude.ai/artifact/TwATMvbfL9Uj7JxKvycZ5w, private to Jeff) need
+Ragtime's first microphone and speaker. This part is the audio and
+Settings > Voice; the deck, the voice cards and the file format come in
+their own PRs and use it.
+
+**`audio::VoiceAudio`** (`audio/include/ragtime/audio/VoiceAudio.h`), on
+the Ear's foundations: PipeWire loaded with `dlopen` on Linux
+(`PipeWireVoice.cpp`, sharing `PipeWireApi.h` with the Ear), WASAPI in
+shared mode on Windows (`WasapiVoice.cpp`, sharing `WasapiCommon.h`), and
+a stand-in that says why not with `-DRAGTIME_PIPEWIRE=OFF` or on the Mac.
+
+- The microphone is open only between `listen()` and `stopListening()`,
+  mono floats at the device's own rate (48 kHz typically).
+- `play()` plays one clip of mono floats at any rate: PipeWire, or the
+  Windows audio engine (`AUTOCONVERTPCM`), converts it to the speaker's.
+  It replaces anything playing; `finished(true)` comes once it has all
+  been heard. `playStream()`, `append()` and `endStream()` play a clip as
+  it comes, for voice arriving in a ragchew: one stream, no gap between
+  pieces, silence while it waits for more. `playPosition()` is for a
+  playhead, `setVolume()` applies at once.
+- Each stream is pinned to its device (`target.object`,
+  `node.dont-reconnect` on PipeWire), so the session manager never moves
+  it, least of all onto the radio.
+
+**Never the radio's sound card** (`voice::devices`, `core/src/voice/`).
+Every sound card a data2g program records from or plays to is the
+radio's: the source linked to each data2g capture and the sink linked
+from each data2g playback (or their targets while no link is up), for
+every data2g-host on the machine, since on the two-host bench both cards
+are radios. A card's other half goes too: a USB codec's input and output
+share PipeWire's `device.id` (on Windows, the endpoints' container id;
+built-in devices all share one container, so it isn't used for them).
+The names seen are remembered (`/Voice/RadioCards`), so the radio stays
+left out while data2g-host isn't running; Settings > Voice's Forget
+clears the ones not in use now. A pick that is the radio's is refused,
+a pick that has gone is reported missing rather than swapped for another
+(as the Ear does), and with no pick the system's default is used unless
+it is the radio's (plugging a USB codec in can make it the default),
+when the first other device is used instead.
+
+**Settings > Voice** (also Settings > Voice...): Microphone and Speaker,
+each a dropdown of the allowed devices with System default first, each
+with Test, the speaker's volume (-30 to +6 dB), and the radio's cards
+listed apart with why each is left out. The microphone's Test records
+three seconds with a level bar, says what sotto would make of the level
+(`voice::checkMicrophone`: the loudest 10 ms RMS against sotto's test
+voices at -15 to -11 dBFS and its ceiling at -7.3; the quietest tenth of
+20 ms frames for the room; a full-scale sample is clipping), and plays
+them back on the speaker. The speaker's Test plays a chime. The audio
+opens only once the tab is looked at. Keys: `/Voice/Microphone`,
+`/Voice/Speaker` (node name or endpoint id, empty for the default),
+`/Voice/SpeakerVolumeDb`.
+
+![Settings > Voice on the bench, the pretend radio left out](images/settings-voice.png)
+
+**The bench.** `tools/voice/pretend_desk.sh up` makes a pretend
+microphone, a pretend speaker and a pretend radio (input and output on
+one card, `device.id` 9999) with a stand-in data2g-host playing to the
+radio's output; `... down` removes them. `build/tests/ragtime_voice_probe`
+lists what voice may use and what it leaves out, and `--record N`,
+`--play` and `--stream` try the microphone, a clip and a clip in pieces.
+
+- Tested: on PipeWire 1.0 headless with the pretend desk (the radio's
+  input left out by its card, recording, the Test's verdict, playback to
+  the end, a streamed clip with a stall); under Wine 9 the WASAPI side
+  records and plays, an 8 kHz clip converted by the engine and a streamed
+  one. Wine lists no audio sessions, so leaving out the radio by data2g's
+  sessions is untested on Windows until someone tries a real one.
+- Not built: a radio card that data2g-host has never been seen to use
+  and that is the system's default output would be played to. A list of
+  radio interfaces by name (Burr-Brown "USB Audio CODEC", SignaLink,
+  Digirig) could catch that; it is left for now.
+
+## Voice: the processing chain
+
+Voice PR 3 of the plan "Ragtime voice messages with sotto" (Jeff,
+2026-10-31): what the microphone deck does to a voice before sotto codes
+it, in core with no window (`core/src/voice/`, `voice::Chain`), and its
+noise reducer in `denoise/` (`ragtime_denoise`). The deck (PR 4) turns
+its knobs and reads its meters.
+
+    Gain -> 48 kHz -> high-pass -> noise reduction -> leveller
+         -> 8 kHz -> limiter -> sotto
+
+- **Levels.** sotto's own figures (sotto.h, the same in v3.5 and v3.6):
+  speech is aimed at an active level of -26 dBFS (ITU-T P.56), each 10 ms
+  saturates sotto's energy field above -7.3 dBFS RMS, and below
+  -76.2 dBFS it is sent as silence. Samples are floats where 1.0 is full
+  scale, levels dBFS of RMS (a full-scale sine is -3 dBFS). From v3.6
+  sotto codes the 200 to 3,700 Hz band's energy, never more than the full
+  band's, so measuring the full band errs on the safe side.
+- **Rates.** The microphone comes in at its own rate and is resampled to
+  48 kHz, where RNNoise works, in 10 ms blocks; the end of the chain is
+  sotto's 8 kHz. `voice::Resampler` is polyphase windowed sinc (Kaiser,
+  80 dB down, flat to 90% of the lower Nyquist frequency) for any ratio
+  of whole rates. The chain delays the voice about 21 ms, 31 with
+  RNNoise; `finish()` drains it when Push to talk is let go.
+- **High-pass.** Fourth-order Butterworth (24 dB an octave) at 80, 100 or
+  150 Hz: at 100 Hz, 60 Hz hum comes down 18 dB and 50 Hz 24 dB. Pushed
+  out, it passes the voice unchanged.
+- **Noise reduction.** RNNoise (Jean-Marc Valin, Xiph.Org, BSD-3-Clause),
+  fetched with git at 0.1.1 and built in: the last release with its
+  trained model in the repository, as 0.2 downloads its model from
+  media.xiph.org at build time (blocked in the cloud sandbox; 0.2's model
+  is better, and could replace it where the download works). It always
+  runs, so the Noise knob pushed in or out changes nothing but the mix:
+  the amount (70% by default) mixes the cleaned voice with the voice as
+  it was, delayed to match (RNNoise is one 10 ms frame behind). On a
+  synthetic voice 20 dB over fan noise, at 100% the quiet stretches fall
+  another 25 dB and the voice keeps its level. Plain white noise takes it
+  several seconds to learn; real noises, which fall with frequency, it
+  takes at once. `-DRAGTIME_RNNOISE=OFF` builds without, and the Noise
+  stage passes the voice through.
+- **Leveller.** A slow hand on the fader (`voice::Leveller`): it measures
+  the active level coming in over about 2 s of speech (`voice::LiveLevel`,
+  10 ms blocks over a gate 15.9 dB under the level found, as P.56's
+  threshold, and above the noise floor, with P.56's 200 ms hangover) and
+  moves its gain so that comes out at the Target, at most 3 dB a second
+  up and 6 down, on speech only, so pauses don't pump the room up. For the
+  first half second of speech it moves fast; after that it keeps its gain
+  from clip to clip. Gain from -30 to +30 dB.
+- **Peak mode** (Target popped out): a 10 ms block that would come out
+  over -10 dBFS (3 dB under sotto's ceiling) turns the gain down by its
+  overshoot at once, and that cut wears off at 1 dB a second of speech,
+  slower than the leveller moves, so a voice that keeps shouting stays
+  turned down. Pushed back in, the cut goes.
+- **Limiter.** Last, at 8 kHz, so it sees exactly what sotto gets: every
+  10 ms window's RMS under -8.3 dBFS (1 dB under sotto's ceiling) and
+  every sample under -1 dBFS, looking ahead 15 ms so the gain falls over
+  5 ms before a burst; it recovers with a 50 ms time constant. Below its
+  ceilings it leaves no trace.
+- **Meters.** `Chain::takeReadings()`, from any thread: the live active
+  level and the loudest 10 ms at the input (after Gain) and at the output,
+  the clip flag (a sample at full scale from the microphone), the
+  leveller's gain, the limiter's reduction, and RNNoise's voice
+  probability. Loudest, clip and reduction are the most since the last
+  call, so a window polling at 30 Hz misses nothing; it draws the hold
+  and fall itself. Settings (`ChainSettings`, clamped to the knobs'
+  ranges) may change from any thread and take effect at the next block.
+- **Level check** (`Chain::levelReport()`, per clip from `startClip()` to
+  `finish()`): Active is P.56 method B on the 8 kHz output, green within
+  3 dB of the Target, amber within 6. Loudest is the loudest 10 ms
+  (windows every 5 ms) before the limiter, green under -7.3 dBFS, amber up
+  to 3 dB over (the limiter took it), red beyond or if the microphone
+  clipped at all. Noise is the quietest tenth of the clip's 20 ms frames
+  (sotto's frames), green at least 30 dB under the voice, amber from 20.
+  The amber edges are first guesses.
+- **Trying it.** `build/tests/ragtime_voice_chain IN.wav OUT.wav` runs a
+  recording (16-bit or float WAV, any rate) through the chain with
+  RNNoise and writes what sotto would get, printing the Level check;
+  `--gain`, `--hp`, `--noise`, `--target` and `--peaks` set the knobs.
+  The unit tests use synthetic voices (`tests/VoiceSynth.h`, a formant
+  synthesiser), so no recordings are committed.
+
 ## Voice cards
 
 Jeff's idea (2026-10-31; plan in the thread "Plan Ragtime voice messages

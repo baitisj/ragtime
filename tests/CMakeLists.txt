@@ -119,3 +119,15 @@ add_executable(ragtime_coolchic_fit CoolChicFitTool.cpp)
 target_link_libraries(ragtime_coolchic_fit PRIVATE ragtime_image)
 target_include_directories(ragtime_coolchic_fit PRIVATE ${PROJECT_SOURCE_DIR}/image/src/coolchic)
 ragtime_warnings(ragtime_coolchic_fit)
+
+# Voice: the processing chain from the microphone to sotto, on synthetic
+# voices (VoiceSynth.h), and RNNoise as its noise reducer.
+ragtime_test(ragtime_voice_chain_test VoiceChainTest.cpp)
+ragtime_test(ragtime_denoise_test DenoiseTest.cpp)
+target_link_libraries(ragtime_denoise_test PRIVATE ragtime_denoise)
+
+# ragtime_voice_chain IN.wav OUT.wav: a recording through the chain, out as
+# sotto would get it, with the Level check. Not a test.
+add_executable(ragtime_voice_chain VoiceChainMain.cpp)
+target_link_libraries(ragtime_voice_chain PRIVATE ragtime_denoise)
+ragtime_warnings(ragtime_voice_chain)

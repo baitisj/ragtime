@@ -196,9 +196,10 @@ Sources: [ARRL band plan](https://www.arrl.org/band-plan),
   point to point ragchew on purpose and leave it on purpose.
 
 Ragtime is a front end for a separately running `data2g-host`, reached
-over TCP. It never starts the modem and never plays to the sound card;
-its Ear only listens in, through PipeWire on Linux or WASAPI on
-Windows, to what data2g-host records.
+over TCP. It never starts the modem and never plays to the radio's
+sound card; its Ear only listens in, through PipeWire on Linux or
+WASAPI on Windows, to what data2g-host records, and voice uses your own
+microphone and speaker, never the radio's card (Settings > Voice).
 It reads the radio's dial from rigctld, or opens the rig itself with
 Hamlib (Settings > Rig), and can key it when data2g-host does, for rigs
 whose drivers can't be opened twice (off by default). Through Hamlib or
