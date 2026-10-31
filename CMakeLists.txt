@@ -10,7 +10,8 @@
 # -DRAGTIME_PIPEWIRE=OFF builds without the Ear's listening on Linux (libpipewire-0.3-dev; on Windows the Ear
 # listens through WASAPI); -DRAGTIME_PICTURES=OFF builds without inline
 # pictures (libopenjp2-7-dev, libwebp-dev, libheif-dev), and
-# -DRAGTIME_HEIF=OFF without only HEIF. The Windows build cross-compiles with MinGW-w64: see
+# -DRAGTIME_HEIF=OFF without only HEIF; -DRAGTIME_RNNOISE=OFF builds
+# without voice noise reduction (RNNoise, fetched with git). The Windows build cross-compiles with MinGW-w64: see
 # cmake/Toolchain-mingw64.cmake and packaging/windows/make-zip.sh.
 cmake_minimum_required(VERSION 3.16)
 
@@ -38,6 +39,7 @@ endif()
 option(RAGTIME_PIPEWIRE "The Ear listens through PipeWire (Linux; Windows uses WASAPI); needs libpipewire-0.3-dev to build." ${RAGTIME_PIPEWIRE_DEFAULT})
 option(RAGTIME_PICTURES "Inline pictures: JPEG 2000 (OpenJPEG) and WebP (libwebp); needs libopenjp2-7-dev and libwebp-dev." ON)
 option(RAGTIME_HEIF "Pictures read from HEIF files (libheif with libde265); needs libheif-dev." ON)
+option(RAGTIME_RNNOISE "Noise reduction for voice with RNNoise, fetched with git and built in (denoise/)." ON)
 option(RAGTIME_BUILD_IMAGE_LIBS "Fetch and build OpenJPEG, libwebp, libde265 and libheif statically instead of using the system's (the Windows build)." OFF)
 
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
@@ -48,6 +50,12 @@ if(RAGTIME_TESTS)
 endif()
 
 add_subdirectory(core)
+
+# Noise reduction for the voice chain: RNNoise, which is C.
+if(RAGTIME_RNNOISE)
+    enable_language(C)
+endif()
+add_subdirectory(denoise)
 
 # Hamlib, as ragtime::hamlib, for the rig library.
 if(RAGTIME_HAMLIB)
