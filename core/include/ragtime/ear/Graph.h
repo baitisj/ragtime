@@ -38,6 +38,11 @@ struct GraphNode
     std::string mediaClass;     // media.class
     std::string appName;        // application.name, when the node has it
     std::string target;         // target.object, or node.target
+    // The sound card it belongs to, for as long as the graph lasts:
+    // device.id on PipeWire, the container id on Windows (empty for
+    // Windows' built-in devices, which all share one). A card's input and
+    // output share it.
+    std::string device;
 };
 
 struct GraphClient
@@ -67,6 +72,8 @@ struct Graph
 bool isData2GProgram(const std::string& appName);
 // A sound card's input (or a virtual one), not a program's stream.
 bool isSource(const GraphNode& node);
+// A sound card's output (or a virtual one), not a program's stream.
+bool isSink(const GraphNode& node);
 
 // The sources the Ear's dropdown offers, by description.
 std::vector<GraphNode> sources(const Graph& graph);

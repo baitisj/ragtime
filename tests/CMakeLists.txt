@@ -76,6 +76,9 @@ if(RAGTIME_HAMLIB)
 endif()
 ragtime_test(ragtime_flight_recorder_test FlightRecorderTest.cpp)
 ragtime_test(ragtime_ear_test EarTest.cpp)
+# Voice's microphones and speakers (the radio's card left out) and the
+# microphone Test's verdict.
+ragtime_test(ragtime_voice_devices_test VoiceDevicesTest.cpp)
 # The Ear without its window, for the bench and checking a station by hand
 # (it only records). Not a test: it needs a running PipeWire.
 add_executable(ragtime_ear_probe EarProbe.cpp)
