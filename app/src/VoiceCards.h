@@ -79,7 +79,8 @@ public:
         double playheadFrame = -1.0;    // < 0: none
     };
     // The card's button and strip, then its length ("0:12") and, while it
-    // arrives, how much has come: "" while not even the header has.
+    // arrives, how much has come; a line saying why while its header hasn't.
+    // It starts a line of its own: the caller puts no <br> before it.
     wxString cardHtml(const std::string& key, const wxWindow* window, const Look& look, bool picked);
 
 private:

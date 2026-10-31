@@ -421,7 +421,7 @@ private:
         if (m.voice && !m.path.empty() && owner_->voiceHtml_)
         {
             wxString card = owner_->voiceHtml_("p" + m.path, this, picked);
-            if (!card.empty()) html << "<br>" << card;
+            if (!card.empty()) html << card;
         }
         html << "</td>"
              << "<td valign=\"top\" nowrap align=\"right\"><font" << font << ">" << htmlEscape(m.outcome)
@@ -459,7 +459,7 @@ private:
         if (card.voice && owner_->voiceHtml_)
         {
             wxString voice = owner_->voiceHtml_("b" + std::to_string(m.file), this, picked);
-            if (!voice.empty()) html << "<br>" << voice;
+            if (!voice.empty()) html << voice;
         }
         // A picture shows as it stands, sharper as more of it comes.
         if (card.picture && owner_->pictureHtml_)

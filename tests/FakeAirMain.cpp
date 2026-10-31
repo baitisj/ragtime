@@ -8,7 +8,7 @@
 // up, a laugh, a cheer or FB.
 //
 //   ragtime_fake_air [--bots N] [--airtime MS] [--call CALL] [--fade] [--rate BPS]
-//                    [--loss PCT] [--files] [--no-snr] [--no-cut] [--no-reasons]
+//                    [--loss PCT] [--files] [--voice] [--no-snr] [--no-cut] [--no-reasons]
 //                    [--rig PORT [--dial HZ] [--dial-hop] [--rig-vfo] [--rig-swr X] [--rig-noise DB]]
 //   ragtime_fake_air --replay FILE|FOLDER... [--from TIME] [--speed X]
 //
@@ -26,7 +26,10 @@
 // broadcast files without asking. --loss PCT has hosts A and B lose that
 // share of the group frames they hear, so a Ragtime on them asks for
 // repairs; --files has the first bot broadcast a short bulletin file a
-// minute in and every six minutes after.
+// minute in and every six minutes after. --voice has the last bot
+// broadcast a short voice message (a made-up clip, no speech) 40 s in and
+// every four minutes, and every bot answer a voice message sent to it in
+// a session with one of its own.
 //
 // The hosts report SNRs as data2g-host has since Data2G PR #98: each bot
 // is heard at its own strength, from +12 dB down to -11 dB, give or take
@@ -109,6 +112,7 @@
 #include "ragtime/link/HostLink.h"
 #include "ragtime/protocol/Records.h"
 #include "ragtime/session/SessionChat.h"
+#include "ragtime/voice/Voice.h"
 
 using namespace ragtime;
 using namespace ragtime_test;
@@ -404,6 +408,55 @@ std::string writeBulletin(const Profile& p)
     return files::utf8FromPath(path);
 }
 
+// A voice message for --voice: a made-up clip, a few words of buzzy
+// syllables gliding up and down with pauses between, as sotto's frames,
+// in a .sot file in the bot's folder. No speech in it (the bench has no
+// recordings to give away), but its pitch strip looks like a voice's and
+// libsotto plays it.
+std::string writeVoiceClip(const char* call, int number, std::mt19937& random)
+{
+    std::vector<voice::Frame> frames;
+    std::uniform_int_distribution<int> words(4, 7), syllables(1, 3), frames8(8, 15), shapeBits(0, 1 << 30);
+    std::uniform_real_distribution<double> unit(0.0, 1.0);
+    // A voice's own pitch (codes are 127 per decade from 50 Hz).
+    const int base = 40 + (int)(random() % 20);
+    for (int k = 0; k < 10; k++) frames.push_back(voice::SILENT_FRAME);
+    const int count = words(random);
+    for (int w = 0; w < count; w++)
+    {
+        const int n = syllables(random);
+        for (int s = 0; s < n; s++)
+        {
+            // A consonant's hiss now and then, then the vowel.
+            if (unit(random) < 0.5)
+            {
+                for (int k = 0; k < 3; k++)
+                    frames.push_back(voice::makeFrame(voice::Voicing::Unvoiced, 0, 14, (uint64_t)shapeBits(random)));
+            }
+            const uint64_t vowel = ((uint64_t)shapeBits(random) << 4) ^ (uint64_t)shapeBits(random);
+            const int length = frames8(random);
+            const double rise = (unit(random) - 0.4) * 14.0;
+            const int start = base + (int)((unit(random) - 0.5) * 10.0);
+            for (int k = 0; k < length; k++)
+            {
+                const double t = k / (double)std::max(1, length - 1);
+                const int pitch = std::min(127, std::max(0, start + (int)std::lround(rise * t)));
+                // Louder in the middle of the syllable.
+                const int energy = 16 + (int)std::lround(8.0 * std::sin(3.14159265 * t));
+                frames.push_back(voice::makeFrame(voice::Voicing::Voiced, pitch, std::max(1, energy), vowel));
+            }
+        }
+        // The gap between words, longer after the last of a phrase.
+        const int gap = w % 3 == 2 ? 30 : 8 + (int)(random() % 8);
+        for (int k = 0; k < gap; k++) frames.push_back(voice::SILENT_FRAME);
+    }
+    std::vector<uint8_t> sot = voice::makeSot(frames);
+    std::filesystem::path path = botFolder(call) / (std::string(call) + "-voice-" + std::to_string(number) + ".sot");
+    std::ofstream out(path, std::ios::binary | std::ios::trunc);
+    out.write((const char*)sot.data(), (std::streamsize)sot.size());
+    return files::utf8FromPath(path);
+}
+
 // A station of the bench's own: a HostLink and a BroadcastChat on its own
 // fake host, over real sockets.
 struct Bot
@@ -508,8 +561,18 @@ struct Bot
             else if (e.type == files::FileTraffic::Event::Type::Finished && !t->outgoing
                      && t->state == files::FileTransfer::State::Saved)
             {
-                say("Got " + t->name + ", " + files::sizeText(t->size) + ", thanks!", now + 2000);
+                // --voice: a voice message is answered with one.
+                if (t->voice && voiceEveryMs != 0)
+                    voiceReplyMs = now + 4000;
+                else
+                    say("Got " + t->name + ", " + files::sizeText(t->size) + ", thanks!", now + 2000);
             }
+        }
+        if (voiceReplyMs != 0 && now >= voiceReplyMs && session.phase() == session::SessionChat::Phase::Connected)
+        {
+            std::string error;
+            files.offer(session.peer(), writeVoiceClip(profile.call, ++voiced, random), now, error, false, true);
+            voiceReplyMs = 0;
         }
         if (offerMs != 0 && now >= offerMs && session.phase() == session::SessionChat::Phase::Connected)
         {
@@ -640,6 +703,14 @@ struct Bot
             share(now);
             shareMs = now + shareEveryMs;
         }
+        // --voice: a voice message to D2G now and then.
+        if (voiceEveryMs != 0 && voiceMs != 0 && link.groupOpen() && now >= voiceMs)
+        {
+            std::string error;
+            if (broadcasts.send(writeVoiceClip(profile.call, ++voiced, random), "", now, error, false, true) == 0)
+                std::fprintf(stderr, "%s: %s\n", profile.call, error.c_str());
+            voiceMs = now + voiceEveryMs;
+        }
         if (!replyTo.empty() && now >= replyMs)
         {
             chat.send("@" + replyTo + " copy you fine, thanks. 73 de " + profile.call, "", now);
@@ -686,6 +757,12 @@ struct Bot
     uint64_t shareEveryMs = 0;
     uint64_t shareMs = 0;
     int shared = 0;
+    // --voice: voice messages on D2G every voiceEveryMs (voiceMs 0: this
+    // bot sends none there, but answers voice in a session with voice).
+    uint64_t voiceEveryMs = 0;
+    uint64_t voiceMs = 0;
+    uint64_t voiceReplyMs = 0;
+    int voiced = 0;
 };
 
 int replay(const std::vector<std::string>& paths, ReplayHost::Options options)
@@ -741,6 +818,7 @@ int main(int argc, char** argv)
     bool fades = false;
     int lossPct = 0;
     bool share = false;
+    bool voiceToo = false;
     int rate = 400;
     bool snr = true;
     bool cuts = true;
@@ -769,6 +847,8 @@ int main(int argc, char** argv)
             lossPct = std::atoi(argv[++i]);
         else if (std::strcmp(argv[i], "--files") == 0)
             share = true;
+        else if (std::strcmp(argv[i], "--voice") == 0)
+            voiceToo = true;
         else if (std::strcmp(argv[i], "--no-snr") == 0)
             snr = false;
         else if (std::strcmp(argv[i], "--no-cut") == 0)
@@ -799,7 +879,7 @@ int main(int argc, char** argv)
         else
         {
             std::fprintf(stderr, "usage: ragtime_fake_air [--bots N] [--airtime MS] [--call CALL] [--fade] "
-                                 "[--rate BPS] [--loss PCT] [--files] [--no-snr] [--no-cut] [--no-reasons] "
+                                 "[--rate BPS] [--loss PCT] [--files] [--voice] [--no-snr] [--no-cut] [--no-reasons] "
                                  "[--rig PORT [--dial HZ] [--dial-hop] [--rig-vfo] [--rig-swr X] [--rig-noise DB]]\n"
                                  "       ragtime_fake_air --replay FILE|FOLDER... [--from 2026-10-25T16:20] "
                                  "[--speed X]\n");
@@ -862,6 +942,13 @@ int main(int argc, char** argv)
     {
         stations.front()->shareEveryMs = 6 * 60 * 1000;
         stations.front()->shareMs = start + 60000;
+    }
+    if (voiceToo)
+    {
+        // Every bot answers voice in a session; the last broadcasts a clip
+        // 40 s in and every 4 minutes.
+        for (auto& s : stations) s->voiceEveryMs = 4 * 60 * 1000;
+        if (!stations.empty()) stations.back()->voiceMs = start + 40000;
     }
     for (auto& s : stations)
     {
