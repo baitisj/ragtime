@@ -93,6 +93,42 @@ carries it). The Ear loads
 needs PipeWire to be the sound server. On Windows it listens through
 WASAPI, which needs nothing installed.
 
+### Voice messages: libsotto
+
+Voice messages are coded with [sotto](https://github.com/baitisj/sotto).
+Ragtime loads it at run time as a shared library and never links it, so
+it builds without it: with no libsotto the voice cards still draw, and
+Play and the deck say libsotto is missing. Codec 1 is sotto v3.6, at
+the commit pinned in `packaging/sotto.sh`. Use that commit, because a
+different sotto codes differently.
+
+To build it (needs `cmake`, `make`, a C compiler, `git` and
+`python3-numpy`; about ten seconds):
+
+    packaging/build-sotto.sh      # build-sotto/out/libsotto.so.0 and libcodec2.so.1.2
+
+It clones sotto, builds the Codec 2 fork that sotto carries (Ubuntu's own
+`libcodec2` won't do), and puts `libsotto.so.0` in `build-sotto/out/`.
+Then point Ragtime at it:
+
+    RAGTIME_SOTTO=$PWD/build-sotto/out/libsotto.so.0 ./build/app/ragtime
+
+Ragtime looks for libsotto in these places, in order:
+
+1. `$RAGTIME_SOTTO`, the full path to the file.
+2. Beside the `ragtime` program.
+3. `../lib/` from the program (where the AppImage keeps it).
+4. The system's library path (`libsotto.so.0`; `sotto.dll` on Windows).
+
+libsotto finds its `libcodec2` in the `build-sotto` folder, so leave that
+folder where it is. The microphone deck shows which sotto loaded (hover
+over its codec line to see the path), or why none did.
+
+The AppImage carries libsotto and its Codec 2 (`make-appimage.sh` runs
+`build-sotto.sh`). There is no Windows `sotto.dll` yet, so the Windows
+zip can't record or play voice. `make-zip.sh` adds one when
+`RAGTIME_SOTTO_DLL_DIR` names a folder that holds it.
+
 The helper scripts need a few more tools: `tools/ear/pretend_radio.sh`
 wants `pipewire-pulse`, `pulseaudio-utils` (`pactl`),
 `pipewire-bin` (`pw-play`, `pw-cat`) and `python3-numpy`;
