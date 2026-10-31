@@ -1672,6 +1672,55 @@ file with a kind byte (docs/PROTOCOL.md, "Pictures").
   sending a smaller side by itself when the budget is very small (a
   smaller picture at the same bytes looks sharper).
 
+## Voice while it arrives
+
+The last of the six voice pull requests (Jeff, 2026-10-31; the plan is
+the Claude Doc "Ragtime voice messages with sotto"). A voice message is
+a sotto file, kind `0x03` (docs/PROTOCOL.md, "Voice"), and in a ragchew
+the stream is reliable and in order, so the far end plays it while the
+bytes still come rather than waiting for the whole file.
+
+- **When to start** (`voice::ArrivalPlayer`, core). The professor's sum:
+  a clip of S bytes arriving at R bytes a second, played at P = 300
+  bytes a second (sotto's 2,400 bit/s), can start after S/R − S/P
+  seconds and never stall. A session's bytes come a burst at a time,
+  though, with the other station's turn between, so the player also
+  waits out one gap between bursts, less the speech it already holds,
+  and adds half a second. It counts on 85% of the rate it measures (the
+  slower of the rate since the first burst and over the last few), and
+  on the gaps it sees; until a second burst gives a rate, on the
+  session mode's rate and the pacing window's two longest bursts. The
+  rest of the clip is taken as all speech (6 bytes for each 20 ms),
+  though a silence run plays far longer for its 6 bytes, so it errs
+  late. At gear 7 and up the link outruns the speech and a clip starts
+  as soon as its first burst is in; at gear 6 a 10 s clip starts after
+  about 5 s, and at gear 5 after most of it has come.
+- **Running dry.** If the link slows and the bytes fall behind, the
+  player tells sotto's decoder the next frame is lost, so it does what
+  it does for a lost frame on 2 m: holds the sound, fades it 6 dB each
+  20 ms and is quiet after 80 ms (v3.6 conceals as v3.5 does). Then it
+  waits by the same rule, with at least a second in hand, and carries
+  on from the frame where it stopped, fading back in. Nothing is
+  skipped: a stall is a pause, not a gap in the words.
+- **The stop sign.** A session voice card coming in has the stop sign,
+  as a session picture does. Pressed, it sends FileCancel `0x84`, keeps
+  what came (the sender logs "had enough at 41%"), and the clip plays to
+  the end of what came and fades out there. A transfer cancelled by
+  either side or cut by a dropped link ends the same way.
+- **Save as WAV.** A voice card's right-click menu (and the Files
+  tab's) saves the clip's sound as an 8 kHz, 16-bit mono WAV
+  (`voice::wavFile`), decoded with lost frames covered. Ragtime itself
+  keeps only the `.sot` file: 3 KB for 10 s against 160 KB of WAV.
+- **D2G.** Not here: on D2G a clip plays from what has come when the
+  card is pressed, and holes left by lost pieces are covered by sotto as
+  lost frames (`voice::readSot` with the missing ranges), the same
+  decoder calls `ArrivalPlayer` makes.
+- **Tests.** `ragtime_arrival_player_test` plays clips through a
+  pretend sotto that marks each frame, arriving in bursts at gear 7, at
+  half the speech's rate, with no rate known, with a 20 s fade, with the
+  stop sign and with long pauses, and checks that every frame is heard
+  once and in order, when it starts, and where the fades fall.
+
 ## Waiting on Andrew (via Jeff)
 
 - Read from Data2G's source on 2026-10-25 (`docs/DATA2G.md`): `BW1200`

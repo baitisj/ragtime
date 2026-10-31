@@ -470,7 +470,9 @@ The bench's fake hosts are POSIX, but `wine ragtime.exe` talks to a Linux
 4. Draft release notes: say whether it talks to the last release (a
    protocol change breaks that), that data2g-host is the operator's to run
    (never bundled or started), and how the gearshift finds Data2G's
-   `mode_thresholds.json`.
+   `mode_thresholds.json`. From the release with voice on: credit sotto,
+   Codec 2 (LGPL-2.1, why libsotto is a shared library) and the CC BY 4.0
+   datasets its codebook was trained on, as the README's "Credits" does.
 5. Jeff tags `v<version>-beta` on the merge commit and publishes.
 
 ## Code
