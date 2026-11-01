@@ -2,8 +2,10 @@
 // 55% by moving data2g-host's transmit level (TXPOWER, Data2G PR #122).
 //
 // Each burst TxMeters works out the step from the median of its ALC
-// readings (Burst::alcStepDb: down 2 dB over 80%, down 0.5 dB over 65%, up
-// 0.5 dB under 45%, up 1 dB under 25%, nothing between 45% and 65%). With
+// readings with the audio on (Burst::alcStepDb: down 2 dB over 80%, down
+// 1 dB over 72%, down 0.5 dB over 65%, up 0.5 dB under 45%, up 1 dB under
+// 25%, nothing between 45% and 65%; up only after a burst long enough to
+// tell). With
 // Auto ALC on, that is sent to the host when the burst ends. It works
 // around the base, the level the operator set (in Settings, or in
 // data2g-host's own window) or found when ticked: never more than CLIMB_DB
