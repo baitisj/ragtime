@@ -60,6 +60,7 @@ struct WorkRow
     uint64_t lastWorkedMs = 0;      // 0: never worked
     bool onNow = false;             // heard in the last ON_NOW_MS
     size_t score = 0;               // (1 + workedDays) x (1 + hourDays)
+    std::string locator;            // the newest it reported in the span ("CN87ux"), or empty
 };
 
 struct RecentWork
@@ -82,8 +83,14 @@ std::string workLine(const WorkRow& row);
 // The hours "this hour" covers: "1500-1800Z" (with an en dash).
 std::string hourSpan(int hour);
 
-// The row's tooltip: what it was heard and worked, and its score.
-std::string workTip(const WorkRow& row, const RecentWork& work, uint64_t nowMs);
+// Where the station last said it was, with how far and which way from
+// our own locator when we have one: "CN87ux · 1,234 km · 81°", or
+// "CN87ux"; empty without its locator.
+std::string workPlace(const WorkRow& row, const std::string& homeLocator);
+
+// The row's tooltip: where it is, what it was heard and worked, and its
+// score.
+std::string workTip(const WorkRow& row, const RecentWork& work, uint64_t nowMs, const std::string& homeLocator = "");
 
 } // namespace radio
 } // namespace ragtime

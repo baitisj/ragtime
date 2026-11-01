@@ -515,6 +515,25 @@ bool locatorCentre(const std::string& locator, LatLon& centreOut)
     return true;
 }
 
+std::string locatorOf(const LatLon& position)
+{
+    // Longitude from 180 W, latitude from 90 S, in twenty-fourths of a
+    // degree's square (a subsquare is 5' of longitude by 2.5' of latitude).
+    double lon = std::fmod(position.lon + 180.0, 360.0);
+    if (lon < 0.0) lon += 360.0;
+    double lat = std::clamp(position.lat + 90.0, 0.0, 180.0);
+    int x = std::min((int)std::floor(lon * 12.0), 360 * 12 - 1);
+    int y = std::min((int)std::floor(lat * 24.0), 180 * 24 - 1);
+    std::string out(6, ' ');
+    out[0] = (char)('A' + x / 240);
+    out[1] = (char)('A' + y / 240);
+    out[2] = (char)('0' + x / 24 % 10);
+    out[3] = (char)('0' + y / 24 % 10);
+    out[4] = (char)('a' + x % 24);
+    out[5] = (char)('a' + y % 24);
+    return out;
+}
+
 double distanceKm(const LatLon& from, const LatLon& to)
 {
     return angleOf(toVector(from), toVector(to)) * EARTH_RADIUS_KM;
@@ -632,6 +651,17 @@ Point onScreen(const View& view, const Window& window, const Vec3& earth)
 {
     Vec3 v = toView(view.attitude, earth);
     return screenPoint(view, window, v.x, v.y);
+}
+
+bool fromScreen(const View& view, const Window& window, const Point& point, Vec3& earthOut)
+{
+    if (view.radius <= 0.0) return false;
+    double x = (point.x - window.width / 2.0) / view.radius;
+    double y = (window.height / 2.0 - point.y) / view.radius;
+    double off = x * x + y * y;
+    if (off > 1.0) return false;
+    earthOut = toEarth(view.attitude, Vec3{x, y, std::sqrt(1.0 - off)});
+    return true;
 }
 
 int pointsInView(const View& view, const std::vector<Vec3>& path, const Window& window)

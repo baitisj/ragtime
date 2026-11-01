@@ -255,5 +255,5 @@ wxString RecentWorkPane::tooltip(int row) const
 {
     const WorkRow* r = row >= 0 ? rowAt((size_t)row) : nullptr;
     if (r == nullptr) return wxString();
-    return utf8(workTip(*r, work_, nowMs_));
+    return utf8(workTip(*r, work_, nowMs_, home_));
 }

@@ -31,9 +31,10 @@ public:
 
     // The station picked in the station list (empty for none), its locator
     // if known and whether that came from it this contact, and a line of
-    // details for under the caption.
+    // details for under the caption. Picked in Recent work, its square
+    // blinks yellow.
     void setStation(const std::string& callsign, const std::string& locator, bool current = true,
-                    const std::string& details = "");
+                    const std::string& details = "", bool blink = false);
 
     // The picked station's strip from the path log; none hides it.
     void setPathStrip(const ragtime::radio::PathStrip* strip, uint64_t nowMs);
@@ -51,6 +52,8 @@ public:
 private:
     void updateTime();
     void updateCaption();
+    // The caption wrapped to the pane's width, as tall as its lines.
+    void wrapCaption();
 
     GlobusToggle* toggle_ = nullptr;
     wxStaticText* time_ = nullptr;
@@ -65,6 +68,9 @@ private:
     std::string callsign_;
     std::string locator_;
     bool current_ = true;
+    bool blink_ = false;
+    std::string captionText_;
+    int captionWidth_ = 0;
 };
 
 #endif

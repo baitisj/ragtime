@@ -8,6 +8,7 @@
 #include <utility>
 
 #include "ragtime/gearbox/Gearbox.h"
+#include "ragtime/globus/Globe.h"
 #include "ragtime/radio/Bands.h"
 
 #include "../LogLines.h"
@@ -120,7 +121,8 @@ std::string pathLine(const PathEntry& e)
     }
     return loglines::join({utcStamp(e.atMs), escape(e.call), snr, escape(e.mode), escape(e.band),
                            e.dialHz == 0 ? std::string() : std::to_string(e.dialHz), escape(e.gear),
-                           e.worked ? "work" : e.session ? "session" : "D2G"});
+                           e.locatorOnly ? "locator" : e.worked ? "work" : e.session ? "session" : "D2G",
+                           globus::tidyLocator(e.locator)});
 }
 
 bool parsePathLine(const std::string& line, PathEntry& e)
@@ -142,9 +144,12 @@ bool parsePathLine(const std::string& line, PathEntry& e)
     out.band = unescape(f[4]);
     if (!f[5].empty() && !number(f[5], out.dialHz)) return false;
     out.gear = unescape(f[6]);
-    if (f[7] != "session" && f[7] != "D2G" && f[7] != "work") return false;
+    if (f[7] != "session" && f[7] != "D2G" && f[7] != "work" && f[7] != "locator") return false;
     out.session = f[7] == "session";
     out.worked = f[7] == "work";
+    out.locatorOnly = f[7] == "locator";
+    if (f.size() > 8) out.locator = globus::tidyLocator(unescape(f[8]));
+    if (out.locatorOnly && out.locator.empty()) return false;
     e = std::move(out);
     return true;
 }
@@ -172,7 +177,7 @@ PathStrip pathStrip(const std::vector<const PathEntry*>& entries, const std::str
     std::map<std::string, Gather> byBand;
     for (const PathEntry* e : entries)
     {
-        if (e == nullptr || e->worked || e->call != call || e->atMs < since || e->atMs > nowMs + HOUR_MS)
+        if (e == nullptr || e->worked || e->locatorOnly || e->call != call || e->atMs < since || e->atMs > nowMs + HOUR_MS)
             continue;
         Gather& g = byBand[e->band];
         size_t hour = (size_t)(e->atMs / HOUR_MS % 24);
@@ -373,6 +378,15 @@ std::vector<const PathEntry*> PathLog::of(const std::string& call, uint64_t sinc
         if (e.call == call && e.atMs >= sinceMs) out.push_back(&e);
     }
     return out;
+}
+
+std::string PathLog::lastLocator(const std::string& call) const
+{
+    for (auto e = entries_.rbegin(); e != entries_.rend(); ++e)
+    {
+        if (e->call == call && !e->locator.empty()) return e->locator;
+    }
+    return "";
 }
 
 void PathLog::trim(uint64_t nowMs)

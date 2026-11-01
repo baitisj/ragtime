@@ -269,6 +269,11 @@ private:
     // A contact for the path log: a session came up, or a message went
     // between the station and us.
     void logWorked(const std::string& call, uint64_t nowMs);
+    // A station's locator for the path log: heard this run, or the log's.
+    std::string locatorOf(const std::string& call) const;
+    // A Hello with a locator the path log doesn't have for the station yet
+    // adds a line of its own.
+    void logLocator(const ragtime::protocol::Record& record, uint64_t nowMs);
     // A Text heard on D2G addressed to our call.
     bool addressedToUs(const ragtime::protocol::Record& record) const;
     // Recent work again: on a new path log line (at most every few

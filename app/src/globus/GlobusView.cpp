@@ -5,10 +5,12 @@
 #include <cstdlib>
 #include <ctime>
 #include <memory>
+#include <string>
 
 #include <wx/dcbuffer.h>
 #include <wx/graphics.h>
 #include <wx/image.h>
+#include <wx/settings.h>
 #include <wx/time.h>
 
 using namespace ragtime::globus;
@@ -55,6 +57,25 @@ constexpr double END_RADIUS = 4.5;
 constexpr double DOT_RADIUS = 3.0;
 constexpr unsigned char STALE_ALPHA = 110;
 
+// A station picked in Recent work: a yellow dot with a dark rim, which
+// shows on the near-white land as on the sea, lit and dimmed in turn.
+const wxColour BLINK(0xff, 0xd0, 0x1a);
+const wxColour BLINK_RIM(0x14, 0x30, 0x68);
+constexpr double BLINK_RADIUS = 5.5;
+constexpr unsigned char BLINK_DIM_ALPHA = 70;
+constexpr int BLINK_MILLISECONDS = 500;
+
+// The locator under the pointer, in the lower right corner on a plate of
+// the pane's colour so it reads over the globe zoomed in.
+constexpr double HOVER_MARGIN = 4.0;
+constexpr double HOVER_PAD = 3.0;
+
+// How to work the globe. It shows off the globe only: over it, the tooltip
+// would cover the locator in the corner.
+const char* const HELP = "Drag the globe to spin it and hold it to stop it; turn the mouse wheel over it to "
+                         "zoom; double-click to fit the path again. Over the globe, the locator under the "
+                         "pointer shows in the lower right corner.";
+
 // Eases the path out quickly and in slowly, like the globe.
 double eased(double t)
 {
@@ -91,6 +112,16 @@ void drawDot(wxGraphicsContext* gc, const wxPoint2DDouble& p, const wxColour& fi
     gc->DrawEllipse(p.m_x - radius, p.m_y - radius, 2.0 * radius, 2.0 * radius);
 }
 
+void drawBlink(wxGraphicsContext* gc, const wxPoint2DDouble& p, bool lit)
+{
+    unsigned char alpha = lit ? 255 : BLINK_DIM_ALPHA;
+    wxColour fill(BLINK.Red(), BLINK.Green(), BLINK.Blue(), alpha);
+    wxColour rim(BLINK_RIM.Red(), BLINK_RIM.Green(), BLINK_RIM.Blue(), alpha);
+    gc->SetPen(gc->CreatePen(wxGraphicsPenInfo(rim, 1.4)));
+    gc->SetBrush(wxBrush(fill));
+    gc->DrawEllipse(p.m_x - BLINK_RADIUS, p.m_y - BLINK_RADIUS, 2.0 * BLINK_RADIUS, 2.0 * BLINK_RADIUS);
+}
+
 bool sameView(const View& a, const View& b)
 {
     return a.radius == b.radius && a.attitude.out.x == b.attitude.out.x && a.attitude.out.y == b.attitude.out.y
@@ -102,6 +133,7 @@ bool sameView(const View& a, const View& b)
 
 GlobusView::GlobusView(wxWindow* parent, wxWindowID id)
     : wxWindow(parent, id, wxDefaultPosition, wxDefaultSize, wxBORDER_NONE | wxFULL_REPAINT_ON_RESIZE)
+    , blinkTimer_(this)
     , timer_(this)
 {
     SetBackgroundStyle(wxBG_STYLE_PAINT);
@@ -112,8 +144,7 @@ GlobusView::GlobusView(wxWindow* parent, wxWindowID id)
     roller_.jump(fitted());
     setTime((std::int64_t)std::time(nullptr));
 
-    SetToolTip("Drag the globe to spin it and hold it to stop it; turn the mouse wheel over it to "
-               "zoom; double-click to fit the path again.");
+    SetToolTip(HELP);
     SetCursor(wxCursor(wxCURSOR_HAND));
     Bind(wxEVT_PAINT, &GlobusView::OnPaint, this);
     Bind(wxEVT_SIZE, &GlobusView::OnSize, this);
@@ -124,6 +155,7 @@ GlobusView::GlobusView(wxWindow* parent, wxWindowID id)
     Bind(wxEVT_LEFT_UP, &GlobusView::OnMouseUp, this);
     Bind(wxEVT_MOTION, &GlobusView::OnMouseMove, this);
     Bind(wxEVT_MOUSE_CAPTURE_LOST, &GlobusView::OnCaptureLost, this);
+    Bind(wxEVT_LEAVE_WINDOW, &GlobusView::OnMouseLeave, this);
 }
 
 wxSize GlobusView::DoGetBestClientSize() const
@@ -166,8 +198,16 @@ void GlobusView::pointer(const wxMouseEvent& event, double& x, double& y) const
     y = window_.height / 2.0 - event.GetY();
 }
 
-void GlobusView::setLocators(const std::string& home, const std::string& station, bool stationCurrent)
+void GlobusView::setLocators(const std::string& home, const std::string& station, bool stationCurrent, bool blink)
 {
+    if (blink != blink_)
+    {
+        blink_ = blink;
+        blinkLit_ = true;
+        if (blink_) blinkTimer_.Start(BLINK_MILLISECONDS);
+        else blinkTimer_.Stop();
+        Refresh();
+    }
     if (home == home_ && station == station_ && stationCurrent == stationCurrent_) return;
     bool moved = home != home_ || station != station_;
     bool stationChanged = station != station_;
@@ -241,8 +281,14 @@ void GlobusView::OnSize(wxSizeEvent& event)
     event.Skip();
 }
 
-void GlobusView::OnTimer(wxTimerEvent&)
+void GlobusView::OnTimer(wxTimerEvent& event)
 {
+    if (&event.GetTimer() == &blinkTimer_)
+    {
+        blinkLit_ = !blinkLit_;
+        if (haveStation_) Refresh();
+        return;
+    }
     long long now = wxGetLocalTimeMillis().GetValue();
     double seconds = std::clamp((now - lastTickMs_) / 1000.0, 0.0, 0.1);
     lastTickMs_ = now;
@@ -289,6 +335,18 @@ void GlobusView::OnMouseUp(wxMouseEvent&)
 
 void GlobusView::OnMouseMove(wxMouseEvent& event)
 {
+    pointerIn_ = true;
+    pointerAt_ = event.GetPosition();
+    // Painted anyway while the globe moves; still, only when it changes.
+    std::string locator = hovered();
+    if (!timer_.IsRunning() && locator != hoveredShown_) Refresh();
+    bool overGlobe = !locator.empty();
+    if (overGlobe != helpHidden_)
+    {
+        helpHidden_ = overGlobe;
+        if (overGlobe) UnsetToolTip();
+        else SetToolTip(HELP);
+    }
     if (!roller_.held()) return;
     double x = 0.0, y = 0.0;
     pointer(event, x, y);
@@ -298,6 +356,45 @@ void GlobusView::OnMouseMove(wxMouseEvent& event)
 void GlobusView::OnCaptureLost(wxMouseCaptureLostEvent&)
 {
     roller_.letGo();
+}
+
+void GlobusView::OnMouseLeave(wxMouseEvent&)
+{
+    // Still held, the pointer may come back: the drag goes on.
+    if (HasCapture()) return;
+    pointerIn_ = false;
+    if (!hoveredShown_.empty()) Refresh();
+    if (helpHidden_)
+    {
+        helpHidden_ = false;
+        SetToolTip(HELP);
+    }
+}
+
+std::string GlobusView::hovered() const
+{
+    if (!pointerIn_) return "";
+    Vec3 earth;
+    if (!fromScreen(roller_.view(), window_, Point{(double)pointerAt_.x, (double)pointerAt_.y}, earth)) return "";
+    return locatorOf(toLatLon(earth));
+}
+
+void GlobusView::drawHovered(wxGraphicsContext* gc, const std::string& locator)
+{
+    hoveredShown_ = locator;
+    if (locator.empty()) return;
+    wxColour text = wxSystemSettings::GetColour(wxSYS_COLOUR_WINDOWTEXT);
+    wxColour back = GetParent()->GetBackgroundColour();
+    gc->SetFont(GetFont(), text);
+    wxString label = wxString::FromUTF8(locator.c_str());
+    double w = 0.0, h = 0.0;
+    gc->GetTextExtent(label, &w, &h);
+    double x = window_.width - HOVER_MARGIN - HOVER_PAD - w;
+    double y = window_.height - HOVER_MARGIN - HOVER_PAD - h;
+    gc->SetPen(*wxTRANSPARENT_PEN);
+    gc->SetBrush(wxBrush(wxColour(back.Red(), back.Green(), back.Blue(), 210)));
+    gc->DrawRoundedRectangle(x - HOVER_PAD, y - HOVER_PAD, w + 2.0 * HOVER_PAD, h + 2.0 * HOVER_PAD, 3.0);
+    gc->DrawText(label, x, y);
 }
 
 const wxBitmap& GlobusView::lighting(const View& view, double scale)
@@ -419,7 +516,7 @@ void GlobusView::OnPaint(wxPaintEvent&)
         if (!dot.second) red = wxColour(red.Red(), red.Green(), red.Blue(), STALE_ALPHA);
         drawDot(gc.get(), at(onScreen(view, window_, v)), red, DOT_RADIUS);
     }
-    if (haveStation_ && toView(view.attitude, station).z > 0.0)
+    if (haveStation_ && toView(view.attitude, station).z > 0.0 && !blink_)
     {
         wxColour red = STATION;
         if (!stationCurrent_) red = wxColour(red.Red(), red.Green(), red.Blue(), 170);
@@ -429,4 +526,12 @@ void GlobusView::OnPaint(wxPaintEvent&)
     {
         drawDot(gc.get(), at(onScreen(view, window_, home)), HOME, END_RADIUS);
     }
+    // The station picked in Recent work over everything, home included
+    // when it is in our own square.
+    if (haveStation_ && blink_ && toView(view.attitude, station).z > 0.0)
+    {
+        drawBlink(gc.get(), at(onScreen(view, window_, station)), blinkLit_);
+    }
+
+    drawHovered(gc.get(), hovered());
 }

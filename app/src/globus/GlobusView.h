@@ -13,6 +13,8 @@
 #include "ragtime/globus/Globe.h"
 #include "ragtime/globus/Sun.h"
 
+class wxGraphicsContext;
+
 // The globe itself: a whole earth, lit from where the sun is overhead so
 // the greyline shows, with the path to the picked station as a red great
 // circle, our own square a navy dot and the other stations red dots.
@@ -23,6 +25,10 @@
 // stops it; held, it stops almost at once. The mouse wheel zooms in and
 // out; a double click fits the path again. It is ported from Glissando's
 // map ball, and the sums are in ragtime/globus/Globe.h and Sun.h.
+//
+// A station picked in Recent work blinks yellow, so it stands out from the
+// red dots of the stations heard. The locator of the subsquare under the
+// pointer shows in the lower right corner.
 class GlobusView : public wxWindow
 {
 public:
@@ -30,9 +36,11 @@ public:
 
     // Our locator, and the picked station's, either possibly empty, with
     // whether the station's came from it this contact (an older one shows
-    // dim). The globe rolls when they change; the first ones it is given,
-    // it starts at. Until then it shows the North Atlantic.
-    void setLocators(const std::string& home, const std::string& station, bool stationCurrent = true);
+    // dim), and whether its dot blinks yellow. The globe rolls when they
+    // change; the first ones it is given, it starts at. Until then it shows
+    // the North Atlantic.
+    void setLocators(const std::string& home, const std::string& station, bool stationCurrent = true,
+                     bool blink = false);
 
     // The squares of the other stations in the station list, each with
     // whether it is current: red dots, faint for an old square.
@@ -53,6 +61,11 @@ private:
     void OnMouseUp(wxMouseEvent& event);
     void OnMouseMove(wxMouseEvent& event);
     void OnCaptureLost(wxMouseCaptureLostEvent& event);
+    void OnMouseLeave(wxMouseEvent& event);
+
+    // The locator under the pointer as the globe is now, or "" off it.
+    std::string hovered() const;
+    void drawHovered(wxGraphicsContext* gc, const std::string& locator);
 
     bool showsPath() const { return haveHome_ && haveStation_; }
 
@@ -83,6 +96,17 @@ private:
     std::vector<std::pair<std::string, bool>> stations_;
     std::vector<std::pair<ragtime::globus::LatLon, bool>> dots_;
     double pathDrawn_ = 1.0;        // how much of the path is drawn so far, 0 to 1
+
+    // The picked station's dot blinking, and which half of the blink it is in.
+    bool blink_ = false;
+    bool blinkLit_ = true;
+    wxTimer blinkTimer_;
+
+    // Where the pointer is over the window, and the locator shown for it.
+    bool pointerIn_ = false;
+    wxPoint pointerAt_;
+    std::string hoveredShown_;
+    bool helpHidden_ = false;       // the tooltip taken off while over the globe
 
     ragtime::globus::LatLon sun_;
 

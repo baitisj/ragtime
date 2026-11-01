@@ -200,9 +200,61 @@ void sessionsAndMidnight()
 
 } // namespace
 
+// Each row keeps the newest locator the station gave, from any line; a
+// locator line alone makes no row; the tooltip says where, how far and
+// which way.
+void locators()
+{
+    std::vector<PathEntry> all = net();
+    PathEntry first = heard(T0 + 10 * DAY, "KC2G", "17 m");
+    first.locator = "FN20";
+    all.push_back(first);
+    PathEntry where;
+    where.atMs = T0 + 12 * DAY;
+    where.call = "KC2G";
+    where.locator = "FN31pr";
+    where.locatorOnly = true;
+    all.push_back(where);
+    // Older than the move, but later in the file: the newest by time wins.
+    PathEntry late = worked(T0 + 11 * DAY, "KC2G");
+    late.locator = "FN20";
+    all.push_back(late);
+    PathEntry lone;
+    lone.atMs = NOW - HOUR;
+    lone.call = "N0WHERE";
+    lone.locator = "DM79";
+    lone.locatorOnly = true;
+    all.push_back(lone);
+
+    RecentWork work = recentWork(all, NOW, 14, "", WorkOrder::LikelyNow);
+    CHECK(row(work, "N0WHERE") == nullptr);
+    const WorkRow* kc2g = row(work, "KC2G");
+    CHECK(kc2g != nullptr);
+    const WorkRow* w1aw = row(work, "W1AW");
+    CHECK(w1aw != nullptr);
+    if (kc2g == nullptr || w1aw == nullptr) return;
+    CHECK_EQ(kc2g->locator, std::string("FN31pr"));
+    // The locator line is neither heard nor worked.
+    CHECK_EQ(kc2g->heardDays, (size_t)5);
+    CHECK_EQ(kc2g->workedDays, (size_t)4);
+    CHECK(w1aw->locator.empty());
+
+    // From CN87 (Seattle) to FN31pr (Newington): 3,9xx km, east by north.
+    std::string place = workPlace(*kc2g, "CN87ux");
+    CHECK(place.rfind("FN31pr \xc2\xb7 ", 0) == 0);
+    CHECK(place.find(" km \xc2\xb7 ") != std::string::npos);
+    CHECK(place.size() > 2 && place.compare(place.size() - 2, 2, "\xc2\xb0") == 0);
+    CHECK_EQ(workPlace(*kc2g, ""), std::string("FN31pr"));
+    CHECK(workPlace(*w1aw, "CN87ux").empty());
+    std::string tip = workTip(*kc2g, work, NOW, "CN87ux");
+    CHECK(tip.find("\nLast at " + place + ".\n") != std::string::npos);
+    CHECK(workTip(*w1aw, work, NOW, "CN87ux").find("No locator heard from it.") != std::string::npos);
+}
+
 int main()
 {
     likelyNow();
+    locators();
     bandNow();
     orders();
     sessionsAndMidnight();

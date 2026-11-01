@@ -155,7 +155,11 @@ and the Part 97 check.
   heard at this hour on this band); contacts (a session, an `@` message
   either way) are `work` lines in the path log. The pane is
   `app/src/RecentWorkPane`, under the station list in the `left_`
-  splitter.
+  splitter. Since 2026-11-01 every path log line carries the station's
+  locator and a new or moved one gets a `locator` line; a Recent work
+  pick blinks yellow on Globus at its last square, its tooltip gives the
+  locator and distance, and Globus shows the locator under the pointer
+  (`globus::locatorOf`, `globus::fromScreen`).
 - Rig control (2026-10-26, Andrew's suggestion, `docs/STAGE1.md`):
   Settings > Rig picks no rig, the dial from rigctld (read only, but for
   the Ear's filter with its box ticked), or

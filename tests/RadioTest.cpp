@@ -918,7 +918,7 @@ void lines()
     e.dialHz = 18104000;
     e.gear = "fsk32r62-r1/3";
     std::string line = pathLine(e);
-    CHECK_EQ(line, std::string("2026-10-22T00:00:01Z\tKC2G\t-6.5\tqpsk-r1/3\t17 m\t18104000\tfsk32r62-r1/3\tD2G"));
+    CHECK_EQ(line, std::string("2026-10-22T00:00:01Z\tKC2G\t-6.5\tqpsk-r1/3\t17 m\t18104000\tfsk32r62-r1/3\tD2G\t"));
     PathEntry back;
     CHECK(parsePathLine(line, back));
     CHECK_EQ(back.atMs, T0 + 1000);
@@ -934,7 +934,7 @@ void lines()
     PathEntry bare = entry(T0, "W1AW", std::nullopt, "");
     bare.session = true;
     line = pathLine(bare);
-    CHECK_EQ(line, std::string("2026-10-22T00:00:00Z\tW1AW\t\t\t\t\t\tsession"));
+    CHECK_EQ(line, std::string("2026-10-22T00:00:00Z\tW1AW\t\t\t\t\t\tsession\t"));
     CHECK(parsePathLine(line, back));
     CHECK(!back.snrDb);
     CHECK(back.band.empty() && back.dialHz == 0 && back.session);
@@ -943,11 +943,33 @@ void lines()
     PathEntry work = entry(T0, "W1AW", std::nullopt, "20 m");
     work.worked = true;
     line = pathLine(work);
-    CHECK_EQ(line, std::string("2026-10-22T00:00:00Z\tW1AW\t\t\t20 m\t\t\twork"));
+    CHECK_EQ(line, std::string("2026-10-22T00:00:00Z\tW1AW\t\t\t20 m\t\t\twork\t"));
     CHECK(parsePathLine(line, back));
     CHECK(back.worked && !back.session);
     CHECK(parsePathLine(pathLine(e), back));
     CHECK(!back.worked);
+
+    // The station's locator, tidied, on any line; and a line for the
+    // locator alone.
+    e.locator = "cn87UX";
+    line = pathLine(e);
+    CHECK(line.size() > 7 && line.compare(line.size() - 7, 7, "\tCN87ux") == 0);
+    CHECK(parsePathLine(line, back));
+    CHECK_EQ(back.locator, std::string("CN87ux"));
+    CHECK(!back.locatorOnly);
+    PathEntry where = entry(T0, "W1AW", std::nullopt, "");
+    where.locator = "FN31";
+    where.locatorOnly = true;
+    line = pathLine(where);
+    CHECK_EQ(line, std::string("2026-10-22T00:00:00Z\tW1AW\t\t\t\t\t\tlocator\tFN31"));
+    CHECK(parsePathLine(line, back));
+    CHECK(back.locatorOnly && !back.worked && !back.session);
+    CHECK_EQ(back.locator, std::string("FN31"));
+    // A locator line needs a locator; a line from before the field reads.
+    CHECK(!parsePathLine("2026-10-22T00:00:00Z\tW1AW\t\t\t\t\t\tlocator\t", back));
+    CHECK(!parsePathLine("2026-10-22T00:00:00Z\tW1AW\t\t\t\t\t\tlocator\tZZ99", back));
+    CHECK(parsePathLine("2026-10-22T00:00:00Z\tW1AW\t-3.0\t\t\t\t\tD2G", back));
+    CHECK(back.locator.empty());
 
     CHECK(!parsePathLine("", back));
     CHECK(!parsePathLine("2026-10-22T00:00:00Z\tW1AW", back));
@@ -974,6 +996,11 @@ void strip()
     PathEntry contact = entry(T0 + 7 * HOUR, "KC2G", std::nullopt, "80 m");
     contact.worked = true;
     all.push_back(contact);
+    // Nor is a locator line: no 60 m row.
+    PathEntry where = entry(T0 + 8 * HOUR, "KC2G", std::nullopt, "60 m");
+    where.locator = "FN20";
+    where.locatorOnly = true;
+    all.push_back(where);
 
     std::vector<const PathEntry*> ptrs;
     for (const PathEntry& e : all) ptrs.push_back(&e);
@@ -1049,10 +1076,24 @@ void file()
         CHECK_EQ(log.of("KC2G", 0).size(), (size_t)(PathLog::KEEP_DAYS * 12));
         log.add(entry(now, "KC2G", -9.0, "17 m"));
         CHECK_EQ(log.entries().back().band, std::string("17 m"));
+        // The newest locator kept wins; none for a station that gave none.
+        CHECK(log.lastLocator("KC2G").empty());
+        PathEntry where = entry(now, "KC2G", std::nullopt, "");
+        where.locator = "FN20";
+        where.locatorOnly = true;
+        log.add(where);
+        PathEntry moved = entry(now + 1000, "KC2G", -8.0, "17 m");
+        moved.locator = "FN31pr";
+        log.add(moved);
+        log.add(entry(now + 2000, "KC2G", -8.0, "17 m"));
+        CHECK_EQ(log.lastLocator("KC2G"), std::string("FN31pr"));
+        CHECK(log.lastLocator("W1AW").empty());
     }
     // The whole file is still there: 30 days and the last line.
     std::vector<PathEntry> everything = readPathTail(path, 0);
-    CHECK_EQ(everything.size(), (size_t)(30 * 24 + 1));
+    CHECK_EQ(everything.size(), (size_t)(30 * 24 + 4));
+    if (!everything.empty()) CHECK_EQ(everything.back().locator, std::string(""));
+    if (everything.size() > 2) CHECK_EQ(everything[everything.size() - 2].locator, std::string("FN31pr"));
     if (!everything.empty()) CHECK_EQ(everything.front().atMs, T0);
 
     // A file that isn't there reads as empty.
