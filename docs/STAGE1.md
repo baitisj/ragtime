@@ -734,8 +734,15 @@ under it is the operator's business.
 **The path log** (`radio::PathLog`). Every burst heard from another
 station adds a line to `paths.log` in `appDataDir()` (or
 `<config>.paths.log`), appended and never rewritten: UTC time, call,
-S/N, the burst's mode, band, dial in Hz, our gear, and `D2G` or
-`session`. Broadcast bursts come from `BCAST HEARD`, the session
+S/N, the burst's mode, band, dial in Hz, our gear, `D2G` or
+`session`, and the station's Maidenhead locator as last reported (from
+its Hello this run, or else the log's own last one; empty while none has
+come). A locator that first comes, or changes, gets a `locator` line of
+its own (Jeff, 2026-11-01), so the log keeps where each station was
+heard from, and a station heard once with its Hello isn't lost to the
+order in which data2g-host passes the burst's `BCAST HEARD` and its
+frames. The strip and Recent work's counts leave `locator` lines out.
+Lines from before the locator field still read. Broadcast bursts come from `BCAST HEARD`, the session
 partner's from `SN`. The host names the mode only of a session's bursts
 (`MODE`), so a broadcast's mode field is empty; naming it in `BCAST
 HEARD` would be an ask for Andrew. Band and dial are empty while the
@@ -809,13 +816,26 @@ keeps the choice (`/Stations/RecentWorkOrder`).
 last 15 minutes) or when last heard, and under it what puts it there:
 "At this hour 10 days, 17 m · worked 4", "Worked 2 days", "Heard 4
 days". Hovering gives the counts in full and the score. Picking a row
-shows the station in Globus with its strip (a station not heard this run
-says when it last was, with no square on the globe, since the path log
-keeps no locators); double-click addresses a message to it; the
+shows the station in Globus with its strip, its square a blinking yellow
+dot so it stands out from the red ones of the stations heard (Jeff,
+2026-11-01); a station not heard this run says when it last was, and its
+square is the newest locator in the path log, dim and "(last
+contact)" in the caption. The tooltip also says where the station last
+was, with distance and bearing from our locator: "Last at FN31pr · 3,900
+km · 81°" (Jeff, 2026-11-01). Picking a station in the station list
+that hasn't sent its locator this run shows the log's in the same way,
+without the blink. Double-click addresses a message to it; the
 right-click menu is the station list's, so Call, Watch and Paths heard
 work from here. A pick in either list unpicks the other, and Call and
 Message take whichever is picked. The pane is drawn again on a new line
 in the log (at most every 5 s), when the band changes, and every 30 s.
+
+**Where the pointer is.** Over the globe, the six-character locator of
+the subsquare under the pointer shows in Globus's lower right corner
+(`globus::fromScreen`, `globus::locatorOf`), on a plate of the pane's
+colour so it reads over a globe zoomed in. Over the globe the tooltip on
+how to work it is taken off, since it would cover the corner; it shows
+in the window's margins.
 
 Choices made here, for Jeff to keep or change: the hour either side;
 the multiplied score; contacts counted by day, not by message; every

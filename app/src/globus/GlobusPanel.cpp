@@ -65,6 +65,12 @@ GlobusPanel::GlobusPanel(wxWindow* parent, wxWindowID id)
     SetSizer(sizer);
 
     Bind(wxEVT_TIMER, [this](wxTimerEvent&) { updateTime(); });
+    // A long caption ("VK2RT · QF56oc (last contact) · 12,477 km · 241°")
+    // wraps in a narrow pane rather than running off its edge.
+    Bind(wxEVT_SIZE, [this](wxSizeEvent& event) {
+        event.Skip();
+        if (GetClientSize().x != captionWidth_) CallAfter([this] { wrapCaption(); });
+    });
     clock_.Start(CLOCK_MILLISECONDS);
     updateTime();
     updateCaption();
@@ -73,17 +79,18 @@ GlobusPanel::GlobusPanel(wxWindow* parent, wxWindowID id)
 void GlobusPanel::setHome(const std::string& locator)
 {
     home_ = locator;
-    view_->setLocators(home_, locator_, current_);
+    view_->setLocators(home_, locator_, current_, blink_);
     updateCaption();
 }
 
 void GlobusPanel::setStation(const std::string& callsign, const std::string& locator, bool current,
-                             const std::string& details)
+                             const std::string& details, bool blink)
 {
     callsign_ = callsign;
     locator_ = locator;
     current_ = current;
-    view_->setLocators(home_, locator_, current_);
+    blink_ = blink;
+    view_->setLocators(home_, locator_, current_, blink_);
     details_->SetLabel(utf8(details));
     // Fixed size (it doesn't resize itself on every new label), but as
     // tall as its lines.
@@ -142,6 +149,23 @@ void GlobusPanel::updateTime()
     Layout();
 }
 
+void GlobusPanel::wrapCaption()
+{
+    int width = GetClientSize().x;
+    if (width == captionWidth_) return;
+    captionWidth_ = width;
+    caption_->SetLabel(utf8(captionText_));
+    if (width > 12) caption_->Wrap(width - 12);
+    int lines = 1;
+    for (wxUniChar c : caption_->GetLabel()) lines += c == '\n' ? 1 : 0;
+    int height = lines * caption_->GetCharHeight();
+    if (caption_->GetMinSize().y != height)
+    {
+        caption_->SetMinSize(wxSize(-1, height));
+        Layout();
+    }
+}
+
 void GlobusPanel::updateCaption()
 {
     std::string text = ragtime::globus::caption(home_, callsign_, locator_, current_);
@@ -149,7 +173,9 @@ void GlobusPanel::updateCaption()
     {
         text = "Set your locator to see the paths";
     }
-    caption_->SetLabel(utf8(text));
+    captionText_ = text;
+    captionWidth_ = -1;
+    wrapCaption();
     caption_->SetForegroundColour(current_ || callsign_.empty() ? wxNullColour
                                                                  : wxSystemSettings::GetColour(wxSYS_COLOUR_GRAYTEXT));
     Layout();

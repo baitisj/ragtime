@@ -35,6 +35,9 @@ public:
     void onOrder(OrderFn fn) { onOrder_ = std::move(fn); }
     void bells(BellFn belled) { belled_ = std::move(belled); }
 
+    // Our own locator, for the distance in the tooltips.
+    void setHome(const std::string& locator) { home_ = locator; }
+
     void setOrder(ragtime::radio::WorkOrder order);
     ragtime::radio::WorkOrder order() const { return order_; }
 
@@ -63,6 +66,7 @@ private:
     ragtime::radio::RecentWork work_;
     uint64_t nowMs_ = 0;
     std::string selected_;
+    std::string home_;
     bool updating_ = false;
 
     CallFn onSelect_, onActivate_, onMenu_;

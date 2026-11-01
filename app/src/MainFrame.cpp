@@ -71,6 +71,7 @@
 #include "ragtime/broadcast/Airtime.h"
 #include "ragtime/ear/AutoSpan.h"
 #include "ragtime/files/FileRows.h"
+#include "ragtime/globus/Globe.h"
 #include "ragtime/globus/Sun.h"
 #include "ragtime/image/Codec.h"
 #include "ragtime/picture/Picture.h"
@@ -863,6 +864,7 @@ void MainFrame::applyPrefs(bool reconnect)
     watch_.setMyCallsign(prefs_.callsign);
     applyFilePrefs();
     globus_->setHome(prefs_.locator);
+    recent_->setHome(prefs_.locator);
     bar_->setCallsign(utf8(prefs_.callsign));
     SetTitle(prefs_.callsign.empty() ? wxString("Ragtime") : wxString::FromUTF8("Ragtime \xc2\xb7 ") + utf8(prefs_.callsign));
 
@@ -991,6 +993,7 @@ void MainFrame::onHostEvents(const std::vector<Event>& events)
         for (const protocol::Record& r : chat_.onEvent(e, now))
         {
             stations_.onRecord(r, now);
+            logLocator(r, now);
             watch_.onRecord(r, now);
             seals_.onRecord(r, now);
             broadcastFiles_.onRecord(r, now);
@@ -1004,6 +1007,7 @@ void MainFrame::onHostEvents(const std::vector<Event>& events)
             {
                 chat_.onRebuilt(r, now);
                 stations_.onRecord(r, now);
+                logLocator(r, now);
                 seals_.onRecord(r, now);
                 broadcastFiles_.onRecord(r, now);
                 if (addressedToUs(r)) logWorked(r.header.callsign, now);
@@ -1204,7 +1208,8 @@ void MainFrame::stationPicked(const std::string& call)
     uint64_t now = HostConnection::nowMs();
     const radio::PathStrip& strip = stripFor(call, now);
     // A station from Recent work may not have been heard this run: its
-    // strip and when it was last heard, with no square on the globe.
+    // strip, when it was last heard, and the square the path log last has
+    // for it, dim.
     const broadcast::Station* s = stations_.find(call);
     std::string details;
     if (s != nullptr)
@@ -1229,7 +1234,12 @@ void MainFrame::stationPicked(const std::string& call)
                    + (most->days == 1 ? " day" : " days");
         if (most->medianDb) details += ", median " + gearbox::formatDb(*most->medianDb);
     }
-    globus_->setStation(call, s != nullptr ? s->locator : std::string(), s != nullptr, details);
+    // Picked in Recent work, the station's square blinks yellow.
+    bool fromRecent = stationList_->selected().empty() && recent_->selected() == call;
+    std::string locator = s != nullptr ? s->locator : std::string();
+    bool current = !locator.empty();
+    if (locator.empty()) locator = pathLog_.lastLocator(call);
+    globus_->setStation(call, locator, current || locator.empty(), details, fromRecent);
     globus_->setPathStrip(&strip, now);
 }
 
@@ -1553,7 +1563,11 @@ void MainFrame::onSessionData(const uint8_t* bytes, size_t length)
     uint64_t now = HostConnection::nowMs();
     // The far end's Hello tells the station list its locator; anything
     // heard in the session says it was heard.
-    for (const protocol::Record& r : session_.dataBytes(bytes, length, now)) stations_.onRecord(r, now);
+    for (const protocol::Record& r : session_.dataBytes(bytes, length, now))
+    {
+        stations_.onRecord(r, now);
+        logLocator(r, now);
+    }
     // A burst of the partner's decoded: ask data2g-host how strong it was.
     link_.sessionHeard(now);
     onSessionEvents();
@@ -4038,6 +4052,7 @@ void MainFrame::logPath(const std::string& call, std::optional<double> snr, bool
     }
     e.gear = broadcastMode();
     e.session = session;
+    e.locator = locatorOf(call);
     pathLog_.add(e);
     if (!pathLog_.problem().empty()) note_ = pathLog_.problem();
 }
@@ -4062,6 +4077,38 @@ void MainFrame::logWorked(const std::string& call, uint64_t nowMs)
     }
     e.gear = broadcastMode();
     e.worked = true;
+    e.locator = locatorOf(call);
+    pathLog_.add(e);
+    if (!pathLog_.problem().empty()) note_ = pathLog_.problem();
+}
+
+std::string MainFrame::locatorOf(const std::string& call) const
+{
+    // Heard this run, or else the newest the path log has.
+    const broadcast::Station* s = stations_.find(call);
+    if (s != nullptr && !s->locator.empty()) return s->locator;
+    return pathLog_.lastLocator(call);
+}
+
+void MainFrame::logLocator(const protocol::Record& record, uint64_t nowMs)
+{
+    const protocol::Hello* hello = record.as<protocol::Hello>();
+    if (hello == nullptr) return;
+    const std::string& call = record.header.callsign;
+    std::string locator = globus::tidyLocator(hello->locator);
+    if (call.empty() || locator.empty() || call == protocol::normalCallsign(prefs_.callsign)) return;
+    // Only a locator the log doesn't have for it yet: the first, or a move.
+    if (pathLog_.lastLocator(call) == locator) return;
+    radio::PathEntry e;
+    e.atMs = nowMs;
+    e.call = call;
+    if (std::optional<uint64_t> hz = rig_->dialHz())
+    {
+        e.dialHz = *hz;
+        e.band = radio::bandOf(*hz);
+    }
+    e.locator = locator;
+    e.locatorOnly = true;
     pathLog_.add(e);
     if (!pathLog_.problem().empty()) note_ = pathLog_.problem();
 }

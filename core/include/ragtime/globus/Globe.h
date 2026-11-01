@@ -41,6 +41,11 @@ double dot(const Vec3& a, const Vec3& b);
 // case. False for anything else.
 bool locatorCentre(const std::string& locator, LatLon& centreOut);
 
+// The six-character locator of the subsquare a position is in, tidied
+// ("CN87ux"); a pole counts in the subsquare beside it, and 180° E is
+// 180° W.
+std::string locatorOf(const LatLon& position);
+
 // The locator tidied: fields upper case, subsquare lower case ("CN87ux").
 // Empty unless it is one.
 std::string tidyLocator(const std::string& locator);
@@ -128,6 +133,10 @@ struct Point
     double y = 0.0;
 };
 Point onScreen(const View& view, const Window& window, const Vec3& earth);
+
+// And back: the point of the earth's near side a view shows at a point of
+// the window. False off the globe.
+bool fromScreen(const View& view, const Window& window, const Point& point, Vec3& earthOut);
 
 // The view that best shows the path from home to a station: as close as
 // shows all of it, north up if that is nearly as close as any turn of the

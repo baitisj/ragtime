@@ -103,7 +103,13 @@ beside Globus and with Globus off:
   plus navy `#1C2C56` × 0.55; a smoothstep between sun altitude +3° and
   −12° makes the greyline. A slight limb darkening (0.88 + 0.12 × depth).
 - Caption under the globe: `W1AW · FN31 · 3,951 km · 81°`, then the
-  station's details.
+  station's details. It wraps in a narrow pane.
+- A station picked in Recent work is a yellow dot (`#ffd01a`) with a
+  navy rim, a little bigger than the picked station's red dot, lit and
+  dimmed every half second (Jeff, 2026-11-01).
+- Over the globe, the locator under the pointer (`CN87ux`) in the lower
+  right corner, in the pane's text colour on a plate of its background
+  (Jeff, 2026-11-01).
 
 ![Globus, home CN87 to W1AW, 22:36 UTC](images/globe-w1aw.png)
 

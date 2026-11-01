@@ -1,6 +1,7 @@
 #include "ragtime/radio/RecentWork.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <map>
 #include <set>
@@ -8,6 +9,7 @@
 #include <utility>
 
 #include "ragtime/broadcast/Stations.h"
+#include "ragtime/globus/Globe.h"
 #include "ragtime/radio/Bands.h"
 
 namespace ragtime
@@ -60,6 +62,8 @@ RecentWork recentWork(const std::vector<PathEntry>& entries, uint64_t nowMs, siz
         std::set<uint64_t> heard, hour, worked;
         std::map<std::string, std::set<uint64_t>> hourBands;
         uint64_t lastHeardMs = 0, lastWorkedMs = 0;
+        std::string locator;
+        uint64_t locatorMs = 0;
     };
     std::map<std::string, Gather> byCall;
     for (const PathEntry& e : entries)
@@ -67,6 +71,12 @@ RecentWork recentWork(const std::vector<PathEntry>& entries, uint64_t nowMs, siz
         if (e.call.empty() || e.atMs < since || e.atMs > nowMs + HOUR_MS) continue;
         Gather& g = byCall[e.call];
         uint64_t day = e.atMs / PathLog::DAY_MS;
+        if (!e.locator.empty() && e.atMs >= g.locatorMs)
+        {
+            g.locator = e.locator;
+            g.locatorMs = e.atMs;
+        }
+        if (e.locatorOnly) continue;
         // A session's bursts are work as well as bursts heard.
         if (e.worked || e.session)
         {
@@ -84,6 +94,9 @@ RecentWork recentWork(const std::vector<PathEntry>& entries, uint64_t nowMs, siz
 
     for (auto& [call, g] : byCall)
     {
+        // Only its locator came (it is in the log with a burst, unless
+        // that burst is older than the span).
+        if (g.heard.empty() && g.worked.empty()) continue;
         WorkRow row;
         row.call = call;
         row.heardDays = g.heard.size();
@@ -103,6 +116,7 @@ RecentWork recentWork(const std::vector<PathEntry>& entries, uint64_t nowMs, siz
         row.lastWorkedMs = g.lastWorkedMs;
         row.onNow = g.lastHeardMs != 0 && g.lastHeardMs + ON_NOW_MS >= nowMs;
         row.score = (1 + row.workedDays) * (1 + row.hourDays);
+        row.locator = g.locator;
         work.rows.push_back(std::move(row));
     }
 
@@ -146,10 +160,27 @@ std::string hourSpan(int hour)
     return text;
 }
 
-std::string workTip(const WorkRow& row, const RecentWork& work, uint64_t nowMs)
+std::string workPlace(const WorkRow& row, const std::string& homeLocator)
+{
+    globus::LatLon there;
+    if (!globus::locatorCentre(row.locator, there)) return "";
+    std::string place = globus::tidyLocator(row.locator);
+    globus::LatLon home;
+    if (globus::locatorCentre(homeLocator, home))
+    {
+        place += " \xc2\xb7 " + globus::withThousands(std::lround(globus::distanceKm(home, there))) + " km \xc2\xb7 "
+                 + std::to_string(std::lround(globus::bearingDegrees(home, there)) % 360) + "\xc2\xb0";
+    }
+    return place;
+}
+
+std::string workTip(const WorkRow& row, const RecentWork& work, uint64_t nowMs, const std::string& homeLocator)
 {
     std::string tip = row.call;
     if (row.onNow) tip += ", on now";
+    tip += "\n";
+    std::string place = workPlace(row, homeLocator);
+    tip += place.empty() ? std::string("No locator heard from it.") : "Last at " + place + ".";
     tip += "\n";
     if (row.heardDays == 0)
     {

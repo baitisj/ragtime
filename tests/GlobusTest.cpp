@@ -61,6 +61,53 @@ void testLocators()
     CHECK(!locatorCentre("CN87u", unused));
 }
 
+// The locator under a position, and back to the subsquare's centre.
+void testLocatorOf()
+{
+    CHECK_EQ(locatorOf(LatLon{47.6, -122.3}), std::string("CN87uo"));
+    CHECK_EQ(locatorOf(centreOf("CN87ux")), std::string("CN87ux"));
+    CHECK_EQ(locatorOf(centreOf("FN31pr")), std::string("FN31pr"));
+    CHECK_EQ(locatorOf(LatLon{-33.9, 151.2}), std::string("QF56oc"));
+    // The corners: the poles and the antimeridian stay in the grid.
+    CHECK_EQ(locatorOf(LatLon{-90.0, -180.0}), std::string("AA00aa"));
+    CHECK_EQ(locatorOf(LatLon{90.0, 180.0}), std::string("AR09ax"));
+    CHECK_EQ(locatorOf(LatLon{89.999, 179.999}), std::string("RR99xx"));
+    // Every subsquare's centre comes back to it.
+    for (int lat = -89; lat < 90; lat += 7)
+    {
+        for (int lon = -179; lon < 180; lon += 11)
+        {
+            std::string locator = locatorOf(LatLon{lat + 0.3, lon + 0.7});
+            LatLon centre;
+            CHECK(locatorCentre(locator, centre));
+            CHECK_EQ(locatorOf(centre), locator);
+        }
+    }
+}
+
+// The window's point back to the earth: the middle is what the view looks
+// at, a point drawn comes back to itself, and off the globe is nothing.
+void testFromScreen()
+{
+    Window window{300.0, 300.0};
+    View view;
+    view.radius = 120.0;
+    view.attitude = lookingAt(toVector(centreOf("CN87")), 0.4);
+    Vec3 earth;
+    CHECK(fromScreen(view, window, Point{150.0, 150.0}, earth));
+    CHECK(near(dot(earth, toVector(centreOf("CN87"))), 1.0, 1e-9));
+    Vec3 berlin = toVector(centreOf("JO62"));
+    Vec3 tokyo = toVector(centreOf("PM95"));
+    for (const Vec3& place : {berlin, tokyo})
+    {
+        if (toView(view.attitude, place).z <= 0.0) continue;
+        CHECK(fromScreen(view, window, onScreen(view, window, place), earth));
+        CHECK(near(dot(earth, place), 1.0, 1e-9));
+    }
+    CHECK(!fromScreen(view, window, Point{5.0, 5.0}, earth));
+    CHECK(!fromScreen(view, window, Point{150.0 + 121.0, 150.0}, earth));
+}
+
 void testDistanceAndBearing()
 {
     // Seattle's square to Berlin's: about 8,100 km, leaving a little east
@@ -1219,6 +1266,8 @@ void testLightingTime()
 int main()
 {
     testLocators();
+    testLocatorOf();
+    testFromScreen();
     testDistanceAndBearing();
     testCaption();
     testLand();

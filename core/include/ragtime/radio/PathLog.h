@@ -5,7 +5,10 @@
 // measured, the burst's mode when the host named it, the band and dial
 // from rigctld when Ragtime reads it, and the gear we were sending in.
 // A contact adds a line too, marked worked: a session with the station,
-// or a message between it and us.
+// or a message between it and us. Each line carries the station's
+// Maidenhead locator as last reported, and a locator that first comes or
+// changes (in a Hello) gets a line of its own, so where a station was
+// heard from is kept with when.
 //
 // From the recent lines it draws each station's 24-hour strip by band
 // for the station details: "17 m: 2000-0000Z on 5 days, median -6 dB";
@@ -41,6 +44,12 @@ struct PathEntry
     // Not a burst heard but a contact: a session came up with the station,
     // it sent us a message, or we sent it one. No S/N or mode.
     bool worked = false;
+    // The station's locator as it last reported it (tidied: "CN87ux"), or
+    // empty while we haven't heard one.
+    std::string locator;
+    // Neither a burst heard nor a contact: a locator came from the station
+    // that the log didn't have for it yet, or a new one. Only the locator.
+    bool locatorOnly = false;
 };
 
 // "2026-10-25T16:30:12Z", and back (false for anything else).
@@ -48,8 +57,9 @@ std::string utcStamp(uint64_t ms);
 bool parseUtcStamp(const std::string& text, uint64_t& ms);
 
 // One line of the file, without its newline: tab-separated time, call,
-// S/N, mode, band, dial, gear, and "D2G", "session" or "work"; an unknown
-// field is empty. And back: false for a line that isn't one.
+// S/N, mode, band, dial, gear, "D2G", "session", "work" or "locator",
+// and the locator; an unknown field is empty. And back: false for a line
+// that isn't one (a line from before the locator field reads without it).
 std::string pathLine(const PathEntry& entry);
 bool parsePathLine(const std::string& line, PathEntry& entry);
 
@@ -73,7 +83,7 @@ struct BandRow
 
 // A station's strip: a row for each band it was heard on in the last
 // `days` days, lowest band first and the dial-unknown row last. Worked
-// lines aren't bursts heard, so they are left out.
+// and locator lines aren't bursts heard, so they are left out.
 struct PathStrip
 {
     std::string call;
@@ -111,6 +121,8 @@ public:
     // The entries kept, oldest first; and a station's, since a time.
     const std::vector<PathEntry>& entries() const { return entries_; }
     std::vector<const PathEntry*> of(const std::string& call, uint64_t sinceMs) const;
+    // The station's newest locator among the entries kept, or "".
+    std::string lastLocator(const std::string& call) const;
 
     // Drops what is older than KEEP_DAYS from memory (never from the file).
     void trim(uint64_t nowMs);
