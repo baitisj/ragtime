@@ -988,11 +988,20 @@ every change, and keeps no copy in its settings.
 - **Auto ALC**, on the connection bar, off by default (the tick is
   kept, `/Connection/AutoAlc`), aims at an ALC of 55% (Jeff,
   2026-10-26: "That's where it should work the best"). Each burst works
-  out a step from the median of its ALC readings, so a reading at
-  keying or unkeying doesn't sway it (one reading will do: the meters
-  are read in turn, so a short burst may have only one):
-  over 80% down 2 dB, over 65% down 0.5 dB, under 45% up 0.5 dB, under
-  25% up 1 dB, and between 45% and 65% nothing. With Auto ALC ticked
+  out a step from the median of its ALC readings with the audio on:
+  none from the first 0.5 s after PTT ON (data2g-host keys the rig
+  about 0.1 s before its audio starts, and the rig's meter takes a
+  moment to rise) nor the last 0.25 s before PTT OFF. Over 80% down
+  2 dB, over 72% down 1 dB, over 65% down 0.5 dB, under 45% up 0.5 dB,
+  under 25% up 1 dB, and between 45% and 65% nothing. A step down takes
+  one such reading (the meters are read in turn, so a short burst may
+  have only one, and too much drive matters more); a step up takes
+  three. Before 2026-11-01 every reading counted and one did for either
+  way, so short bursts (a check-in, an ACK), read mostly before their
+  audio, stepped the level up 1 dB while each long one stepped it down
+  only 0.5 dB, and Jeff's long transmissions sat at 78-80%; the burst's
+  line in the flight recorder now says when it was too short to raise
+  the level. With Auto ALC ticked
   that goes to the host as the burst ends (`radio::AutoAlc`). It works
   around the base, the TX level set in Settings (or in data2g-host's
   own window, or a restarted host's, or the level it found when

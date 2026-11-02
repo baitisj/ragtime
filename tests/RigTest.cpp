@@ -1,9 +1,11 @@
 // Rig control without a rig: the settings as Hamlib's configuration words,
 // the words kept in the settings file, and the PTT follower's keying and
 // its safety unkeys, the transmit meters burst by burst, and Auto ALC.
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <initializer_list>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -280,8 +282,9 @@ void meters()
     CHECK(b.alcMean && std::fabs(*b.alcMean - (0.3 + 0.6 + 0.55 + 0.6 + 0.4 + 0.6 + 0.85) / 7) < 1e-9);
     CHECK(b.swrPeak && *b.swrPeak == 1.5 && !b.swrHigh());
     CHECK(b.wattsMean && *b.wattsMean == 38);
-    // Readings 0.3 0.4 0.55 0.6 0.6 0.6 0.85: the median 60%, in the band.
-    CHECK(b.alcReadings == 7 && b.alcMedian && *b.alcMedian == 0.6);
+    // The one in the first SETTLE_MS doesn't count; of 0.4 0.55 0.6 0.6 0.6
+    // 0.85 the median is 60%, in the band.
+    CHECK(b.alcReadings == 7 && b.alcCounted == 6 && b.alcMedian && *b.alcMedian == 0.6);
     CHECK_EQ(b.alcStepDb, 0.0);
     CHECK(!b.overTarget());
     CHECK_EQ(burstText(b), std::string("12 s: ALC peak 85%, mean 56%, median 60% \xc2\xb7 SWR 1.5 \xc2\xb7 38 W"));
@@ -308,24 +311,86 @@ void meters()
 
     // The steps, from the median: to 55%, holding between 45% and 65%.
     CHECK_EQ(alcStepDb(0.9), -TxMeters::BIG_STEP_DB);
+    CHECK_EQ(alcStepDb(0.78), -TxMeters::DOWN_MORE_DB);
     CHECK_EQ(alcStepDb(0.7), -TxMeters::STEP_DB);
     CHECK_EQ(alcStepDb(0.65), 0.0);
     CHECK_EQ(alcStepDb(0.55), 0.0);
     CHECK_EQ(alcStepDb(0.45), 0.0);
     CHECK_EQ(alcStepDb(0.4), TxMeters::STEP_DB);
     CHECK_EQ(alcStepDb(0.1), TxMeters::BIG_UP_DB);
+    // Readings with the audio on: the first after SETTLE_MS, the burst
+    // ending a little after the last.
     auto burstOf = [&](std::initializer_list<double> alcs) {
         m.transmitting(true, 40000);
-        uint64_t t = 40000;
+        uint64_t t = 40000 + TxMeters::SETTLE_MS - 150;
         for (double a : alcs) m.reading(alcOnly(a), t += 250);
-        m.transmitting(false, t + 100);
+        m.transmitting(false, t + TxMeters::TAIL_MS + 50);
         return *m.last();
     };
     CHECK_EQ(burstOf({0.0, 0.9, 0.95, 0.9, 0.2}).alcStepDb, -TxMeters::BIG_STEP_DB);
     CHECK(burstOf({0.0, 0.9, 0.95, 0.9, 0.2}).overTarget());
     CHECK_EQ(burstOf({0.3, 0.35, 0.4, 0.38}).alcStepDb, TxMeters::STEP_DB);
-    // One reading will do: a short burst may have no more.
+    // One reading will do for a step down: a short burst may have no more.
     CHECK_EQ(burstOf({0.9}).alcStepDb, -TxMeters::BIG_STEP_DB);
+    // A step up takes UP_READINGS.
+    TxMeters::Burst few = burstOf({0.3, 0.3});
+    CHECK(few.alcStepDb == 0.0 && few.tooShortToRaise && few.alcCounted == 2);
+    CHECK(!burstOf({0.3, 0.3, 0.3}).tooShortToRaise);
+
+    // The lead and the tail don't count (Jeff, 2026-11-01: long
+    // transmissions sat at 78-80%): data2g-host says PTT ON before the
+    // audio starts, and PTT OFF a little after it stops.
+    m.transmitting(true, 50000);
+    m.reading(alcOnly(0.0), 50100);
+    m.reading(alcOnly(0.05), 50400);
+    for (uint64_t t = 51000; t <= 59000; t += 1000) m.reading(alcOnly(0.78), t);
+    m.reading(alcOnly(0.0), 59900);
+    m.transmitting(false, 60000);
+    CHECK(m.last()->alcCounted == 9 && m.last()->alcReadings == 12);
+    CHECK(m.last()->alcMedian && *m.last()->alcMedian == 0.78);
+    CHECK_EQ(m.last()->alcStepDb, -TxMeters::DOWN_MORE_DB);
+    // A burst read only before its audio came: no step, but a median shown.
+    m.transmitting(true, 70000);
+    m.reading(alcOnly(0.0), 70100);
+    m.transmitting(false, 71500);
+    CHECK(m.last()->alcCounted == 0 && m.last()->alcMedian && m.last()->alcStepDb == 0.0);
+    CHECK(!m.last()->tooShortToRaise);
+}
+
+// Long bursts too hot, and short ones (a check-in, an ACK) between them
+// read mostly while the rig comes up to power: Auto ALC must still bring
+// the long ones down to the band, not be pushed back up by the short ones
+// (Jeff, 2026-11-01).
+void autoAlcLongAndShort()
+{
+    TxMeters m;
+    AutoAlc alc;
+    alc.hostLevel(-10.0, 0);
+    alc.setEnabled(true);
+    // The rig's ALC with the audio on: 79% at -10 dB, following the drive.
+    auto alcAt = [&]() { return std::min(1.2, 0.79 * std::pow(10.0, (*alc.level() + 10.0) / 20.0)); };
+    uint64_t t = 1000;
+    auto burst = [&](int seconds) {
+        uint64_t start = t;
+        m.transmitting(true, start);
+        // The first reading at once, before the audio; then one a second.
+        m.reading(alcOnly(0.0), start + 100);
+        for (int s = 1; s < seconds; s++) m.reading(alcOnly(alcAt()), start + 1000 * (uint64_t)s);
+        m.transmitting(false, start + 1000 * (uint64_t)seconds + 50);
+        t = start + 1000 * (uint64_t)seconds + 5000;
+        if (std::optional<double> next = alc.burstEnded(*m.last()))
+        {
+            alc.sent(*next);
+            alc.hostLevel(*next, t);
+        }
+    };
+    for (int i = 0; i < 12; i++)
+    {
+        burst(30);
+        burst(2);
+        burst(2);
+    }
+    CHECK(alcAt() <= TxMeters::ALC_BAND_HIGH && alcAt() >= TxMeters::ALC_BAND_LOW);
 }
 
 void swr()
@@ -535,5 +600,6 @@ int main()
     meters();
     swr();
     autoAlc();
+    autoAlcLongAndShort();
     return ragtime_test::finish();
 }

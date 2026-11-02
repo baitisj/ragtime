@@ -3757,6 +3757,11 @@ void MainFrame::onMeters()
         else if (burst.alcStepDb > 0 && autoAlc_.atTop())
             line += "; Auto ALC is at its most, " + std::to_string((int)radio::AutoAlc::CLIMB_DB)
                     + " dB over the TX level set";
+        else if (burst.alcReadings > 0 && burst.alcCounted == 0)
+            line += "; no ALC reading with the audio on, so no step";
+        else if (burst.tooShortToRaise)
+            line += "; too short to raise the TX level (" + std::to_string(burst.alcCounted) + " ALC reading"
+                    + (burst.alcCounted == 1 ? "" : "s") + " with the audio on)";
         host_->recorder().note(line, HostConnection::nowMs());
         if (next) sendTxLevel(*next, "Auto ALC");
     }
@@ -3787,8 +3792,9 @@ void MainFrame::showAutoAlc()
     bool host = link_.txPower().has_value();
     bool alc = rig_->readsAlc();
     std::string tip = "Keeps the rig's ALC near 55% by moving data2g-host's TX level (TXPOWER) after each burst, "
-                      "from the middle of its ALC readings: over 80% down 2 dB, over 65% down 0.5 dB, under 45% "
-                      "up 0.5 dB, under 25% up 1 dB, and between 45% and 65% it leaves it. It works around the "
+                      "from the middle of its ALC readings with the audio on: over 80% down 2 dB, over 72% down 1 dB, "
+                      "over 65% down 0.5 dB, under 45% up 0.5 dB, under 25% up 1 dB, and between 45% and 65% it "
+                      "leaves it. It raises the level only after a burst long enough to tell. It works around the "
                       "TX level set in Settings (or the level it found when ticked): never more than "
                       + std::to_string((int)radio::AutoAlc::CLIMB_DB) + " dB over it, never more than "
                       + std::to_string((int)radio::AutoAlc::MAX_TRIM_DB)
@@ -3887,6 +3893,8 @@ void MainFrame::showMeters()
                                 + wxString::Format("%.1f", std::fabs(last->alcStepDb)).ToStdString()
                                 + " dB; tick it, or set the level in Settings.");
         }
+        else if (last->tooShortToRaise)
+            tip += "\nUnder " + std::to_string(low) + "%, but too short a burst to raise the TX level by.";
         else if (last->alcMedian)
             tip += "\nBetween " + std::to_string(low) + "% and " + std::to_string(high) + "%: just right.";
     }

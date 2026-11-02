@@ -55,11 +55,23 @@ void TxMeters::transmitting(bool on, uint64_t nowMs)
         current_.endMs = nowMs;
         if (!alcReadings_.empty())
         {
-            std::vector<double>& r = alcReadings_;
+            // The step from the readings once the audio was on; with none,
+            // the median of them all is shown, and no step.
+            std::vector<double> counted, all;
+            for (const auto& [ms, alc] : alcReadings_)
+            {
+                all.push_back(alc);
+                if (ms >= current_.startMs + SETTLE_MS && ms + TAIL_MS <= nowMs) counted.push_back(alc);
+            }
+            current_.alcCounted = (int)counted.size();
+            std::vector<double>& r = counted.empty() ? all : counted;
             std::sort(r.begin(), r.end());
             size_t n = r.size();
             current_.alcMedian = n % 2 ? r[n / 2] : (r[n / 2 - 1] + r[n / 2]) / 2;
-            if (current_.alcReadings >= STEP_READINGS) current_.alcStepDb = alcStepDb(*current_.alcMedian);
+            double step = counted.empty() ? 0 : alcStepDb(*current_.alcMedian);
+            if (step < 0 && current_.alcCounted >= STEP_READINGS) current_.alcStepDb = step;
+            if (step > 0 && current_.alcCounted >= UP_READINGS) current_.alcStepDb = step;
+            current_.tooShortToRaise = step > 0 && current_.alcCounted < UP_READINGS;
         }
         if (current_.readings > 0)
         {
@@ -84,7 +96,7 @@ void TxMeters::reading(const MeterReading& reading, uint64_t nowMs)
         alcSum_ += alc;
         current_.alcMean = alcSum_ / ++alcCount_;
         current_.alcReadings = alcCount_;
-        alcReadings_.push_back(alc);
+        alcReadings_.push_back({nowMs, alc});
     }
     if (reading.swr)
     {
@@ -109,6 +121,7 @@ void TxMeters::reading(const MeterReading& reading, uint64_t nowMs)
 double alcStepDb(double median)
 {
     if (median > TxMeters::ALC_HIGH) return -TxMeters::BIG_STEP_DB;
+    if (median > TxMeters::ALC_DOWN_MORE) return -TxMeters::DOWN_MORE_DB;
     if (median > TxMeters::ALC_BAND_HIGH) return -TxMeters::STEP_DB;
     if (median < TxMeters::ALC_LOW) return TxMeters::BIG_UP_DB;
     if (median < TxMeters::ALC_BAND_LOW) return TxMeters::STEP_DB;

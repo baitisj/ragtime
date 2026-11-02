@@ -10,10 +10,17 @@
 // It only reads; Ragtime never plays to the sound card. Each burst works
 // out how Auto ALC should move data2g-host's TX level to bring the ALC to
 // ALC_TARGET (55%, where Jeff finds a rig works best), from the median of
-// its ALC readings, so a reading at keying or unkeying doesn't sway it:
-// over ALC_HIGH down BIG_STEP_DB, over ALC_BAND_HIGH down STEP_DB, under
-// ALC_LOW up BIG_UP_DB, under ALC_BAND_LOW up STEP_DB, and between the two
-// band edges nothing. AutoAlc sends that to the host (TXPOWER) when ticked.
+// its ALC readings once the audio is on: none from the first SETTLE_MS
+// after PTT ON (data2g-host keys the rig before the audio starts, and the
+// rig's meter takes a moment to rise) nor the last TAIL_MS before PTT OFF.
+// Over ALC_HIGH down BIG_STEP_DB, over ALC_DOWN_MORE down DOWN_MORE_DB,
+// over ALC_BAND_HIGH down STEP_DB, under ALC_LOW up BIG_UP_DB, under
+// ALC_BAND_LOW up STEP_DB, and between the two band edges nothing. A step
+// down takes one such reading; a step up takes UP_READINGS, so short
+// bursts, whose few readings may still be the rig coming up to power,
+// can't push the level back up between the long ones (Jeff, 2026-11-01:
+// long transmissions sat at 78-80%). AutoAlc sends that to the host
+// (TXPOWER) when ticked.
 //
 // The time is always passed in, so tests run it on a simulated clock.
 #ifndef RAGTIME_RADIO_TX_METERS_H
@@ -22,6 +29,7 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace ragtime
@@ -46,15 +54,22 @@ public:
     static constexpr double ALC_BAND_LOW = 0.45;
     static constexpr double ALC_BAND_HIGH = 0.65;
     static constexpr double ALC_HIGH = 0.8;
+    static constexpr double ALC_DOWN_MORE = 0.72;
     static constexpr double ALC_LOW = 0.25;
     static constexpr double SWR_HIGH = 3.0;
     static constexpr double STEP_DB = 0.5;
     static constexpr double BIG_STEP_DB = 2.0;
+    static constexpr double DOWN_MORE_DB = 1.0;
     static constexpr double BIG_UP_DB = 1.0;
-    // Fewer ALC readings than this in a burst: no step. One will do: with
-    // the meters taken in turn, a short burst may have only one, and the
-    // steps are small.
+    // ALC readings this soon after PTT ON, or before PTT OFF, don't count
+    // towards the step: the audio isn't on yet, or has stopped.
+    static constexpr uint64_t SETTLE_MS = 500;
+    static constexpr uint64_t TAIL_MS = 250;
+    // Counted ALC readings a burst needs for a step down (with the meters
+    // taken in turn a short burst may have only one, and too much drive
+    // matters more), and for a step up.
     static constexpr int STEP_READINGS = 1;
+    static constexpr int UP_READINGS = 3;
 
     // One keying, from PTT on to PTT off.
     struct Burst
@@ -63,15 +78,20 @@ public:
         uint64_t endMs = 0;
         int readings = 0;
         int alcReadings = 0;
+        int alcCounted = 0;                // of those, once the audio was on; set when the burst ends
         std::optional<double> alcPeak;
         std::optional<double> alcMean;
-        std::optional<double> alcMedian;   // set when the burst ends
+        // Of the counted readings, or of them all if none counted; set
+        // when the burst ends.
+        std::optional<double> alcMedian;
         std::optional<double> swrPeak;
         std::optional<double> wattsMean;
         std::optional<double> powerMean;
         // How Auto ALC would move the drive, in dB: under 0 down, over 0
         // up, set when the burst ends.
         double alcStepDb = 0;
+        // The counted readings asked for a step up, but too few of them.
+        bool tooShortToRaise = false;
 
         bool overTarget() const { return alcMedian ? *alcMedian > ALC_BAND_HIGH : alcPeak && *alcPeak > ALC_BAND_HIGH; }
         bool swrHigh() const { return swrPeak && *swrPeak > SWR_HIGH; }
@@ -104,7 +124,7 @@ private:
     std::optional<Burst> last_;
     double alcSum_ = 0, wattsSum_ = 0, powerSum_ = 0;
     int alcCount_ = 0, wattsCount_ = 0, powerCount_ = 0;
-    std::vector<double> alcReadings_;
+    std::vector<std::pair<uint64_t, double>> alcReadings_;   // time, ALC
     uint64_t bursts_ = 0;
     uint64_t version_ = 0;
 };
