@@ -450,9 +450,15 @@ private:
             links << htmlLink(htmlEscape(action.first), htmlEscape(action.second), picked);
         }
         wxString who = m.ours ? wxString("You broadcast") : htmlEscape(m.from) + " broadcasts";
+        // Its seal's badge, as a chat line's (its announce is the item the
+        // seal lists); none until a seal says something, as the card's
+        // state says how it goes.
+        using Mark = ragtime::broadcast::Seals::Mark;
+        Mark mark = owner_->sealMark_ ? owner_->sealMark_(m).mark : Mark::None;
+        wxString badge = mark == Mark::None ? wxString() : sealBadgeHtml(mark, this);
         wxString html;
         html << "<table width=\"100%\" cellspacing=\"0\" cellpadding=\"2\"><tr>"
-             << "<td width=\"" << BADGE_ROOM << "\"></td>"
+             << "<td width=\"" << BADGE_ROOM << "\" valign=\"top\">" << badge << "</td>"
              << "<td valign=\"top\" nowrap><font" << colour(secondaryText()) << ">" << clock(m.atMs)
              << "</font></td>"
              << "<td valign=\"top\" width=\"100%\"><b>" << who << "</b>"
@@ -608,6 +614,10 @@ BroadcastPage::BroadcastPage(wxWindow* parent, const BroadcastChat& chat)
                 if (!m->mode.empty()) tip += ", " + wxString::FromUTF8(nameMode_ ? nameMode_(m->mode) : m->mode);
             }
         }
+        if (m != nullptr && m->kind == Message::Kind::File && !m->past && sealMark_
+            && list_->VirtualHitTest(e.GetPosition().y) != wxNOT_FOUND
+            && e.GetPosition().x < list_->GetMargins().x + list_->FromDIP(BADGE_ROOM + 4))
+            tip = wxString::FromUTF8(sealLine(*m, sealMark_(*m)));
         if (m != nullptr && m->kind == Message::Kind::Ping && list_->VirtualHitTest(e.GetPosition().y) != wxNOT_FOUND)
             tip = pingTip(*m);
         list_->SetToolTip(tip);
@@ -865,6 +875,14 @@ void BroadcastPage::showFileMenu(const Message& m)
     wxString name = wxString::FromUTF8(m.text);
 
     wxMenu menu;
+    // What its seal says, greyed, first.
+    std::string seal = sealMark_ && !m.past ? sealLine(m, sealMark_(m)) : std::string();
+    if (!seal.empty())
+    {
+        menu.Append(ID_SEAL_LINE, wxString::FromUTF8(seal));
+        menu.Enable(ID_SEAL_LINE, false);
+        menu.AppendSeparator();
+    }
     fillFileMenu(menu, card, ID_FILE_ACTION, [this, file](const std::string& action) {
         if (onFileAction_) onFileAction_(file, action);
     });

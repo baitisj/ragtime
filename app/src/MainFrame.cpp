@@ -720,6 +720,14 @@ void MainFrame::buildLayout()
     broadcast_->nameModes([this](const std::string& mode) { return gearshift_.shortName(mode); });
     broadcast_->sealMarks(
         [this](const broadcast::Message& m) {
+            // A file's line goes by its announce, the item its seal lists.
+            if (m.kind == broadcast::Message::Kind::File)
+            {
+                broadcast::BroadcastFile f;
+                if (m.file == 0 || !broadcastFiles_.find(m.file, HostConnection::nowMs(), f) || f.seq == 0)
+                    return broadcast::Seals::ItemMark();
+                return m.ours ? seals_.ourMark(f.seq) : seals_.theirMark(f.from, f.seq);
+            }
             return m.ours ? seals_.ourMark(m.seq) : seals_.theirMark(m.from, m.seq);
         },
         [this]() { return seals_.version(); });
