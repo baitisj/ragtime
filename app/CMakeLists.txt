@@ -62,6 +62,7 @@ add_executable(ragtime WIN32
     src/Theme.cpp
     src/VoiceCards.cpp
     src/SwrBar.cpp
+    src/UnpickClick.cpp
     src/ArrivalBar.cpp
     src/TxLamp.cpp
     src/WatchDialog.cpp

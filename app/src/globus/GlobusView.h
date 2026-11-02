@@ -15,12 +15,13 @@
 
 class wxGraphicsContext;
 
-// The globe itself: a whole earth, lit from where the sun is overhead so
-// the greyline shows, with the path to the picked station as a red great
+// The globe itself: the earth, lit from where the sun is overhead so the
+// greyline shows, with the path to the picked station as a red great
 // circle, our own square a navy dot and the other stations red dots.
 //
-// Given our square and a station's it rolls to show the path and eases to
-// a stop, the path curling out from our dot to the station. Dragged it
+// Given our square and a station's it rolls and comes in to show the
+// whole path with room round it, north up when it can, and eases to a
+// stop (globus::globusZoom); the path curling out from our dot to the station. Dragged it
 // spins, and with only our own square to show it coasts on until the fluid
 // stops it; held, it stops almost at once. The mouse wheel zooms in and
 // out; a double click fits the path again. It is ported from Glissando's

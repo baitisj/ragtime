@@ -827,7 +827,9 @@ that hasn't sent its locator this run shows the log's in the same way,
 without the blink. Double-click addresses a message to it; the
 right-click menu is the station list's, so Call, Watch and Paths heard
 work from here. A pick in either list unpicks the other, and Call and
-Message take whichever is picked. The pane is drawn again on a new line
+Message take whichever is picked. A second click on the row picked, in
+either list, unpicks it and lets Globus go (Jeff, 2026-11-02;
+`app/src/UnpickClick`). The pane is drawn again on a new line
 in the log (at most every 5 s), when the band changes, and every 30 s.
 
 **Where the pointer is.** Over the globe, the six-character locator of

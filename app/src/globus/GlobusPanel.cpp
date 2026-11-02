@@ -55,13 +55,12 @@ GlobusPanel::GlobusPanel(wxWindow* parent, wxWindowID id)
 
     auto* sizer = new wxBoxSizer(wxVERTICAL);
     sizer->Add(header, 0, wxEXPAND | wxALL, 6);
-    // The globe stays square as the pane is resized, the captions right
-    // under it.
-    sizer->Add(view_, 1, wxSHAPED | wxALIGN_CENTER_HORIZONTAL | wxLEFT | wxRIGHT, 6);
+    // The globe fills the pane, the captions at its foot (Jeff,
+    // 2026-11-02): a path framed in it uses the pane's height too.
+    sizer->Add(view_, 1, wxEXPAND | wxLEFT | wxRIGHT, 6);
     sizer->Add(caption_, 0, wxEXPAND | wxLEFT | wxRIGHT | wxTOP, 6);
     sizer->Add(details_, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 6);
     sizer->Add(strip_, 0, wxALIGN_CENTER_HORIZONTAL | wxLEFT | wxRIGHT | wxBOTTOM, 6);
-    sizer->AddStretchSpacer(1);
     SetSizer(sizer);
 
     Bind(wxEVT_TIMER, [this](wxTimerEvent&) { updateTime(); });

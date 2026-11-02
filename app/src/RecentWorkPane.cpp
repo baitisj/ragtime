@@ -1,5 +1,6 @@
 #include "RecentWorkPane.h"
 
+#include <string>
 #include <utility>
 
 #include <wx/choice.h>
@@ -154,10 +155,20 @@ RecentWorkPane::RecentWorkPane(wxWindow* parent)
     list_->Bind(wxEVT_LEFT_DCLICK, [this](wxMouseEvent& e) {
         int row = list_->VirtualHitTest(e.GetPosition().y);
         if (row == wxNOT_FOUND) return;
+        unpickClick_.cancel();
         list_->SetSelection(row);
         picked(row);
         if (onActivate_ && !selected_.empty()) onActivate_(selected_);
     });
+    // A second click on the row picked lets the station go.
+    unpickClick_.attach(
+        list_,
+        [this](wxWindow*, const wxPoint& at) {
+            int row = list_->VirtualHitTest(at.y);
+            const WorkRow* r = row >= 0 ? rowAt((size_t)row) : nullptr;
+            return r != nullptr ? r->call : std::string();
+        },
+        [this] { return selected_; }, [this] { unpick(); });
     list_->Bind(wxEVT_KEY_DOWN, [this](wxKeyEvent& e) {
         if ((e.GetKeyCode() == WXK_RETURN || e.GetKeyCode() == WXK_NUMPAD_ENTER) && onActivate_ && !selected_.empty())
             onActivate_(selected_);
@@ -216,6 +227,13 @@ void RecentWorkPane::setWork(RecentWork work, uint64_t nowMs)
 void RecentWorkPane::redraw()
 {
     list_->RefreshAll();
+}
+
+void RecentWorkPane::unpick()
+{
+    if (selected_.empty()) return;
+    clearSelection();
+    if (onSelect_) onSelect_(selected_);
 }
 
 void RecentWorkPane::clearSelection()

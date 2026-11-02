@@ -56,16 +56,27 @@ constexpr double SETTLED_RADIANS = 0.002;    // a fifth of a pixel at the edge o
 constexpr double SETTLED_SPIN = 0.005;
 
 // Points along a path when framing it, and how far inside the window's
-// edge they have to be to count as shown.
+// edge they have to be to count as shown: at least FRAMING_MARGIN pixels,
+// and in a bigger window a share of its shorter side, so a framed path has
+// some room round it (Jeff, 2026-11-02).
 constexpr int FRAMING_SEGMENTS = 64;
 constexpr double FRAMING_MARGIN = 12.0;
+constexpr double FRAMING_ROOM = 0.08;
+
+double framingMargin(const Window& window)
+{
+    return std::max(FRAMING_MARGIN, FRAMING_ROOM * std::min(window.width, window.height));
+}
+
+// How much closer than the whole globe Globus comes to frame a short path;
+// the wheel goes a little closer still.
+constexpr double PATH_CLOSEST = 6.0;
+constexpr double WHEEL_CLOSEST = 8.0;
 // The most the middle of the path is lifted towards the pole, as a share of
 // the window's half height, so the bow stays in a short window.
 constexpr double CURL_SHARE = 0.5;
-// Looking for how close to come, from nearest out, a step at a time; and
-// how much closer a turned picture has to be to win over north up.
+// Looking for how close to come, from nearest out, a step at a time.
 constexpr double ZOOM_STEP = 0.93;
-constexpr double NORTH_UP_SHARE = 0.75;
 
 // Steps along a line of the graticule, and round the rim where land goes
 // behind.
@@ -635,15 +646,18 @@ std::vector<Vec3> greatCircle(const Vec3& a, const Vec3& b, int segments)
     return points;
 }
 
-Zoom wholeGlobe(const Window& window)
+Zoom globusZoom(const Window& window)
 {
-    // The framing margin, so the whole globe counts as shown.
+    // The whole globe inside the framing margin.
     Zoom zoom;
     double fit = std::max(8.0, std::min(window.width, window.height) / 2.0 - FRAMING_MARGIN);
-    zoom.nearest = fit;
+    zoom.nearest = PATH_CLOSEST * fit;
     zoom.farthest = fit;
     zoom.standard = fit;
-    zoom.closest = 8.0 * fit;
+    zoom.closest = WHEEL_CLOSEST * fit;
+    // The pane is tall and narrow, and a west-east path would turn on its
+    // side to use its height: Globus keeps north up when it can.
+    zoom.northUpShare = 0.0;
     return zoom;
 }
 
@@ -666,8 +680,9 @@ bool fromScreen(const View& view, const Window& window, const Point& point, Vec3
 
 int pointsInView(const View& view, const std::vector<Vec3>& path, const Window& window)
 {
-    double halfWidth = window.width / 2.0 - FRAMING_MARGIN;
-    double halfHeight = window.height / 2.0 - FRAMING_MARGIN;
+    double margin = framingMargin(window);
+    double halfWidth = window.width / 2.0 - margin;
+    double halfHeight = window.height / 2.0 - margin;
     int count = 0;
     for (const Vec3& point : path)
     {
@@ -695,7 +710,7 @@ Vec3 pathCentre(const Vec3& h, const Vec3& s, const std::vector<Vec3>& path, con
     if (length(normal) < 1e-9) normal = cross(h, middle);
     normal = normalized(normal);
     if (dot(normal, NORTH) < 0.0) normal = scaled(normal, -1.0);
-    double lift = std::min(1.0, CURL_SHARE * (window.height / 2.0 - FRAMING_MARGIN) / radius);
+    double lift = std::min(1.0, CURL_SHARE * (window.height / 2.0 - framingMargin(window)) / radius);
     double curl = std::min({0.25 * span, 15.0 / DEGREES, std::asin(lift)});
 
     return normalized(plus(scaled(middle, std::cos(curl)), scaled(normal, -std::sin(curl))));
@@ -756,7 +771,7 @@ View framePath(const LatLon& home, const LatLon& station, const Window& window, 
         }
         View upright{lookingAt(pathCentre(h, s, path, window, radius)), radius};
         if (pointsInView(upright, path, window) == all) return upright;
-        if (radius < NORTH_UP_SHARE * turned.radius) return turned;
+        if (radius < zoom.northUpShare * turned.radius) return turned;
     }
     if (haveTurned) return turned;
 

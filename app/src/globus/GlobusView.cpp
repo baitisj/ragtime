@@ -139,7 +139,7 @@ GlobusView::GlobusView(wxWindow* parent, wxWindowID id)
     SetBackgroundStyle(wxBG_STYLE_PAINT);
     window_.width = 320.0;
     window_.height = 320.0;
-    zoom_ = wholeGlobe(window_);
+    zoom_ = globusZoom(window_);
     roller_.setBackOff(window_.width / 2.0);
     roller_.jump(fitted());
     setTime((std::int64_t)std::time(nullptr));
@@ -273,7 +273,7 @@ void GlobusView::OnSize(wxSizeEvent& event)
         Zoom before = zoom_;
         window_.width = size.x;
         window_.height = size.y;
-        zoom_ = wholeGlobe(window_);
+        zoom_ = globusZoom(window_);
         roller_.setBackOff(window_.width / 2.0);
         roller_.scaleBy(zoom_.standard / before.standard);
     }
