@@ -102,6 +102,17 @@ beside Globus and with Globus off:
   Lambert-lit lightly (0.93 + 0.07 cos z); night side is the colour × 0.30
   plus navy `#1C2C56` × 0.55; a smoothstep between sun altitude +3° and
   −12° makes the greyline. A slight limb darkening (0.88 + 0.12 × depth).
+- The globe fills the pane from the header down to the captions at its
+  foot (Jeff, 2026-11-02). With one place or none, the whole globe shows,
+  so the greyline does. A picked station's path is framed as close as
+  shows all of it with room round it (8% of the pane's narrower side, 12
+  px at least), from the whole globe for a path half way round the world
+  to six times closer for a short one; the pane's height is used too, and
+  north stays up whenever that shows the whole path (Jeff, 2026-11-02:
+  "zoom in to display the full path plus a little comfort space").
+- A second click on the station picked, in the station list or Recent
+  work, unpicks it and lets the globe go (Jeff, 2026-11-02). It waits for
+  the double-click time, so a double click still addresses a message.
 - Caption under the globe: `W1AW · FN31 · 3,951 km · 81°`, then the
   station's details. It wraps in a narrow pane.
 - A station picked in Recent work is a yellow dot (`#ffd01a`) with a

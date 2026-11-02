@@ -159,7 +159,10 @@ and the Part 97 check.
   locator and a new or moved one gets a `locator` line; a Recent work
   pick blinks yellow on Globus at its last square, its tooltip gives the
   locator and distance, and Globus shows the locator under the pointer
-  (`globus::locatorOf`, `globus::fromScreen`).
+  (`globus::locatorOf`, `globus::fromScreen`). Since 2026-11-02 the
+  globe fills the pane and comes in on a picked path with room round it,
+  north up when it can (`globus::globusZoom`), and a second click on a
+  picked row unpicks it (`app/src/UnpickClick`).
 - Rig control (2026-10-26, Andrew's suggestion, `docs/STAGE1.md`):
   Settings > Rig picks no rig, the dial from rigctld (read only, but for
   the Ear's filter with its box ticked), or

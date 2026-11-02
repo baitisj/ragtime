@@ -7,6 +7,7 @@
 
 #include <wx/panel.h>
 
+#include "UnpickClick.h"
 #include "ragtime/radio/RecentWork.h"
 
 class wxChoice;
@@ -49,6 +50,8 @@ public:
     std::string selected() const { return selected_; }
     // Picking in the station list unpicks here, without a callback.
     void clearSelection();
+    // Unpicks, with the callback: a second click on the row picked.
+    void unpick();
 
 private:
     friend class RecentWorkList;
@@ -70,6 +73,7 @@ private:
     bool updating_ = false;
 
     CallFn onSelect_, onActivate_, onMenu_;
+    UnpickClick unpickClick_;
     OrderFn onOrder_;
     BellFn belled_;
 };

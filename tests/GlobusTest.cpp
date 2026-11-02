@@ -751,34 +751,73 @@ void testBorders()
     CHECK(borderLines(pacific, window).empty());
 }
 
+// The margin a framed path keeps from the window's edge, in pixels.
+double roomAround(const View& view, const std::vector<Vec3>& path, const Window& window)
+{
+    double room = 1e9;
+    for (const Vec3& p : path)
+    {
+        Point at = onScreen(view, window, p);
+        room = std::min({room, at.x, at.y, window.width - at.x, window.height - at.y});
+    }
+    return room;
+}
+
 void testGlobusFraming()
 {
-    // Globus frames a path on the whole globe, so the greyline always
-    // shows: the path centred and curling north of the middle, north up.
+    // Globus comes in on a path, as close as shows all of it with room
+    // round it: the path centred and curling north of the middle, north up.
     Window window{320.0, 320.0};
-    Zoom zoom = wholeGlobe(window);
+    Zoom zoom = globusZoom(window);
     CHECK(near(zoom.standard, 148.0, 1e-9));
-    CHECK(near(zoom.nearest, zoom.farthest, 1e-9));
+    CHECK(near(zoom.farthest, zoom.standard, 1e-9));
+    CHECK(near(zoom.nearest, 6.0 * zoom.standard, 1e-9));
     CHECK(near(zoom.closest, 8.0 * zoom.standard, 1e-9));
 
     LatLon home = centreOf("CN87");
     LatLon w1aw = centreOf("FN31");
     std::vector<Vec3> path = greatCircle(toVector(home), toVector(w1aw), 64);
     View view = framePath(home, w1aw, window, zoom);
-    CHECK(near(view.radius, zoom.standard, 1e-9));
+    CHECK(view.radius > 1.5 * zoom.standard);
     CHECK_EQ(pointsInView(view, path, window), (int)path.size());
+    CHECK(roomAround(view, path, window) >= 0.08 * 320.0 - 1e-6);
+    // Snug: a step closer and it no longer fits.
+    View closer{view.attitude, view.radius / 0.93};
+    CHECK(pointsInView(closer, path, window) < (int)path.size());
     CHECK(near(view.attitude.right.z, 0.0, 1e-9));
     Vec3 middle = toView(view.attitude, path[32]);
     CHECK(middle.y > 0.0 && middle.z > 0.9);
 
-    // Even half way round the world, it all shows.
+    // A short path comes closer, but no closer than six times.
+    LatLon portland = centreOf("CN85");
+    View near_ = framePath(home, portland, window, zoom);
+    CHECK(near_.radius > view.radius);
+    CHECK(near_.radius <= zoom.nearest + 1e-9);
+
+    // Half way round the world it all shows, from the whole globe at most.
     LatLon far{-35.0, 150.0};
     path = greatCircle(toVector(home), toVector(far), 64);
     View round = framePath(home, far, window, zoom);
     CHECK_EQ(pointsInView(round, path, window), (int)path.size());
+    CHECK(round.radius >= zoom.farthest - 1e-9);
+
+    // In a tall window, as the pane is, a west-east path stays north up.
+    Window tallish{220.0, 560.0};
+    path = greatCircle(toVector(home), toVector(w1aw), 64);
+    View upright = framePath(home, w1aw, tallish, globusZoom(tallish));
+    CHECK(near(upright.attitude.right.z, 0.0, 1e-9));
+    CHECK_EQ(pointsInView(upright, path, tallish), (int)path.size());
+
+    // A tall window frames a north-south path closer than a square one of
+    // the same width.
+    LatLon uruguay = centreOf("GF15");
+    Window tall{320.0, 560.0};
+    View inSquare = framePath(w1aw, uruguay, window, globusZoom(window));
+    View inTall = framePath(w1aw, uruguay, tall, globusZoom(tall));
+    CHECK(inTall.radius > inSquare.radius);
 
     // A window too small for a margin still frames something.
-    CHECK(wholeGlobe(Window{10.0, 10.0}).standard > 0.0);
+    CHECK(globusZoom(Window{10.0, 10.0}).standard > 0.0);
 }
 
 void testScaling()

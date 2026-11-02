@@ -118,12 +118,19 @@ struct Zoom
     double farthest = 148.0;
     double standard = 148.0;
     double closest = 1184.0;
+    // A turned picture wins over north up when north up would have to be
+    // this much farther out to show the whole path: 0.75 is 25% farther;
+    // 0 keeps north up whenever it can show it all.
+    double northUpShare = 0.75;
 };
 
-// Globus's zoom for a window: framed, the whole globe with a margin round
-// it, as the mock-ups show it, so the greyline always shows; the wheel
-// comes up to eight times closer.
-Zoom wholeGlobe(const Window& window);
+// Globus's zoom for a window: one place, or nothing yet, on the whole
+// globe with a margin round it, so the greyline shows; a path framed as
+// close as shows all of it with room round it, from the whole globe for
+// one half way round the world to six times closer for a short one (Jeff,
+// 2026-11-02), north up whenever that shows it all; the wheel comes up to
+// eight times closer.
+Zoom globusZoom(const Window& window);
 
 // A point in the window, in pixels from its top left corner, and the point
 // of the earth a view puts there (view z positive on the near side).
@@ -150,7 +157,8 @@ View framePath(const LatLon& home, const LatLon& station, const Window& window, 
 // the smallest turn, either way, that shows the most.
 Attitude framePathAt(const LatLon& home, const LatLon& station, const Window& window, double radius);
 
-// How many of the path's points the window shows.
+// How many of the path's points the window shows, inside a margin of 12
+// pixels or 8% of the window's shorter side, whichever is more.
 int pointsInView(const View& view, const std::vector<Vec3>& path, const Window& window);
 
 // The magnet in the globe for a path: the direction from its southern end

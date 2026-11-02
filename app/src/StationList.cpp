@@ -1,6 +1,7 @@
 #include "StationList.h"
 
 #include <algorithm>
+#include <string>
 #include <utility>
 
 #include <wx/htmllbox.h>
@@ -190,10 +191,19 @@ StationList::StationList(wxWindow* parent, const Stations& stations)
     narrowView_->Bind(wxEVT_LEFT_DCLICK, [this](wxMouseEvent& e) {
         int row = narrowView_->VirtualHitTest(e.GetPosition().y);
         if (row == wxNOT_FOUND) return;
+        unpickNarrow_.cancel();
         narrowView_->SetSelection(row);
         picked(row);
         if (onActivate_ && !selected_.empty()) onActivate_(selected_);
     });
+    // A second click on the row picked lets the station go.
+    unpickNarrow_.attach(
+        narrowView_,
+        [this](wxWindow*, const wxPoint& at) {
+            int row = narrowView_->VirtualHitTest(at.y);
+            return row >= 0 && (size_t)row < order_.size() ? order_[(size_t)row] : std::string();
+        },
+        [this] { return selected_; }, [this] { unpick(); });
     narrowView_->Bind(wxEVT_KEY_DOWN, [this](wxKeyEvent& e) {
         if ((e.GetKeyCode() == WXK_RETURN || e.GetKeyCode() == WXK_NUMPAD_ENTER) && onActivate_ && !selected_.empty())
             onActivate_(selected_);
@@ -220,6 +230,7 @@ StationList::StationList(wxWindow* parent, const Stations& stations)
         if (!updating_) picked(-1);
     });
     table_->Bind(wxEVT_LIST_ITEM_ACTIVATED, [this](wxListEvent& e) {
+        unpickTable_.cancel();
         picked(e.GetIndex());
         if (onActivate_ && !selected_.empty()) onActivate_(selected_);
     });
@@ -247,6 +258,28 @@ StationList::StationList(wxWindow* parent, const Stations& stations)
         table_->SetToolTip(tooltip(row));
         e.Skip();
     });
+
+    // wx's own table (Windows) takes the clicks itself; the generic one
+    // (GTK) has them on its children, the header and, under it, the rows'
+    // window, whose coordinates its HitTest takes.
+    auto tableCallAt = [this](wxWindow* clicked, const wxPoint& at) {
+        if (clicked != table_)
+        {
+            for (wxWindow* child : table_->GetChildren())
+            {
+                if (child != clicked && child->GetSize().y > clicked->GetSize().y) return std::string();
+            }
+        }
+        int flags = 0;
+        long row = table_->HitTest(at, flags);
+        return row >= 0 && (size_t)row < order_.size() ? order_[(size_t)row] : std::string();
+    };
+#if defined(__WXMSW__) || defined(__WXQT__)
+    unpickTable_.attach(table_, tableCallAt, [this] { return selected_; }, [this] { unpick(); });
+#else
+    for (wxWindow* child : table_->GetChildren())
+        unpickTable_.attach(child, tableCallAt, [this] { return selected_; }, [this] { unpick(); });
+#endif
 
     setNarrow(true);
 }
@@ -408,6 +441,13 @@ void StationList::clearSelection()
     updating_ = true;
     showSelection();
     updating_ = false;
+}
+
+void StationList::unpick()
+{
+    if (selected_.empty()) return;
+    clearSelection();
+    if (onSelect_) onSelect_(selected_);
 }
 
 void StationList::showSelection()

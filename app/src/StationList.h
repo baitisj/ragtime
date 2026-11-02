@@ -8,6 +8,7 @@
 
 #include <wx/panel.h>
 
+#include "UnpickClick.h"
 #include "ragtime/broadcast/Stations.h"
 
 class wxListCtrl;
@@ -47,6 +48,8 @@ public:
     std::string selected() const { return selected_; }
     // Picking in Recent work unpicks here, without a callback.
     void clearSelection();
+    // Unpicks, with the callback: a second click on the row picked.
+    void unpick();
 
     // A bell on a row (the watch list, Tell me when free), with how it
     // came to be for the row's tooltip.
@@ -96,6 +99,7 @@ private:
     bool updating_ = false;
 
     CallFn onSelect_, onActivate_, onMenu_;
+    UnpickClick unpickNarrow_, unpickTable_;
     BellFn belled_;
     BellTipFn bellTip_;
     std::string flashCall_;
