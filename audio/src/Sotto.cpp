@@ -2,6 +2,8 @@
 #include "ragtime/voice/Sotto.h"
 
 #include <algorithm>
+#include <cmath>
+#include <cstddef>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -9,6 +11,7 @@
 #include <string>
 #include <vector>
 
+#include "ragtime/voice/Dsp.h"
 #include "ragtime/voice/Voice.h"
 
 #ifdef _WIN32
@@ -37,6 +40,15 @@ struct SottoApi
     void (*decDestroy)(void*) = nullptr;
     void (*decode)(void*, const unsigned char*, int, short*) = nullptr;
     void (*decFlush)(void*, short*) = nullptr;
+    // v3.8's 16 kHz coder.
+    void* (*enc16Create)() = nullptr;
+    void (*enc16Destroy)(void*) = nullptr;
+    int (*encode16)(void*, const short*, unsigned char*) = nullptr;
+    int (*enc16Flush)(void*, unsigned char*) = nullptr;
+    void* (*dec16Create)() = nullptr;
+    void (*dec16Destroy)(void*) = nullptr;
+    void (*decode16)(void*, const unsigned char*, int, short*) = nullptr;
+    int (*dec16Flush)(void*, short*) = nullptr;
 };
 
 namespace
@@ -192,16 +204,12 @@ Sotto::Sotto(const std::string& path)
         std::string why;
         if (open(file, why)) return;
         // A library there but refused (a missing libcodec2, the wrong
-        // architecture, not sotto) says more than "not found" on every
-        // other path.
+        // architecture, an older sotto) says more than "not found" on
+        // every other path; the next place may still have a good one.
         bool there = file.find_first_of("\\/") != std::string::npos ? fileExists(file)
                      : why.find("No such file") == std::string::npos
                            && why.find("Windows error 126") == std::string::npos;
-        if (there)
-        {
-            foundWhy = why;
-            break;
-        }
+        if (there && foundWhy.empty()) foundWhy = why;
     }
     if (!foundWhy.empty())
         info_.why = foundWhy;
@@ -235,11 +243,17 @@ bool Sotto::open(const std::string& file, std::string& why)
               && bind(lib, "sotto_enc_destroy", api->encDestroy) && bind(lib, "sotto_encode", api->encode)
               && bind(lib, "sotto_encode_half", api->encodeHalf) && bind(lib, "sotto_enc_flush", api->encFlush)
               && bind(lib, "sotto_dec_create", api->decCreate) && bind(lib, "sotto_dec_destroy", api->decDestroy)
-              && bind(lib, "sotto_decode", api->decode) && bind(lib, "sotto_dec_flush", api->decFlush);
+              && bind(lib, "sotto_decode", api->decode) && bind(lib, "sotto_dec_flush", api->decFlush)
+              && bind(lib, "sotto_enc16_create", api->enc16Create)
+              && bind(lib, "sotto_enc16_destroy", api->enc16Destroy) && bind(lib, "sotto_encode16", api->encode16)
+              && bind(lib, "sotto_enc16_flush", api->enc16Flush) && bind(lib, "sotto_dec16_create", api->dec16Create)
+              && bind(lib, "sotto_dec16_destroy", api->dec16Destroy) && bind(lib, "sotto_decode16", api->decode16)
+              && bind(lib, "sotto_dec16_flush", api->dec16Flush);
     if (!ok)
     {
         closeLibrary(lib);
-        why = file + " isn't a libsotto Ragtime can use (a function is missing)";
+        why = file + " isn't a libsotto Ragtime can use (a function is missing: Ragtime needs sotto v3.8, "
+                     "which packaging/build-sotto.sh builds)";
         return false;
     }
     const char* format = api->format();
@@ -249,7 +263,7 @@ bool Sotto::open(const std::string& file, std::string& why)
     {
         closeLibrary(lib);
         why = file + " speaks " + (name.empty() ? std::string("an unnamed format") : "\"" + name + "\"")
-              + ", not sotto v3.6 (codec 1)";
+              + ", not sotto v3.8 (codec 2): packaging/build-sotto.sh builds the one Ragtime needs";
         return false;
     }
     handle_ = lib;
@@ -272,17 +286,17 @@ void Sotto::close()
 std::unique_ptr<SottoEncoder> Sotto::encoder() const
 {
     if (!api_) return nullptr;
-    void* state = api_->encCreate();
+    void* state = api_->enc16Create();
     if (!state) return nullptr;
     return std::unique_ptr<SottoEncoder>(new SottoEncoder(api_.get(), state));
 }
 
-std::unique_ptr<SottoDecoder> Sotto::decoder() const
+std::unique_ptr<SottoDecoder> Sotto::decoder(uint8_t codec) const
 {
-    if (!api_) return nullptr;
-    void* state = api_->decCreate();
-    if (!state) return nullptr;
-    return std::unique_ptr<SottoDecoder>(new SottoDecoder(api_.get(), state));
+    if (!api_ || !knownCodec(codec)) return nullptr;
+    std::unique_ptr<SottoDecoder> d(new SottoDecoder(api_.get(), codec));
+    if (!d->state_) return nullptr;
+    return d;
 }
 
 //-------------------------------------------------------------------------
@@ -291,13 +305,13 @@ std::unique_ptr<SottoDecoder> Sotto::decoder() const
 
 SottoEncoder::~SottoEncoder()
 {
-    if (state_) api_->encDestroy(state_);
+    if (state_) api_->enc16Destroy(state_);
 }
 
 bool SottoEncoder::encode(const int16_t* samples, SottoFrame& out)
 {
     if (flushed_) return false;
-    return api_->encode(state_, reinterpret_cast<const short*>(samples), out.data()) > 0;
+    return api_->encode16(state_, reinterpret_cast<const short*>(samples), out.data()) > 0;
 }
 
 void SottoEncoder::push(const int16_t* samples, size_t count, std::vector<SottoFrame>& out)
@@ -335,7 +349,7 @@ void SottoEncoder::flush(std::vector<SottoFrame>& out)
         part_.clear();
     }
     SottoFrame f;
-    while (api_->encFlush(state_, f.data()) > 0) out.push_back(f);
+    while (api_->enc16Flush(state_, f.data()) > 0) out.push_back(f);
     flushed_ = true;
 }
 
@@ -343,39 +357,122 @@ void SottoEncoder::flush(std::vector<SottoFrame>& out)
 // SottoDecoder
 //-------------------------------------------------------------------------
 
+// Codec 1's 8 kHz sound doubled to 16 kHz, a frame a call.
+struct SottoDecoder::Doubler
+{
+    Resampler up{8000, SOTTO_RATE};
+    std::vector<float> in, out;
+    std::vector<float> fifo;
+
+    void push(const int16_t* half, int16_t* samples)
+    {
+        in.assign(half, half + SOTTO_SAMPLES / 2);
+        for (float& v : in) v /= 32768.0f;
+        out.clear();
+        up.process(in.data(), in.size(), out);
+        fifo.insert(fifo.end(), out.begin(), out.end());
+        // The resampler gives two samples a sample, its few samples of
+        // delay riding along (well under a millisecond).
+        const size_t n = std::min(fifo.size(), (size_t)SOTTO_SAMPLES);
+        size_t at = 0;
+        for (; at < (size_t)SOTTO_SAMPLES - n; at++) samples[at] = 0;
+        for (size_t i = 0; i < n; i++, at++)
+        {
+            const float v = std::max(-1.0f, std::min(1.0f, fifo[i])) * 32767.0f;
+            samples[at] = (int16_t)std::lround(v);
+        }
+        fifo.erase(fifo.begin(), fifo.begin() + (std::ptrdiff_t)n);
+    }
+};
+
+SottoDecoder::SottoDecoder(const SottoApi* api, uint8_t codec) : api_(api), codec_(codec)
+{
+    create();
+}
+
 SottoDecoder::~SottoDecoder()
 {
-    if (state_) api_->decDestroy(state_);
+    destroy();
+}
+
+void SottoDecoder::create()
+{
+    held_ = 0;
+    if (codec_ == CODEC_V36)
+    {
+        state_ = api_->decCreate();
+        doubler_ = std::make_unique<Doubler>();
+    }
+    else
+    {
+        state_ = api_->dec16Create();
+    }
+}
+
+void SottoDecoder::destroy()
+{
+    if (state_) (codec_ == CODEC_V36 ? api_->decDestroy : api_->dec16Destroy)(state_);
+    state_ = nullptr;
+    doubler_.reset();
 }
 
 void SottoDecoder::decode(const SottoFrame& frame, bool good, int16_t* samples)
 {
-    api_->decode(state_, frame.data(), good ? 1 : 0, reinterpret_cast<short*>(samples));
+    if (codec_ == CODEC_V36)
+    {
+        int16_t half[SOTTO_SAMPLES / 2];
+        api_->decode(state_, frame.data(), good ? 1 : 0, reinterpret_cast<short*>(half));
+        doubler_->push(half, samples);
+    }
+    else
+    {
+        api_->decode16(state_, frame.data(), good ? 1 : 0, reinterpret_cast<short*>(samples));
+    }
+    held_ = std::min(held_ + 1, delay());
 }
 
-void SottoDecoder::flush(int16_t* samples)
+bool SottoDecoder::flush(int16_t* samples)
 {
-    api_->decFlush(state_, reinterpret_cast<short*>(samples));
+    if (held_ <= 0) return false;
+    if (codec_ == CODEC_V36)
+    {
+        int16_t half[SOTTO_SAMPLES / 2];
+        api_->decFlush(state_, reinterpret_cast<short*>(half));
+        doubler_->push(half, samples);
+    }
+    else if (api_->dec16Flush(state_, reinterpret_cast<short*>(samples)) <= 0)
+    {
+        held_ = 0;
+        return false;
+    }
+    held_--;
+    return true;
 }
 
 std::vector<int16_t> SottoDecoder::decodeClip(const std::vector<SottoFrame>& frames, const std::vector<uint8_t>& good)
 {
     // A fresh state, so an earlier clip's tail doesn't run into this one.
-    api_->decDestroy(state_);
-    state_ = api_->decCreate();
+    destroy();
+    create();
     std::vector<int16_t> out;
     if (frames.empty() || !state_) return out;
-    out.resize(frames.size() * SOTTO_SAMPLES);
-    std::vector<int16_t> first(SOTTO_SAMPLES);
-    // Each call gives the frame before's 20 ms: the first call's output is
-    // the delay, thrown away.
+    out.reserve(frames.size() * SOTTO_SAMPLES);
+    std::vector<int16_t> sound(SOTTO_SAMPLES);
+    // Each call gives the sound of the frame delay() calls before: the
+    // first calls' sound is the delay, thrown away.
+    size_t calls = 0;
+    const size_t skip = (size_t)delay();
+    auto keep = [&]() {
+        if (calls++ >= skip) out.insert(out.end(), sound.begin(), sound.end());
+    };
     for (size_t i = 0; i < frames.size(); i++)
     {
         bool ok = good.empty() || (i < good.size() && good[i] != 0);
-        int16_t* to = i == 0 ? first.data() : &out[(i - 1) * SOTTO_SAMPLES];
-        decode(frames[i], ok, to);
+        decode(frames[i], ok, sound.data());
+        keep();
     }
-    flush(&out[(frames.size() - 1) * SOTTO_SAMPLES]);
+    while (out.size() < frames.size() * SOTTO_SAMPLES && flush(sound.data())) keep();
+    out.resize(frames.size() * SOTTO_SAMPLES, 0);
     return out;
 }
 

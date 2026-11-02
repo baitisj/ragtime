@@ -13,14 +13,15 @@
 // starts as soon as its first burst is in.
 //
 // If it guesses wrong and runs dry, sotto's decoder is told the next
-// frame is lost, so it does what it does for a lost frame on 2 m: holds
-// the sound 40 ms, fades 6 dB each 20 ms and goes quiet after 80 ms. The
+// frames are lost, so it does what it does for a lost frame on 2 m: plays
+// out the frames it holds, holds the sound 40 ms, fades 6 dB each 20 ms
+// and goes quiet after 80 ms. The
 // player then waits by the same rule and carries on where it stopped,
 // losing nothing. When the transfer ends short (the stop sign, a cancel, a
 // dropped link) it plays what came and fades out the same way.
 //
-// No audio device here: the app pulls samples at sotto's 8 kHz and gives
-// the time. The decoder is two calls, so tests give a fake one and the app
+// No audio device here: the app pulls samples at 16 kHz and gives the
+// time. The decoder is two calls, so tests give a fake one and the app
 // libsotto.
 #ifndef RAGTIME_VOICE_ARRIVALPLAYER_H
 #define RAGTIME_VOICE_ARRIVALPLAYER_H
@@ -38,18 +39,21 @@ namespace ragtime
 namespace voice
 {
 
-// sotto's sound: 8 kHz, 16-bit, 160 samples a frame.
-constexpr int PLAY_RATE = 8000;
+// Voice's sound: 16 kHz, 16-bit, 320 samples a frame (sotto v3.8's
+// sotto_decode16; a codec 1 clip is decoded at 8 kHz and doubled).
+constexpr int PLAY_RATE = 16000;
 constexpr int FRAME_SAMPLES = PLAY_RATE * FRAME_MS / 1000;
 
-// sotto's decoder, as libsotto's sotto_decode and sotto_dec_flush. decode
-// takes a frame, or with good false covers a lost one, and gives 160
-// samples a frame behind: the first call gives silence, and flush gives
-// the last frame's sound.
+// sotto's decoder, as voice::SottoDecoder gives it. decode takes a frame,
+// or with good false covers a lost one, and gives a frame of sound delay
+// frames behind: the first delay calls give silence (1 for sotto's 8 kHz
+// decoder, SOTTO_DEC16_DELAY_FRAMES = 5 for the 16 kHz one). flush gives
+// the frames it still holds, one a call, and false once it holds none.
 struct FrameDecoder
 {
     std::function<void(const Frame& frame, bool good, int16_t* out)> decode;
-    std::function<void(int16_t* out)> flush;
+    std::function<bool(int16_t* out)> flush;
+    int delay = 1;
 };
 
 class ArrivalPlayer
@@ -141,17 +145,32 @@ private:
         uint64_t have = 0;
     };
 
+    // What the decoder holds, oldest first: each call's sound is the
+    // front's, as the call pushes its own on the back.
+    enum class Held : uint8_t
+    {
+        Lead,   // the silence before the first frame fed, thrown away
+        Real,   // a frame of the clip: its sound is a slot
+        Lost,   // fed while dry or past what came: sotto's fade
+    };
+
     // Seconds it must still wait before (re)starting, from nowMs, with
     // slots of sound in hand; negative if it can't tell.
     double waitSeconds(uint64_t nowMs) const;
     // Sound slots playable from slot_ with what has come.
     size_t inHand() const;
-    // Decodes the next 160 samples into frame_, or returns false if it
+    // Decodes the next frame of sound into frame_, or returns false if it
     // can't without running dry.
     bool nextFrame();
-    // One more lost frame into frame_, for sotto to fade; false once it
-    // has gone quiet.
+    // One more lost frame fed, for sotto to play out what it holds and
+    // fade; false once it has gone quiet.
     bool fadeStep();
+    // Takes the front of held_ for a call's sound just made into frame_:
+    // false if that was Lead (thrown away), else true, counting a slot for
+    // Real.
+    bool takeSound();
+    // Starts the decoder's pipe over (seek, the start).
+    void resetHeld();
     // Waiting or Stalled: whether to play now.
     bool ready(uint64_t nowMs) const;
 
@@ -168,20 +187,17 @@ private:
     bool ended_ = false;
     State state_ = State::Waiting;
 
-    // The decoder's place: fed_ frames given to it, the first of whose
-    // sound (silence) is thrown away, so slot_ sound frames have played.
+    // The decoder's place: fed_ frames of the clip given to it, held_
+    // what it holds (decoder_.delay of them), and slot_ frames of the
+    // clip's sound played.
     uint32_t fed_ = 0;
     uint32_t slot_ = 0;
-    bool primed_ = false;
-    bool flushed_ = false;
+    std::deque<Held> held_;
+    // Lost frames' sound given out in a row (sotto is quiet after 3).
+    int lostRun_ = 0;
     // The frame of sound being given out, and how far.
     int16_t frame_[FRAME_SAMPLES] = {};
     size_t frameAt_ = FRAME_SAMPLES;
-    // Lost frames fed since it ran dry or the bytes stopped short (sotto
-    // is quiet after 4), and whether the next frame decoded is the fade
-    // back in after running dry, which is no slot of the clip.
-    int fading_ = 0;
-    bool resuming_ = false;
 };
 
 } // namespace voice

@@ -80,7 +80,7 @@ void testWriteAndRead()
     CHECK_EQ(file.size(), voice::HEADER_BYTES + 11 * 6);
     CHECK_EQ((int)file[0], (int)'S');
     CHECK_EQ((int)file[1], (int)'o');
-    CHECK_EQ((int)file[2], 1);
+    CHECK_EQ((int)file[2], (int)voice::CODEC_SOTTO_V38);
     CHECK_EQ((int)file[3], 0);
     CHECK_EQ((int)file[6], (int)frames.size());
     CHECK(voice::isSot(file.data(), file.size()));
@@ -289,8 +289,14 @@ void testRefusals()
     CHECK(voice::readSot(bad, clip) == voice::ReadResult::NotSot);
     CHECK(!voice::isSot(bad.data(), bad.size()));
     bad = good;
-    bad[2] = 2;
+    bad[2] = 3;
     CHECK(voice::readSot(bad, clip) == voice::ReadResult::UnknownCodec);
+    // Codec 1 (sotto v3.6's frames, from before 2026-11-02) still reads.
+    bad = good;
+    bad[2] = voice::CODEC_SOTTO_V36;
+    CHECK(voice::readSot(bad, clip) == voice::ReadResult::Ok);
+    CHECK_EQ((int)clip.codec, (int)voice::CODEC_SOTTO_V36);
+    CHECK(voice::isSot(bad.data(), bad.size()));
     bad = good;
     bad[3] = 0x01;
     CHECK(voice::readSot(bad, clip) == voice::ReadResult::UnknownFlags);
@@ -450,7 +456,9 @@ void testProtocolAndFormat()
     const FileOffer* o = back.as<FileOffer>();
     CHECK(o != nullptr && o->kind == FILE_VOICE);
 
-    CHECK_EQ((int)voice::codecOfFormat("sotto v3.6, shape 9-9-8-8"), 1);
+    CHECK_EQ((int)voice::codecOfFormat("sotto v3.8, shape 9-9-8-8"), 2);
+    // A v3.6 or v3.7 library has no 16 kHz coder: passed over.
+    CHECK_EQ((int)voice::codecOfFormat("sotto v3.6, shape 9-9-8-8"), 0);
     CHECK_EQ((int)voice::codecOfFormat("sotto v3.5, shape 12-11-11"), 0);
     CHECK_EQ((int)voice::codecOfFormat(""), 0);
 }

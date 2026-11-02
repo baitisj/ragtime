@@ -3,10 +3,10 @@
 // it. In order:
 //
 //   input gain -> 48 kHz -> high-pass -> noise reduction -> leveller
-//              -> 8 kHz -> limiter -> sotto
+//              -> 16 kHz -> limiter -> sotto
 //
 // The microphone comes in at its own rate and is resampled to 48 kHz,
-// where RNNoise works, in 10 ms blocks; the end of the chain is 8 kHz,
+// where RNNoise works, in 10 ms blocks; the end of the chain is 16 kHz,
 // sotto's rate. The limiter runs after the resampler, so it sees exactly
 // the samples sotto codes. Meters (Readings) are read along the way, and a
 // clip gets its Level check (Levels.h) when it ends.
@@ -92,7 +92,7 @@ class Chain
 {
 public:
     static constexpr int WORK_RATE = 48000;
-    static constexpr int OUT_RATE = 8000;
+    static constexpr int OUT_RATE = 16000;
     static constexpr size_t BLOCK = 480;  // 10 ms at WORK_RATE
 
     // inputRate: the microphone's rate. denoiser may be null.
@@ -107,7 +107,7 @@ public:
     void setSettings(const ChainSettings& settings);
     ChainSettings settings() const;
 
-    // Feeds microphone samples and appends what comes out at 8 kHz, a fixed
+    // Feeds microphone samples and appends what comes out at 16 kHz, a fixed
     // latency() behind.
     void process(const float* in, size_t count, std::vector<float>& out);
     // Starts a clip's Level check afresh (Push to talk pressed). The
@@ -123,7 +123,7 @@ public:
     // Everything back to how it was made, the leveller's gain included.
     void reset();
 
-    // The delay from the microphone to the 8 kHz output, in seconds.
+    // The delay from the microphone to the 16 kHz output, in seconds.
     double latencySeconds() const;
 
 private:
@@ -163,14 +163,14 @@ private:
     std::vector<float> out8k_;
     Limiter limiter_;
     std::vector<float> limited_;
-    // The 8 kHz samples before the limiter, lined up with its output.
+    // The 16 kHz samples before the limiter, lined up with its output.
     std::vector<float> beforeDelay_;
     LiveLevel outputLevel_;
     double outBlockSum_ = 0;
     int outBlockFill_ = 0;
     LevelCheck check_;
     CallMeters call_;
-    // Samples in from the microphone and out at 8 kHz, ever; finish()
+    // Samples in from the microphone and out at 16 kHz, ever; finish()
     // stops the output at outLimit_.
     uint64_t totalIn_ = 0;
     uint64_t totalOut_ = 0;

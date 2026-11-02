@@ -1,13 +1,12 @@
-# The sotto vocoder Ragtime's voice messages are coded with: codec 1 is
-# sotto v3.6's frames (docs/PROTOCOL.md, "Voice"), built as the v3.7
-# variant at this commit. v3.7 changes only the encoder (a pitch candidate
-# at a third of Codec 2's estimate): its frames are v3.6's and its
-# sotto_format() still says "sotto v3.6, shape 9-9-8-8". Name the variant:
-# sotto's Makefile builds v3.8 by default, whose frames differ (a side
-# channel in unvoiced frames) and which Ragtime refuses. Ragtime loads
-# libsotto at run time and never links it (LGPL through Codec 2); the
-# packages carry it beside ragtime with its licences. Sourced by
-# build-sotto.sh.
+# The sotto vocoder Ragtime's voice messages are coded with: codec 2 is
+# sotto v3.8 (docs/PROTOCOL.md, "Voice"), 16 kHz speech with the 4-8 kHz
+# hiss band, and the same library plays codec 1 (v3.6's frames) at 8 kHz.
+# Ragtime needs a library whose sotto_format() says "sotto v3.8, shape
+# 9-9-8-8", so the variant is named here rather than left to sotto's
+# Makefile. From this commit sotto's generated C tables are committed, so
+# the build needs no Python. Ragtime loads libsotto at run time and never
+# links it (LGPL through Codec 2); the packages carry it beside ragtime with
+# its licences. Sourced by build-sotto.sh.
 SOTTO_REPO=${SOTTO_REPO:-https://github.com/baitisj/sotto.git}
-SOTTO_COMMIT=a84c6f5c15a96f0e7d393802d53e4d230192a5d4
-SOTTO_VARIANT=v3.7
+SOTTO_COMMIT=594ca655269f16896d2ff8eb4ed5ef8acfcb3c9d
+SOTTO_VARIANT=v3.8

@@ -4,8 +4,7 @@
 # links, and puts in OUT_DIR (default build-sotto/out):
 #   libsotto.so.0, libcodec2.so.1.2 (what libsotto needs at run time)
 #   licences/sotto.txt (MIT), licences/codec2.txt (LGPL-2.1)
-# Needs cmake, make, a C compiler, git, and python3 with numpy (sotto writes
-# its codebook from the NumPy file at build time). Set SOTTO_SOURCE to a
+# Needs cmake, make, a C compiler and git. Set SOTTO_SOURCE to a
 # checkout to build that instead of cloning.
 
 cd "$(dirname "$(realpath "$0")")/.."

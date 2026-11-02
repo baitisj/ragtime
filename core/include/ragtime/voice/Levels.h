@@ -117,7 +117,7 @@ enum class Lamp
 
 const char* lampName(Lamp lamp);
 
-// A clip's Level check: what sotto was given, measured at 8 kHz.
+// A clip's Level check: what sotto was given, measured at 16 kHz.
 //   Active:  P.56 active level within 3 dB of the target (amber within 6).
 //   Loudest: every 10 ms under sotto's ceiling before the limiter, and the
 //            microphone never clipped (amber: the limiter took up to 3 dB).
@@ -143,7 +143,7 @@ struct LevelReport
 class LevelCheck
 {
 public:
-    static constexpr int RATE = 8000;
+    static constexpr int RATE = 16000;
 
     explicit LevelCheck(double targetDb = LEVEL_TARGET_DBFS);
 

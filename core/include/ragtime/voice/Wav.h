@@ -12,9 +12,9 @@ namespace ragtime
 namespace voice
 {
 
-// A 16-bit mono PCM WAV file of samples at rate (sotto's 8 kHz by
+// A 16-bit mono PCM WAV file of samples at rate (voice's 16 kHz by
 // default).
-std::vector<uint8_t> wavFile(const std::vector<int16_t>& samples, int rate = 8000);
+std::vector<uint8_t> wavFile(const std::vector<int16_t>& samples, int rate = 16000);
 
 } // namespace voice
 } // namespace ragtime

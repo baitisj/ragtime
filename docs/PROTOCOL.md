@@ -932,35 +932,45 @@ time order:
 | Field | Bytes | Meaning |
 | --- | --- | --- |
 | magic | 2 | `So` (`0x53 0x6F`) |
-| codec | 1 | `0x01`: sotto v3.6 (below) |
+| codec | 1 | `0x02`: sotto v3.8, what Ragtime sends; `0x01`: sotto v3.6, still played (below) |
 | flags | 1 | `0x00`; a reader refuses a file with a flag it doesn't know |
 | length | 3 | The clip's length in 20 ms frames, every silent frame a run stands for counted |
 | frames | the rest | 6 bytes each |
 
 **Codec 1 is sotto v3.6** (Jeff, 2026-10-31), frozen as text table 0
 is: its frame, its codebook (shape 9-9-8-8), its energy from the
-spectral envelope, its postfilter and its concealment. A library that
-speaks it says `sotto v3.6, shape 9-9-8-8` from `sotto_format()`. A
-later sotto that changes the bits is a new codec number, and a receiver
-plays only numbers it knows; decoder-only changes can come in a Ragtime
-update without one, and so can encoder-only ones. Since 2026-11-02
-Ragtime builds sotto's v3.7 variant: v3.7 changes only the encoder (a
-pitch candidate at a third of Codec 2's estimate), sends v3.6's frames,
-decodes them bit for bit as v3.6 does, and still says `sotto v3.6, shape
-9-9-8-8`, so it is codec 1. sotto's v3.8 is not: it takes a bit of each
-unvoiced frame's index for a side channel (the 4-8 kHz hiss band), so it
-would be a new codec number. Each frame is 48 bits for 20 ms, most
-significant bit first:
+spectral envelope, its postfilter and its concealment, for 8 kHz speech.
+
+**Codec 2 is sotto v3.8** (Jeff, 2026-11-02), what Ragtime sends since
+then: codec 1's frame and codebook, coded from 16 kHz speech, with a
+4-8 kHz hiss band. In a frame that is unvoiced in both halves the pitch
+field carries no pitch, so v3.8 puts a 6-bit index of that frame's hiss
+shape there, and one bit of a speaker-shape side channel (12 bits and a
+CRC-4, a bit an unvoiced frame). sotto's 16 kHz decoder adds the band;
+its 8 kHz decoder plays codec 2 as codec 1, without it. The other way
+round does not work: a codec 1 frame's pitch field read as a hiss index
+gives a loud wrong band (about 20 dB too loud on the test clip), which
+is why codec 2 has its own number. A library that speaks both says
+`sotto v3.8, shape 9-9-8-8` from `sotto_format()`, and Ragtime needs
+one: it plays a codec 1 clip through the 8 kHz decoder and doubles the
+rate, and a codec 2 clip through the 16 kHz one, five frames behind.
+
+A later sotto that changes the bits is a new codec number, and a
+receiver plays only numbers it knows; decoder-only changes can come in
+a Ragtime update without one, and so can encoder-only ones. Each frame
+is 48 bits for 20 ms, most significant bit first:
 
 | Field | Bits | Meaning |
 | --- | --- | --- |
 | voicing | 2 | 0 unvoiced, 1 voiced, 2 mixed, for both 10 ms halves; 3 one half unvoiced and the other mixed, the order following the frame before |
-| pitch | 7 | 50 × 10^(code / 127) Hz, 50 to 500 Hz |
+| pitch | 7 | 50 × 10^(code / 127) Hz, 50 to 500 Hz; in codec 2's all-unvoiced frames, the hiss index (6 bits) and a side-channel bit |
 | energy | 5 | 0 is silence; else 10 + code × 70 / 31 dB, which is the frame's RMS in dBFS + 87.3 (-75.0 to -7.3 dBFS) |
 | shape | 34 | The spectral envelope: four codebook indexes, 9, 9, 8 and 8 bits |
 
-No frame depends on another, so any first part of a clip plays, and a
-lost frame costs 20 ms.
+Every frame decodes on its own, so any first part of a clip plays, and a
+lost frame costs 20 ms. (Codec 2's hiss band also looks a few frames
+either side, and its speaker shape comes over many, but a frame needs
+no other to be heard.)
 
 **Silence runs.** A frame with energy 0 is silence, so its other bits
 carry nothing. In a `.sot` file such a frame stands for itself and the

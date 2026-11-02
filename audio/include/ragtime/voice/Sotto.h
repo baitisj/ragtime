@@ -7,8 +7,10 @@
 // Where it looks, in order: the file named by RAGTIME_SOTTO; beside the
 // program (the Windows zip's sotto.dll, the AppImage's usr/lib); then the
 // system's library path. A library is taken only if its sotto_format() is
-// a codec Ragtime knows (voice::codecOfFormat), so a libsotto built with
-// another codebook is refused rather than sending frames nobody can play.
+// sotto v3.8 (voice::codecOfFormat), which codes codec 2 from 16 kHz speech
+// and plays codecs 1 and 2, so a libsotto built as another variant or with
+// another codebook is passed over rather than sending frames nobody can
+// play.
 //
 // One library for the whole program; encoders and decoders are cheap and
 // each belongs to one thread at a time.
@@ -27,10 +29,15 @@ namespace ragtime
 namespace voice
 {
 
-// sotto.h's figures, so callers need no sotto.h.
-constexpr int SOTTO_RATE = 8000;
-constexpr int SOTTO_SAMPLES = 160;      // 20 ms at 8 kHz, one frame
+// sotto.h's figures, so callers need no sotto.h. Ragtime's voice is 16 kHz
+// both ways (sotto v3.8's sotto_encode16 and sotto_decode16); a codec 1
+// clip is decoded at 8 kHz and doubled.
+constexpr int SOTTO_RATE = 16000;
+constexpr int SOTTO_SAMPLES = 320;      // 20 ms at 16 kHz, one frame
 constexpr int SOTTO_FRAME_BYTES = 6;
+// The 16 kHz decoder's sound comes this many frames behind
+// (SOTTO_DEC16_DELAY_FRAMES); the 8 kHz one's, one.
+constexpr int SOTTO_DEC16_DELAY = 5;
 using SottoFrame = std::array<uint8_t, SOTTO_FRAME_BYTES>;
 
 struct SottoApi;
@@ -39,14 +46,15 @@ struct SottoApi;
 struct SottoInfo
 {
     bool available = false;
-    std::string format;     // sotto_format(): "sotto v3.6, shape 9-9-8-8"
-    uint8_t codec = 0;      // the .sot codec number it speaks (voice::codecOfFormat), 0 if none
+    std::string format;     // sotto_format(): "sotto v3.8, shape 9-9-8-8"
+    uint8_t codec = 0;      // the .sot codec number it sends (voice::codecOfFormat), 0 if none
     std::string path;       // the file loaded
     std::string why;        // not available: why, in a sentence for the operator
 };
 
-// Turns 8 kHz speech into frames. Frames come 80 ms behind (the pitch
-// tracker's look-ahead): flush() at the end gives the rest.
+// Turns 16 kHz speech into codec 2's frames. Frames come about 320 ms
+// behind (the pitch tracker's look-ahead, then v3.8's voicing rules'):
+// flush() at the end gives the rest.
 class SottoEncoder
 {
 public:
@@ -54,7 +62,7 @@ public:
     SottoEncoder(const SottoEncoder&) = delete;
     SottoEncoder& operator=(const SottoEncoder&) = delete;
 
-    // 160 samples (20 ms) in; true and a frame out once the look-ahead has
+    // 320 samples (20 ms) in; true and a frame out once the look-ahead has
     // filled.
     bool encode(const int16_t* samples, SottoFrame& out);
     // Any number of samples: whole frames go to encode() as they fill, the
@@ -74,10 +82,14 @@ private:
     bool flushed_ = false;
 };
 
-// Turns frames back into 8 kHz speech, 20 ms behind: the first call gives
-// silence, and flush() gives the last 20 ms. A lost frame (good false) is
-// covered as sotto covers one on 2 m: the last sound held 40 ms, fading
-// 6 dB per 20 ms, silent after 80 ms.
+// Turns a clip's frames back into 16 kHz speech, delay() frames behind:
+// the first calls give silence, and flush() gives what it still holds. A
+// codec 2 clip goes through sotto_decode16, with its hiss band, 5 frames
+// behind; a codec 1 clip through the 8 kHz sotto_decode (sotto_decode16
+// would read its unvoiced frames' pitch as hiss), doubled to 16 kHz, one
+// frame behind. A lost frame (good false) is covered as sotto covers one
+// on 2 m: the last sound held 40 ms, fading 6 dB per 20 ms, silent after
+// 80 ms.
 class SottoDecoder
 {
 public:
@@ -85,20 +97,33 @@ public:
     SottoDecoder(const SottoDecoder&) = delete;
     SottoDecoder& operator=(const SottoDecoder&) = delete;
 
-    // 160 samples out.
+    uint8_t codec() const { return codec_; }
+    // Frames the sound comes behind.
+    int delay() const { return codec_ == CODEC_V36 ? 1 : SOTTO_DEC16_DELAY; }
+
+    // 320 samples out.
     void decode(const SottoFrame& frame, bool good, int16_t* samples);
-    void flush(int16_t* samples);
+    // 320 samples of what it still holds, one frame's a call; false once
+    // it holds none.
+    bool flush(int16_t* samples);
 
     // A clip's frames (good: one a frame, 0 for lost; empty for all good)
-    // into its sound, the decoder's 20 ms delay taken out, so sample 0 is
-    // the clip's start. Uses a fresh decoder state.
+    // into its sound, the decoder's delay taken out, so sample 0 is the
+    // clip's start. Uses a fresh decoder state.
     std::vector<int16_t> decodeClip(const std::vector<SottoFrame>& frames, const std::vector<uint8_t>& good);
 
 private:
     friend class Sotto;
-    SottoDecoder(const SottoApi* api, void* state) : api_(api), state_(state) {}
+    static constexpr uint8_t CODEC_V36 = 1;
+    struct Doubler;
+    SottoDecoder(const SottoApi* api, uint8_t codec);
+    void create();
+    void destroy();
     const SottoApi* api_;
-    void* state_;
+    uint8_t codec_;
+    void* state_ = nullptr;
+    std::unique_ptr<Doubler> doubler_;  // codec 1: 8 kHz to 16 kHz
+    int held_ = 0;                      // frames fed whose sound hasn't come out
 };
 
 class Sotto
@@ -116,9 +141,11 @@ public:
     const SottoInfo& info() const { return info_; }
     bool available() const { return info_.available; }
 
-    // Null when the library isn't available.
+    // Null when the library isn't available. The encoder makes codec 2;
+    // the decoder plays clips of codec (1 or 2, voice::Clip::codec), null
+    // for any other.
     std::unique_ptr<SottoEncoder> encoder() const;
-    std::unique_ptr<SottoDecoder> decoder() const;
+    std::unique_ptr<SottoDecoder> decoder(uint8_t codec) const;
 
 private:
     bool open(const std::string& file, std::string& why);

@@ -3244,7 +3244,7 @@ void MainFrame::saveVoiceAsWav(const std::string& key)
         showStatus();
         return;
     }
-    std::unique_ptr<voice::SottoDecoder> decoder = voice::Sotto::library().decoder();
+    std::unique_ptr<voice::SottoDecoder> decoder = voice::Sotto::library().decoder(s->clip.codec);
     if (!decoder)
     {
         note_ = "Save as WAV: libsotto couldn't make a decoder.";

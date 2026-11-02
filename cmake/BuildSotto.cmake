@@ -7,12 +7,13 @@
 # pinned in packaging/sotto.sh into <build>/build-sotto/out, one folder
 # above build/app/ragtime and build/tests/..., where voice::Sotto looks
 # (audio/src/Sotto.cpp, sottoCandidates). It runs once: again only when the
-# pinned commit changes. If it can't (offline, no numpy), the build goes on
-# with a warning, and voice says libsotto is missing.
+# pinned commit changes. If it can't (offline), the build goes on with a
+# warning, and voice says libsotto is missing.
 #
-# Skipped when a libsotto is already found: $RAGTIME_SOTTO, the checkout's
-# own build-sotto/out (from running build-sotto.sh by hand), or one on the
-# system's library path.
+# Skipped when $RAGTIME_SOTTO names a libsotto. Not for the checkout's own
+# build-sotto/out (from running build-sotto.sh by hand) or one on the
+# system's library path: either may be an older sotto, which voice passes
+# over, and the build folder's comes first where the program looks.
 
 file(STRINGS ${CMAKE_SOURCE_DIR}/packaging/sotto.sh RAGTIME_SOTTO_COMMIT_LINE REGEX "^SOTTO_COMMIT=")
 string(REGEX REPLACE "^SOTTO_COMMIT=([0-9a-f]+).*" "\\1" RAGTIME_SOTTO_COMMIT "${RAGTIME_SOTTO_COMMIT_LINE}")
@@ -23,16 +24,9 @@ set(RAGTIME_SOTTO_WORK ${CMAKE_BINARY_DIR}/build-sotto)
 set(RAGTIME_SOTTO_OUT ${RAGTIME_SOTTO_WORK}/out)
 set(RAGTIME_SOTTO_STAMP ${RAGTIME_SOTTO_OUT}/commit.txt)
 
-find_library(RAGTIME_SYSTEM_SOTTO NAMES libsotto.so.0 sotto)
-mark_as_advanced(RAGTIME_SYSTEM_SOTTO)
-
 set(_have "")
 if(DEFINED ENV{RAGTIME_SOTTO} AND EXISTS "$ENV{RAGTIME_SOTTO}")
     set(_have "$ENV{RAGTIME_SOTTO} (RAGTIME_SOTTO)")
-elseif(EXISTS ${CMAKE_SOURCE_DIR}/build-sotto/out/libsotto.so.0)
-    set(_have "${CMAKE_SOURCE_DIR}/build-sotto/out/libsotto.so.0")
-elseif(RAGTIME_SYSTEM_SOTTO)
-    set(_have "${RAGTIME_SYSTEM_SOTTO}")
 elseif(EXISTS ${RAGTIME_SOTTO_OUT}/libsotto.so.0 AND EXISTS ${RAGTIME_SOTTO_STAMP})
     file(READ ${RAGTIME_SOTTO_STAMP} _built)
     string(STRIP "${_built}" _built)
@@ -58,7 +52,7 @@ else()
     else()
         string(STRIP "${_output}" _output)
         message(WARNING "libsotto couldn't be built, so voice messages won't record or play until one is "
-                        "found (see the README, \"Voice messages: libsotto\"). It needs git, cmake, make, "
-                        "a C compiler and python3 with numpy. build-sotto.sh said:\n${_output}")
+                        "found (see the README, \"Voice messages: libsotto\"). It needs git, cmake, make "
+                        "and a C compiler. build-sotto.sh said:\n${_output}")
     endif()
 endif()

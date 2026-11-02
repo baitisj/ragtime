@@ -1785,7 +1785,10 @@ noise reducer in `denoise/` (`ragtime_denoise`). The deck (PR 4) turns
 its knobs and reads its meters.
 
     Gain -> 48 kHz -> high-pass -> noise reduction -> leveller
-         -> 8 kHz -> limiter -> sotto
+         -> 16 kHz -> limiter -> sotto
+
+  (8 kHz until 2026-11-02, when voice moved to sotto v3.8: "Voice at
+  16 kHz" below.)
 
 - **Levels.** sotto's own figures (sotto.h, the same in v3.5 and v3.6):
   speech is aimed at an active level of -26 dBFS (ITU-T P.56), each 10 ms
@@ -1796,7 +1799,7 @@ its knobs and reads its meters.
   band's, so measuring the full band errs on the safe side.
 - **Rates.** The microphone comes in at its own rate and is resampled to
   48 kHz, where RNNoise works, in 10 ms blocks; the end of the chain is
-  sotto's 8 kHz. `voice::Resampler` is polyphase windowed sinc (Kaiser,
+  sotto v3.8's 16 kHz. `voice::Resampler` is polyphase windowed sinc (Kaiser,
   80 dB down, flat to 90% of the lower Nyquist frequency) for any ratio
   of whole rates. The chain delays the voice about 21 ms, 31 with
   RNNoise; `finish()` drains it when Push to talk is let go.
@@ -1829,7 +1832,7 @@ its knobs and reads its meters.
   overshoot at once, and that cut wears off at 1 dB a second of speech,
   slower than the leveller moves, so a voice that keeps shouting stays
   turned down. Pushed back in, the cut goes.
-- **Limiter.** Last, at 8 kHz, so it sees exactly what sotto gets: every
+- **Limiter.** Last, at 16 kHz, so it sees exactly what sotto gets: every
   10 ms window's RMS under -8.3 dBFS (1 dB under sotto's ceiling) and
   every sample under -1 dBFS, looking ahead 15 ms so the gain falls over
   5 ms before a burst; it recovers with a 50 ms time constant. Below its
@@ -1843,7 +1846,7 @@ its knobs and reads its meters.
   and fall itself. Settings (`ChainSettings`, clamped to the knobs'
   ranges) may change from any thread and take effect at the next block.
 - **Level check** (`Chain::levelReport()`, per clip from `startClip()` to
-  `finish()`): Active is P.56 method B on the 8 kHz output, green within
+  `finish()`): Active is P.56 method B on the 16 kHz output, green within
   3 dB of the Target, amber within 6. Loudest is the loudest 10 ms
   (windows every 5 ms) before the limiter, green under -7.3 dBFS, amber up
   to 3 dB over (the limiter took it), red beyond or if the microphone
@@ -1942,7 +1945,8 @@ bytes still come rather than waiting for the whole file.
   as soon as its first burst is in; at gear 6 a 10 s clip starts after
   about 5 s, and at gear 5 after most of it has come.
 - **Running dry.** If the link slows and the bytes fall behind, the
-  player tells sotto's decoder the next frame is lost, so it does what
+  player tells sotto's decoder the next frames are lost, so it plays out
+  the frames it holds (one at 8 kHz, five at 16 kHz) and then does what
   it does for a lost frame on 2 m: holds the sound, fades it 6 dB each
   20 ms and is quiet after 80 ms (v3.6 conceals as v3.5 does). Then it
   waits by the same rule, with at least a second in hand, and carries
@@ -1954,7 +1958,7 @@ bytes still come rather than waiting for the whole file.
   the end of what came and fades out there. A transfer cancelled by
   either side or cut by a dropped link ends the same way.
 - **Save as WAV.** A voice card's right-click menu (and the Files
-  tab's) saves the clip's sound as an 8 kHz, 16-bit mono WAV
+  tab's) saves the clip's sound as a 16 kHz, 16-bit mono WAV
   (`voice::wavFile`), decoded with lost frames covered. Ragtime itself
   keeps only the `.sot` file: 3 KB for 10 s against 160 KB of WAV.
 - **D2G.** Not here: on D2G a clip plays from what has come when the
@@ -1988,9 +1992,9 @@ draws is in core with no window (`core/src/deck/`, `ragtime_deck_test`).
 
 - **sotto, loaded at run time.** libsotto is LGPL through Codec 2, so
   Ragtime never links it: `voice::Sotto` (`audio/src/Sotto.cpp`) opens
-  it with `dlopen` (`LoadLibrary` on Windows) and refuses one that lacks
-  a function or names a codec Ragtime doesn't know
-  (`sotto_format()`, "sotto v3.6, shape 9-9-8-8" is codec 1). It looks
+  it with `dlopen` (`LoadLibrary` on Windows) and passes over one that
+  lacks a function or isn't sotto v3.8 (`sotto_format()`, "sotto v3.8,
+  shape 9-9-8-8", since 2026-11-02; "sotto v3.6" before). It looks
   in `$RAGTIME_SOTTO`, beside the program, in `../lib/` from it, in
   `build-sotto/out/` up to four folders above the program (where
   configuring leaves it, `cmake/BuildSotto.cmake`, or
@@ -1999,9 +2003,9 @@ draws is in core with no window (`core/src/deck/`, `ragtime_deck_test`).
   when none is found (`RAGTIME_BUILD_SOTTO`, on by default). Without it the deck
   says why and Push to talk stays dark; nothing else changes. The
   encoder runs on the window's clock: sotto codes in about 1% of real
-  time. `SottoDecoder::decodeClip` gives a clip back with sotto's 20 ms
-  delay taken out, lost frames concealed. The commit is pinned in
-  `packaging/sotto.sh` (baitisj/sotto 08d5047, v3.6 the default), and
+  time. `SottoDecoder::decodeClip` gives a clip back with the decoder's
+  delay taken out, lost frames concealed. The commit and variant are
+  pinned in `packaging/sotto.sh` (v3.8 since 2026-11-02), and
   `packaging/build-sotto.sh` builds it there with its Codec 2 fork.
 - **1 Input.** The microphone (never the radio's card: VoiceAudio leaves
   it out), the Active level meter (a cream VU face, P.56's live level,
@@ -2058,6 +2062,47 @@ draws is in core with no window (`core/src/deck/`, `ragtime_deck_test`).
   RNNoise's) in `usr/share/doc/ragtime/licences`. The Windows zip takes
   `sotto.dll` and its Codec 2 DLL from `RAGTIME_SOTTO_DLL_DIR`; sotto has
   no MinGW build yet, so until it does the zip has no voice coding.
+
+## Voice at 16 kHz: sotto v3.8
+
+Jeff, 2026-11-02: "we are at v3.8 for both encoder and decoder". sotto
+v3.8 codes 16 kHz speech into v3.6's 48-bit frame, and its decoder adds
+a 4-8 kHz hiss band (the s, f and sh that 8 kHz speech loses) from a
+6-bit index carried in the pitch field of frames that are unvoiced in
+both halves, which have no pitch to send. One bit of each such frame
+carries a speaker-shape side channel (12 bits and a CRC-4) that the
+decoder uses for the band under vowels.
+
+- **Codec 2.** Ragtime sends `.sot` files with codec byte 2 (PROTOCOL.md,
+  "Voice"). v3.8's 8 kHz decoder plays them as codec 1, but its 16 kHz
+  decoder must not be given codec 1: measured on the LibriSpeech test
+  clip, a v3.7 stream through `sotto_decode16` puts the 4-8 kHz band at
+  -11 dB against the 0-4 kHz band, where the original speech has -35 dB
+  and a v3.8 stream -31 dB. The codec byte tells the receiver which.
+- **The library.** `voice::Sotto` needs `sotto v3.8, shape 9-9-8-8` and
+  binds the 16 kHz calls too (`sotto_encode16`, `sotto_decode16` and
+  their flushes); an older libsotto is passed over and the search goes
+  on. `SottoEncoder` takes 320 samples a frame. `Sotto::decoder(codec)`
+  gives a codec 2 decoder (16 kHz, 5 frames behind) or a codec 1 one
+  (the 8 kHz decoder doubled to 16 kHz by `voice::Resampler`, a frame
+  behind); its `flush()` says when it holds nothing more.
+- **The chain** ends at 16 kHz, the limiter and the Level check with it.
+  sotto measures its energy field on the band it codes, so the levels
+  (-26 dBFS active, -7.3 dBFS ceiling) hold.
+- **Playing as it arrives.** `ArrivalPlayer` keeps a list of what the
+  decoder holds (the lead-in, the clip's frames, the lost frames fed
+  while dry), so its sums work for any delay: a slot is in hand once
+  the frame `delay` after it has come. Its tests run with a pretend
+  decoder one frame behind and five.
+- **Building.** `packaging/sotto.sh` pins sotto main with
+  `SOTTO_VARIANT=v3.8`. From that commit sotto ships its generated C
+  tables, so building libsotto needs no Python. `cmake/BuildSotto.cmake`
+  no longer skips the build for a libsotto in the checkout's
+  `build-sotto/out` or on the system, which may be from an older pin.
+- **Tested.** `ragtime_sotto_test` codes a 2 s buzz at 16 kHz and gets
+  it back at -25.6 dBFS for -26.0 in, with lost frames silent by 240 ms;
+  the codec 1 test clip plays through the doubled 8 kHz decoder at
+  -26.3 dBFS with its 4-8 kHz band at -33.8 dB.
 
 ## Waiting on Andrew (via Jeff)
 

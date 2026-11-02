@@ -257,7 +257,7 @@ void Chain::startClip()
 void Chain::finish(std::vector<float>& out)
 {
     // The output that covers everything fed so far: the input's length
-    // at 8 kHz plus the chain's delay.
+    // at 16 kHz plus the chain's delay.
     double seconds = (double)totalIn_ / inputRate_ + latencySeconds();
     uint64_t end = (uint64_t)std::ceil(seconds * OUT_RATE);
     if (end > totalOut_)
