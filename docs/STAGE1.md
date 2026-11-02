@@ -241,7 +241,12 @@ The brief:
   message Unsigned; room is left for it in the Key column. The message
   row's badge shows the seal's own state (Awaiting, Sealed, Repairing,
   Held, Mismatch; `docs/MOCKUPS.md`, Jeff's ask of 2026-10-23), from
-  `Seals::ourMark` and `Seals::theirMark`.
+  `Seals::ourMark` and `Seals::theirMark`. A broadcast file's line (a
+  voice message, a picture or a file) shows its seal's badge too, looked
+  up by its announce, the item the seal lists (Jeff, 2026-11-02); it
+  shows none until a seal says something, as the card says how the file
+  goes, and its tooltip and the menu's greyed first line say what the
+  seal says.
 
 ## F. Sessions
 
