@@ -28,8 +28,8 @@ C2="$WORK/codec2"
 cmake -S "$SRC/codec/codec2" -B "$C2" -DCMAKE_BUILD_TYPE=Release -DUNITTEST=OFF > /dev/null
 cmake --build "$C2" --target codec2 -j"$(nproc)" > /dev/null
 
-make -C "$SRC/c" --no-print-directory clean > /dev/null
-make -C "$SRC/c" --no-print-directory libsotto.so CODEC2_LIB="$C2/src" > /dev/null
+make -C "$SRC/c" --no-print-directory clean VARIANT="$SOTTO_VARIANT" > /dev/null
+make -C "$SRC/c" --no-print-directory libsotto.so VARIANT="$SOTTO_VARIANT" CODEC2_LIB="$C2/src" > /dev/null
 
 mkdir -p "$OUT/licences"
 cp -L "$SRC/c/libsotto.so.0" "$OUT/libsotto.so.0"

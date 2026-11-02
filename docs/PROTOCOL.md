@@ -943,8 +943,14 @@ spectral envelope, its postfilter and its concealment. A library that
 speaks it says `sotto v3.6, shape 9-9-8-8` from `sotto_format()`. A
 later sotto that changes the bits is a new codec number, and a receiver
 plays only numbers it knows; decoder-only changes can come in a Ragtime
-update without one. Each frame is 48 bits for 20 ms, most significant
-bit first:
+update without one, and so can encoder-only ones. Since 2026-11-02
+Ragtime builds sotto's v3.7 variant: v3.7 changes only the encoder (a
+pitch candidate at a third of Codec 2's estimate), sends v3.6's frames,
+decodes them bit for bit as v3.6 does, and still says `sotto v3.6, shape
+9-9-8-8`, so it is codec 1. sotto's v3.8 is not: it takes a bit of each
+unvoiced frame's index for a side channel (the 4-8 kHz hiss band), so it
+would be a new codec number. Each frame is 48 bits for 20 ms, most
+significant bit first:
 
 | Field | Bits | Meaning |
 | --- | --- | --- |

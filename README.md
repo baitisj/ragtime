@@ -99,9 +99,11 @@ WASAPI, which needs nothing installed.
 Voice messages are coded with [sotto](https://github.com/baitisj/sotto).
 Ragtime loads it at run time as a shared library and never links it, so
 it builds without it: with no libsotto the voice cards still draw, and
-Play and the deck say libsotto is missing. Codec 1 is sotto v3.6, at
-the commit pinned in `packaging/sotto.sh`. Use that commit, because a
-different sotto codes differently.
+Play and the deck say libsotto is missing. Codec 1 is sotto v3.6's
+frames, built as sotto's v3.7 variant (a better encoder, the same frames)
+at the commit pinned in `packaging/sotto.sh`. Use that commit and
+variant: sotto's own Makefile now builds v3.8 by default, which codes
+differently and which Ragtime refuses.
 
 **The build makes it for you.** On Linux, configuring Ragtime (`cmake -S
 . -B build`) builds libsotto when none is found, in about ten seconds,

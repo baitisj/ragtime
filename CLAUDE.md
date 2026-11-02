@@ -257,7 +257,10 @@ and the Part 97 check.
   reading a prefix or a file with holes), the pitch strip drawn from the
   frames' bits, and the airtime sums (docs/PROTOCOL.md, "Voice"). Codec
   1 is sotto v3.6 (Jeff, 2026-10-31), frozen; libsotto (LGPL) is loaded
-  at run time, never linked. Its test clip `tests/data/voice/` is
+  at run time, never linked. Since 2026-11-02 `packaging/sotto.sh` pins
+  sotto main built as `SOTTO_VARIANT=v3.7` (encoder only, v3.6's frames,
+  decoding bit-identical); sotto's default v3.8 changes the frames and
+  would be a new codec. Its test clip `tests/data/voice/` is
   LibriSpeech, CC BY 4.0.
 - The voice chain (2026-10-31, voice PR 3 of the sotto plan,
   `docs/STAGE1.md`): `voice::Chain` in `core/src/voice/` takes the
