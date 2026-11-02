@@ -44,7 +44,7 @@ private:
 };
 
 // A polyphase windowed-sinc resampler for any ratio of whole rates (48 kHz
-// to 8 kHz, 44.1 kHz to 48 kHz, ...): Kaiser window, 80 dB down in the stop
+// to 16 kHz, 44.1 kHz to 48 kHz, ...): Kaiser window, 80 dB down in the stop
 // band, the pass band flat to 90% of the lower Nyquist frequency. It runs
 // as samples come and delays them by delayIn() input samples.
 class Resampler
@@ -72,7 +72,7 @@ private:
     uint64_t outCount_ = 0;
 };
 
-// The limiter, last in the chain at 8 kHz, so it sees exactly what sotto
+// The limiter, last in the chain at 16 kHz, so it sees exactly what sotto
 // gets. It keeps every 10 ms window's RMS under rmsCeilingDb (1 dB under
 // sotto's ceiling by default) and every sample under peakCeilingDb (-1 dBFS),
 // looking ahead so it turns down before a burst rather than during it: the
@@ -82,7 +82,7 @@ private:
 class Limiter
 {
 public:
-    explicit Limiter(int sampleRate = 8000, double rmsCeilingDb = LEVEL_MAX_DBFS - 1.0,
+    explicit Limiter(int sampleRate = 16000, double rmsCeilingDb = LEVEL_MAX_DBFS - 1.0,
                      double peakCeilingDb = -1.0);
 
     void reset();

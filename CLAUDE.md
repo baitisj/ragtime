@@ -256,13 +256,19 @@ and the Part 97 check.
   7-byte header, sotto's 6-byte frames, silence runs, the pause gate,
   reading a prefix or a file with holes), the pitch strip drawn from the
   frames' bits, and the airtime sums (docs/PROTOCOL.md, "Voice"). Codec
-  1 is sotto v3.6 (Jeff, 2026-10-31), frozen; libsotto (LGPL) is loaded
-  at run time, never linked. Its test clip `tests/data/voice/` is
-  LibriSpeech, CC BY 4.0.
+  1 is sotto v3.6 (Jeff, 2026-10-31), frozen, 8 kHz; since 2026-11-02
+  (Jeff) Ragtime sends codec 2, sotto v3.8: 16 kHz with a 4-8 kHz hiss
+  band in the pitch field of all-unvoiced frames, the same 48-bit frame.
+  `packaging/sotto.sh` pins sotto main with `SOTTO_VARIANT=v3.8`;
+  Ragtime needs a library saying "sotto v3.8, shape 9-9-8-8" and plays
+  codec 1 through its 8 kHz decoder, doubled (the 16 kHz one would read
+  codec 1's pitch as loud hiss). libsotto (LGPL) is loaded at run time,
+  never linked. Its test clip `tests/data/voice/` is LibriSpeech, CC BY
+  4.0.
 - The voice chain (2026-10-31, voice PR 3 of the sotto plan,
   `docs/STAGE1.md`): `voice::Chain` in `core/src/voice/` takes the
   microphone through Gain, 48 kHz, a high-pass, noise reduction, the
-  leveller (with the Target knob's peak mode), 8 kHz and the limiter, with
+  leveller (with the Target knob's peak mode), 16 kHz and the limiter, with
   live meters (`takeReadings`) and a per-clip Level check (P.56 active
   level, loudest 10 ms, noise), aimed at sotto.h's figures (-26 dBFS
   active, -7.3 dBFS ceiling). The noise reducer is RNNoise 0.1.1 in
@@ -423,7 +429,7 @@ The version is `project(ragtime VERSION ...)` in the top-level
 
 Ubuntu 24.04 needs `build-essential cmake pkg-config libwxgtk3.2-dev
 libgtk-3-dev libhamlib-dev libpipewire-0.3-dev libopenjp2-7-dev
-libwebp-dev libheif-dev libheif-plugin-libde265 git python3-numpy` (GTK for the ham phrase
+libwebp-dev libheif-dev libheif-plugin-libde265 git` (GTK for the ham phrase
 highlight in the entry lines, `PhraseHighlight`; Hamlib for Settings >
 Rig, or `-DRAGTIME_HAMLIB=OFF` to build without it; PipeWire's headers
 for the Ear, or `-DRAGTIME_PIPEWIRE=OFF`. The Ear loads libpipewire when
@@ -433,7 +439,7 @@ leaves out only HEIF. RNNoise, for the voice chain, needs nothing
 installed: configuring clones it from GitHub, or `-DRAGTIME_RNNOISE=OFF`.
 libsotto, for voice, is built when configuring if none is found
 (`cmake/BuildSotto.cmake` runs `packaging/build-sotto.sh` into
-`build/build-sotto/out`, once per pinned commit; git and NumPy, a warning
+`build/build-sotto/out`, once per pinned commit; git, a warning
 if it can't, `-DRAGTIME_BUILD_SOTTO=OFF` to skip; Linux only).
 
     cmake -S . -B build -DCMAKE_BUILD_TYPE=Release

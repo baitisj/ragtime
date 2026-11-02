@@ -335,8 +335,8 @@ void testLevelCheck()
 {
     // Speech at the target with little noise: three greens.
     {
-        std::vector<float> x = speech(8000, 8.0, 13);
-        setActiveLevel(x, 8000, -26);
+        std::vector<float> x = speech(LevelCheck::RATE, 8.0, 13);
+        setActiveLevel(x, LevelCheck::RATE, -26);
         addNoise(x, -70, 13);
         LevelCheck check;
         check.add(x.data(), x.data(), x.size());
@@ -354,8 +354,8 @@ void testLevelCheck()
     }
     // Too quiet, noisy: active and noise lamps say so.
     {
-        std::vector<float> x = speech(8000, 8.0, 14);
-        setActiveLevel(x, 8000, -36);
+        std::vector<float> x = speech(LevelCheck::RATE, 8.0, 14);
+        setActiveLevel(x, LevelCheck::RATE, -36);
         addNoise(x, -50, 14);
         LevelCheck check;
         check.add(x.data(), x.data(), x.size());
@@ -365,8 +365,8 @@ void testLevelCheck()
     }
     // The microphone clipped: Loudest is red whatever the limiter did.
     {
-        std::vector<float> x = speech(8000, 2.0, 15);
-        setActiveLevel(x, 8000, -26);
+        std::vector<float> x = speech(LevelCheck::RATE, 2.0, 15);
+        setActiveLevel(x, LevelCheck::RATE, -26);
         LevelCheck check;
         check.add(x.data(), x.data(), x.size());
         check.addClipped(3);
@@ -374,7 +374,7 @@ void testLevelCheck()
     }
     // Silence: no speech, red lamps, no crash.
     {
-        std::vector<float> x(16000, 0.0f);
+        std::vector<float> x(2 * LevelCheck::RATE, 0.0f);
         LevelCheck check;
         check.add(x.data(), x.data(), x.size());
         LevelReport r = check.report();
@@ -407,7 +407,7 @@ std::vector<float> runClip(Chain& chain, const std::vector<float>& x, size_t pie
 
 void testChain()
 {
-    // A quiet talker at 48 kHz with some hum: out at 8 kHz, near the
+    // A quiet talker at 48 kHz with some hum: out at 16 kHz, near the
     // target, three green lamps, and the length the clip should have.
     {
         Chain chain(48000);
@@ -425,12 +425,13 @@ void testChain()
                              "gain %.2f dB, latency %.1f ms\n",
                      r.activeDb, r.loudestDb, r.loudestBeforeLimiterDb, r.noiseDb, r.seconds,
                      chain.takeReadings().levellerGainDb, chain.latencySeconds() * 1000);
-        // The clip: the microphone's 12 s at 8 kHz, plus at most the
+        // The clip: the microphone's 12 s at 16 kHz, plus at most the
         // chain's delay and 20 ms of what came before it.
-        double least = 12.0 * 8000;
-        double most = least + chain.latencySeconds() * 8000 + 160;
+        const double rate = Chain::OUT_RATE;
+        double least = 12.0 * rate;
+        double most = least + chain.latencySeconds() * rate + rate / 50;
         CHECK((double)out.size() >= least && (double)out.size() <= most);
-        CHECK(near(r.seconds, (double)out.size() / 8000, 1e-9));
+        CHECK(near(r.seconds, (double)out.size() / rate, 1e-9));
         CHECK(r.active == Lamp::Green);
         CHECK(r.loudest == Lamp::Green);
         CHECK(r.noise == Lamp::Green);
@@ -459,8 +460,9 @@ void testChain()
             v = std::clamp(v, -0.99f, 0.99f);
         std::vector<float> out = runClip(chain, x, 1024);
         double worst = LEVEL_FLOOR_DBFS;
-        for (size_t i = 0; i + 80 <= out.size(); i += 40)
-            worst = std::max(worst, rmsDb(out.data() + i, 80));
+        const size_t ms10 = Chain::OUT_RATE / 100;
+        for (size_t i = 0; i + ms10 <= out.size(); i += ms10 / 2)
+            worst = std::max(worst, rmsDb(out.data() + i, ms10));
         CHECK(worst <= LEVEL_MAX_DBFS);
         Readings rd = chain.takeReadings();
         CHECK(rd.levellerGainDb < -10);

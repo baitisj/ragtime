@@ -181,7 +181,7 @@ private:
     std::mutex mutex_;
     std::unique_ptr<ragtime::voice::Chain> chain_;
     bool recording_ = false;
-    std::vector<float> coded8k_;            // 8 kHz, waiting for the encoder
+    std::vector<float> coded_;              // 16 kHz, waiting for the encoder
     std::vector<float> scratch_;            // the audio thread's own
     bool newSettings_ = true;
 

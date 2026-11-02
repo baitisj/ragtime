@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <cstdio>
+#include <deque>
 #include <vector>
 
 #include "Check.h"
@@ -16,37 +17,50 @@ using namespace ragtime::voice;
 namespace
 {
 
+// The pretend decoder's delay in frames: 1 as sotto's 8 kHz decoder, 5 as
+// v3.8's 16 kHz one (main runs every test with each).
+int g_delay = 1;
+
 // A pretend sotto: each frame's sound is its pitch code + 1 in every
-// sample, a frame late as sotto's is; for a lost frame it gives 1000 + how
-// many lost in a row (the hold and fade), quiet (0) after 4.
+// sample, g_delay frames late as sotto's is; a lost frame's is 1000 + how
+// many lost in a row (the hold and fade), quiet (0) after 4. flush gives
+// what it holds.
 struct FakeSotto
 {
-    int16_t out = 0;        // the sound the next call gives
-    int16_t last = 0;
+    std::deque<int16_t> pipe;   // sounds held, the front's next out
+    int held = 0;               // of them, frames fed
     int lost = 0;
     int calls = 0;
 
     FrameDecoder decoder()
     {
+        pipe.assign((size_t)g_delay, 0);
         FrameDecoder d;
+        d.delay = g_delay;
         d.decode = [this](const Frame& f, bool good, int16_t* pcm) {
             calls++;
-            std::fill(pcm, pcm + FRAME_SAMPLES, out);
             if (good)
             {
                 lost = 0;
-                last = (int16_t)(pitchCodeOf(f) + 1);
-                out = last;
+                pipe.push_back((int16_t)(pitchCodeOf(f) + 1));
             }
             else
             {
                 lost++;
-                // The call after a lost frame gives the last good frame's
-                // own sound; the next ones its hold and fade.
-                out = lost <= 4 ? (int16_t)(1000 + lost) : (int16_t)0;
+                pipe.push_back(lost <= 4 ? (int16_t)(1000 + lost) : (int16_t)0);
             }
+            std::fill(pcm, pcm + FRAME_SAMPLES, pipe.front());
+            pipe.pop_front();
+            held = std::min(held + 1, g_delay);
         };
-        d.flush = [this](int16_t* pcm) { std::fill(pcm, pcm + FRAME_SAMPLES, out); };
+        d.flush = [this](int16_t* pcm) {
+            if (held == 0) return false;
+            held--;
+            pipe.push_back(0);
+            std::fill(pcm, pcm + FRAME_SAMPLES, pipe.front());
+            pipe.pop_front();
+            return true;
+        };
         return d;
     }
 };
@@ -224,9 +238,10 @@ void testNoRateWaitsForSecondArrival()
 void testUnderrunFadesAndLosesNothing()
 {
     // The link fades: the first bursts promise gear 7, then nothing comes
-    // for 20 s. It runs dry, lets sotto hold and fade the sound (frames
-    // marked 1001 to 1003, and 1004 fading back in), waits, and carries on where it stopped, every
-    // frame heard once and in order.
+    // for 20 s. It runs dry, lets sotto play out what it holds, then hold
+    // and fade the sound (frames marked 1001 to 1003; what it still holds
+    // of the fade comes back in first), waits, and carries on where it
+    // stopped, every frame heard once and in order.
     FakeSotto sotto;
     ArrivalPlayer player(sotto.decoder());
     player.setExpectedRate(400);
@@ -371,7 +386,7 @@ void testWav()
     CHECK(f[8] == 'W' && f[12] == 'f' && f[36] == 'd');
     CHECK_EQ((int)f[4], 36 + 10);
     CHECK_EQ((int)f[22], 1);                              // mono
-    CHECK_EQ((int)(f[24] | (f[25] << 8)), 8000);          // 8 kHz
+    CHECK_EQ((int)(f[24] | (f[25] << 8)), 16000);         // 16 kHz
     CHECK_EQ((int)f[34], 16);                             // 16-bit
     CHECK_EQ((int)f[40], 10);                             // data bytes
     CHECK_EQ((int)f[46], 1);
@@ -385,17 +400,21 @@ void testWav()
 
 int main()
 {
-    testWholeAtOnce();
-    testFastLinkStartsAfterOneGap();
-    testSlowLinkWaitsThenNeverStalls();
-    testNoRateWaitsForSecondArrival();
-    testUnderrunFadesAndLosesNothing();
-    testStopSignPlaysWhatCameThenFades();
-    testStoppedWhileWaitingPlaysAtOnce();
-    testNotAClip();
-    testShortHeaderWaits();
-    testSeek();
-    testSilenceRunsGiveTheLinkTime();
+    for (int delay : {1, 5})
+    {
+        g_delay = delay;
+        testWholeAtOnce();
+        testFastLinkStartsAfterOneGap();
+        testSlowLinkWaitsThenNeverStalls();
+        testNoRateWaitsForSecondArrival();
+        testUnderrunFadesAndLosesNothing();
+        testStopSignPlaysWhatCameThenFades();
+        testStoppedWhileWaitingPlaysAtOnce();
+        testNotAClip();
+        testShortHeaderWaits();
+        testSeek();
+        testSilenceRunsGiveTheLinkTime();
+    }
     testWav();
     return ragtime_test::finish();
 }

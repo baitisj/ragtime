@@ -14,9 +14,10 @@ namespace voice
 namespace
 {
 
-// sotto's decoder is quiet after this many lost frames running (hold
-// 40 ms, then 6 dB down each 20 ms).
-constexpr int QUIET_AFTER_LOST = 4;
+// sotto's decoder is quiet once it has given out this many lost frames'
+// sound in a row (the first lost frame holds the sound, then 6 dB down
+// each 20 ms).
+constexpr int QUIET_AFTER_LOST = 3;
 
 constexpr double FRAME_SECONDS = FRAME_MS / 1000.0;
 
@@ -28,6 +29,14 @@ ArrivalPlayer::ArrivalPlayer(FrameDecoder decoder, Settings settings)
     : decoder_(std::move(decoder)), settings_(settings)
 {
     if (settings_.window < 2) settings_.window = 2;
+    if (decoder_.delay < 1) decoder_.delay = 1;
+    resetHeld();
+}
+
+void ArrivalPlayer::resetHeld()
+{
+    held_.assign((size_t)decoder_.delay, Held::Lead);
+    lostRun_ = 0;
 }
 
 void ArrivalPlayer::setExpectedRate(double bytesPerSecond)
@@ -124,12 +133,17 @@ double ArrivalPlayer::gap() const
 
 size_t ArrivalPlayer::inHand() const
 {
-    // Slot k's sound needs frame k + 1, or the end of the clip (flushed,
-    // or faded when the bytes stopped short).
-    const size_t n = clip_.frames.size();
+    // Each frame fed gives the sound of the front of what the decoder
+    // holds; at the clip's end (flushed, or faded when the bytes stopped
+    // short) all it holds comes out too.
+    const size_t n = std::min(clip_.frames.size(), clip_.good.size());
     const bool complete = n >= clip_.length || ended_;
-    const size_t playable = complete ? n : (n == 0 ? 0 : n - 1);
-    return playable > slot_ ? playable - slot_ : 0;
+    const size_t toFeed = n > fed_ ? n - fed_ : 0;
+    const size_t outOfHeld = complete ? held_.size() : std::min(toFeed, held_.size());
+    size_t real = 0;
+    for (size_t i = 0; i < outOfHeld; i++)
+        if (held_[i] == Held::Real) real++;
+    return real + (complete ? toFeed : toFeed - outOfHeld);
 }
 
 double ArrivalPlayer::waitSeconds(uint64_t nowMs) const
@@ -166,50 +180,63 @@ bool ArrivalPlayer::ready(uint64_t nowMs) const
     return wait >= 0 && wait <= 0.0;
 }
 
+bool ArrivalPlayer::takeSound()
+{
+    const Held front = held_.front();
+    held_.pop_front();
+    if (front == Held::Lead) return false;
+    if (front == Held::Real)
+    {
+        slot_++;
+        lostRun_ = 0;
+    }
+    else
+    {
+        lostRun_++;
+    }
+    frameAt_ = 0;
+    return true;
+}
+
 bool ArrivalPlayer::fadeStep()
 {
-    if (!primed_ || fading_ >= QUIET_AFTER_LOST) return false;
-    decoder_.decode(SILENT_FRAME, false, frame_);
-    frameAt_ = 0;
-    // The first lost frame still gives the last frame's own sound, held.
-    if (fading_ == 0 && !resuming_) slot_++;
-    fading_++;
-    return true;
+    // Nothing fed yet: nothing to fade.
+    if (std::all_of(held_.begin(), held_.end(), [](Held h) { return h == Held::Lead; })) return false;
+    // A run of lost frames' sound: sotto has gone quiet.
+    while (lostRun_ < QUIET_AFTER_LOST)
+    {
+        decoder_.decode(SILENT_FRAME, false, frame_);
+        held_.push_back(Held::Lost);
+        if (takeSound()) return true;
+    }
+    return false;
 }
 
 bool ArrivalPlayer::nextFrame()
 {
     const size_t n = std::min(clip_.frames.size(), clip_.good.size());
-    if (!primed_)
-    {
-        if (fed_ >= n) return false;
-        int16_t before[FRAME_SAMPLES];
-        decoder_.decode(clip_.frames[fed_], clip_.good[fed_] != 0, before);
-        fed_++;
-        primed_ = true;
-    }
-    if (fed_ < n)
+    while (fed_ < n)
     {
         decoder_.decode(clip_.frames[fed_], clip_.good[fed_] != 0, frame_);
-        frameAt_ = 0;
         fed_++;
-        // After running dry, the first frame back fades in from the quiet:
-        // no slot of the clip.
-        if (resuming_)
-            resuming_ = false;
-        else
-            slot_++;
-        fading_ = 0;
-        return true;
+        held_.push_back(Held::Real);
+        // The decoder's lead-in is no sound; after running dry, the lost
+        // frames it still holds come out first, fading back in.
+        if (takeSound()) return true;
     }
     if (fed_ >= clip_.length)
     {
-        if (flushed_) return false;
-        decoder_.flush(frame_);
-        frameAt_ = 0;
-        flushed_ = true;
-        slot_++;
-        return true;
+        // The clip is all fed: what the decoder holds comes out.
+        while (std::any_of(held_.begin(), held_.end(), [](Held h) { return h == Held::Real; }))
+        {
+            if (!decoder_.flush(frame_))
+            {
+                held_.clear();
+                return false;
+            }
+            if (takeSound()) return true;
+        }
+        return false;
     }
     // The bytes stop short of the clip.
     if (ended_) return fadeStep();
@@ -248,16 +275,11 @@ size_t ArrivalPlayer::pull(int16_t* out, size_t n, uint64_t nowMs)
             state_ = State::Done;
             break;
         }
-        // Ran dry: wait for more, and come back in with a fade.
+        // Ran dry: sotto plays out what it holds and fades, then it waits
+        // for more and comes back in from the quiet.
         state_ = State::Stalled;
-        fading_ = 0;
-        resuming_ = false;
-        if (fadeStep())
-        {
-            resuming_ = true;
-            continue;
-        }
-        resuming_ = primed_;
+        lostRun_ = 0;
+        if (fadeStep()) continue;
         break;
     }
     return given;
@@ -270,10 +292,7 @@ bool ArrivalPlayer::seek(uint32_t frame)
     if (complete && frame >= clip_.frames.size()) return false;
     fed_ = frame;
     slot_ = frame;
-    primed_ = false;
-    flushed_ = false;
-    fading_ = 0;
-    resuming_ = false;
+    resetHeld();
     frameAt_ = FRAME_SAMPLES;
     // A clip all here plays from there at once; one still coming waits
     // until the bytes will keep ahead from there.

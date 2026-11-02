@@ -51,7 +51,7 @@ thresholds...** in the gearshift. See [docs/GEARBOX.md](docs/GEARBOX.md).
 On Ubuntu 24.04:
 
     sudo apt-get install build-essential cmake pkg-config libwxgtk3.2-dev libgtk-3-dev libhamlib-dev libpipewire-0.3-dev \
-        libopenjp2-7-dev libwebp-dev libheif-dev libheif-plugin-libde265 git python3-numpy
+        libopenjp2-7-dev libwebp-dev libheif-dev libheif-plugin-libde265 git
     cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
     cmake --build build -j$(nproc)
     ctest --test-dir build --output-on-failure
@@ -72,7 +72,7 @@ have them under their own names.
 | PipeWire 0.3 headers | `libpipewire-0.3-dev` | The Ear's listening | `-DRAGTIME_PIPEWIRE=OFF` |
 | OpenJPEG 2.5 and libwebp | `libopenjp2-7-dev libwebp-dev` | Inline pictures: JPEG 2000 both ways, WebP read | `-DRAGTIME_PICTURES=OFF` |
 | libheif, with its libde265 plugin | `libheif-dev libheif-plugin-libde265` | Pictures read from HEIF (phones' `.heic`) | `-DRAGTIME_HEIF=OFF` |
-| git and NumPy | `git python3-numpy` | Building libsotto for voice when configuring (below) | `-DRAGTIME_BUILD_SOTTO=OFF`, or a warning and no voice |
+| git | `git` | Building libsotto for voice when configuring (below) | `-DRAGTIME_BUILD_SOTTO=OFF`, or a warning and no voice |
 
 Warnings are errors by default. If a compiler we haven't tried stops
 the build on a warning, `-DRAGTIME_WERROR=OFF` lets it finish, and we'd
@@ -99,16 +99,16 @@ WASAPI, which needs nothing installed.
 Voice messages are coded with [sotto](https://github.com/baitisj/sotto).
 Ragtime loads it at run time as a shared library and never links it, so
 it builds without it: with no libsotto the voice cards still draw, and
-Play and the deck say libsotto is missing. Codec 1 is sotto v3.6, at
-the commit pinned in `packaging/sotto.sh`. Use that commit, because a
-different sotto codes differently.
+Play and the deck say libsotto is missing. Ragtime needs sotto v3.8,
+at the commit pinned in `packaging/sotto.sh`: it codes 16 kHz speech
+with a 4-8 kHz hiss band (codec 2), and plays clips from the earlier
+v3.6 (codec 1) too. An older libsotto (v3.6 or v3.7) is passed over.
 
 **The build makes it for you.** On Linux, configuring Ragtime (`cmake -S
 . -B build`) builds libsotto when none is found, in about ten seconds,
 into `build/build-sotto/out/`, where the program finds it. It runs once,
 and again only when the pinned commit changes. It needs `git`, `cmake`,
-`make`, a C compiler and `python3-numpy`
-(`sudo apt-get install python3-numpy`). If it can't build libsotto
+`make` and a C compiler. If it can't build libsotto
 (offline, say), configuring goes on with a warning, and the next
 configure tries again. `-DRAGTIME_BUILD_SOTTO=OFF` turns it off.
 
@@ -129,6 +129,9 @@ in order:
    the build folder's (from configuring) or the checkout's (from
    `build-sotto.sh`).
 5. The system's library path (`libsotto.so.0`; `sotto.dll` on Windows).
+
+It takes the first that loads and says `sotto v3.8`; one from an older
+pin is passed over.
 
 libsotto finds its `libcodec2` in its `build-sotto` folder, so leave
 that folder where it is. The microphone deck shows which sotto loaded (hover

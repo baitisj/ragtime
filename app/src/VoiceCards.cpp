@@ -360,7 +360,7 @@ bool VoicePlayer::play(audio::VoiceAudio& audio, const std::string& key, const v
         why = "Nothing of it has come yet.";
         return false;
     }
-    std::unique_ptr<voice::SottoDecoder> decoder = voice::Sotto::library().decoder();
+    std::unique_ptr<voice::SottoDecoder> decoder = voice::Sotto::library().decoder(clip.codec);
     if (!decoder)
     {
         why = "libsotto couldn't make a decoder.";
@@ -416,15 +416,22 @@ bool VoicePlayer::playArriving(audio::VoiceAudio& audio, const std::string& key,
                                uint64_t nowMs, std::string& why)
 {
     if (!canDecode(why)) return false;
-    std::shared_ptr<voice::SottoDecoder> decoder(voice::Sotto::library().decoder());
+    // The header's codec byte says which decoder (voice::Clip::codec).
+    if (bytes.size() < 3)
+    {
+        why = "Not enough of it has come to play.";
+        return false;
+    }
+    std::shared_ptr<voice::SottoDecoder> decoder(voice::Sotto::library().decoder(bytes[2]));
     if (!decoder)
     {
-        why = "libsotto couldn't make a decoder.";
+        why = "libsotto couldn't make a decoder for it.";
         return false;
     }
     voice::FrameDecoder calls;
     calls.decode = [decoder](const voice::Frame& f, bool good, int16_t* out) { decoder->decode(f, good, out); };
-    calls.flush = [decoder](int16_t* out) { decoder->flush(out); };
+    calls.flush = [decoder](int16_t* out) { return decoder->flush(out); };
+    calls.delay = decoder->delay();
     auto player = std::make_unique<voice::ArrivalPlayer>(calls);
     player->setExpectedRate(expectedRate);
     if (expectedGap > 0) player->setExpectedGap(expectedGap);

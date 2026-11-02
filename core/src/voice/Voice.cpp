@@ -118,12 +118,12 @@ Frame makeFrame(Voicing voicing, int pitchCode, int energyCode, uint64_t shape)
 
 uint8_t codecOfFormat(const std::string& format)
 {
-    return format == SOTTO_V36_FORMAT ? CODEC_SOTTO_V36 : 0;
+    return format == SOTTO_V38_FORMAT ? CODEC_SOTTO_V38 : 0;
 }
 
 bool isSot(const uint8_t* bytes, size_t length)
 {
-    return length >= 4 && bytes[0] == MAGIC_0 && bytes[1] == MAGIC_1 && bytes[2] == CODEC_SOTTO_V36 &&
+    return length >= 4 && bytes[0] == MAGIC_0 && bytes[1] == MAGIC_1 && knownCodec(bytes[2]) &&
            (bytes[3] & ~KNOWN_FLAGS) == 0;
 }
 
@@ -217,7 +217,7 @@ ReadResult readSot(const uint8_t* bytes, uint64_t size, uint64_t have, const std
     clip.codec = bytes[2];
     clip.flags = bytes[3];
     clip.length = ((uint32_t)bytes[4] << 16) | ((uint32_t)bytes[5] << 8) | bytes[6];
-    if (clip.codec != CODEC_SOTTO_V36) return ReadResult::UnknownCodec;
+    if (!knownCodec(clip.codec)) return ReadResult::UnknownCodec;
     if ((clip.flags & ~KNOWN_FLAGS) != 0) return ReadResult::UnknownFlags;
     if (clip.length > MAX_CLIP_FRAMES) return ReadResult::TooLong;
     if ((size - HEADER_BYTES) % FRAME_BYTES != 0) return ReadResult::Malformed;

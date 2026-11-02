@@ -4,8 +4,7 @@
 # links, and puts in OUT_DIR (default build-sotto/out):
 #   libsotto.so.0, libcodec2.so.1.2 (what libsotto needs at run time)
 #   licences/sotto.txt (MIT), licences/codec2.txt (LGPL-2.1)
-# Needs cmake, make, a C compiler, git, and python3 with numpy (sotto writes
-# its codebook from the NumPy file at build time). Set SOTTO_SOURCE to a
+# Needs cmake, make, a C compiler and git. Set SOTTO_SOURCE to a
 # checkout to build that instead of cloning.
 
 cd "$(dirname "$(realpath "$0")")/.."
@@ -28,8 +27,8 @@ C2="$WORK/codec2"
 cmake -S "$SRC/codec/codec2" -B "$C2" -DCMAKE_BUILD_TYPE=Release -DUNITTEST=OFF > /dev/null
 cmake --build "$C2" --target codec2 -j"$(nproc)" > /dev/null
 
-make -C "$SRC/c" --no-print-directory clean > /dev/null
-make -C "$SRC/c" --no-print-directory libsotto.so CODEC2_LIB="$C2/src" > /dev/null
+make -C "$SRC/c" --no-print-directory clean VARIANT="$SOTTO_VARIANT" > /dev/null
+make -C "$SRC/c" --no-print-directory libsotto.so VARIANT="$SOTTO_VARIANT" CODEC2_LIB="$C2/src" > /dev/null
 
 mkdir -p "$OUT/licences"
 cp -L "$SRC/c/libsotto.so.0" "$OUT/libsotto.so.0"

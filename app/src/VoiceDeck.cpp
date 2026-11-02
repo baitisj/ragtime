@@ -85,7 +85,7 @@ DeckLamp::Colour lampColour(voice::Lamp lamp)
     return DeckLamp::Colour::Red;
 }
 
-// "sotto v3.6, shape 9-9-8-8" gives "v3.6".
+// "sotto v3.8, shape 9-9-8-8" gives "v3.8".
 std::string versionOf(const std::string& format)
 {
     size_t v = format.find(" v");
@@ -583,7 +583,7 @@ void VoiceDeck::onSamples(const float* samples, size_t n, int rate)
     }
     scratch_.clear();
     chain_->process(samples, n, scratch_);
-    if (recording_) coded8k_.insert(coded8k_.end(), scratch_.begin(), scratch_.end());
+    if (recording_) coded_.insert(coded_.end(), scratch_.begin(), scratch_.end());
 }
 
 //-------------------------------------------------------------------------
@@ -808,7 +808,7 @@ void VoiceDeck::talkDown()
     recordStartMs_ = nowMs();
     {
         std::lock_guard<std::mutex> lock(mutex_);
-        coded8k_.clear();
+        coded_.clear();
         if (chain_) chain_->startClip();
         recording_ = true;
     }
@@ -829,7 +829,7 @@ void VoiceDeck::discardClip()
     {
         std::lock_guard<std::mutex> lock(mutex_);
         recording_ = false;
-        coded8k_.clear();
+        coded_.clear();
         if (chain_)
         {
             std::vector<float> drop;
@@ -852,7 +852,7 @@ void VoiceDeck::drainCoded()
     std::vector<float> pcm;
     {
         std::lock_guard<std::mutex> lock(mutex_);
-        pcm.swap(coded8k_);
+        pcm.swap(coded_);
     }
     if (pcm.empty()) return;
     std::vector<int16_t> samples(pcm.size());
@@ -877,7 +877,7 @@ void VoiceDeck::finishClip()
         if (chain_)
         {
             // The chain's last 30 ms or so, then the clip's Level check.
-            chain_->finish(coded8k_);
+            chain_->finish(coded_);
             report = chain_->levelReport();
         }
     }
@@ -886,7 +886,7 @@ void VoiceDeck::finishClip()
         std::vector<float> pcm;
         {
             std::lock_guard<std::mutex> lock(mutex_);
-            pcm.swap(coded8k_);
+            pcm.swap(coded_);
         }
         if (encoder_)
         {
@@ -982,20 +982,22 @@ void VoiceDeck::toggleMonitor()
         return;
     }
     if (!talk_state_.startMonitor(!lastFrames_.empty())) return;
-    auto dec = sotto_.decoder();
-    if (!dec)
-    {
-        talk_state_.stopMonitor();
-        return;
-    }
     // The clip as it goes: read back from its file, silences and all.
     voice::Clip clip;
     std::vector<voice::SottoFrame> frames = lastFrames_;
     std::vector<uint8_t> good;
+    uint8_t codec = voice::CODEC_SEND;
     if (voice::readSot(lastSot_, clip) == voice::ReadResult::Ok)
     {
         frames.assign(clip.frames.begin(), clip.frames.end());
         good = clip.good;
+        codec = clip.codec;
+    }
+    auto dec = sotto_.decoder(codec);
+    if (!dec)
+    {
+        talk_state_.stopMonitor();
+        return;
     }
     std::vector<float> sound = voice::toFloat(dec->decodeClip(frames, good));
     std::weak_ptr<bool> alive = alive_;

@@ -18,7 +18,7 @@ jobs:
       run: |
         sudo apt-get update
         sudo apt-get install -y build-essential cmake pkg-config libwxgtk3.2-dev libgtk-3-dev libhamlib-dev libpipewire-0.3-dev \
-          libopenjp2-7-dev libwebp-dev libheif-dev libheif-plugin-libde265 python3-numpy
+          libopenjp2-7-dev libwebp-dev libheif-dev libheif-plugin-libde265
     - name: Build
       run: |
         cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
@@ -94,7 +94,7 @@ jobs:
       run: |
         sudo apt-get update
         sudo apt-get install -y build-essential cmake curl file pkg-config libwxgtk3.2-dev libgtk-3-dev libhamlib-dev libpipewire-0.3-dev \
-          libopenjp2-7-dev libwebp-dev libheif-dev libheif-plugin-libde265 git python3-numpy
+          libopenjp2-7-dev libwebp-dev libheif-dev libheif-plugin-libde265 git
     - name: Build the AppImage
       run: packaging/linux/make-appimage.sh
     - name: Checksum

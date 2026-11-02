@@ -90,6 +90,7 @@ ragtime_test(ragtime_deck_test DeckTest.cpp)
 # libsotto is found (RAGTIME_SOTTO_TEST_LIB names one for the test).
 ragtime_test(ragtime_sotto_test SottoTest.cpp)
 target_link_libraries(ragtime_sotto_test PRIVATE ragtime_audio)
+target_compile_definitions(ragtime_sotto_test PRIVATE RAGTIME_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
 set(RAGTIME_SOTTO_TEST_LIB "" CACHE FILEPATH "A libsotto for ragtime_sotto_test's round trip")
 if(RAGTIME_SOTTO_TEST_LIB)
     set_tests_properties(ragtime_sotto_test PROPERTIES ENVIRONMENT "RAGTIME_SOTTO=${RAGTIME_SOTTO_TEST_LIB}")

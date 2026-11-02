@@ -1,5 +1,5 @@
 // ragtime_voice_chain: runs a WAV recording through the voice chain and
-// writes what sotto would get (8 kHz, 16-bit mono), printing the Level
+// writes what sotto would get (16 kHz, 16-bit mono), printing the Level
 // check. For trying the chain on real voices with no deck and no window.
 //
 //   ragtime_voice_chain IN.wav OUT.wav [--gain DB] [--hp 80|100|150|off]
@@ -221,7 +221,7 @@ int main(int argc, char** argv)
                 s.targetDb, s.peakMode ? "out" : "in");
     std::printf("input: active %.1f dBFS (live)\n", r.inputActiveDb);
     std::printf("leveller: gain %+.1f dB at the end, lowest %+.1f dB\n", r.levellerGainDb, lowestGain);
-    std::printf("out: %s, 8000 Hz, %.2f s (latency %.1f ms)\n", files[1].c_str(), c.seconds,
+    std::printf("out: %s, 16000 Hz, %.2f s (latency %.1f ms)\n", files[1].c_str(), c.seconds,
                 chain.latencySeconds() * 1000);
     std::printf("level check:\n");
     std::printf("  active   %-5s %.1f dBFS (P.56, %.0f%% speech; target %.1f)\n", lampName(c.active), c.activeDb,

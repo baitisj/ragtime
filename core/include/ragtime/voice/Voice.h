@@ -9,7 +9,7 @@
 //
 // A sotto frame is 48 bits for 20 ms of speech, most significant bit
 // first: voicing (2 bits), pitch (7), energy (5), then the shape of the
-// voice's spectrum (34, codebook indexes: 9, 9, 8 and 8 bits in v3.6). No frame depends on another, so
+// voice's spectrum (34, codebook indexes: 9, 9, 8 and 8 bits since v3.6). No frame depends on another, so
 // any first part of a clip plays, and a lost frame costs 20 ms.
 #ifndef RAGTIME_VOICE_VOICE_H
 #define RAGTIME_VOICE_VOICE_H
@@ -90,12 +90,26 @@ constexpr uint8_t MAGIC_0 = 'S';
 constexpr uint8_t MAGIC_1 = 'o';
 // Codec 1 is sotto v3.6 (Jeff, 2026-10-31): its frame, its codebook (shape
 // 9-9-8-8, 8-bit values), its energy from the spectral envelope, its
-// postfilter and its concealment, frozen as text table 0 is. A later sotto
-// that changes the bits is a new number; a receiver plays only numbers it
-// knows.
+// postfilter and its concealment, frozen as text table 0 is: 8 kHz speech.
+// Codec 2 is sotto v3.8 (Jeff, 2026-11-02): the same 48-bit frame and
+// codebook, coded from 16 kHz speech, with a 4-8 kHz hiss band riding in
+// the pitch field of all-unvoiced frames (which carry no pitch) and one
+// bit of a speaker-shape side channel. An 8 kHz decoder plays codec 2 as
+// codec 1 without the band; the 16 kHz decoder must not be given codec 1,
+// whose unvoiced frames' pitch fields would read as loud hiss. A later
+// sotto that changes the bits is a new number; a receiver plays only
+// numbers it knows.
 constexpr uint8_t CODEC_SOTTO_V36 = 1;
-// sotto_format() of a libsotto that speaks codec 1.
+constexpr uint8_t CODEC_SOTTO_V38 = 2;
+// What Ragtime sends.
+constexpr uint8_t CODEC_SEND = CODEC_SOTTO_V38;
+// sotto_format() of the libsotto Ragtime needs: v3.8, which codes codec 2
+// and plays both.
+constexpr const char* SOTTO_V38_FORMAT = "sotto v3.8, shape 9-9-8-8";
+// And of one that speaks only codec 1, refused (it has no 16 kHz coder).
 constexpr const char* SOTTO_V36_FORMAT = "sotto v3.6, shape 9-9-8-8";
+// Codecs a reader plays.
+inline bool knownCodec(uint8_t codec) { return codec == CODEC_SOTTO_V36 || codec == CODEC_SOTTO_V38; }
 // No flags yet. A reader refuses a file with a flag it doesn't know, since
 // a flag could change what the frames mean.
 constexpr uint8_t KNOWN_FLAGS = 0x00;
@@ -107,8 +121,8 @@ constexpr uint32_t MAX_CLIP_FRAMES = MAX_CLIP_SECONDS * FRAMES_PER_SECOND;
 // silent frames, the count in the 16 bits after its energy field.
 constexpr uint32_t MAX_RUN = 0xFFFF;
 
-// The codec the library loaded speaks, from its sotto_format(); 0 if none
-// we know.
+// The codec a library sends, from its sotto_format(): CODEC_SOTTO_V38 for
+// sotto v3.8 (which plays codec 1 too), 0 for any other, v3.6 included.
 uint8_t codecOfFormat(const std::string& format);
 
 // A .sot file by its first bytes.
@@ -132,7 +146,7 @@ struct PauseGate
     bool enabled = true;
 };
 std::vector<uint8_t> makeSot(const std::vector<Frame>& frames, const PauseGate& gate = PauseGate(),
-                             uint8_t codec = CODEC_SOTTO_V36);
+                             uint8_t codec = CODEC_SEND);
 
 // The steps makeSot takes, one at a time.
 // Quiet pauses into SILENT_FRAMEs.
@@ -141,7 +155,7 @@ std::vector<Frame> gatePauses(const std::vector<Frame>& frames, const PauseGate&
 std::vector<Frame> trimSilence(const std::vector<Frame>& frames);
 // The file for frames as they stand: every silent frame becomes
 // SILENT_FRAME and each run of them one frame. Empty past MAX_CLIP_FRAMES.
-std::vector<uint8_t> writeSot(const std::vector<Frame>& frames, uint8_t codec = CODEC_SOTTO_V36);
+std::vector<uint8_t> writeSot(const std::vector<Frame>& frames, uint8_t codec = CODEC_SEND);
 
 // Bytes of a file that haven't come, [begin, end): pieces lost on D2G.
 struct ByteRange
