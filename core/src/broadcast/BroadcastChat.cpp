@@ -400,13 +400,12 @@ uint64_t BroadcastChat::ping(const std::string& call, const std::string& mode, u
     return messages_.back().id;
 }
 
-bool BroadcastChat::pinging(const std::string& call) const
+bool BroadcastChat::pingGoingOut(const std::string& call) const
 {
     for (const Message& m : messages_)
     {
         if (m.kind != Message::Kind::Ping || !m.ours || m.to != call) continue;
         if (m.state == State::Queued || m.state == State::Sending || m.state == State::Held) return true;
-        if (m.state == State::Sent && !m.unanswered) return true;
     }
     return false;
 }
@@ -444,14 +443,25 @@ void BroadcastChat::onPing(const protocol::Record& record, const protocol::Ping&
 {
     const std::string& from = record.header.callsign;
     if (settings_.callsign.empty() || ping.to != settings_.callsign) return;
-    // A station pinging again and again gets one Pong in PONG_GAP_MS.
-    auto last = pongedMs_.find(from);
-    if (last != pongedMs_.end() && nowMs < last->second + PONG_GAP_MS) return;
+    // Every Ping gets its Pong, however soon after the last: an operator
+    // pinging again most likely lost the last Pong to a fade or too fast
+    // a gear, and pings come no faster than their bursts go. The same
+    // Ping heard twice is answered once, and a newer one isn't answered
+    // while our Pong to that station is still going out: that Pong is its
+    // answer.
+    auto last = ponged_.find(from);
+    if (last != ponged_.end() && last->second == std::make_pair(ping.number, record.header.time)) return;
     for (const PongDue& due : pongsDue_)
     {
         if (due.to == from) return;
     }
-    pongedMs_[from] = nowMs;
+    for (const Message& m : messages_)
+    {
+        if (m.kind == Message::Kind::Ping && !m.ours && m.from == from
+            && (m.state == State::Queued || m.state == State::Sending || m.state == State::Held))
+            return;
+    }
+    ponged_[from] = {ping.number, record.header.time};
 
     PongDue due;
     due.to = from;

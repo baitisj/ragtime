@@ -70,6 +70,7 @@ struct End
     std::vector<protocol::Record> heard;
     bool hold = false;          // the host keeps our frames
     bool dropNext = false;      // the host drops our next frames
+    bool twice = false;         // the other end hears our next frames twice
     // How the other end's host hears our bursts: the S/N on its HEARD
     // (none: no figure, as a host from before Data2G PR #98), and whether
     // the HEARD comes a step after the frames rather than before.
@@ -136,10 +137,12 @@ void step(End& a, End& b)
             CHECK(data.size() <= protocol::MAX_BROADCAST_FRAME);
             std::vector<uint8_t> kiss = link::kissEncode(GROUP_PORT, data);
             other.link.kissBytes(kiss.data(), kiss.size(), now);
+            if (end->twice) other.link.kissBytes(kiss.data(), kiss.size(), now);
             uint16_t tag = (uint16_t)((f.payload[0] << 8) | f.payload[1]);
             std::vector<uint8_t> ack = link::kissEncodeAckMode(GROUP_PORT, tag, {});
             end->link.kissBytes(ack.data(), ack.size(), now);
         }
+        end->twice = false;
         std::string off = "PTT OFF\r";
         end->link.commandBytes(off.data(), off.size(), now);
     }
@@ -735,7 +738,7 @@ void testPingAndPong()
     CHECK(mine != nullptr && mine->kind == Message::Kind::Ping && mine->to == "TEST2");
     CHECK(mine->state == State::Queued);
     CHECK_EQ(broadcast::pingLine(*mine), std::string("Ping TEST2, queued"));
-    CHECK(a.chat.pinging("TEST2"));
+    CHECK(a.chat.pingGoingOut("TEST2"));
     CHECK_EQ(link::channelLine(a.link).find("ping TEST2") != std::string::npos, true);
     settle(a, b);
 
@@ -754,25 +757,69 @@ void testPingAndPong()
     CHECK(mine->state == State::Acknowledged);
     CHECK(mine->theyHear && std::fabs(*mine->theyHear + 7.5) < 0.01);
     CHECK(mine->weHear && std::fabs(*mine->weHear - 3.0) < 0.01);
-    CHECK(!a.chat.pinging("TEST2"));
+    CHECK(!a.chat.pingGoingOut("TEST2"));
     std::string line = broadcast::pingLine(*mine);
     CHECK(line.find("Pong from TEST2 in ") == 0);
     CHECK(line.find("it hears us at \xE2\x88\x92" "7.5 dB, we hear it at +3.0 dB") != std::string::npos);
     // It no longer holds a file's bursts off.
     CHECK_EQ(a.link.yieldHold(), (uint64_t)0);
 
-    // Pinged again at once: one Pong in PONG_GAP_MS, so no second.
+    // Pinged again at once: answered again, with no wait (Jeff,
+    // 2026-11-03: a missing Pong most likely means too fast a gear or a
+    // fade, so the next try shouldn't be held off).
     size_t rows = b.chat.messages().size();
-    id = a.chat.ping("TEST2", "", now);
-    settle(a, b);
-    CHECK_EQ(b.chat.messages().size(), rows);
-    CHECK(a.chat.find(id)->state == State::Sent);
-    // Later, it is answered.
-    now += broadcast::PONG_GAP_MS;
     id = a.chat.ping("TEST2", "", now);
     settle(a, b);
     CHECK(a.chat.find(id)->state == State::Acknowledged);
     CHECK_EQ(b.chat.messages().size(), rows + 1);
+
+    // The same Ping heard twice is answered once.
+    a.twice = true;
+    id = a.chat.ping("TEST2", "", now);
+    settle(a, b);
+    CHECK(a.chat.find(id)->state == State::Acknowledged);
+    CHECK_EQ(b.chat.messages().size(), rows + 2);
+    size_t pongs = 0;
+    for (const protocol::Record& r : a.heard)
+        if (r.as<protocol::Pong>() != nullptr) pongs++;
+    CHECK_EQ(pongs, (size_t)3);
+}
+
+// A ping still waiting for its Pong doesn't hold the next one off; one
+// still going out does.
+void testPingAgainAtOnce()
+{
+    End a("TEST1", "CN87"), b("TEST2", "FN31");
+    a.link.commandUp(now);
+    b.link.commandUp(now);
+    settle(a, b);
+    a.snr = -9.0;
+
+    // The first Ping is lost to a fade.
+    a.dropNext = true;
+    uint64_t first = a.chat.ping("TEST2", "", now);
+    CHECK(a.chat.pingGoingOut("TEST2"));
+    settle(a, b);
+    CHECK(a.chat.find(first)->state == State::NotSent);
+    CHECK(!a.chat.pingGoingOut("TEST2"));
+
+    // Heard, but its Pong lost on the way back.
+    b.dropNext = true;
+    uint64_t second = a.chat.ping("TEST2", "", now);
+    settle(a, b);
+    const Message* m = a.chat.find(second);
+    CHECK(m->state == State::Sent && !m->unanswered);
+    CHECK(!a.chat.pingGoingOut("TEST2"));
+
+    // Pinged again a moment later, well inside the Pong wait: TEST2
+    // answers this one too, and only this row is filled.
+    uint64_t third = a.chat.ping("TEST2", "", now);
+    CHECK(third != 0);
+    settle(a, b);
+    CHECK(a.chat.find(third)->state == State::Acknowledged);
+    CHECK(a.chat.find(second)->state != State::Acknowledged);
+    const Message* there = pingRow(b, false);
+    CHECK(there != nullptr && there->state == State::Sent);
 }
 
 void testPongWaitsForItsFigure()
@@ -796,7 +843,8 @@ void testPongWaitsForItsFigure()
     CHECK(broadcast::pingLine(*mine).find("our host gave no S/N for it") != std::string::npos);
 
     // A host that gives no figure: the Pong goes without one after a wait.
-    now += broadcast::PONG_GAP_MS;
+    // (Later, so TEST2's host's last figure is an old burst's.)
+    now += 10 * 1000;
     a.snr.reset();
     a.heardLate = false;
     id = a.chat.ping("TEST2", "", now);
@@ -834,7 +882,7 @@ void testPingUnanswered()
     now += wait;
     settle(a, b, 1);
     CHECK(mine->unanswered && mine->state == State::Sent);
-    CHECK(!a.chat.pinging("W1AW"));
+    CHECK(!a.chat.pingGoingOut("W1AW"));
     CHECK_EQ(broadcast::pingLine(*mine), "No pong from W1AW in " + std::to_string((wait + 500) / 1000) + " s");
 }
 
@@ -1019,6 +1067,7 @@ int main()
     testPingAndPong();
     testPongWaitsForItsFigure();
     testPingUnanswered();
+    testPingAgainAtOnce();
     testLongMessageSplits();
     testPauseCancelResend();
     testDuplicateFrame();

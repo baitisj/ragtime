@@ -153,6 +153,13 @@ bench"). Choices made there, for Jeff to keep or change:
   - "No pong" after twice the mode's listening window plus those 3 s,
     at least 20 s (`pongWaitMs`). A late Pong still fills the line.
     Our file bursts hold off for the Pong as they do for an Ack.
+  - No wait between pings (Jeff, 2026-11-03): **Ping W1AW again** is
+    open as soon as the last ping is on the air, since no Pong soon most
+    likely means too fast a gear or a fade. It is greyed only while one
+    is still going out (`BroadcastChat::pingGoingOut`). The answering
+    end gives every Ping its Pong (it gave one every 15 s before), but
+    the same Ping heard twice once, and none while a Pong to that
+    station is still on its way. 0.2.0 stations still keep their 15 s.
   - Pings and their lines aren't kept in the broadcast log, aren't
     items (no seal lists them) and don't count as unread messages.
   - Hello's takes gains bit 5 for Ping and Pong, so 0.1.1 and older
