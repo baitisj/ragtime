@@ -15,7 +15,8 @@
 //   itself, in the Ping's mode, saying the S/N it heard us at; we read the
 //   S/N we hear the Pong at from the host. The row shows both. A Ping to
 //   us is answered the same way, once the host has said how well it heard
-//   it. Never retried by itself: Ping again is the operator's.
+//   it. Never retried by itself: Ping again is the operator's, at once if
+//   they like (no Pong soon most likely means too fast a gear or a fade).
 // - Reactions (react()): an emoji or ham word from the palette on a
 //   station's line. Ours waits up to REACTION_RIDE_MS to ride in our next
 //   burst (a message, Acks, a check-in, a ping), then goes alone, at most
@@ -138,8 +139,6 @@ std::string pingLine(const Message& m);
 constexpr uint64_t PONG_SNR_WAIT_MS = 3000;
 // A host's S/N for a station this recent is the burst just heard.
 constexpr uint64_t SNR_SAME_BURST_MS = 2000;
-// At most one Pong to a station this often, however often it pings.
-constexpr uint64_t PONG_GAP_MS = 15 * 1000;
 // A Ping is unanswered after this long, at least: twice the listening
 // window in its mode, after the Pong's wait for its figure.
 constexpr uint64_t MIN_PONG_WAIT_MS = 20 * 1000;
@@ -234,8 +233,10 @@ public:
     // the ping's row; 0 with no callsign set, or call not a callsign or
     // our own.
     uint64_t ping(const std::string& call, const std::string& mode, uint64_t nowMs);
-    // A ping of ours to call is still going or waiting for its Pong.
-    bool pinging(const std::string& call) const;
+    // A ping of ours to call hasn't gone out yet (queued, sending or
+    // held). One waiting for its Pong doesn't count: the operator may
+    // ping again at once.
+    bool pingGoingOut(const std::string& call) const;
     // Moves the pings on: Pongs that waited long enough for their figure
     // go, and Pings with no Pong by their time show as unanswered.
     void tick(uint64_t nowMs);
@@ -368,7 +369,7 @@ private:
 
     uint16_t pingNumber_ = 0;
     std::vector<PongDue> pongsDue_;                 // waiting for the host's figure
-    std::map<std::string, uint64_t> pongedMs_;      // station: when we last answered its ping
+    std::map<std::string, std::pair<uint16_t, uint32_t>> ponged_;  // station: the last Ping we answered (number, time)
     std::map<std::string, std::pair<double, uint64_t>> snrs_;   // station: its last burst's S/N, and when
     uint64_t nextId_ = 1;
     uint64_t version_ = 0;

@@ -2176,7 +2176,9 @@ std::string MainFrame::whyNoPing(const std::string& call) const
         if (busyWord(stations_.status(*s, HostConnection::nowMs()).word)) return "in a session";
         if (s->helloHeard && (s->takes & protocol::TAKES_PINGS) == 0) return "its Ragtime doesn't answer pings";
     }
-    if (chat_.pinging(call)) return "waiting for its pong";
+    // Only one still going out: one waiting for its Pong may be pinged
+    // again at once (Jeff, 2026-11-03).
+    if (chat_.pingGoingOut(call)) return "a ping to it is still going out";
     return std::string();
 }
 

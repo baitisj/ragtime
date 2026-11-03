@@ -534,11 +534,17 @@ ways (Jeff, 2026-10-25).
   the Ping's burst; that line and the frame come on different ports in
   either order, so it waits up to 3 s for the figure (one under 2 s old
   counts), then answers without one.
-- At most one Pong to a station every 15 s, however often it pings.
+- Every Ping gets its Pong, however soon after the last (Jeff,
+  2026-11-03; 0.2 answered at most one every 15 s): an operator pinging
+  again most likely lost the last Pong to a fade or too fast a gear.
+  The same Ping heard twice (sender, number and time) is answered once, and
+  a Ping heard while our Pong to its sender is still waiting for its
+  figure or going out isn't answered again: that Pong answers it.
 - The pinger reads the S/N it hears the Pong at from its own host, the
   same way. A Pong that doesn't come within twice the mode's listening
   window plus 3 s (at least 20 s) shows as no answer; a late one still
-  counts. Nothing is retried by itself.
+  counts. Nothing is retried by itself, and nothing holds the operator's
+  next Ping back while one waits for its Pong.
 - A station never pings one whose Hello lacks takes bit 5.
 - Pings and Pongs aren't items: they carry the newest item's number, no
   seal lists them, and they are never repaired.
