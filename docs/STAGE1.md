@@ -2111,6 +2111,57 @@ decoder uses for the band under vowels.
   the codec 1 test clip plays through the doubled 8 kHz decoder at
   -26.3 dBFS with its 4-8 kHz band at -33.8 dB.
 
+## A clip's end by the clock
+
+Jeff, 2026-11-03, on his xrdp speaker: once a clip had played, its card
+went on showing Stop, other clips wouldn't play for a while, and the
+window stopped answering. His report's flight log shows the window
+reading nothing from data2g-host or rigctld for 12 s, 11 s and 71 s,
+each time a voice clip was playing or had just gone out.
+
+Two things in the voice path let a speaker hold Ragtime up:
+
+- A clip ended only when the speaker said so (PipeWire's `drained`).
+  A speaker that stops taking sound, or never says it has played the
+  last of it, left the card playing, and the queue behind it waiting,
+  until something else stopped it. On the bench a test sink that stops
+  driving its graph does exactly that: the clip never ends.
+- The window took PipeWire's thread-loop lock for every play, stop,
+  piece of an arriving clip and change of speaker, so it waited as long
+  as PipeWire's thread held the lock.
+
+Now:
+
+- **The watch.** `voice::PlayWatch` (core) is fed, each voice tick, how
+  many samples the speaker has taken. Once every sample has been taken
+  and 2.5 s have passed with no word from the speaker, the clip counts
+  as heard (`END_GRACE_MS`; its sound is left to play out). If there was
+  sound to take and the speaker took none of it for 6 s (`STALL_MS`),
+  the clip stops and the status bar says the speaker stopped taking
+  sound. A clip playing as it arrives that has run dry hands nothing
+  over, so it is waiting, not stalled; its end is known once the
+  transfer has given all it will. `VoicePlayer::tick` runs the watch
+  for every clip, so it covers WASAPI too.
+- **The window never waits for PipeWire.** `PipeWireVoice` puts what
+  the window asks in a queue that its own thread runs, woken by an event
+  on its loop. Only `start`, `stop`, `listen` and `stopListening` still
+  take the lock, once each as the deck opens and closes, so that no
+  microphone samples come after `stopListening` returns. Until the
+  thread starts a clip asked for, `playPosition()` reads 0, so the last
+  clip's count never reads as the new one's.
+- **The flight recorder says so.** `note voice: plays b12 (0:06)`, then
+  `heard to its end`, `stopped`, `ended by the clock` or `stopped: the
+  speaker (...) took no sound for 6 s`; and a clock tick more than 2 s
+  late notes `the window didn't run for 5.6 s (busy, or the computer
+  asleep)`, with the clip playing and whether the deck was open. A
+  report then shows whether the window froze and what voice was doing.
+
+Tested with `ragtime_voice_cards_test` (the watch's verdicts) and on the
+bench with a sink that drives its own graph and stops on a flag: the
+voice probe's clip then never ends without the watch, and in the app the
+card goes back to Play 6 s after the speaker stops, with the note; with
+the speaker running, the 6 s clip is heard to its end as before.
+
 ## Waiting on Andrew (via Jeff)
 
 - Read from Data2G's source on 2026-10-25 (`docs/DATA2G.md`): `BW1200`

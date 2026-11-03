@@ -224,6 +224,12 @@ private:
     // The clip's sound saved as a WAV file the operator picks.
     void saveVoiceAsWav(const std::string& key);
     void voiceDone(const std::string& key, bool played);
+    // A line in the flight recorder about voice: what played, and how it
+    // ended.
+    void noteVoice(const std::string& what);
+    // Notes in the flight recorder when the window's clock comes late: the
+    // window was too busy to answer (or the computer slept).
+    void noteLateClock();
     void redrawVoices();
     bool autoPlayVoice() const;
     // Settings > Voice's speaker, microphone and volume, to voiceAudio_.
@@ -353,6 +359,7 @@ private:
     wxMenu* viewMenu_ = nullptr;
     wxTimer clock_;
     wxTimer voiceTimer_;        // the voice cards' playhead, while a clip plays
+    int64_t lastClockMs_ = 0;   // steady clock, at the last clock tick
 
     bool globusOn_ = true;
     int listWidth_ = 300;       // the station list beside Globus

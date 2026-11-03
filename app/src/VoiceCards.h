@@ -5,12 +5,14 @@
 #include <functional>
 #include <map>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
 #include <wx/string.h>
 
 #include "ragtime/voice/ArrivalPlayer.h"
+#include "ragtime/voice/PlayWatch.h"
 #include "ragtime/voice/Voice.h"
 
 class wxWindow;
@@ -133,10 +135,24 @@ public:
     // False, with why, when there's no libsotto to decode with.
     static bool canDecode(std::string& why);
 
+    // How the last clip ended, for the window's note and the flight
+    // recorder: the speaker said it was heard, or stopped (Stop, another
+    // clip, the speaker failing), or the clock ended it (PlayWatch: every
+    // sample taken and no word from the speaker), or the speaker stopped
+    // taking sound.
+    enum class Ending
+    {
+        Heard,
+        Stopped,
+        ByClock,
+        Stalled,
+    };
+    Ending ending() const { return ending_; }
+
     // Decodes clip and plays it from fromFrame on audio. False, with why,
     // if it can't (no libsotto, an empty clip).
     bool play(ragtime::audio::VoiceAudio& audio, const std::string& key, const ragtime::voice::Clip& clip,
-              uint32_t fromFrame, std::string& why);
+              uint32_t fromFrame, uint64_t nowMs, std::string& why);
     // A session clip still arriving (docs/STAGE1.md, "Voice while it
     // arrives"): plays from its bytes as they stand, starting once they
     // will keep ahead of the speech, and fed more by arriving(). The
@@ -150,8 +166,11 @@ public:
     // cancel, the link gone), when what came plays out and fades.
     void arriving(const std::string& key, const std::vector<uint8_t>& bytes, uint64_t size, bool ended,
                   uint64_t nowMs);
-    // Hands the speaker the sound now due, a little ahead; call often
-    // (each of the window's voice ticks) while a clip plays as it arrives.
+    // Call often (each of the window's voice ticks) while a clip plays:
+    // hands the speaker the sound now due, a little ahead, for a clip
+    // playing as it arrives, and for any clip watches the speaker by the
+    // clock (PlayWatch), ending a clip the speaker never says it has
+    // played, or stopping one it has stopped taking.
     void tick(ragtime::audio::VoiceAudio& audio, uint64_t nowMs);
     // The clip playing is one still arriving.
     bool isArriving() const { return arrival_ != nullptr; }
@@ -176,8 +195,20 @@ private:
     std::unique_ptr<ragtime::voice::ArrivalPlayer> arrival_;
     uint64_t appended_ = 0;
     bool streamEnded_ = false;
-    // Starts a clip on the speaker; done when it has been heard.
-    std::function<void(bool)> finisher(const std::string& key, uint64_t generation);
+    // The clip on the speaker, in samples at voice::SOTTO_RATE, and its
+    // watch by the clock.
+    uint64_t total_ = 0;
+    ragtime::voice::PlayWatch watch_;
+    Ending ending_ = Ending::Heard;
+    // Starts a clip on the speaker; done when it has been heard. how says
+    // what ended it, if not the speaker's own word.
+    std::function<void(bool)> finisher(const std::string& key, uint64_t generation,
+                                       std::optional<Ending> how = std::nullopt);
+    // Ends the clip playing without the speaker's word (the watch's
+    // verdict): done follows, as from the speaker.
+    void endByWatch(bool played, Ending how);
+    // A clip playing as it arrives: hands the speaker what is due.
+    void feed(ragtime::audio::VoiceAudio& audio, uint64_t nowMs);
 };
 
 #endif

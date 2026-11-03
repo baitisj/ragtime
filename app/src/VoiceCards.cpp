@@ -352,7 +352,7 @@ bool VoicePlayer::canDecode(std::string& why)
 }
 
 bool VoicePlayer::play(audio::VoiceAudio& audio, const std::string& key, const voice::Clip& clip, uint32_t fromFrame,
-                       std::string& why)
+                       uint64_t nowMs, std::string& why)
 {
     if (!canDecode(why)) return false;
     if (clip.frames.empty())
@@ -378,11 +378,14 @@ bool VoicePlayer::play(audio::VoiceAudio& audio, const std::string& key, const v
     playing_ = key;
     fromFrame_ = fromFrame;
     arrival_.reset();
+    total_ = samples.size();
+    watch_.start(nowMs, total_);
     audio.play(std::move(samples), voice::SOTTO_RATE, finisher(key, generation));
     return true;
 }
 
-std::function<void(bool)> VoicePlayer::finisher(const std::string& key, uint64_t generation)
+std::function<void(bool)> VoicePlayer::finisher(const std::string& key, uint64_t generation,
+                                               std::optional<Ending> how)
 {
     // A clip replaced or stopped says so later, on the audio thread: only
     // the latest one's word counts.
@@ -390,15 +393,27 @@ std::function<void(bool)> VoicePlayer::finisher(const std::string& key, uint64_t
     Post post = post_;
     Done done = done_;
     VoicePlayer* self = this;
-    return [alive, post, done, self, generation, key](bool played) {
-        post([alive, done, self, generation, key, played]() {
+    return [alive, post, done, self, generation, key, how](bool played) {
+        post([alive, done, self, generation, key, played, how]() {
             std::shared_ptr<uint64_t> current = alive.lock();
             if (!current || *current != generation) return;
             self->playing_.clear();
             self->arrival_.reset();
+            self->watch_.clear();
+            self->ending_ = how ? *how : played ? Ending::Heard : Ending::Stopped;
             done(key, played);
         });
     };
+}
+
+void VoicePlayer::endByWatch(bool played, Ending how)
+{
+    if (playing_.empty()) return;
+    // A new generation: the speaker's own word, if it ever comes, is late
+    // and counts for nothing.
+    const uint64_t generation = ++generation_;
+    *current_ = generation;
+    finisher(playing_, generation, how)(played);
 }
 
 namespace
@@ -449,6 +464,8 @@ bool VoicePlayer::playArriving(audio::VoiceAudio& audio, const std::string& key,
     arrival_ = std::move(player);
     appended_ = 0;
     streamEnded_ = false;
+    total_ = 0;
+    watch_.start(nowMs, 0);
     audio.playStream(voice::SOTTO_RATE, finisher(key, generation));
     tick(audio, nowMs);
     return true;
@@ -463,6 +480,28 @@ void VoicePlayer::arriving(const std::string& key, const std::vector<uint8_t>& b
 }
 
 void VoicePlayer::tick(audio::VoiceAudio& audio, uint64_t nowMs)
+{
+    if (playing_.empty()) return;
+    feed(audio, nowMs);
+    // The speaker by the clock: a clip it never says it has played ends,
+    // and one it has stopped taking stops (docs/STAGE1.md, "A clip's end
+    // by the clock").
+    const uint64_t taken = (uint64_t)std::llround(std::max(0.0, audio.playPosition()) * voice::SOTTO_RATE);
+    switch (watch_.check(nowMs, taken, arrival_ ? appended_ : total_))
+    {
+        case voice::PlayWatch::Verdict::Playing:
+            break;
+        case voice::PlayWatch::Verdict::Ended:
+            endByWatch(true, Ending::ByClock);
+            break;
+        case voice::PlayWatch::Verdict::Stalled:
+            endByWatch(false, Ending::Stalled);
+            audio.stopPlaying();
+            break;
+    }
+}
+
+void VoicePlayer::feed(audio::VoiceAudio& audio, uint64_t nowMs)
 {
     if (!arrival_ || streamEnded_) return;
     // How far ahead of the ear the speaker has been handed sound.
@@ -488,6 +527,7 @@ void VoicePlayer::tick(audio::VoiceAudio& audio, uint64_t nowMs)
         // has been heard.
         audio.endStream();
         streamEnded_ = true;
+        watch_.ended(appended_);
     }
 }
 
