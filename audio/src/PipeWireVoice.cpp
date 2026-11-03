@@ -6,6 +6,14 @@
 // exists only while listening, the speaker's only while a clip plays, each
 // pinned to its device (target.object, node.dont-reconnect), so the
 // session manager never moves it, least of all onto the radio.
+//
+// The window never waits for PipeWire's thread. What it asks while a clip
+// plays (play, more of a clip, its end, stop, a new speaker or
+// microphone) goes in a queue the thread runs, woken by an event on its
+// loop, so a PipeWire that is slow to let go of its lock (a remote
+// desktop's speaker, Jeff 2026-11-03) can't hold the window up. Only
+// start, stop, listen and stopListening still take the lock: they come
+// once each, when the microphone deck opens and closes.
 #include "ragtime/audio/VoiceAudio.h"
 
 #include "PipeWireApi.h"
@@ -15,6 +23,7 @@
 #include <cerrno>
 #include <cstdint>
 #include <cstring>
+#include <functional>
 #include <mutex>
 #include <string>
 #include <utility>
@@ -58,7 +67,11 @@ public:
         if (problem.empty())
         {
             loop_ = pw.threadLoopNew("ragtime-voice", nullptr);
-            if (loop_) context_ = pw.contextNew(pw.threadLoopGetLoop(loop_), nullptr, 0);
+            if (loop_) pwLoop_ = pw.threadLoopGetLoop(loop_);
+            if (pwLoop_)
+                wake_ = pw_loop_add_event(
+                    pwLoop_, [](void* self, uint64_t) { static_cast<PipeWireVoice*>(self)->runCommands(); }, this);
+            if (loop_) context_ = pw.contextNew(pwLoop_, nullptr, 0);
             if (context_) core_ = pw.contextConnect(context_, nullptr, 0);
             if (!core_) problem = "PipeWire isn't running";
         }
@@ -103,7 +116,10 @@ public:
     void stop() override
     {
         Finished finished;
-        locked([&] { finished = endPlayback(); });
+        locked([&] {
+            runCommands();
+            finished = endPlayback();
+        });
         teardown();
         if (finished) finished(false);
         changed_ = nullptr;
@@ -111,33 +127,34 @@ public:
 
     void chooseMicrophone(const std::string& name) override
     {
-        locked([&] {
+        post([this, name]() {
             chosenMicrophone_ = name;
-            evaluate();
+            reevaluate();
         });
     }
 
     void chooseSpeaker(const std::string& name) override
     {
-        Finished finished;
-        locked([&] {
+        post([this, name]() {
             chosenSpeaker_ = name;
-            finished = evaluate();
+            reevaluate();
         });
-        if (finished) finished(false);
     }
 
     void forgetRadio() override
     {
-        locked([&] {
+        post([this]() {
             remembered_.clear();
-            evaluate();
+            reevaluate();
         });
     }
 
+    // Taken with the lock: once stopListening returns, samples is never
+    // called again, as the deck closing needs.
     void listen(Samples samples) override
     {
         locked([&] {
+            runCommands();
             samples_ = std::move(samples);
             listening_ = true;
             destroyCapture();
@@ -148,6 +165,7 @@ public:
     void stopListening() override
     {
         locked([&] {
+            runCommands();
             listening_ = false;
             destroyCapture();
             samples_ = nullptr;
@@ -164,63 +182,76 @@ public:
 
     void append(const float* samples, std::size_t n) override
     {
-        locked([&] {
-            if (open_ && samples) clip_.insert(clip_.end(), samples, samples + n);
+        if (!samples || n == 0) return;
+        post([this, more = std::vector<float>(samples, samples + n)]() {
+            if (open_) clip_.insert(clip_.end(), more.begin(), more.end());
         });
     }
 
     void endStream() override
     {
-        locked([&] { open_ = false; });
+        post([this]() { open_ = false; });
     }
 
 private:
     void begin(std::vector<float> samples, int rate, bool open, Finished finished)
     {
-        Finished before;
-        locked([&] {
-            before = endPlayback();
-            clip_ = std::move(samples);
-            clipRate_ = rate;
-            open_ = open;
-            position_ = 0;
-            finished_ = std::move(finished);
-            {
-                std::lock_guard<std::mutex> lock(statusMutex_);
-                status_.speakerProblem.clear();
-            }
-            if (!core_ || rate <= 0 || (clip_.empty() && !open_))
-                failPlayback(core_ ? "Nothing to play" : "No sound: PipeWire isn't connected");
-            else if (!speaker_.usable())
-                failPlayback(voice::describe(speaker_, false));
-            else
-                createPlayback(speaker_.node);
-            publish();
+        // Until the thread starts it, the new clip has played nothing: the
+        // last clip's count must not read as this one's.
+        pendingBegins_++;
+        handed_ = 0;
+        post([this, samples = std::move(samples), rate, open, finished = std::move(finished)]() mutable {
+            pendingBegins_--;
+            startClip(std::move(samples), rate, open, std::move(finished));
         });
+    }
+
+    // On PipeWire's thread, its loop locked.
+    void startClip(std::vector<float> samples, int rate, bool open, Finished finished)
+    {
+        Finished before = endPlayback();
+        clip_ = std::move(samples);
+        clipRate_ = rate;
+        open_ = open;
+        position_ = 0;
+        finished_ = std::move(finished);
+        {
+            std::lock_guard<std::mutex> lock(statusMutex_);
+            status_.speakerProblem.clear();
+        }
+        if (!core_ || rate <= 0 || (clip_.empty() && !open_))
+            failPlayback(core_ ? "Nothing to play" : "No sound: PipeWire isn't connected");
+        else if (!speaker_.usable())
+            failPlayback(voice::describe(speaker_, false));
+        else
+            createPlayback(speaker_.node);
+        publish();
+        // A finished only posts to its window, so it is called here, on
+        // PipeWire's thread, as drained calls it.
         if (before) before(false);
         // A clip that couldn't start ends at once.
-        Finished failed;
-        locked([&] {
-            if (!playback_ && finished_) failed = std::exchange(finished_, nullptr);
-        });
-        if (failed) failed(false);
+        if (!playback_ && finished_)
+        {
+            Finished failed = std::exchange(finished_, nullptr);
+            failed(false);
+        }
         notify();
     }
 
 public:
     void stopPlaying() override
     {
-        Finished finished;
-        locked([&] {
-            finished = endPlayback();
+        post([this]() {
+            Finished finished = endPlayback();
             publish();
+            if (finished) finished(false);
+            notify();
         });
-        if (finished) finished(false);
-        notify();
     }
 
     double playPosition() const override
     {
+        if (pendingBegins_.load() > 0) return 0.0;
         const int rate = playingRate_.load();
         return rate > 0 ? (double)handed_.load() / rate : 0.0;
     }
@@ -237,6 +268,33 @@ public:
     }
 
 private:
+    // Runs fn on PipeWire's thread with its loop locked, soon; at once
+    // when there is no PipeWire.
+    void post(std::function<void()> fn)
+    {
+        if (!loop_ || !wake_)
+        {
+            fn();
+            return;
+        }
+        {
+            std::lock_guard<std::mutex> lock(commandsMutex_);
+            commands_.push_back(std::move(fn));
+        }
+        pw_loop_signal_event(pwLoop_, wake_);
+    }
+
+    // On PipeWire's thread, or with its loop locked: what the window asked.
+    void runCommands()
+    {
+        std::vector<std::function<void()>> now;
+        {
+            std::lock_guard<std::mutex> lock(commandsMutex_);
+            now.swap(commands_);
+        }
+        for (auto& command : now) command();
+    }
+
     template <typename Fn>
     void locked(Fn fn)
     {
@@ -254,6 +312,17 @@ private:
     {
         PipeWireApi& pw = api();
         if (loop_) pw.threadLoopStop(loop_);
+        if (wake_)
+        {
+            pw_loop_destroy_source(pwLoop_, wake_);
+            wake_ = nullptr;
+        }
+        {
+            // What the window asked and the thread never ran: a clip that
+            // never started is never finished, and nobody waits for it now.
+            std::lock_guard<std::mutex> lock(commandsMutex_);
+            commands_.clear();
+        }
         destroyCapture();
         destroyPlayback();
         if (metadata_)
@@ -284,6 +353,7 @@ private:
             pw.threadLoopDestroy(loop_);
             loop_ = nullptr;
         }
+        pwLoop_ = nullptr;
         graph_ = ear::Graph();
         links_.clear();
         defaultSource_.clear();
@@ -669,7 +739,7 @@ private:
             const float gain = volume_.load();
             for (std::size_t i = 0; i < n; i++) out[i] = clip_[position_ + i] * gain;
             position_ += n;
-            handed_ = position_;
+            if (pendingBegins_.load() == 0) handed_ = position_;
         }
         else
         {
@@ -715,6 +785,11 @@ private:
     Samples samples_;
 
     pw_thread_loop* loop_ = nullptr;
+    pw_loop* pwLoop_ = nullptr;
+    spa_source* wake_ = nullptr;  // runs the window's commands
+    std::mutex commandsMutex_;
+    std::vector<std::function<void()>> commands_;
+    std::atomic<int> pendingBegins_{0};  // plays asked for, not yet started
     pw_context* context_ = nullptr;
     pw_core* core_ = nullptr;
     pw_registry* registry_ = nullptr;

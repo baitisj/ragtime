@@ -2,6 +2,7 @@
 // by itself while the deck is open, play pressed, Stop, Push to talk's
 // pause), and a voice message kept by the chat logs and the Files tab's
 // log so its card is there after a restart.
+#include <algorithm>
 #include <cstdint>
 #include <filesystem>
 #include <string>
@@ -15,9 +16,11 @@
 #include "ragtime/link/HostLink.h"
 #include "ragtime/session/SessionLog.h"
 #include "ragtime/voice/PlayQueue.h"
+#include "ragtime/voice/PlayWatch.h"
 
 using namespace ragtime;
 using voice::PlayQueue;
+using voice::PlayWatch;
 
 namespace
 {
@@ -272,6 +275,89 @@ void testFileLogKeepsVoice()
     }
 }
 
+// A speaker that says nothing at the end (Jeff, 2026-11-03, on xrdp's
+// speaker): the clock ends the clip once every sample has been taken and
+// the grace has passed, not before.
+void testWatchEndsByTheClock()
+{
+    using V = PlayWatch::Verdict;
+    PlayWatch w;
+    const uint64_t total = 16000 * 3;  // 3 s at 16 kHz
+    w.start(T0, total);
+    // Taken at the pace it plays, 150 ms a tick.
+    uint64_t now = T0;
+    uint64_t taken = 0;
+    while (taken < total)
+    {
+        now += 150;
+        taken = std::min<uint64_t>(total, taken + 2400);
+        CHECK(w.check(now, taken, total) == V::Playing);
+    }
+    const uint64_t last = now;
+    // Inside the grace it still plays, as the speaker's own word may come.
+    while (now + 150 < last + PlayWatch::END_GRACE_MS)
+    {
+        now += 150;
+        CHECK(w.check(now, taken, total) == V::Playing);
+    }
+    now = last + PlayWatch::END_GRACE_MS;
+    CHECK(w.check(now, taken, total) == V::Ended);
+    CHECK(!w.running());
+    // Said once only.
+    CHECK(w.check(now + 5000, taken, total) == V::Playing);
+}
+
+// A speaker that stops taking sound part way: stalled after STALL_MS with
+// nothing taken, while a slow start or a slow speaker is left alone.
+void testWatchStall()
+{
+    using V = PlayWatch::Verdict;
+    const uint64_t total = 16000 * 10;
+    {
+        PlayWatch w;
+        w.start(T0, total);
+        // Nothing yet, as a sink wakes: patience.
+        CHECK(w.check(T0 + PlayWatch::STALL_MS - 1, 0, total) == V::Playing);
+        CHECK(w.check(T0 + PlayWatch::STALL_MS, 0, total) == V::Stalled);
+    }
+    {
+        PlayWatch w;
+        w.start(T0, total);
+        CHECK(w.check(T0 + 1000, 16000, total) == V::Playing);
+        // A slow speaker that still takes some is playing.
+        for (uint64_t t = 2000; t < 30000; t += 1000)
+            CHECK(w.check(T0 + t, 16000 + t, total) == V::Playing);
+        // It stops at 30 s in.
+        CHECK(w.check(T0 + 29000 + PlayWatch::STALL_MS - 1, 16000 + 29000, total) == V::Playing);
+        CHECK(w.check(T0 + 29000 + PlayWatch::STALL_MS, 16000 + 29000, total) == V::Stalled);
+    }
+}
+
+// A clip playing as it arrives: dry with nothing handed over is waiting,
+// not stalled; its end is known only once it has had all it will get.
+void testWatchArriving()
+{
+    using V = PlayWatch::Verdict;
+    PlayWatch w;
+    w.start(T0, 0);
+    // 2 s handed over and taken, then dry for a minute.
+    CHECK(w.check(T0 + 2000, 32000, 32000) == V::Playing);
+    CHECK(w.check(T0 + 62000, 32000, 32000) == V::Playing);
+    // More comes, and is taken.
+    CHECK(w.check(T0 + 64000, 64000, 64000) == V::Playing);
+    // All it will get: 64000 samples, taken, then the grace.
+    w.ended(64000);
+    CHECK(w.check(T0 + 64100, 64000, 64000) == V::Playing);
+    CHECK(w.check(T0 + 64100 + PlayWatch::END_GRACE_MS, 64000, 64000) == V::Ended);
+
+    // Handed over but never taken: stalled, as a whole clip would be.
+    PlayWatch s;
+    s.start(T0, 0);
+    CHECK(s.check(T0 + 1000, 8000, 8000) == V::Playing);
+    CHECK(s.check(T0 + 2000, 8000, 16000) == V::Playing);
+    CHECK(s.check(T0 + 1000 + PlayWatch::STALL_MS, 8000, 16000) == V::Stalled);
+}
+
 } // namespace
 
 int main()
@@ -283,5 +369,8 @@ int main()
     testBroadcastLogKeepsVoice();
     testSessionLogKeepsVoice();
     testFileLogKeepsVoice();
+    testWatchEndsByTheClock();
+    testWatchStall();
+    testWatchArriving();
     return ragtime_test::finish();
 }

@@ -1,6 +1,7 @@
 #include "MainFrame.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <ctime>
@@ -165,6 +166,8 @@ enum StatusField
 const int STATUS_FIELDS = canSwitchTheme() ? 5 : 4;
 
 constexpr int CLOCK_MS = 1000;
+// A clock tick this much late goes in the flight recorder.
+constexpr int64_t LATE_CLOCK_MS = 2000;
 constexpr int MIN_PANE = 200;
 // A reaction to our line shows in the status bar this long.
 constexpr uint64_t REACTION_NOTE_MS = 30 * 1000;
@@ -1036,8 +1039,34 @@ void MainFrame::onHostEvents(const std::vector<Event>& events)
     refreshStations();
 }
 
+void MainFrame::noteLateClock()
+{
+    // The clock ticks each second. One that comes much later means the
+    // window didn't run in between: nothing was read from data2g-host or
+    // rigctld, nothing drawn, no click answered. A report then says so,
+    // and what voice was doing (Jeff, 2026-11-03: the window froze after a
+    // clip played).
+    const int64_t steady = (int64_t)std::chrono::duration_cast<std::chrono::milliseconds>(
+                               std::chrono::steady_clock::now().time_since_epoch())
+                               .count();
+    const int64_t late = lastClockMs_ == 0 ? 0 : steady - lastClockMs_ - CLOCK_MS;
+    lastClockMs_ = steady;
+    if (late < LATE_CLOCK_MS) return;
+    std::string line = "the window didn't run for " + wxString::Format("%.1f", (late + CLOCK_MS) / 1000.0).ToStdString()
+                       + " s (busy, or the computer asleep)";
+    if (!voiceQueue_.playing().empty()) line += "; voice " + voiceQueue_.playing() + " playing";
+    if (voiceDeck_ != nullptr) line += "; the microphone deck open";
+    host_->recorder().note(line, HostConnection::nowMs());
+}
+
+void MainFrame::noteVoice(const std::string& what)
+{
+    host_->recorder().note("voice: " + what, HostConnection::nowMs());
+}
+
 void MainFrame::onClock()
 {
+    noteLateClock();
     uint64_t now = HostConnection::nowMs();
     if (int signal = quitSignal())
     {
@@ -3217,12 +3246,14 @@ void MainFrame::startVoice(const std::optional<voice::PlayQueue::Start>& start)
         }
         if (startArrivingVoice(next->key, next->fromFrame, why))
         {
+            noteVoice("plays " + next->key + " as it arrives");
             voiceTimer_.Start(VOICE_TICK_MS);
             return;
         }
         if (why.empty() && s != nullptr && s->playable()
-            && voicePlayer_->play(voiceAudio(), next->key, s->clip, next->fromFrame, why))
+            && voicePlayer_->play(voiceAudio(), next->key, s->clip, next->fromFrame, HostConnection::nowMs(), why))
         {
+            noteVoice("plays " + next->key + " (" + clipLength(s->clip.seconds()) + ")");
             voiceTimer_.Start(VOICE_TICK_MS);
             return;
         }
@@ -3338,6 +3369,34 @@ bool MainFrame::startArrivingVoice(const std::string& key, uint32_t fromFrame, s
 
 void MainFrame::voiceDone(const std::string& key, bool played)
 {
+    // How it ended, for the flight recorder: the speaker's word, or the
+    // clock's (docs/STAGE1.md, "A clip's end by the clock").
+    using Ending = VoicePlayer::Ending;
+    const Ending how = voicePlayer_ ? voicePlayer_->ending() : Ending::Heard;
+    switch (how)
+    {
+        case Ending::Heard:
+            noteVoice(key + " heard to its end");
+            break;
+        case Ending::Stopped:
+            noteVoice(key + " stopped");
+            break;
+        case Ending::ByClock:
+            noteVoice(key + " ended by the clock: every sample went to the speaker, which never said it had "
+                            "played them");
+            break;
+        case Ending::Stalled:
+        {
+            const audio::VoiceStatus st = voiceAudio().status();
+            const std::string speaker = st.speaker.usable() ? voice::label(st.speaker.node) : std::string();
+            noteVoice(key + " stopped: the speaker" + (speaker.empty() ? "" : " (" + speaker + ")")
+                      + " took no sound for " + std::to_string(voice::PlayWatch::STALL_MS / 1000) + " s");
+            note_ = "Voice message: the speaker" + (speaker.empty() ? "" : " (" + speaker + ")")
+                    + " stopped taking sound, so it stopped.";
+            showStatus();
+            break;
+        }
+    }
     // Stopped for Push to talk: it carries on at release.
     if (voiceQueue_.held() && voiceQueue_.playing() == key)
     {

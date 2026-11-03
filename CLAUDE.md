@@ -304,7 +304,12 @@ and the Part 97 check.
   the one `audio::VoiceAudio` `MainFrame` owns; `voice::PlayQueue`
   (core) queues them and plays arrivals while the deck is open; the
   Broadcast and session logs keep the file's path, so cards (and
-  broadcast pictures) come back after a restart.
+  broadcast pictures) come back after a restart. Since 2026-11-03
+  `voice::PlayWatch` (core) ends a clip by the clock when the speaker
+  never says it has played it, and stops one it stopped taking, and
+  `PipeWireVoice` runs the window's requests on its own thread, so the
+  window never waits for PipeWire (docs/STAGE1.md, "A clip's end by the
+  clock").
 - Voice while it arrives (2026-10-31, voice PR 6, docs/STAGE1.md "Voice
   while it arrives"): in a ragchew a clip plays as it comes
   (`voice::ArrivalPlayer`, core), starting once the bytes will keep
