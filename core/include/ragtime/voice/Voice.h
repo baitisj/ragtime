@@ -100,8 +100,11 @@ Frame makeFrame(Voicing voicing, int pitchCode, int energyCode, uint64_t shape);
 // and one bit of a speaker-shape side channel. An 8 kHz decoder plays
 // codec 2 as codec 1 without the band; the 16 kHz decoder must not be given
 // codec 1, whose unvoiced frames' pitch fields would read as loud hiss.
-// Codecs 3, 4 and 5 are sotto 1200, 600 and 400 (Jeff, 2026-11-07), on
-// v3.7's core at 8 kHz, with no hiss band. A later sotto that changes the
+// Codecs 3, 4 and 5 are sotto 1200, 600 and 400 with v3.8's hiss band
+// (Jeff, 2026-11-07): v3.7's core codes 0-4 kHz from 16 kHz speech, and
+// the band rides in the pitch fields that carry no pitch, as at codec 2.
+// An 8 kHz sotto 1200, 600 or 400 decoder plays them without the band; a
+// stream without the band would read as a wrong one. A later sotto that changes the
 // bits is a new number; a receiver plays only numbers it knows.
 constexpr uint8_t CODEC_SOTTO_V36 = 1;
 constexpr uint8_t CODEC_SOTTO_V38 = 2;
@@ -124,7 +127,7 @@ struct Codec
     uint8_t number = 0;
     int bitsPerSecond = 0;
     int frameMs = 0;            // speech a 6-byte frame holds
-    int codedRate = 0;          // the sample rate sotto codes: 16000 or 8000
+    int codedRate = 0;          // the sample rate sotto codes: 16000, or 8000 for codec 1
     Layout layout = Layout::Frame20;
     // Frames the decoder must have beyond one to play it: 1 for 2,400
     // (a frame's sound comes once the next is in), 2 for the slower ones
@@ -159,11 +162,12 @@ struct FrameLook
 };
 FrameLook lookOf(const Frame& frame, uint8_t codec);
 // Whether a frame is the codec's silence, as a .sot file's runs hold it:
-// energy 0 at 2,400; at 1,200, every bit but a run count 0; at 600 and
-// 400, mean energy 0 with the residual that keeps every frame at 0.
+// energy 0 at 2,400; at 1,200, A's energy 0 and B's energy step 0; at 600
+// and 400, mean energy 0 with the residual that keeps every frame at 0.
 bool isSilent(const Frame& frame, uint8_t codec);
 // The codec's silent frame, run count 0: what a reader feeds the decoder
-// for each frame a run stands for (all zero bits for 2,400 and 1,200).
+// for each frame a run stands for (all zero bits at 2,400; at 1,200 all
+// zero but B's energy step, code 4).
 Frame silentFrame(uint8_t codec);
 
 //-------------------------------------------------------------------------

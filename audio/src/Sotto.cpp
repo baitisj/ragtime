@@ -7,6 +7,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <initializer_list>
 #include <mutex>
 #include <string>
 #include <vector>
@@ -49,19 +50,19 @@ struct SottoApi
     void (*dec16Destroy)(void*) = nullptr;
     void (*decode16)(void*, const unsigned char*, int, short*) = nullptr;
     int (*dec16Flush)(void*, short*) = nullptr;
-    // sotto 1200 (sotto_lr_*), optional.
+    // sotto 1200 with the hiss band (sotto.h's sotto_lr_enc16 and
+    // sotto_lr_dec16), optional.
     void* (*lrEncCreate)() = nullptr;
     void (*lrEncDestroy)(void*) = nullptr;
     int (*lrEncode)(void*, const short*, unsigned char*) = nullptr;
-    void (*lrEncodePart)(void*, const short*, int) = nullptr;
     int (*lrEncFlush)(void*, unsigned char*) = nullptr;
     void* (*lrDecCreate)() = nullptr;
     void (*lrDecDestroy)(void*) = nullptr;
     void (*lrDecode)(void*, const unsigned char*, int, short*) = nullptr;
     int (*lrDecFlush)(void*, short*) = nullptr;
     bool lr = false;
-    // sotto 600 and 400 (sotto_vlr_*, sotto_vlr.h), optional: the encoder
-    // and the decoder apart, as a library may have only the encoder.
+    // sotto 600 and 400 with the hiss band (sotto_vlr.h's sotto_vlr_enc16
+    // and sotto_vlr_dec16), optional.
     void* (*vlrEncCreate)(int) = nullptr;
     void (*vlrEncDestroy)(void*) = nullptr;
     void (*vlrEncode)(void*, const short*, int) = nullptr;
@@ -72,8 +73,7 @@ struct SottoApi
     int (*vlrSamples)(const void*) = nullptr;
     void (*vlrDecode)(void*, const unsigned char*, int, short*) = nullptr;
     int (*vlrDecFlush)(void*, short*) = nullptr;
-    bool vlrEnc = false;
-    bool vlrDec = false;
+    bool vlr = false;
 };
 
 namespace
@@ -182,10 +182,16 @@ int vlrRate(uint8_t codec)
     return codec == CODEC_SOTTO_400 ? 400 : 600;
 }
 
-// v3.7's 8 kHz decoder core gives a frame's sound 20 ms late (sotto.h);
-// sotto 600 and 400 add it to their two superframes (sotto_vlr.h), while
-// sotto 1200's decoder is two superframes behind in all (sotto.h).
+// v3.7's 8 kHz decoder core gives a frame's sound 20 ms late (sotto.h).
 constexpr int CORE_DELAY_8K = 160;
+// The slower decoders' delay in superframes (sotto.h's
+// SOTTO_LR_DEC16_DELAY, sotto_vlr.h's SOTTO_VLR_DEC16_DELAY): their own
+// two, and the hiss band layer's 100 ms, rounded up.
+constexpr int LR_DEC16_DELAY = 4;
+int vlrDec16Delay(uint8_t codec)
+{
+    return codec == CODEC_SOTTO_400 ? 3 : 4;
+}
 
 } // namespace
 
@@ -292,20 +298,38 @@ bool Sotto::open(const std::string& file, std::string& why)
                      "which packaging/build-sotto.sh builds)";
         return false;
     }
-    api->lr = bind(lib, "sotto_lr_enc_create", api->lrEncCreate)
-              && bind(lib, "sotto_lr_enc_destroy", api->lrEncDestroy) && bind(lib, "sotto_lr_encode", api->lrEncode)
-              && bind(lib, "sotto_lr_encode_part", api->lrEncodePart)
-              && bind(lib, "sotto_lr_enc_flush", api->lrEncFlush) && bind(lib, "sotto_lr_dec_create", api->lrDecCreate)
-              && bind(lib, "sotto_lr_dec_destroy", api->lrDecDestroy) && bind(lib, "sotto_lr_decode", api->lrDecode)
-              && bind(lib, "sotto_lr_dec_flush", api->lrDecFlush);
-    api->vlrEnc = bind(lib, "sotto_vlr_enc_create", api->vlrEncCreate)
-                  && bind(lib, "sotto_vlr_enc_destroy", api->vlrEncDestroy)
-                  && bind(lib, "sotto_vlr_encode", api->vlrEncode) && bind(lib, "sotto_vlr_enc_pop", api->vlrEncPop)
-                  && bind(lib, "sotto_vlr_enc_flush", api->vlrEncFlush);
-    api->vlrDec = bind(lib, "sotto_vlr_dec_create", api->vlrDecCreate)
-                  && bind(lib, "sotto_vlr_dec_destroy", api->vlrDecDestroy)
-                  && bind(lib, "sotto_vlr_samples", api->vlrSamples) && bind(lib, "sotto_vlr_decode", api->vlrDecode)
-                  && bind(lib, "sotto_vlr_dec_flush", api->vlrDecFlush);
+    api->lr = bind(lib, "sotto_lr_enc16_create", api->lrEncCreate)
+              && bind(lib, "sotto_lr_enc16_destroy", api->lrEncDestroy)
+              && bind(lib, "sotto_lr_encode16", api->lrEncode) && bind(lib, "sotto_lr_enc16_flush", api->lrEncFlush)
+              && bind(lib, "sotto_lr_dec16_create", api->lrDecCreate)
+              && bind(lib, "sotto_lr_dec16_destroy", api->lrDecDestroy)
+              && bind(lib, "sotto_lr_decode16", api->lrDecode) && bind(lib, "sotto_lr_dec16_flush", api->lrDecFlush);
+    api->vlr = bind(lib, "sotto_vlr_enc16_create", api->vlrEncCreate)
+               && bind(lib, "sotto_vlr_enc16_destroy", api->vlrEncDestroy)
+               && bind(lib, "sotto_vlr_encode16", api->vlrEncode) && bind(lib, "sotto_vlr_enc16_pop", api->vlrEncPop)
+               && bind(lib, "sotto_vlr_enc16_flush", api->vlrEncFlush)
+               && bind(lib, "sotto_vlr_dec16_create", api->vlrDecCreate)
+               && bind(lib, "sotto_vlr_dec16_destroy", api->vlrDecDestroy)
+               && bind(lib, "sotto_vlr_samples16", api->vlrSamples)
+               && bind(lib, "sotto_vlr_decode16", api->vlrDecode)
+               && bind(lib, "sotto_vlr_dec16_flush", api->vlrDecFlush);
+    // A fixed-point build exports them as stubs that make nothing.
+    if (api->lr)
+    {
+        void* e = api->lrEncCreate();
+        void* d = api->lrDecCreate();
+        api->lr = e && d;
+        if (e) api->lrEncDestroy(e);
+        if (d) api->lrDecDestroy(d);
+    }
+    if (api->vlr)
+    {
+        void* e = api->vlrEncCreate(600);
+        void* d = api->vlrDecCreate(600);
+        api->vlr = e && d;
+        if (e) api->vlrEncDestroy(e);
+        if (d) api->vlrDecDestroy(d);
+    }
     const char* format = api->format();
     std::string name = format ? format : "";
     uint8_t codec = codecOfFormat(name);
@@ -329,14 +353,12 @@ bool Sotto::open(const std::string& file, std::string& why)
         info_.plays.push_back(CODEC_SOTTO_1200);
         info_.sends.push_back(CODEC_SOTTO_1200);
     }
-    if (api->vlrDec)
+    if (api->vlr)
     {
-        info_.plays.push_back(CODEC_SOTTO_600);
-        info_.plays.push_back(CODEC_SOTTO_400);
-        if (api->vlrEnc)
+        for (uint8_t c : {CODEC_SOTTO_600, CODEC_SOTTO_400})
         {
-            info_.sends.push_back(CODEC_SOTTO_600);
-            info_.sends.push_back(CODEC_SOTTO_400);
+            info_.plays.push_back(c);
+            info_.sends.push_back(c);
         }
     }
     api_ = std::move(api);
@@ -383,42 +405,8 @@ std::unique_ptr<SottoDecoder> Sotto::decoder(uint8_t codec) const
 // SottoEncoder
 //-------------------------------------------------------------------------
 
-// 16 kHz speech halved to 8 kHz for the slower codecs.
-struct SottoEncoder::Halver
-{
-    Resampler down{SOTTO_RATE, 8000};
-    std::vector<float> in, out;
-
-    // The filter's delay (about 6 ms), taken off the front so the frames
-    // keep time with the speech.
-    size_t skip = down.delayIn() / 2;
-
-    void push(const int16_t* samples, size_t count, std::vector<int16_t>& to)
-    {
-        in.resize(count);
-        for (size_t i = 0; i < count; i++) in[i] = samples[i] / 32768.0f;
-        out.clear();
-        down.process(in.data(), in.size(), out);
-        for (float v : out)
-        {
-            if (skip > 0)
-            {
-                skip--;
-                continue;
-            }
-            to.push_back((int16_t)std::lround(std::max(-1.0f, std::min(1.0f, v)) * 32767.0f));
-        }
-    }
-};
-
 SottoEncoder::SottoEncoder(const SottoApi* api, uint8_t codec, void* state) : api_(api), codec_(codec), state_(state)
 {
-    if (codec_ == CODEC_SOTTO_V38) return;
-    halver_ = std::make_unique<Halver>();
-    // sotto 1200's encoder puts a superframe 20 ms after its speech (its
-    // decoder is two superframes behind, not the core's 20 ms more), so
-    // its first 20 ms go too: the clip keeps time, and its end isn't cut.
-    if (codec_ == CODEC_SOTTO_1200) halver_->skip += CORE_DELAY_8K;
 }
 
 SottoEncoder::~SottoEncoder()
@@ -431,9 +419,11 @@ SottoEncoder::~SottoEncoder()
 
 size_t SottoEncoder::blockSamples() const
 {
-    // sotto_encode16 and sotto_lr_encode take 320 (20 ms at 16 kHz, 40 ms
-    // at 8 kHz); sotto_vlr_encode takes 10 ms blocks of 80.
-    return codec_ == CODEC_SOTTO_V38 || codec_ == CODEC_SOTTO_1200 ? 320 : 80;
+    // sotto_encode16 takes a 2,400 frame, sotto_lr_encode16 a 1,200
+    // superframe, and sotto_vlr_encode16 10 ms blocks.
+    if (codec_ == CODEC_SOTTO_V38) return SOTTO_SAMPLES;
+    if (codec_ == CODEC_SOTTO_1200) return 2 * SOTTO_SAMPLES;
+    return SOTTO_SAMPLES / 2;
 }
 
 void SottoEncoder::block(const int16_t* samples, std::vector<SottoFrame>& out)
@@ -455,8 +445,9 @@ void SottoEncoder::block(const int16_t* samples, std::vector<SottoFrame>& out)
     }
 }
 
-void SottoEncoder::coded(const int16_t* samples, size_t count, std::vector<SottoFrame>& out)
+void SottoEncoder::push(const int16_t* samples, size_t count, std::vector<SottoFrame>& out)
 {
+    if (flushed_) return;
     const size_t n = blockSamples();
     size_t at = 0;
     // Top up a part block left from before.
@@ -477,50 +468,22 @@ void SottoEncoder::coded(const int16_t* samples, size_t count, std::vector<Sotto
     part_.assign(samples + at, samples + count);
 }
 
-void SottoEncoder::push(const int16_t* samples, size_t count, std::vector<SottoFrame>& out)
-{
-    if (flushed_) return;
-    if (!halver_)
-    {
-        coded(samples, count, out);
-        return;
-    }
-    std::vector<int16_t> half;
-    halver_->push(samples, count, half);
-    coded(half.data(), half.size(), out);
-}
-
 void SottoEncoder::flush(std::vector<SottoFrame>& out)
 {
     if (flushed_) return;
-    if (halver_)
+    if (!part_.empty())
     {
-        // The halver's own delay of speech, out with silence after it.
-        std::vector<int16_t> zeros(halver_->down.delayIn() + 2, 0), half;
-        halver_->push(zeros.data(), zeros.size(), half);
-        coded(half.data(), half.size(), out);
+        part_.resize(blockSamples(), 0);
+        block(part_.data(), out);
+        part_.clear();
     }
     SottoFrame f;
-    if (codec_ == CODEC_SOTTO_1200)
-    {
-        // sotto 1200 takes the last 10 ms blocks as they are.
-        if (part_.size() >= 80) api_->lrEncodePart(state_, reinterpret_cast<const short*>(part_.data()), (int)(part_.size() / 80));
-        part_.clear();
+    if (codec_ == CODEC_SOTTO_V38)
+        while (api_->enc16Flush(state_, f.data()) > 0) out.push_back(f);
+    else if (codec_ == CODEC_SOTTO_1200)
         while (api_->lrEncFlush(state_, f.data()) > 0) out.push_back(f);
-    }
     else
-    {
-        if (!part_.empty())
-        {
-            part_.resize(blockSamples(), 0);
-            block(part_.data(), out);
-            part_.clear();
-        }
-        if (codec_ == CODEC_SOTTO_V38)
-            while (api_->enc16Flush(state_, f.data()) > 0) out.push_back(f);
-        else
-            while (api_->vlrEncFlush(state_, f.data()) > 0) out.push_back(f);
-    }
+        while (api_->vlrEncFlush(state_, f.data()) > 0) out.push_back(f);
     flushed_ = true;
 }
 
@@ -528,7 +491,7 @@ void SottoEncoder::flush(std::vector<SottoFrame>& out)
 // SottoDecoder
 //-------------------------------------------------------------------------
 
-// The 8 kHz codecs' sound doubled to 16 kHz.
+// Codec 1's 8 kHz sound doubled to 16 kHz.
 struct SottoDecoder::Doubler
 {
     Resampler up{8000, SOTTO_RATE};
@@ -588,14 +551,14 @@ void SottoDecoder::create()
             break;
         case CODEC_SOTTO_1200:
             state_ = api_->lrDecCreate();
-            behind = 2 * frameSamples_;
+            behind = (size_t)LR_DEC16_DELAY * frameSamples_;
             break;
         default:
             state_ = api_->vlrDecCreate(vlrRate(codec_));
-            behind = 2 * frameSamples_ + 2 * CORE_DELAY_8K;
+            behind = (size_t)vlrDec16Delay(codec_) * frameSamples_;
             break;
     }
-    if (codec_ != CODEC_SOTTO_V38) doubler_ = std::make_unique<Doubler>();
+    if (codec_ == CODEC_SOTTO_V36) doubler_ = std::make_unique<Doubler>();
     // Whole frames behind: the part frame is silence ahead of the sound.
     delay_ = (int)((behind + frameSamples_ - 1) / frameSamples_);
     fifo_.assign((size_t)delay_ * frameSamples_ - behind, 0);
@@ -655,7 +618,7 @@ void SottoDecoder::decode(const SottoFrame& frame, bool good, int16_t* samples)
             api_->decode16(state_, frame.data(), ok, reinterpret_cast<short*>(raw.data()));
             break;
         case CODEC_SOTTO_1200:
-            raw.resize(frameSamples_ / 2);
+            raw.resize(frameSamples_);
             api_->lrDecode(state_, frame.data(), ok, reinterpret_cast<short*>(raw.data()));
             break;
         default:
@@ -687,7 +650,7 @@ bool SottoDecoder::flush(int16_t* samples)
                 if (api_->dec16Flush(state_, reinterpret_cast<short*>(raw.data())) <= 0) raw.clear();
                 break;
             case CODEC_SOTTO_1200:
-                raw.resize(frameSamples_ / 2);
+                raw.resize(frameSamples_);
                 if (api_->lrDecFlush(state_, reinterpret_cast<short*>(raw.data())) <= 0) raw.clear();
                 break;
             default:

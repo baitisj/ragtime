@@ -2122,9 +2122,13 @@ decoder uses for the band under vowels.
 
 Jeff, 2026-11-07: "Let's gift Ragtime the ability to encode and decode
 Sotto at different rates, now that the Sotto encoder supports
-400/600/1200/2400." sotto now has sotto 1200 (48 bits per 40 ms) and
-sotto 600 and 400 (48 bits per 80 and 120 ms), all on v3.7's core at
-8 kHz, for the K6 pager's slow links.
+400/600/1200/2400." sotto has sotto 1200 (48 bits per 40 ms) and sotto
+600 and 400 (48 bits per 80 and 120 ms), on v3.7's core, for the K6
+pager's slow links. Later the same day: "I added the hiss band to those
+low bitrate codecs; let's make sure Ragtime can benefit." So codecs 3,
+4 and 5 are the hiss band streams, 16 kHz both ways, as codec 2 is at
+2,400 (sotto's listening rounds 19 and 21: the band won every pair
+against the plain modes).
 
 - **Codecs 3, 4 and 5** (PROTOCOL.md, "Voice"). `voice::Codec` gives
   each codec's rate, frame length, coded sample rate, layout, how many
@@ -2134,26 +2138,23 @@ sotto 600 and 400 (48 bits per 80 and 120 ms), all on v3.7's core at
   silence, pitch and level of any codec's frame, so the pause gate,
   the silence runs, the pitch strip and the deck's scope work at every
   rate. The gate's 200 ms and 40 ms hang are kept as time, with at
-  least one frame of hang.
-- **The library.** `voice::Sotto` binds `sotto_lr_*` and `sotto_vlr_*`
-  when they are there (`SottoInfo::sends` and `plays`). It sends a
-  codec only when it can decode it too. The pin, sotto `ebe5386`, has
-  sotto 1200 both ways but only the 600/400 encoder: their decoder is
-  fixed point only, on the fixed-point core, so it can't go into the
-  float libsotto. Jeff (2026-11-07) has his sotto thread add a float
-  one; once a pinned libsotto exports `sotto_vlr_dec_create` and the
-  rest of `sotto_vlr.h`, 600 and 400 appear on the deck by
-  themselves. Ragtime's silent 600/400 superframe (mean 0, residual 12
-  or 17) is checked against the fixed-point decoder,
-  `c/fixed/sotto_vlr_dec_fx`, and decodes as silence.
-- **The coders.** The slower codecs' speech is halved to 8 kHz
-  (`voice::Resampler`, its 6 ms delay taken off) and their sound
-  doubled back. `SottoDecoder` gives `frameSamples()` a call, whole
-  frames behind (`delay()`: 2 for sotto 1200, which is two superframes
-  behind; 3 for 600 and 400, two superframes and the core's 20 ms, the
-  part frame made up with silence at the start). sotto 1200's encoder
-  puts a superframe 20 ms after its speech, so its first 20 ms are
-  dropped and the clip keeps time.
+  least one frame of hang. At 1,200 a silent superframe is A's energy
+  0 with B's energy step 0 (code 4), whatever its hiss fields say: what
+  sotto's hiss encoder sends in digital silence.
+- **The library.** `voice::Sotto` binds `sotto_lr_enc16` /
+  `sotto_lr_dec16` and `sotto_vlr_enc16` / `sotto_vlr_dec16` from the
+  pin, sotto `aa21055`, and tries a coder and decoder of each when it
+  loads: a fixed-point build's stubs give NULL, and then that rate is
+  left off (`SottoInfo::sends` and `plays`). The pin's v3.8 frames and
+  sound are bit-identical to `ebe5386`'s on two LibriSpeech clips.
+  The plain 8 kHz `sotto_lr_*` and `sotto_vlr_*` calls are no longer
+  used: no Ragtime release sent a plain stream.
+- **The coders.** 16 kHz in and out, as at 2,400. `SottoEncoder` feeds
+  sotto 1200 40 ms blocks and 600 and 400 10 ms ones, a last part block
+  padded with silence. `SottoDecoder` gives `frameSamples()` a call,
+  `delay()` whole frames behind: 4 at 1,200 and 600 and 3 at 400
+  (sotto.h's `SOTTO_LR_DEC16_DELAY`, sotto_vlr.h's
+  `SOTTO_VLR_DEC16_DELAY`). Only codec 1 is still doubled from 8 kHz.
 - **Playing as it arrives.** `ArrivalPlayer` sizes its frame of sound
   by the clip's codec, counts the speech's own bytes a second (150 at
   1,200), and fades a stall with the codec's lost frames. The voice
@@ -2163,13 +2164,16 @@ sotto 600 and 400 (48 bits per 80 and 120 ms), all on v3.7's core at
   picks the next clip's codec from what the library sends; the
   readout under the scope names it. Monitor and the airtime bar go by
   the clip's own codec.
-- **Tested.** `ragtime_sotto_test` codes the LibriSpeech clip at 1,200:
-  348 superframes for 13.9 s, -27.9 dBFS back for -26.3 in, within
-  5 ms of the speech, lost superframes silent by the end of a hole,
-  and the same sound played as it arrives. `ragtime_voice_test` writes
-  and reads each slower codec's files (runs, holes, the gate, the
-  strip, 30 minutes), and `ragtime_arrival_player_test` plays 40 ms
-  frames with a pretend decoder two frames behind.
+- **Tested.** `ragtime_sotto_test` codes the LibriSpeech clip, with an
+  "s" of hiss added each second, at each rate: 348, 174 and 116
+  superframes for 13.9 s, about 2 dB under the input's level, within
+  3 ms of the speech, the 4-8 kHz share within about 1 dB of the input's,
+  lost superframes silent in a hole until the one before the next good
+  one (which the decoder rebuilds from both sides), and the same sound
+  played as it arrives. `ragtime_voice_test` writes and reads each
+  slower codec's files (runs, holes, the gate, the strip, 30 minutes),
+  and `ragtime_arrival_player_test` plays 40 ms frames with a pretend
+  decoder two frames behind.
 
 ## A clip's end by the clock
 

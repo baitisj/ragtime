@@ -192,7 +192,7 @@ void slowerCodec(voice::Sotto& lib, uint8_t codec, const std::vector<int16_t>& s
     auto dec = lib.decoder(codec);
     CHECK(dec != nullptr);
     if (!dec) return;
-    CHECK_EQ(dec->delay(), codec == voice::CODEC_SOTTO_1200 ? 2 : 3);
+    CHECK_EQ(dec->delay(), codec == voice::CODEC_SOTTO_400 ? 3 : 4);
     CHECK_EQ(dec->frameSamples(), (size_t)(voice::SOTTO_RATE / 1000 * c.frameMs));
     std::vector<int16_t> out = dec->decodeClip(frames, {});
     CHECK_EQ(out.size(), frames.size() * dec->frameSamples());
@@ -201,6 +201,11 @@ void slowerCodec(voice::Sotto& lib, uint8_t codec, const std::vector<int16_t>& s
     std::printf("%s: active level in %.1f dBFS, out %.1f dBFS, %.1f ms late\n", c.name, inDb, outDb,
                 lag * 1000.0 / voice::SOTTO_RATE);
     CHECK(std::fabs(inDb - outDb) < 4.0);
+    // The hiss band: the 4-8 kHz share near the speech's own (the clip's
+    // own is about 17 dB under its 0-4 kHz, from its added hiss).
+    const double inHigh = highBandDb(speech), outHigh = highBandDb(out);
+    std::printf("%s: above 4 kHz in %.1f dB, out %.1f dB\n", c.name, inHigh, outHigh);
+    CHECK(std::fabs(inHigh - outHigh) < 4.0);
     // In time: the decoder's delay taken out to within 10 ms.
     CHECK(std::labs(lag) <= voice::SOTTO_RATE / 100);
 
@@ -223,10 +228,13 @@ void slowerCodec(voice::Sotto& lib, uint8_t codec, const std::vector<int16_t>& s
     const size_t from = frames.size() / 3, to = from + std::max<size_t>(6, 600 / (size_t)c.frameMs);
     for (size_t i = from; i < to; i++) good[i] = 0;
     std::vector<int16_t> holed = dec->decodeClip(frames, good);
-    double tail = 0.0;
-    for (size_t i = (to - 2) * dec->frameSamples(); i < to * dec->frameSamples(); i++)
-        tail = std::max(tail, std::fabs((double)holed[i]));
-    std::printf("%s: lost frames, loudest %.0f at the end of the hole\n", c.name, tail);
+    // Quiet once the cover runs out, until the frame before the next good
+    // one, which the decoder rebuilds from both sides.
+    double quiet = 0.0;
+    for (size_t i = (from + 3) * dec->frameSamples(); i < (to - 1) * dec->frameSamples(); i++)
+        quiet = std::max(quiet, std::fabs((double)holed[i]));
+    std::printf("%s: lost frames, loudest %.0f in the hole's quiet\n", c.name, quiet);
+    CHECK(quiet < 50.0);
 
     // Played as it arrives, all of it in at once: as long as decodeClip's,
     // every frame played.
@@ -411,9 +419,26 @@ int main()
         CHECK_EQ(player.playedFrames(), (uint32_t)expanded.size());
     }
 
-    // The slower rates, on the codec 1 clip's speech.
+    // The slower rates, on the codec 1 clip's speech with an "s" of hiss
+    // above 4 kHz every second, for the hiss band to carry.
+    std::vector<int16_t> hissy = heard;
+    {
+        uint32_t seed = 1;
+        float w1 = 0.0f, w2 = 0.0f;
+        for (size_t i = 0; i < hissy.size(); i++)
+        {
+            seed = seed * 1664525u + 1013904223u;
+            const float w = (float)(seed >> 8) / (float)(1u << 24) - 0.5f;
+            // The second difference tilts white noise up 12 dB an octave.
+            const float y = w - 2.0f * w1 + w2;
+            w2 = w1;
+            w1 = w;
+            if (i % voice::SOTTO_RATE < (size_t)voice::SOTTO_RATE / 6)
+                hissy[i] = (int16_t)std::max(-32767.0f, std::min(32767.0f, hissy[i] + y * 600.0f));
+        }
+    }
     for (uint8_t c : lib.info().sends)
-        if (c != voice::CODEC_SOTTO_V38) slowerCodec(lib, c, heard);
+        if (c != voice::CODEC_SOTTO_V38) slowerCodec(lib, c, hissy);
 
     return ragtime_test::finish();
 }
