@@ -268,6 +268,14 @@ and the Part 97 check.
   codec 1's pitch as loud hiss). libsotto (LGPL) is loaded at run time,
   never linked. Its test clip `tests/data/voice/` is LibriSpeech, CC BY
   4.0.
+- Voice rates (2026-11-07, Jeff, docs/STAGE1.md "Voice rates"): the
+  deck's Rate picks 2400, 1200, 600 or 400 bit/s, codecs 2 to 5
+  (`voice::Codec`, `voice::codecOf`; 40, 80 and 120 ms superframes,
+  8 kHz, no hiss band). The pin (sotto ebe5386) has sotto 1200
+  (`sotto_lr_*`) and only the 600/400 encoder; Jeff's own sotto thread
+  adds the float 600/400 decoder, and `voice::Sotto` offers 600 and 400
+  once the loaded library exports `sotto_vlr_dec_create` (the
+  `sotto_vlr.h` API), with no Ragtime change but the pin.
 - The voice chain (2026-10-31, voice PR 3 of the sotto plan,
   `docs/STAGE1.md`): `voice::Chain` in `core/src/voice/` takes the
   microphone through Gain, 48 kHz, a high-pass, noise reduction, the

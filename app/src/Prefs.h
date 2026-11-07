@@ -218,6 +218,8 @@ constexpr const char* VOICE_DECK_NOISE_IN = "/Voice/Deck/NoiseIn";
 constexpr const char* VOICE_DECK_TARGET = "/Voice/Deck/TargetTenthsDb";
 constexpr const char* VOICE_DECK_PEAKS = "/Voice/Deck/PeakMode";           // Target popped out
 constexpr const char* VOICE_DECK_REVIEW = "/Voice/Deck/HoldForReview";
+// The deck's Rate: sotto's bit/s for the next clip (2400, 1200, 600, 400).
+constexpr const char* VOICE_DECK_RATE = "/Voice/Deck/RateBitsPerSecond";
 // The most airtime a clip should take: the deck's bar turns red past it.
 constexpr const char* VOICE_MAX_AIR = "/Voice/MaxAirSeconds";
 } // namespace keys

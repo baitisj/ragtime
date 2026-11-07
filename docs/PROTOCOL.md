@@ -925,7 +925,8 @@ on D2G and repaired there. What kind adds is how the far end treats it.
 
 A voice message is a file with kind `0x03`, in a session or on D2G: a
 `.sot` file of speech coded with sotto, Jeff's vocoder
-(github.com/baitisj/sotto), at 2,400 bit/s. Like a picture it goes by
+(github.com/baitisj/sotto), at 2,400, 1,200, 600 or 400 bit/s (the
+sender's pick, the deck's Rate). Like a picture it goes by
 the rules of any file: offered or announced, sent, sealed on D2G and
 repaired there. It needs no record type, no Hello bit and nothing from
 Data2G. Voice sent as data is data (Jeff, 2026-10-31): it goes wherever
@@ -938,9 +939,9 @@ time order:
 | Field | Bytes | Meaning |
 | --- | --- | --- |
 | magic | 2 | `So` (`0x53 0x6F`) |
-| codec | 1 | `0x02`: sotto v3.8, what Ragtime sends; `0x01`: sotto v3.6, still played (below) |
+| codec | 1 | `0x02`: sotto v3.8, 2,400 bit/s, what Ragtime sends by default; `0x03`: sotto 1200; `0x04`: sotto 600; `0x05`: sotto 400; `0x01`: sotto v3.6, still played (below) |
 | flags | 1 | `0x00`; a reader refuses a file with a flag it doesn't know |
-| length | 3 | The clip's length in 20 ms frames, every silent frame a run stands for counted |
+| length | 3 | The clip's length in the codec's frames (20 ms at 2,400, 40 ms at 1,200, 80 ms at 600, 120 ms at 400), every silent frame a run stands for counted |
 | frames | the rest | 6 bytes each |
 
 **Codec 1 is sotto v3.6** (Jeff, 2026-10-31), frozen as text table 0
@@ -961,10 +962,23 @@ is why codec 2 has its own number. A library that speaks both says
 one: it plays a codec 1 clip through the 8 kHz decoder and doubles the
 rate, and a codec 2 clip through the 16 kHz one, five frames behind.
 
+**Codecs 3, 4 and 5 are sotto 1200, 600 and 400** (Jeff, 2026-11-07),
+on v3.7's core at 8 kHz, with no hiss band: sotto's `sotto_lr_*` and
+`sotto_vlr_*` calls, `docs/sotto-1200.md` and `docs/sotto-vlr.md` in
+sotto. Each keeps the 6-byte frame and makes it a superframe of more
+speech, coded together, so a frame no longer decodes alone: sotto
+1200's second 20 ms is coded from the halfway point to the next
+superframe, and 600's and 400's shapes run on straight lines between
+anchors that reach into the next one. Their decoders play a superframe
+once they hold the two after it, and rebuild a lone lost one from both
+sides. A receiver that has a sotto with no 600 and 400 decoder shows
+such a clip's card but can't play it.
+
 A later sotto that changes the bits is a new codec number, and a
 receiver plays only numbers it knows; decoder-only changes can come in
-a Ragtime update without one, and so can encoder-only ones. Each frame
-is 48 bits for 20 ms, most significant bit first:
+a Ragtime update without one, and so can encoder-only ones. At 2,400
+(codecs 1 and 2) each frame is 48 bits for 20 ms, most significant bit
+first:
 
 | Field | Bits | Meaning |
 | --- | --- | --- |
@@ -978,6 +992,16 @@ lost frame costs 20 ms. (Codec 2's hiss band also looks a few frames
 either side, and its speaker shape comes over many, but a frame needs
 no other to be heard.)
 
+A sotto 1200 superframe (40 ms) is frames A and B: its first 14 bits
+are A's voicing, pitch and energy as at 2,400 (energy 0 is silence),
+then 18 bits of A's shape, then B's voicing (2), a pitch step (3), an
+energy step (3) and a shape residual (8). A sotto 600 (80 ms, four
+frames) or 400 (120 ms, six) superframe is a voicing pattern (3 bits,
+one of 8 trained patterns; pattern 0 is unvoiced throughout), a pitch
+line's centre (7, the same scale as 2,400's pitch) and slope (3), the
+mean of the frames' energy codes (5) and a residual from a trained
+table (5), then 25 bits of shape anchors.
+
 **Silence runs.** A frame with energy 0 is silence, so its other bits
 carry nothing. In a `.sot` file such a frame stands for itself and the
 next run count silent frames, the count in the 16 bits after its energy
@@ -985,20 +1009,31 @@ field (bits 14 to 29, so 1 to 65,536 frames a run frame); its voicing,
 pitch and last 18 bits are 0. A two-second pause is then 6 bytes, not
 600. A reader expands each run into frames of all zero bits, which
 sotto decodes as silence. The frames, runs expanded, add up to the
-header's length, or the file is malformed.
+header's length, or the file is malformed. The slower codecs run the
+same way, with their own silent superframe. At 1,200 it is all zero
+bits but the count, in the same bits 14 to 29 (A's energy 0, B's
+energy step its lowest). At 600 and 400 it is a mean energy of 0 with
+the residual that leaves every frame's energy code at 0 (residual 12
+at 600, 17 at 400, the ones sotto's encoder sends for digital silence),
+every other field 0 but the count, in bits 23 to 38 (the anchors'
+first 16). Only a superframe exactly like that is a run: a quiet one
+the encoder made otherwise stays as it is.
 
 **What a sender does before writing.** Silence at both ends goes, and a
 quiet pause becomes silence: a run of frames each at least 30 dB under
 the clip's loud frames (the 95th percentile of their energy), lasting
 200 ms or more, becomes silence but for 40 ms at each end touching
-speech, so word tails and breaths keep their sound. On sotto's test
+speech (at least a frame, so 80 or 120 ms at 600 and 400), so word
+tails and breaths keep their sound. The slower codecs' energy is A's
+at 1,200 and the mean at 600 and 400. On sotto's test
 clips of read speech this saves about 14% (`tests/VoiceTest.cpp`); a
 message with pauses saves more. Only the sender does this, so a reader
 needs to know nothing of it.
 
 **A clip may be at most 30 minutes long**, silences included (90,000
-frames); a reader refuses a header that says more, so a file can't make
-it fill memory. A file of kind `0x03` that doesn't read shows only its
+frames at 2,400, 45,000 at 1,200, 22,500 at 600, 15,000 at 400); a
+reader refuses a header that says more, so a file can't make it fill
+memory. A file of kind `0x03` that doesn't read shows only its
 card, as a bad picture does.
 
 **Holes.** A frame with a byte missing (a piece lost for good on D2G)
@@ -1013,7 +1048,7 @@ place.
 **In a session** the stream is reliable and in order, so the far end
 can play while the bytes arrive. Arriving at R bytes a second, frame t
 (from 0) must be here by the time frame t - 1 plays (sotto's decoder is
-one frame behind); the wait before playing is the worst of those over
+one frame behind; at 1,200 and slower, t - 2); the wait before playing is the worst of those over
 the file, about S / R - S / P for a clip of S bytes playing at P, and
 less where a silence run lets the link catch up. When to start is the
 receiver's own business and puts nothing on the air: Ragtime also waits

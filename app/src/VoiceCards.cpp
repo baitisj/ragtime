@@ -317,8 +317,11 @@ wxString VoiceShelf::cardHtml(const std::string& key, const wxWindow* window, co
     // for when we have heard enough of it.
     if (!look.stopHref.empty()) html << "&nbsp;" << stopSignHtml(window, look.stopHref);
 
-    // Its length, and while it comes, how far it has come.
+    // Its length, its rate when slower than 2,400, and while it comes, how
+    // far it has come.
     wxString after = wxString::FromUTF8(clipLength(s.clip.seconds()));
+    if (const voice::Codec* codec = voice::codecOf(s.clip.codec))
+        if (codec->bitsPerSecond < 2400) after << " &middot; " << wxString::Format("%d bit/s", codec->bitsPerSecond);
     if (!s.clip.whole && !s.final)
         after << " &middot; " << wxString::Format("%d%% here", (int)std::lround(100.0 * s.clip.frames.size()
                                                                                 / std::max<uint32_t>(1, s.clip.length)));
@@ -369,7 +372,7 @@ bool VoicePlayer::play(audio::VoiceAudio& audio, const std::string& key, const v
     std::vector<voice::SottoFrame> frames(clip.frames.begin(), clip.frames.end());
     std::vector<int16_t> sound = decoder->decodeClip(frames, clip.good);
     fromFrame = std::min<uint32_t>(fromFrame, (uint32_t)clip.frames.size() - 1);
-    const size_t start = std::min(sound.size(), (size_t)fromFrame * voice::SOTTO_SAMPLES);
+    const size_t start = std::min(sound.size(), (size_t)fromFrame * decoder->frameSamples());
     std::vector<float> samples(sound.size() - start);
     for (size_t i = 0; i < samples.size(); i++) samples[i] = sound[start + i] / 32768.0f;
 
@@ -377,6 +380,8 @@ bool VoicePlayer::play(audio::VoiceAudio& audio, const std::string& key, const v
     *current_ = generation;
     playing_ = key;
     fromFrame_ = fromFrame;
+    framesPerSecond_ = 1.0 / clip.frameSeconds();
+    frameSamples_ = decoder->frameSamples();
     arrival_.reset();
     total_ = samples.size();
     watch_.start(nowMs, total_);
@@ -461,6 +466,8 @@ bool VoicePlayer::playArriving(audio::VoiceAudio& audio, const std::string& key,
     *current_ = generation;
     playing_ = key;
     fromFrame_ = 0;
+    framesPerSecond_ = 1.0 / player->clip().frameSeconds();
+    frameSamples_ = decoder->frameSamples();
     arrival_ = std::move(player);
     appended_ = 0;
     streamEnded_ = false;
@@ -554,8 +561,8 @@ double VoicePlayer::positionFrames(const audio::VoiceAudio& audio) const
     {
         // Frames decoded, less what the speaker still holds of them.
         const double heard = std::max(0.0, audio.playPosition()) * voice::SOTTO_RATE;
-        const double ahead = std::max(0.0, (double)appended_ - heard) / voice::SOTTO_SAMPLES;
+        const double ahead = std::max(0.0, (double)appended_ - heard) / (double)frameSamples_;
         return std::max(0.0, arrival_->playedFrames() - ahead);
     }
-    return fromFrame_ + audio.playPosition() * voice::FRAMES_PER_SECOND;
+    return fromFrame_ + audio.playPosition() * framesPerSecond_;
 }

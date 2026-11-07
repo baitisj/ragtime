@@ -17,9 +17,17 @@ namespace
 // sotto's decoder is quiet once it has given out this many lost frames'
 // sound in a row (the first lost frame holds the sound, then 6 dB down
 // each 20 ms).
-constexpr int QUIET_AFTER_LOST = 3;
+int quietAfterLost(const Clip& clip)
+{
+    const Codec* c = codecOf(clip.codec);
+    return c ? c->quietAfterLost : 3;
+}
 
-constexpr double FRAME_SECONDS = FRAME_MS / 1000.0;
+int speechBytesPerSecond(const Clip& clip)
+{
+    const Codec* c = codecOf(clip.codec);
+    return c ? c->bytesPerSecond() : SPEECH_BYTES_PER_SECOND;
+}
 
 } // namespace
 
@@ -78,6 +86,11 @@ ReadResult ArrivalPlayer::arrived(const uint8_t* bytes, uint64_t size, uint64_t 
     {
         // What has played stays as it was: a prefix only grows.
         if (clip.frames.size() >= clip_.frames.size()) clip_ = std::move(clip);
+        if (frame_.size() != frameSamplesOf(clip_))
+        {
+            frame_.assign(frameSamplesOf(clip_), 0);
+            frameAt_ = frame_.size();
+        }
     }
     else if (read_ == ReadResult::Ok)
     {
@@ -155,12 +168,12 @@ double ArrivalPlayer::waitSeconds(uint64_t nowMs) const
     const double r = rate() * settings_.rateShare;
     if (!(r > 0)) return -1.0;
     const double remaining = (double)(size_ - have_);
-    // The rest at worst is all speech, 6 bytes for each 20 ms, coming at
-    // r after the next gap; the speech in hand plays meanwhile.
-    const double inHandSeconds = inHand() * FRAME_SECONDS;
+    // The rest at worst is all speech, 6 bytes for each frame, coming at r
+    // after the next gap; the speech in hand plays meanwhile.
+    const double inHandSeconds = inHand() * clip_.frameSeconds();
     const double sinceLast = arrivals_.empty() ? 0.0 : (double)(nowMs - std::min(nowMs, arrivals_.back().ms)) / 1000.0;
     const double gapLeft = std::max(0.0, gap() - sinceLast);
-    const double behind = std::max(0.0, remaining / r - remaining / SPEECH_BYTES_PER_SECOND);
+    const double behind = std::max(0.0, remaining / r - remaining / speechBytesPerSecond(clip_));
     return std::max(0.0, gapLeft + behind + settings_.marginSeconds - inHandSeconds);
 }
 
@@ -175,7 +188,7 @@ bool ArrivalPlayer::ready(uint64_t nowMs) const
     if (read_ != ReadResult::Ok || clip_.frames.empty()) return false;
     const bool complete = clip_.frames.size() >= clip_.length || ended_;
     if (inHand() == 0 && !complete) return false;
-    if (state_ == State::Stalled && !complete && inHand() * FRAME_SECONDS < settings_.resumeSeconds) return false;
+    if (state_ == State::Stalled && !complete && inHand() * clip_.frameSeconds() < settings_.resumeSeconds) return false;
     const double wait = waitSeconds(nowMs);
     return wait >= 0 && wait <= 0.0;
 }
@@ -203,9 +216,10 @@ bool ArrivalPlayer::fadeStep()
     // Nothing fed yet: nothing to fade.
     if (std::all_of(held_.begin(), held_.end(), [](Held h) { return h == Held::Lead; })) return false;
     // A run of lost frames' sound: sotto has gone quiet.
-    while (lostRun_ < QUIET_AFTER_LOST)
+    const Frame silence = silentFrame(clip_.codec);
+    while (lostRun_ < quietAfterLost(clip_))
     {
-        decoder_.decode(SILENT_FRAME, false, frame_);
+        decoder_.decode(silence, false, frame_.data());
         held_.push_back(Held::Lost);
         if (takeSound()) return true;
     }
@@ -217,7 +231,7 @@ bool ArrivalPlayer::nextFrame()
     const size_t n = std::min(clip_.frames.size(), clip_.good.size());
     while (fed_ < n)
     {
-        decoder_.decode(clip_.frames[fed_], clip_.good[fed_] != 0, frame_);
+        decoder_.decode(clip_.frames[fed_], clip_.good[fed_] != 0, frame_.data());
         fed_++;
         held_.push_back(Held::Real);
         // The decoder's lead-in is no sound; after running dry, the lost
@@ -229,7 +243,7 @@ bool ArrivalPlayer::nextFrame()
         // The clip is all fed: what the decoder holds comes out.
         while (std::any_of(held_.begin(), held_.end(), [](Held h) { return h == Held::Real; }))
         {
-            if (!decoder_.flush(frame_))
+            if (!decoder_.flush(frame_.data()))
             {
                 held_.clear();
                 return false;
@@ -248,10 +262,10 @@ size_t ArrivalPlayer::pull(int16_t* out, size_t n, uint64_t nowMs)
     size_t given = 0;
     while (given < n)
     {
-        if (frameAt_ < (size_t)FRAME_SAMPLES)
+        if (frameAt_ < frame_.size())
         {
-            size_t take = std::min(n - given, (size_t)FRAME_SAMPLES - frameAt_);
-            std::memcpy(out + given, frame_ + frameAt_, take * sizeof(int16_t));
+            size_t take = std::min(n - given, frame_.size() - frameAt_);
+            std::memcpy(out + given, frame_.data() + frameAt_, take * sizeof(int16_t));
             frameAt_ += take;
             given += take;
             continue;
@@ -293,7 +307,7 @@ bool ArrivalPlayer::seek(uint32_t frame)
     fed_ = frame;
     slot_ = frame;
     resetHeld();
-    frameAt_ = FRAME_SAMPLES;
+    frameAt_ = frame_.size();
     // A clip all here plays from there at once; one still coming waits
     // until the bytes will keep ahead from there.
     state_ = complete ? State::Playing : State::Waiting;

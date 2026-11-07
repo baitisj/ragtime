@@ -103,6 +103,9 @@ private:
     void showMeters(double seconds);
     void showClipLamps();
     void showCodec();
+    void fillRates();
+    // The codec Rate picks, one the library sends.
+    uint8_t chosenCodec() const;
     void showLevelCheck(const ragtime::voice::LevelReport& report, bool have);
     void updateAirtime();
     bool sendToBroadcast() const;
@@ -149,6 +152,8 @@ private:
     ReductionBar* reduction_ = nullptr;
     PitchScope* scope_ = nullptr;
     wxStaticText* codec_ = nullptr;
+    wxChoice* rate_ = nullptr;
+    std::vector<uint8_t> rateCodecs_;       // rate_'s entries' codecs
     DeckLamp* checkActive_ = nullptr;
     DeckLamp* checkLoudest_ = nullptr;
     DeckLamp* checkNoise_ = nullptr;
@@ -192,11 +197,13 @@ private:
     int clipTicks_ = 0;                     // the Clip lamp stays lit a while
     std::unique_ptr<ragtime::voice::SottoEncoder> encoder_;
     std::vector<ragtime::voice::SottoFrame> frames_;   // the clip being made
+    uint8_t clipCodec_ = ragtime::voice::CODEC_SEND;     // its codec
     uint64_t recordStartMs_ = 0;
     uint64_t codingSinceMs_ = 0;
     bool spaceHeld_ = false;
     // The last clip: its frames (for Monitor), its file, and where it went.
     std::vector<ragtime::voice::SottoFrame> lastFrames_;
+    uint8_t lastCodec_ = ragtime::voice::CODEC_SEND;
     std::vector<uint8_t> lastSot_;
     std::string lastPath_;
     ragtime::deck::ClipAir lastAir_ = ragtime::deck::ClipAir::None;

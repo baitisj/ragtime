@@ -188,6 +188,10 @@ private:
     Done done_;
     std::string playing_;
     uint32_t fromFrame_ = 0;
+    // The playing clip's codec's frame: 50 a second and 320 samples at
+    // 2,400, fewer and longer at the slower rates.
+    double framesPerSecond_ = ragtime::voice::FRAMES_PER_SECOND;
+    size_t frameSamples_ = ragtime::voice::FRAME_SAMPLES;
     uint64_t generation_ = 0;
     std::shared_ptr<uint64_t> current_ = std::make_shared<uint64_t>(0);
     // Playing as it arrives: the engine (its decoder in its calls), and

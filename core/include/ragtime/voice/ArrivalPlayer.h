@@ -39,16 +39,22 @@ namespace ragtime
 namespace voice
 {
 
-// Voice's sound: 16 kHz, 16-bit, 320 samples a frame (sotto v3.8's
-// sotto_decode16; a codec 1 clip is decoded at 8 kHz and doubled).
+// Voice's sound: 16 kHz, 16-bit, 320 samples a 20 ms frame (sotto v3.8's
+// sotto_decode16; the 8 kHz codecs are decoded at 8 kHz and doubled).
 constexpr int PLAY_RATE = 16000;
 constexpr int FRAME_SAMPLES = PLAY_RATE * FRAME_MS / 1000;
+// A codec's frame of sound: 320 samples at 2,400, up to 1,920 at 400.
+inline size_t frameSamplesOf(const Clip& clip)
+{
+    return (size_t)(PLAY_RATE / 1000 * clip.frameMs());
+}
 
 // sotto's decoder, as voice::SottoDecoder gives it. decode takes a frame,
-// or with good false covers a lost one, and gives a frame of sound delay
-// frames behind: the first delay calls give silence (1 for sotto's 8 kHz
-// decoder, SOTTO_DEC16_DELAY_FRAMES = 5 for the 16 kHz one). flush gives
-// the frames it still holds, one a call, and false once it holds none.
+// or with good false covers a lost one, and gives a frame of sound (the
+// clip's codec's: frameSamplesOf) delay frames behind: the first delay
+// calls give silence (1 for sotto's 8 kHz decoder, SOTTO_DEC16_DELAY_FRAMES
+// = 5 for the 16 kHz one, 3 for the slower rates). flush gives the frames
+// it still holds, one a call, and false once it holds none.
 struct FrameDecoder
 {
     std::function<void(const Frame& frame, bool good, int16_t* out)> decode;
@@ -193,11 +199,13 @@ private:
     uint32_t fed_ = 0;
     uint32_t slot_ = 0;
     std::deque<Held> held_;
-    // Lost frames' sound given out in a row (sotto is quiet after 3).
+    // Lost frames' sound given out in a row (sotto is quiet after
+    // Codec::quietAfterLost).
     int lostRun_ = 0;
-    // The frame of sound being given out, and how far.
-    int16_t frame_[FRAME_SAMPLES] = {};
-    size_t frameAt_ = FRAME_SAMPLES;
+    // The frame of sound being given out (sized for the clip's codec once
+    // it reads), and how far.
+    std::vector<int16_t> frame_;
+    size_t frameAt_ = 0;
 };
 
 } // namespace voice
