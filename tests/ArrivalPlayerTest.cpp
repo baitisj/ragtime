@@ -20,6 +20,9 @@ namespace
 // The pretend decoder's delay in frames: 1 as sotto's 8 kHz decoder, 5 as
 // v3.8's 16 kHz one (main runs every test with each).
 int g_delay = 1;
+// And its frame of sound: FRAME_SAMPLES (20 ms) for 2,400, or a slower
+// codec's longer frame (testSlowerCodec).
+size_t g_samples = FRAME_SAMPLES;
 
 // A pretend sotto: each frame's sound is its pitch code + 1 in every
 // sample, g_delay frames late as sotto's is; a lost frame's is 1000 + how
@@ -49,7 +52,7 @@ struct FakeSotto
                 lost++;
                 pipe.push_back(lost <= 4 ? (int16_t)(1000 + lost) : (int16_t)0);
             }
-            std::fill(pcm, pcm + FRAME_SAMPLES, pipe.front());
+            std::fill(pcm, pcm + g_samples, pipe.front());
             pipe.pop_front();
             held = std::min(held + 1, g_delay);
         };
@@ -57,7 +60,7 @@ struct FakeSotto
             if (held == 0) return false;
             held--;
             pipe.push_back(0);
-            std::fill(pcm, pcm + FRAME_SAMPLES, pipe.front());
+            std::fill(pcm, pcm + g_samples, pipe.front());
             pipe.pop_front();
             return true;
         };
@@ -161,6 +164,66 @@ std::vector<Step> bursts(uint64_t size, uint64_t bytesPerBurst, uint64_t gapMs, 
         ms += gapMs;
     }
     return steps;
+}
+
+// sotto 1200's clip: n superframes of 40 ms, frame A's pitch code i % 120.
+std::vector<uint8_t> clipFile1200(int n)
+{
+    std::vector<Frame> frames;
+    for (int i = 0; i < n; i++) frames.push_back(makeFrame(Voicing::Voiced, i % 120, 20, (uint64_t)i * 7919 + 1));
+    PauseGate gate;
+    gate.enabled = false;
+    return makeSot(frames, gate, CODEC_SOTTO_1200);
+}
+
+void testSlowerCodec()
+{
+    // sotto 1200's 40 ms frames, two frames of delay: a 20 ms pull gives
+    // each frame's sound twice, in order, all of it.
+    g_delay = 2;
+    g_samples = 2 * FRAME_SAMPLES;
+    {
+        FakeSotto sotto;
+        ArrivalPlayer player(sotto.decoder());
+        std::vector<uint8_t> file = clipFile1200(100);
+        Run run = play(player, file, {{0, file.size()}}, 10000);
+        CHECK(run.done);
+        CHECK_EQ(run.stalls, 0);
+        std::vector<int> want;
+        for (int i = 0; i < 100; i++) want.insert(want.end(), 2, i % 120 + 1);
+        CHECK(run.heard == want);
+        CHECK_EQ(player.playedFrames(), 100u);
+        CHECK_EQ(player.clip().codec, CODEC_SOTTO_1200);
+    }
+    {
+        // Arriving at 150 bytes a second, the speech's own rate, in bursts
+        // 2 s apart: it waits, then plays to the end without a stall.
+        FakeSotto sotto;
+        ArrivalPlayer player(sotto.decoder());
+        player.setExpectedRate(150);
+        player.setExpectedGap(2.0);
+        std::vector<uint8_t> file = clipFile1200(400);
+        std::vector<Step> steps;
+        for (uint64_t ms = 0, have = 300; have < file.size() + 300; ms += 2000, have += 300) steps.push_back({ms, have});
+        Run run = play(player, file, steps, 120000);
+        CHECK(run.done);
+        CHECK_EQ(run.stalls, 0);
+        CHECK_EQ(player.playedFrames(), 400u);
+        CHECK(run.startedMs > 0);
+    }
+    {
+        // Stopped short: it plays what came, then sotto 1200's two lost
+        // frames of fade, and is Done.
+        FakeSotto sotto;
+        ArrivalPlayer player(sotto.decoder());
+        std::vector<uint8_t> file = clipFile1200(100);
+        Run run = play(player, file, {{0, HEADER_BYTES + 30 * FRAME_BYTES}}, 10000, 100);
+        CHECK(run.done);
+        CHECK_EQ(player.playedFrames(), 30u);
+        CHECK_EQ(run.heard.back(), 1002);
+    }
+    g_delay = 1;
+    g_samples = FRAME_SAMPLES;
 }
 
 void testWholeAtOnce()
@@ -415,6 +478,7 @@ int main()
         testSeek();
         testSilenceRunsGiveTheLinkTime();
     }
+    testSlowerCodec();
     testWav();
     return ragtime_test::finish();
 }

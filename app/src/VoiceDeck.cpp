@@ -349,7 +349,18 @@ void VoiceDeck::buildPanel()
         codec_ = new wxStaticText(m, wxID_ANY, "", wxDefaultPosition, wxDefaultSize, wxST_ELLIPSIZE_END | wxST_NO_AUTORESIZE);
         codec_->SetFont(deckart::readoutFont(m, 8.0));
         codec_->SetForegroundColour(deckart::colours().ink);
-        s->Add(codec_, 0, wxEXPAND | wxTOP | wxBOTTOM, FromDIP(6));
+        s->Add(codec_, 0, wxEXPAND | wxTOP, FromDIP(6));
+        // The rate the next clip is coded at.
+        auto* rateRow = new wxBoxSizer(wxHORIZONTAL);
+        rateRow->Add(engraved(m, "RATE", 7.0), 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, FromDIP(6));
+        rate_ = new wxChoice(m, wxID_ANY);
+        rate_->SetToolTip(
+            "How many bits a second sotto codes your next clip with. 2400 sounds best, with the 4-8 kHz hiss "
+            "band. 1200 takes half the airtime, at 8 kHz; 600 and 400 take a quarter and a sixth, and sound "
+            "rougher. The far end needs a Ragtime that plays the rate; the card says which it is.\n\n"
+            "600 and 400 show here once your libsotto can decode them too.");
+        rateRow->Add(rate_, 1, wxALIGN_CENTER_VERTICAL);
+        s->Add(rateRow, 0, wxEXPAND | wxTOP | wxBOTTOM, FromDIP(4));
         s->Add(engraved(m, wxString::FromUTF8("LEVEL CHECK \xc2\xb7 THIS CLIP"), 7.0), 0, wxBOTTOM, FromDIP(3));
         auto* grid = new wxFlexGridSizer(3, FromDIP(2), FromDIP(6));
         grid->AddGrowableCol(2);
@@ -519,6 +530,31 @@ void VoiceDeck::buildPanel()
         showTarget();
         updateAirtime();
     });
+    fillRates();
+    rate_->Bind(wxEVT_CHOICE, [this](wxCommandEvent&) {
+        saveInt(keys::VOICE_DECK_RATE, voice::codecOf(chosenCodec())->bitsPerSecond);
+        showCodec();
+    });
+}
+
+void VoiceDeck::fillRates()
+{
+    rateCodecs_ = sotto_.available() ? sotto_.info().sends : std::vector<uint8_t>{voice::CODEC_SEND};
+    wxArrayString items;
+    for (uint8_t c : rateCodecs_) items.Add(wxString::Format("%d bit/s", voice::codecOf(c)->bitsPerSecond));
+    rate_->Set(items);
+    const uint8_t want = voice::codecForRate(loadInt(keys::VOICE_DECK_RATE, 2400));
+    int pick = 0;
+    for (size_t i = 0; i < rateCodecs_.size(); i++)
+        if (rateCodecs_[i] == want) pick = (int)i;
+    rate_->SetSelection(pick);
+    rate_->Enable(rateCodecs_.size() > 1);
+}
+
+uint8_t VoiceDeck::chosenCodec() const
+{
+    const int i = rate_ ? rate_->GetSelection() : -1;
+    return i >= 0 && i < (int)rateCodecs_.size() ? rateCodecs_[(size_t)i] : voice::CODEC_SEND;
 }
 
 //-------------------------------------------------------------------------
@@ -733,15 +769,20 @@ void VoiceDeck::showCodec()
         text = "sotto not loaded";
     else
     {
-        const std::vector<voice::SottoFrame>& f =
-            talk_state_.phase() == deck::TalkPhase::Recording ? frames_ : lastFrames_;
-        text = wxString::Format("%d", (int)sotto_.info().codec) + DOT + utf8(versionOf(sotto_.info().format)) + DOT
-               + wxString::Format("%zu frames", f.size());
-        size_t bytes = talk_state_.phase() == deck::TalkPhase::Recording ? f.size() * voice::FRAME_BYTES : lastSot_.size();
+        const bool recording = talk_state_.phase() == deck::TalkPhase::Recording;
+        const std::vector<voice::SottoFrame>& f = recording ? frames_ : lastFrames_;
+        // The clip shown: the one being made, or the last; with none, what
+        // Rate picks.
+        const uint8_t codec = recording ? clipCodec_ : !f.empty() ? lastCodec_ : chosenCodec();
+        const voice::Codec& c = *voice::codecOf(codec);
+        text = wxString::Format("%d", (int)codec) + DOT
+               + (codec == voice::CODEC_SOTTO_V38 ? utf8(versionOf(sotto_.info().format)) : utf8(c.name))
+               + DOT + wxString::Format("%zu frames", f.size());
+        size_t bytes = recording ? f.size() * voice::FRAME_BYTES : lastSot_.size();
         if (bytes) text += DOT + wxString::Format("%.1f kB", bytes / 1000.0);
     }
     if (codec_->GetLabel() != text) codec_->SetLabel(text);
-    codec_->SetToolTip(sotto_.available() ? utf8(sotto_.info().format + " (" + sotto_.info().path + "), 2,400 bit/s")
+    codec_->SetToolTip(sotto_.available() ? utf8(sotto_.info().format + " (" + sotto_.info().path + ")")
                                           : utf8(sotto_.info().why));
 }
 
@@ -791,7 +832,8 @@ void VoiceDeck::talkDown()
     if (!talk_->IsEnabled()) return;
     const bool wasReview = talk_state_.phase() == deck::TalkPhase::Review;
     if (talk_state_.phase() == deck::TalkPhase::Recording || talk_state_.phase() == deck::TalkPhase::Coding) return;
-    encoder_ = sotto_.encoder();
+    clipCodec_ = chosenCodec();
+    encoder_ = sotto_.encoder(clipCodec_);
     if (!encoder_)
     {
         status_->SetLabel("Voice can't be coded: " + utf8(sotto_.info().why));
@@ -861,9 +903,8 @@ void VoiceDeck::drainCoded()
     encoder_->push(samples.data(), samples.size(), frames_);
     for (size_t i = before; i < frames_.size(); i++)
     {
-        const voice::Frame& f = frames_[i];
-        bool voiced = !voice::isSilent(f) && voice::voicingOf(f) != voice::Voicing::Unvoiced;
-        scope_->add(voiced ? voice::pitchHzOf(f) : 0.0, voice::energyDbfsOf(f));
+        const voice::FrameLook f = voice::lookOf(frames_[i], clipCodec_);
+        scope_->add(f.voiced ? f.pitchHz : 0.0, f.dbfs);
     }
     if (frames_.size() != before) updateAirtime();
 }
@@ -900,13 +941,13 @@ void VoiceDeck::finishClip()
     talk_->setClock("");
     if (hooks_.holdPlayback) hooks_.holdPlayback(false);
 
-    std::vector<uint8_t> sot = voice::makeSot(frames_);
+    std::vector<uint8_t> sot = voice::makeSot(frames_, voice::PauseGate(), clipCodec_);
     const bool empty = sot.empty();
     showLevelCheck(report, report.speech);
     talk_state_.coded(review_->GetValue(), empty);
     if (empty)
     {
-        status_->SetLabel(frames_.size() * voice::FRAME_MS > voice::MAX_CLIP_SECONDS * 1000ull
+        status_->SetLabel(frames_.size() > voice::codecOf(clipCodec_)->maxFrames()
                               ? "Too long to send"
                               : "Nothing but silence: nothing sent");
         frames_.clear();
@@ -915,6 +956,7 @@ void VoiceDeck::finishClip()
         return;
     }
     lastFrames_ = frames_;
+    lastCodec_ = clipCodec_;
     lastSot_ = std::move(sot);
     updateAirtime();
     if (talk_state_.phase() == deck::TalkPhase::Review)
@@ -940,7 +982,7 @@ void VoiceDeck::sendClip()
     }
     lastPath_ = path;
     lastAir_ = deck::ClipAir::Queued;
-    double speech = lastFrames_.size() * voice::FRAME_MS / 1000.0;
+    double speech = lastFrames_.size() * voice::codecOf(lastCodec_)->frameSeconds();
     status_->SetLabel(wxString::Format("Sent %s of speech, %.1f kB, ", utf8(deck::clockText(speech)), lastSot_.size() / 1000.0)
                       + (broadcast ? wxString("to the net") : "to " + utf8(targetNow_.peer)));
     showClipLamps();
@@ -952,8 +994,9 @@ void VoiceDeck::updateAirtime()
     bar.maxSeconds = std::max(voice::MIN_MAX_AIR_SECONDS, loadInt(keys::VOICE_MAX_AIR, voice::DEFAULT_MAX_AIR_SECONDS));
     const bool recording = talk_state_.phase() == deck::TalkPhase::Recording;
     const std::vector<voice::SottoFrame>& frames = recording ? frames_ : lastFrames_;
-    bar.speechSeconds = frames.size() * voice::FRAME_MS / 1000.0;
-    uint64_t bytes = recording ? voice::makeSot(frames).size() : lastSot_.size();
+    const uint8_t codec = recording ? clipCodec_ : lastCodec_;
+    bar.speechSeconds = frames.size() * voice::codecOf(codec)->frameSeconds();
+    uint64_t bytes = recording ? voice::makeSot(frames, voice::PauseGate(), codec).size() : lastSot_.size();
     if (bytes)
     {
         if (sendToBroadcast())
@@ -986,7 +1029,7 @@ void VoiceDeck::toggleMonitor()
     voice::Clip clip;
     std::vector<voice::SottoFrame> frames = lastFrames_;
     std::vector<uint8_t> good;
-    uint8_t codec = voice::CODEC_SEND;
+    uint8_t codec = lastCodec_;
     if (voice::readSot(lastSot_, clip) == voice::ReadResult::Ok)
     {
         frames.assign(clip.frames.begin(), clip.frames.end());

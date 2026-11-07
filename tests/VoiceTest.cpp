@@ -289,7 +289,7 @@ void testRefusals()
     CHECK(voice::readSot(bad, clip) == voice::ReadResult::NotSot);
     CHECK(!voice::isSot(bad.data(), bad.size()));
     bad = good;
-    bad[2] = 3;
+    bad[2] = 6;
     CHECK(voice::readSot(bad, clip) == voice::ReadResult::UnknownCodec);
     // Codec 1 (sotto v3.6's frames, from before 2026-11-02) still reads.
     bad = good;
@@ -463,7 +463,168 @@ void testProtocolAndFormat()
     CHECK_EQ((int)voice::codecOfFormat(""), 0);
 }
 
+// A frame from 48 bits.
+Frame bits48(uint64_t v)
+{
+    Frame f{};
+    for (int i = 5; i >= 0; i--)
+    {
+        f[(size_t)i] = (uint8_t)(v & 0xFF);
+        v >>= 8;
+    }
+    return f;
+}
+
+// sotto 600 or 400's superframe: voicing pattern, pitch centre, slope,
+// energy mean and residual, anchors.
+Frame vlrFrame(int pattern, int pitch, int slope, int mean, int residual, uint64_t anchors)
+{
+    return bits48(((uint64_t)pattern << 45) | ((uint64_t)pitch << 38) | ((uint64_t)slope << 35) | ((uint64_t)mean << 30)
+                  | ((uint64_t)residual << 25) | (anchors & ((1ull << 25) - 1)));
+}
+
+void testCodecs()
+{
+    // The table: numbers, rates and frame lengths.
+    CHECK(voice::codecOf(0) == nullptr);
+    CHECK(voice::codecOf(6) == nullptr);
+    CHECK_EQ(voice::codecOf(voice::CODEC_SOTTO_V38)->frameMs, 20);
+    CHECK_EQ(voice::codecOf(voice::CODEC_SOTTO_1200)->frameMs, 40);
+    CHECK_EQ(voice::codecOf(voice::CODEC_SOTTO_600)->frameMs, 80);
+    CHECK_EQ(voice::codecOf(voice::CODEC_SOTTO_400)->frameMs, 120);
+    for (uint8_t c : voice::sendCodecs())
+    {
+        const voice::Codec& k = *voice::codecOf(c);
+        // 6 bytes a frame at the rate.
+        CHECK_EQ(k.bitsPerSecond, 48 * 1000 / k.frameMs);
+        CHECK_EQ(k.bytesPerSecond(), k.bitsPerSecond / 8);
+        CHECK_EQ(voice::codecForRate(k.bitsPerSecond), (int)c);
+        CHECK_EQ(k.maxFrames() * (uint32_t)k.frameMs, voice::MAX_CLIP_SECONDS * 1000u);
+        CHECK(voice::knownCodec(c));
+    }
+    CHECK_EQ((int)voice::codecForRate(700), 0);
+    CHECK_EQ((int)voice::sendCodecs().front(), (int)voice::CODEC_SOTTO_V38);
+
+    // Silence: 1,200's is all zero bits but the run count; 600's and 400's
+    // a mean of 0 with the residual that keeps every frame at 0.
+    CHECK(voice::isSilent(voice::silentFrame(voice::CODEC_SOTTO_1200), voice::CODEC_SOTTO_1200));
+    CHECK(voice::silentFrame(voice::CODEC_SOTTO_1200) == voice::SILENT_FRAME);
+    CHECK(!voice::isSilent(noisySilence(), voice::CODEC_SOTTO_1200));
+    CHECK(voice::isSilent(noisySilence(), voice::CODEC_SOTTO_V38));
+    CHECK(voice::isSilent(vlrFrame(0, 34, 0, 0, 12, 0), voice::CODEC_SOTTO_600));
+    CHECK(voice::isSilent(vlrFrame(3, 66, 5, 0, 12, 0x1ABCDEF), voice::CODEC_SOTTO_600));
+    CHECK(!voice::isSilent(vlrFrame(0, 34, 0, 0, 13, 0), voice::CODEC_SOTTO_600));
+    CHECK(!voice::isSilent(vlrFrame(0, 34, 0, 1, 12, 0), voice::CODEC_SOTTO_600));
+    CHECK(voice::isSilent(vlrFrame(0, 34, 0, 0, 17, 0), voice::CODEC_SOTTO_400));
+    CHECK(!voice::isSilent(vlrFrame(0, 34, 0, 0, 12, 0), voice::CODEC_SOTTO_400));
+    CHECK(voice::silentFrame(voice::CODEC_SOTTO_600) == vlrFrame(0, 0, 0, 0, 12, 0));
+    CHECK(voice::silentFrame(voice::CODEC_SOTTO_400) == vlrFrame(0, 0, 0, 0, 17, 0));
+
+    // What the strip sees.
+    voice::FrameLook a = voice::lookOf(speech(20, 40), voice::CODEC_SOTTO_1200);
+    CHECK(!a.silent && a.voiced);
+    CHECK(std::fabs(a.pitchHz - voice::pitchHzOf(speech(20, 40))) < 1e-9);
+    CHECK(std::fabs(a.dbfs - voice::energyDbfsOf(speech(20, 40))) < 1e-9);
+    voice::FrameLook v = voice::lookOf(vlrFrame(1, 40, 3, 20, 5, 0), voice::CODEC_SOTTO_600);
+    CHECK(!v.silent && v.voiced);
+    CHECK(std::fabs(v.pitchHz - voice::pitchHzOf(speech(20, 40))) < 1e-9);
+    CHECK(std::fabs(v.dbfs - voice::energyDbfsOf(speech(20, 40))) < 1e-9);
+    CHECK(!voice::lookOf(vlrFrame(0, 40, 3, 20, 5, 0), voice::CODEC_SOTTO_400).voiced);
+    CHECK(voice::lookOf(voice::silentFrame(voice::CODEC_SOTTO_400), voice::CODEC_SOTTO_400).silent);
+
+    // Each slower codec through a file: runs squeeze its silence, and it
+    // reads back frame for frame, silence as its silent frame.
+    for (uint8_t c : {voice::CODEC_SOTTO_1200, voice::CODEC_SOTTO_600, voice::CODEC_SOTTO_400})
+    {
+        const voice::Codec& k = *voice::codecOf(c);
+        const bool vlr = c != voice::CODEC_SOTTO_1200;
+        auto loud = [&](int i) {
+            return vlr ? vlrFrame(1 + i % 7, 30 + i, i % 8, 18 + i % 5, (i * 7) % 32 == 12 ? 3 : (i * 7) % 32, 0x155555 + i)
+                       : speech(20 + i % 5, 30 + i, voice::Voicing::Voiced, 0x2AAAAAAAAull + (uint64_t)i);
+        };
+        std::vector<Frame> frames;
+        for (int i = 0; i < 5; i++) frames.push_back(loud(i));
+        // As long a pause as the codec's 30 minutes allow.
+        const size_t run = k.maxFrames() - 8;
+        for (size_t i = 0; i < run; i++) frames.push_back(voice::silentFrame(c));
+        for (int i = 5; i < 8; i++) frames.push_back(loud(i));
+        std::vector<uint8_t> file = voice::writeSot(frames, c);
+        CHECK(file.size() > 2);
+        if (file.size() <= 2) continue;
+        CHECK_EQ((int)file[2], (int)c);
+        // 8 frames of speech and a run frame (two at 1,200: 65,536 and the
+        // rest).
+        CHECK_EQ(file.size(), voice::HEADER_BYTES + (8 + (run + 65535) / 65536) * voice::FRAME_BYTES);
+        voice::Clip clip;
+        CHECK(voice::readSot(file, clip) == voice::ReadResult::Ok);
+        CHECK(clip.whole);
+        CHECK_EQ(clip.length, (uint32_t)frames.size());
+        CHECK(clip.frames == frames);
+        CHECK(std::fabs(clip.seconds() - frames.size() * k.frameSeconds()) < 1e-6);
+        CHECK_EQ(clip.frameMs(), k.frameMs);
+
+        // A hole of lost frames reads as the codec's silence, not good.
+        voice::Clip holed;
+        CHECK(voice::readSot(file.data(), file.size(), file.size(), {{voice::HEADER_BYTES + 6, voice::HEADER_BYTES + 12}},
+                             holed) == voice::ReadResult::Ok);
+        CHECK(!holed.whole);
+        CHECK_EQ(holed.length, (uint32_t)frames.size());
+        CHECK(holed.good[1] == 0);
+        CHECK(holed.frames[1] == voice::silentFrame(c));
+
+        // The gate: a quiet pause of 400 ms becomes silence but for the
+        // hang (at least a frame) each side, and the ends go.
+        std::vector<Frame> paused;
+        const int pause = (400 + k.frameMs - 1) / k.frameMs;
+        auto quiet = [&](int i) {
+            return vlr ? vlrFrame(1, 30, 0, 1, 3, (uint64_t)i) : bits48((1ull << 34) | ((uint64_t)i << 18) | 7);
+        };
+        for (int i = 0; i < 3; i++) paused.push_back(quiet(100 + i));
+        for (int i = 0; i < 6; i++) paused.push_back(loud(i));
+        for (int i = 0; i < pause; i++) paused.push_back(quiet(i));
+        for (int i = 0; i < 6; i++) paused.push_back(loud(i + 6));
+        const int hang = std::max(1, (40 + k.frameMs - 1) / k.frameMs);
+        // The quiet lead-in goes but for the hang next to the speech.
+        std::vector<Frame> trimmed = voice::trimSilence(voice::gatePauses(paused, voice::PauseGate(), c), c);
+        CHECK_EQ(trimmed.size(), (size_t)(12 + pause + std::min(3, hang)));
+        int silent = 0;
+        for (const Frame& f : trimmed) silent += voice::isSilent(f, c);
+        CHECK_EQ(silent, pause - 2 * hang);
+        // The file is smaller than the frames plain.
+        std::vector<uint8_t> sot = voice::makeSot(paused, voice::PauseGate(), c);
+        CHECK(sot.size() < voice::HEADER_BYTES + paused.size() * voice::FRAME_BYTES);
+        CHECK(voice::readSot(sot, clip) == voice::ReadResult::Ok);
+        CHECK_EQ(clip.length, (uint32_t)trimmed.size());
+
+        // The strip reads its pitch and level.
+        voice::PitchStrip strip = voice::pitchStrip(clip, 8);
+        bool anyVoiced = false;
+        for (const voice::StripColumn& col : strip.columns) anyVoiced = anyVoiced || col.voiced;
+        CHECK(anyVoiced);
+
+        // Playing while it comes: at the speech's own rate a clip starts
+        // about two frames in (the decoder needs two after a frame).
+        const double atRate = voice::playDelaySeconds(file, k.bytesPerSecond());
+        CHECK(atRate > 0 && atRate < 4 * k.frameSeconds() + 0.1);
+        // With bytes to spare, only the decoder's lookahead.
+        CHECK(std::fabs(voice::playDelaySeconds(file, 1e9) - k.lookahead * k.frameSeconds()) < 1e-6);
+
+        // Too long for the codec.
+        std::vector<Frame> tooLong(k.maxFrames() + 1, voice::silentFrame(c));
+        CHECK(voice::writeSot(tooLong, c).empty());
+        std::vector<uint8_t> big = voice::writeSot(std::vector<Frame>(k.maxFrames(), voice::silentFrame(c)), c);
+        CHECK(!big.empty());
+        CHECK(voice::readSot(big, clip) == voice::ReadResult::Ok);
+        uint32_t over = k.maxFrames() + 1;
+        big[4] = (uint8_t)(over >> 16);
+        big[5] = (uint8_t)(over >> 8);
+        big[6] = (uint8_t)over;
+        CHECK(voice::readSot(big, clip) == voice::ReadResult::TooLong);
+    }
+}
+
 } // namespace
+
 
 int main()
 {
@@ -478,5 +639,6 @@ int main()
     testStripAndSeek();
     testAirtime();
     testProtocolAndFormat();
+    testCodecs();
     return ragtime_test::finish();
 }

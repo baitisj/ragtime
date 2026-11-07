@@ -49,6 +49,46 @@ constexpr int ENERGY_SHIFT = 34;
 constexpr uint64_t SHAPE_MASK = (1ull << 34) - 1;
 // A silent frame's run count: the 16 bits after its energy field.
 constexpr int RUN_SHIFT = 18;
+constexpr uint64_t RUN_MASK = (uint64_t)MAX_RUN << RUN_SHIFT;
+constexpr uint64_t ALL_BITS = (1ull << 48) - 1;
+
+// sotto 600 and 400 (sotto's c/sotto_vlr_tables.h): voicing pattern 3
+// bits, pitch centre 7, pitch slope 3, energy mean 5, energy residual 5,
+// then 25 bits of shape anchors.
+constexpr int VLR_PATTERN_SHIFT = 45;
+constexpr int VLR_PITCH_SHIFT = 38;
+constexpr int VLR_MEAN_SHIFT = 30;
+constexpr int VLR_RESIDUAL_SHIFT = 25;
+// A silent superframe's run count, in the anchors.
+constexpr int VLR_RUN_SHIFT = 9;
+// The energy residual whose offsets from a mean of 0 leave every frame's
+// energy code 0, so the superframe is silence: row 12 of sotto 600's
+// table (-2, 0, 0, -2 sixteenths) and row 17 of sotto 400's (0, 0, -1, 1,
+// 2, 1). sotto's encoder sends them for digital silence. Frozen with the
+// codec numbers: new tables are a new codec.
+constexpr uint64_t VLR600_SILENT_RESIDUAL = 12;
+constexpr uint64_t VLR400_SILENT_RESIDUAL = 17;
+
+// Every codec: number, bit/s, frame ms, coded rate, layout, lookahead,
+// lost frames before quiet, name.
+const Codec CODECS[] = {
+    {CODEC_SOTTO_V36, 2400, 20, 8000, Layout::Frame20, 1, 3, "sotto v3.6"},
+    {CODEC_SOTTO_V38, 2400, 20, 16000, Layout::Frame20, 1, 3, "sotto 2400"},
+    {CODEC_SOTTO_1200, 1200, 40, 8000, Layout::Lr, 2, 2, "sotto 1200"},
+    {CODEC_SOTTO_600, 600, 80, 8000, Layout::Vlr, 2, 1, "sotto 600"},
+    {CODEC_SOTTO_400, 400, 120, 8000, Layout::Vlr, 2, 1, "sotto 400"},
+};
+
+uint64_t vlrSilentResidual(uint8_t codec)
+{
+    return codec == CODEC_SOTTO_400 ? VLR400_SILENT_RESIDUAL : VLR600_SILENT_RESIDUAL;
+}
+
+// Where a silent frame's run count sits.
+int runShiftOf(const Codec& c)
+{
+    return c.layout == Layout::Vlr ? VLR_RUN_SHIFT : RUN_SHIFT;
+}
 
 double fieldDbOf(int code)
 {
@@ -113,8 +153,86 @@ Frame makeFrame(Voicing voicing, int pitchCode, int energyCode, uint64_t shape)
 }
 
 //-------------------------------------------------------------------------
+// The codecs
+//-------------------------------------------------------------------------
+
+uint32_t Codec::maxFrames() const
+{
+    return MAX_CLIP_SECONDS * 1000u / (uint32_t)frameMs;
+}
+
+const Codec* codecOf(uint8_t number)
+{
+    for (const Codec& c : CODECS)
+        if (c.number == number) return &c;
+    return nullptr;
+}
+
+const std::vector<uint8_t>& sendCodecs()
+{
+    static const std::vector<uint8_t> codecs = {CODEC_SOTTO_V38, CODEC_SOTTO_1200, CODEC_SOTTO_600, CODEC_SOTTO_400};
+    return codecs;
+}
+
+uint8_t codecForRate(int bitsPerSecond)
+{
+    for (uint8_t n : sendCodecs())
+        if (codecOf(n)->bitsPerSecond == bitsPerSecond) return n;
+    return 0;
+}
+
+bool isSilent(const Frame& frame, uint8_t codec)
+{
+    const Codec* c = codecOf(codec);
+    if (!c || c->layout == Layout::Frame20) return isSilent(frame);
+    const uint64_t v = bitsOf(frame);
+    if (c->layout == Layout::Lr) return (v & ~RUN_MASK & ALL_BITS) == 0;
+    return ((v >> VLR_MEAN_SHIFT) & 0x1F) == 0 && ((v >> VLR_RESIDUAL_SHIFT) & 0x1F) == vlrSilentResidual(codec);
+}
+
+Frame silentFrame(uint8_t codec)
+{
+    const Codec* c = codecOf(codec);
+    if (c && c->layout == Layout::Vlr) return frameOf(vlrSilentResidual(codec) << VLR_RESIDUAL_SHIFT);
+    return SILENT_FRAME;
+}
+
+FrameLook lookOf(const Frame& frame, uint8_t codec)
+{
+    FrameLook look;
+    if (isSilent(frame, codec)) return look;
+    const Codec* c = codecOf(codec);
+    if (c && c->layout == Layout::Vlr)
+    {
+        const uint64_t v = bitsOf(frame);
+        const int mean = (int)((v >> VLR_MEAN_SHIFT) & 0x1F);
+        // Pattern 0 is unvoiced throughout, in both modes' tables; every
+        // other pattern has buzz somewhere.
+        look.voiced = ((v >> VLR_PATTERN_SHIFT) & 0x7) != 0;
+        const double lo = std::log(PITCH_LOW_HZ), hi = std::log(PITCH_HIGH_HZ);
+        look.pitchHz = std::exp(lo + (double)((v >> VLR_PITCH_SHIFT) & 0x7F) * (hi - lo) / 127.0);
+        // A mean of 0 with another residual is a whisper of sound.
+        look.dbfs = (mean == 0 ? fieldDbOf(1) : fieldDbOf(mean)) - ENERGY_OFFSET_DB;
+        look.silent = false;
+        return look;
+    }
+    // 2,400, and 1,200's frame A.
+    look.silent = false;
+    look.dbfs = energyCodeOf(frame) == 0 ? fieldDbOf(1) - ENERGY_OFFSET_DB : energyDbfsOf(frame);
+    look.voiced = voicingOf(frame) != Voicing::Unvoiced;
+    look.pitchHz = pitchHzOf(frame);
+    return look;
+}
+
+//-------------------------------------------------------------------------
 // The .sot file
 //-------------------------------------------------------------------------
+
+int Clip::frameMs() const
+{
+    const Codec* c = codecOf(codec);
+    return c ? c->frameMs : FRAME_MS;
+}
 
 uint8_t codecOfFormat(const std::string& format)
 {
@@ -127,18 +245,29 @@ bool isSot(const uint8_t* bytes, size_t length)
            (bytes[3] & ~KNOWN_FLAGS) == 0;
 }
 
-std::vector<Frame> gatePauses(const std::vector<Frame>& frames, const PauseGate& gate)
+std::vector<Frame> gatePauses(const std::vector<Frame>& frames, const PauseGate& gate, uint8_t codec)
 {
     std::vector<Frame> out = frames;
-    if (!gate.enabled) return out;
+    const Codec* c = codecOf(codec);
+    if (!gate.enabled || !c) return out;
+    std::vector<double> level(frames.size(), SILENCE_DBFS);
     std::vector<double> sounding;
-    for (const Frame& f : frames)
-        if (!isSilent(f)) sounding.push_back(fieldDbOf(energyCodeOf(f)));
+    for (size_t i = 0; i < frames.size(); i++)
+    {
+        const FrameLook look = lookOf(frames[i], codec);
+        if (look.silent) continue;
+        level[i] = look.dbfs;
+        sounding.push_back(look.dbfs);
+    }
     if (sounding.empty()) return out;
     const double threshold = percentile(sounding, 0.95) - gate.belowDb;
     const size_t n = frames.size();
-    auto quiet = [&](size_t i) { return isSilent(frames[i]) || fieldDbOf(energyCodeOf(frames[i])) <= threshold; };
-    const size_t hang = (size_t)std::max(0, gate.hangFrames);
+    auto quiet = [&](size_t i) { return level[i] <= threshold; };
+    // The gate's 20 ms frames in the codec's.
+    auto frames20 = [&](int count) { return (count * FRAME_MS + c->frameMs - 1) / c->frameMs; };
+    const size_t hang = gate.hangFrames > 0 ? (size_t)std::max(1, frames20(gate.hangFrames)) : 0;
+    const size_t minRun = (size_t)std::max(1, frames20(gate.minFrames));
+    const Frame silence = silentFrame(codec);
     size_t i = 0;
     while (i < n)
     {
@@ -150,47 +279,50 @@ std::vector<Frame> gatePauses(const std::vector<Frame>& frames, const PauseGate&
         size_t j = i;
         while (j < n && quiet(j)) j++;
         const bool atStart = i == 0, atEnd = j == n;
-        if (atStart || atEnd || j - i >= (size_t)std::max(1, gate.minFrames))
+        if (atStart || atEnd || j - i >= minRun)
         {
             size_t a = atStart ? i : std::min(j, i + hang);
             size_t b = atEnd ? j : (j - i > hang ? j - hang : i);
-            for (size_t k = a; k < b; k++) out[k] = SILENT_FRAME;
+            for (size_t k = a; k < b; k++) out[k] = silence;
         }
         i = j;
     }
     return out;
 }
 
-std::vector<Frame> trimSilence(const std::vector<Frame>& frames)
+std::vector<Frame> trimSilence(const std::vector<Frame>& frames, uint8_t codec)
 {
     size_t a = 0, b = frames.size();
-    while (a < b && isSilent(frames[a])) a++;
-    while (b > a && isSilent(frames[b - 1])) b--;
+    while (a < b && isSilent(frames[a], codec)) a++;
+    while (b > a && isSilent(frames[b - 1], codec)) b--;
     return std::vector<Frame>(frames.begin() + (std::ptrdiff_t)a, frames.begin() + (std::ptrdiff_t)b);
 }
 
 std::vector<uint8_t> writeSot(const std::vector<Frame>& frames, uint8_t codec)
 {
-    if (frames.size() > MAX_CLIP_FRAMES) return {};
+    const Codec* c = codecOf(codec);
+    if (!c || frames.size() > c->maxFrames()) return {};
+    const uint64_t silence = bitsOf(silentFrame(codec));
+    const int runShift = runShiftOf(*c);
     const uint32_t length = (uint32_t)frames.size();
     std::vector<uint8_t> out = {MAGIC_0, MAGIC_1, codec, 0, (uint8_t)(length >> 16), (uint8_t)(length >> 8),
                                 (uint8_t)length};
     size_t i = 0;
     while (i < frames.size())
     {
-        if (!isSilent(frames[i]))
+        if (!isSilent(frames[i], codec))
         {
             out.insert(out.end(), frames[i].begin(), frames[i].end());
             i++;
             continue;
         }
         size_t j = i;
-        while (j < frames.size() && isSilent(frames[j])) j++;
+        while (j < frames.size() && isSilent(frames[j], codec)) j++;
         size_t run = j - i;
         while (run > 0)
         {
             size_t take = std::min<size_t>(run, (size_t)MAX_RUN + 1);
-            Frame head = frameOf((uint64_t)(take - 1) << RUN_SHIFT);
+            Frame head = frameOf(silence | (uint64_t)(take - 1) << runShift);
             out.insert(out.end(), head.begin(), head.end());
             run -= take;
         }
@@ -201,7 +333,7 @@ std::vector<uint8_t> writeSot(const std::vector<Frame>& frames, uint8_t codec)
 
 std::vector<uint8_t> makeSot(const std::vector<Frame>& frames, const PauseGate& gate, uint8_t codec)
 {
-    std::vector<Frame> clip = trimSilence(gatePauses(frames, gate));
+    std::vector<Frame> clip = trimSilence(gatePauses(frames, gate, codec), codec);
     if (clip.empty()) return {};
     return writeSot(clip, codec);
 }
@@ -217,9 +349,12 @@ ReadResult readSot(const uint8_t* bytes, uint64_t size, uint64_t have, const std
     clip.codec = bytes[2];
     clip.flags = bytes[3];
     clip.length = ((uint32_t)bytes[4] << 16) | ((uint32_t)bytes[5] << 8) | bytes[6];
-    if (!knownCodec(clip.codec)) return ReadResult::UnknownCodec;
+    const Codec* codec = codecOf(clip.codec);
+    if (!codec) return ReadResult::UnknownCodec;
     if ((clip.flags & ~KNOWN_FLAGS) != 0) return ReadResult::UnknownFlags;
-    if (clip.length > MAX_CLIP_FRAMES) return ReadResult::TooLong;
+    if (clip.length > codec->maxFrames()) return ReadResult::TooLong;
+    const Frame silence = silentFrame(clip.codec);
+    const int runShift = runShiftOf(*codec);
     if ((size - HEADER_BYTES) % FRAME_BYTES != 0) return ReadResult::Malformed;
 
     // The clip in stretches: frames that came, and holes of lost frames,
@@ -255,9 +390,10 @@ ReadResult readSot(const uint8_t* bytes, uint64_t size, uint64_t have, const std
         {
             Frame f;
             std::copy(bytes + begin, bytes + end, f.begin());
-            const size_t count = isSilent(f) ? 1 + (size_t)((bitsOf(f) >> RUN_SHIFT) & MAX_RUN) : 1;
+            const bool silent = isSilent(f, clip.codec);
+            const size_t count = silent ? 1 + (size_t)((bitsOf(f) >> runShift) & MAX_RUN) : 1;
             if (total + count > clip.length) return ReadResult::Malformed;
-            frames.insert(frames.end(), count, isSilent(f) ? SILENT_FRAME : f);
+            frames.insert(frames.end(), count, silent ? silence : f);
             total += count;
         }
         if (total > clip.length) return ReadResult::Malformed;
@@ -294,7 +430,7 @@ ReadResult readSot(const uint8_t* bytes, uint64_t size, uint64_t have, const std
         if (k < holes.size())
         {
             const size_t lost = holes[k].lost + extra[k];
-            clip.frames.insert(clip.frames.end(), lost, SILENT_FRAME);
+            clip.frames.insert(clip.frames.end(), lost, silence);
             clip.good.insert(clip.good.end(), lost, 0);
         }
     }
@@ -330,10 +466,11 @@ PitchStrip pitchStrip(const Clip& clip, int columns)
     std::vector<double> pitches, levels;
     for (size_t i = 0; i < clip.frames.size(); i++)
     {
-        const Frame& f = clip.frames[i];
-        if (!clip.good[i] || isSilent(f)) continue;
-        levels.push_back(energyDbfsOf(f));
-        if (voicingOf(f) != Voicing::Unvoiced) pitches.push_back(pitchHzOf(f));
+        if (!clip.good[i]) continue;
+        const FrameLook f = lookOf(clip.frames[i], clip.codec);
+        if (f.silent) continue;
+        levels.push_back(f.dbfs);
+        if (f.voiced) pitches.push_back(f.pitchHz);
     }
     if (!pitches.empty())
     {
@@ -368,15 +505,14 @@ PitchStrip pitchStrip(const Clip& clip, int columns)
                 col.lost = true;
                 continue;
             }
-            const Frame& f = clip.frames[(size_t)i];
-            if (isSilent(f)) continue;
+            const FrameLook f = lookOf(clip.frames[(size_t)i], clip.codec);
+            if (f.silent) continue;
             col.silent = false;
-            const double db = energyDbfsOf(f);
-            col.dbfs = std::max(col.dbfs, db);
-            if (voicingOf(f) != Voicing::Unvoiced)
+            col.dbfs = std::max(col.dbfs, f.dbfs);
+            if (f.voiced)
             {
-                const double w = std::pow(10.0, db / 20.0);
-                logSum += w * std::log(pitchHzOf(f));
+                const double w = std::pow(10.0, f.dbfs / 20.0);
+                logSum += w * std::log(f.pitchHz);
                 weightSum += w;
             }
         }
@@ -419,8 +555,11 @@ double playDelaySeconds(const std::vector<uint8_t>& file, double bytesPerSecond)
 {
     Clip clip;
     if (readSot(file, clip) != ReadResult::Ok || !(bytesPerSecond > 0)) return -1.0;
-    // sotto's decoder gives a frame's sound once it has the frame after,
-    // so frame t (from 0) must be here by the time frame t - 1 plays.
+    // sotto's decoder gives a frame's sound once it has the frame after
+    // (two after, at 1,200 and slower), so frame t (from 0) must be here
+    // by the time frame t - lookahead plays.
+    const Codec& codec = *codecOf(clip.codec);
+    const int runShift = runShiftOf(codec);
     double delay = 0.0;
     uint64_t t = 0;
     const size_t coded = (file.size() - HEADER_BYTES) / FRAME_BYTES;
@@ -431,9 +570,9 @@ double playDelaySeconds(const std::vector<uint8_t>& file, double bytesPerSecond)
         std::copy(file.begin() + (std::ptrdiff_t)begin, file.begin() + (std::ptrdiff_t)(begin + FRAME_BYTES),
                   f.begin());
         const double here = (double)(begin + FRAME_BYTES) / bytesPerSecond;
-        const double plays = ((double)t - 1.0) * FRAME_MS / 1000.0;
+        const double plays = ((double)t - codec.lookahead) * codec.frameSeconds();
         delay = std::max(delay, here - plays);
-        t += isSilent(f) ? 1 + ((bitsOf(f) >> RUN_SHIFT) & MAX_RUN) : 1;
+        t += isSilent(f, clip.codec) ? 1 + ((bitsOf(f) >> runShift) & MAX_RUN) : 1;
     }
     return delay;
 }

@@ -2,7 +2,9 @@
 // (CI has none) only the refusals are checked; with one (RAGTIME_SOTTO, or
 // -DRAGTIME_SOTTO_TEST_LIB=... at configure time) a clip goes through the
 // 16 kHz encoder and decoder (codec 2) and comes back at about its level,
-// and a codec 1 clip plays through the 8 kHz decoder, doubled.
+// a codec 1 clip plays through the 8 kHz decoder, doubled, and speech goes
+// through each slower rate the library sends (1,200, and 600 and 400 once
+// it has their decoder), in time with what went in.
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
@@ -116,6 +118,135 @@ std::vector<voice::SottoFrame> codec1Clip()
     return frames;
 }
 
+// Where y's loudness lines up with x's: the lag of y, in samples, whose
+// 10 ms log levels best follow x's, from -max to max.
+long envelopeLag(const std::vector<int16_t>& x, const std::vector<int16_t>& y, long max)
+{
+    const size_t step = voice::SOTTO_RATE / 100;
+    auto env = [&](const std::vector<int16_t>& v) {
+        std::vector<double> e;
+        for (size_t i = 0; i + step <= v.size(); i += step / 4)
+        {
+            double sum = 0.0;
+            for (size_t j = 0; j < step; j++) sum += (double)v[i + j] * v[i + j];
+            e.push_back(std::log(sum / (double)step + 1e3));
+        }
+        return e;
+    };
+    const std::vector<double> ex = env(x), ey = env(y);
+    const long hop = (long)step / 4;
+    long best = 0;
+    double bestScore = -1e300;
+    for (long lag = -max / hop; lag <= max / hop; lag++)
+    {
+        double sxy = 0.0, sx = 0.0, sy = 0.0, sxx = 0.0, syy = 0.0;
+        size_t n = 0;
+        for (size_t i = 0; i < ex.size(); i++)
+        {
+            const long j = (long)i + lag;
+            if (j < 0 || j >= (long)ey.size()) continue;
+            sxy += ex[i] * ey[(size_t)j];
+            sx += ex[i];
+            sy += ey[(size_t)j];
+            sxx += ex[i] * ex[i];
+            syy += ey[(size_t)j] * ey[(size_t)j];
+            n++;
+        }
+        if (n < 10) continue;
+        const double cov = sxy - sx * sy / n, vx = sxx - sx * sx / n, vy = syy - sy * sy / n;
+        const double score = cov / std::sqrt(std::max(1e-9, vx * vy));
+        if (score > bestScore)
+        {
+            bestScore = score;
+            best = lag * hop;
+        }
+    }
+    return best;
+}
+
+// Speech through a slower codec: frames for its length, its level back,
+// in time, a clean .sot round trip, and the same sound played as it
+// arrives.
+void slowerCodec(voice::Sotto& lib, uint8_t codec, const std::vector<int16_t>& speech)
+{
+    const voice::Codec& c = *voice::codecOf(codec);
+    auto enc = lib.encoder(codec);
+    CHECK(enc != nullptr);
+    if (!enc) return;
+    CHECK_EQ((int)enc->codec(), (int)codec);
+    std::vector<voice::SottoFrame> frames;
+    size_t at = 0;
+    for (size_t piece : {37u, 160u, 500u, 1u, 999u, 4000u})
+    {
+        size_t take = std::min(piece, speech.size() - at);
+        enc->push(speech.data() + at, take, frames);
+        at += take;
+    }
+    enc->push(speech.data() + at, speech.size() - at, frames);
+    enc->flush(frames);
+    const double want = (double)speech.size() / voice::SOTTO_RATE / c.frameSeconds();
+    std::printf("%s: %zu frames for %.1f s (%.1f frames of speech)\n", c.name, frames.size(),
+                speech.size() / (double)voice::SOTTO_RATE, want);
+    CHECK(std::fabs((double)frames.size() - want) <= 2.0);
+
+    auto dec = lib.decoder(codec);
+    CHECK(dec != nullptr);
+    if (!dec) return;
+    CHECK_EQ(dec->delay(), codec == voice::CODEC_SOTTO_1200 ? 2 : 3);
+    CHECK_EQ(dec->frameSamples(), (size_t)(voice::SOTTO_RATE / 1000 * c.frameMs));
+    std::vector<int16_t> out = dec->decodeClip(frames, {});
+    CHECK_EQ(out.size(), frames.size() * dec->frameSamples());
+    const double inDb = activeDbfs(speech), outDb = activeDbfs(out);
+    const long lag = envelopeLag(speech, out, voice::SOTTO_RATE / 4);
+    std::printf("%s: active level in %.1f dBFS, out %.1f dBFS, %.1f ms late\n", c.name, inDb, outDb,
+                lag * 1000.0 / voice::SOTTO_RATE);
+    CHECK(std::fabs(inDb - outDb) < 4.0);
+    // In time: the decoder's delay taken out to within 10 ms.
+    CHECK(std::labs(lag) <= voice::SOTTO_RATE / 100);
+
+    // Through a .sot file and back, pauses gated.
+    std::vector<voice::Frame> plain(frames.begin(), frames.end());
+    std::vector<uint8_t> sot = voice::makeSot(plain, voice::PauseGate(), codec);
+    CHECK(!sot.empty());
+    CHECK_EQ((int)sot[2], (int)codec);
+    voice::Clip clip;
+    CHECK(voice::readSot(sot, clip) == voice::ReadResult::Ok);
+    CHECK(clip.whole);
+    std::printf("%s: %zu bytes plain, %zu gated, %.1f s\n", c.name, plain.size() * voice::FRAME_BYTES, sot.size(),
+                clip.seconds());
+    std::vector<voice::SottoFrame> expanded(clip.frames.begin(), clip.frames.end());
+    std::vector<int16_t> whole = dec->decodeClip(expanded, {});
+    CHECK(std::fabs(activeDbfs(whole) - outDb) < 1.5);
+
+    // Lost frames are covered and then go quiet.
+    std::vector<uint8_t> good(frames.size(), 1);
+    const size_t from = frames.size() / 3, to = from + std::max<size_t>(6, 600 / (size_t)c.frameMs);
+    for (size_t i = from; i < to; i++) good[i] = 0;
+    std::vector<int16_t> holed = dec->decodeClip(frames, good);
+    double tail = 0.0;
+    for (size_t i = (to - 2) * dec->frameSamples(); i < to * dec->frameSamples(); i++)
+        tail = std::max(tail, std::fabs((double)holed[i]));
+    std::printf("%s: lost frames, loudest %.0f at the end of the hole\n", c.name, tail);
+
+    // Played as it arrives, all of it in at once: as long as decodeClip's,
+    // every frame played.
+    std::shared_ptr<voice::SottoDecoder> live(lib.decoder(codec));
+    voice::FrameDecoder calls;
+    calls.decode = [live](const voice::Frame& f, bool ok, int16_t* o) { live->decode(f, ok, o); };
+    calls.flush = [live](int16_t* o) { return live->flush(o); };
+    calls.delay = live->delay();
+    voice::ArrivalPlayer player(calls);
+    player.arrived(sot, sot.size(), 0);
+    player.ended();
+    std::vector<int16_t> played;
+    int16_t pcm[voice::FRAME_SAMPLES];
+    for (size_t got; (got = player.pull(pcm, voice::FRAME_SAMPLES, 0)) > 0;) played.insert(played.end(), pcm, pcm + got);
+    CHECK_EQ(played.size(), whole.size());
+    CHECK_EQ(player.playedFrames(), (uint32_t)expanded.size());
+    CHECK(std::fabs(activeDbfs(played) - activeDbfs(whole)) < 1.5);
+    CHECK(std::labs(envelopeLag(whole, played, voice::SOTTO_RATE / 4)) <= voice::SOTTO_RATE / 100);
+}
+
 } // namespace
 
 int main()
@@ -146,7 +277,17 @@ int main()
     std::printf("loaded %s: %s\n", lib.info().path.c_str(), lib.info().format.c_str());
     CHECK_EQ((int)lib.info().codec, (int)voice::CODEC_SOTTO_V38);
     CHECK(!lib.decoder(0));
-    CHECK(!lib.decoder(3));
+    CHECK(!lib.decoder(6));
+    CHECK(!lib.encoder(voice::CODEC_SOTTO_V36));
+    std::string sends;
+    for (uint8_t c : lib.info().sends) sends += " " + std::string(voice::codecOf(c)->name);
+    std::printf("sends:%s\n", sends.c_str());
+    CHECK(lib.sends(voice::CODEC_SOTTO_V38));
+    // sotto 1200 is in every libsotto from the pinned commit on; 600 and
+    // 400 go only with their decoder.
+    CHECK(lib.sends(voice::CODEC_SOTTO_1200));
+    CHECK(lib.plays(voice::CODEC_SOTTO_600) == lib.sends(voice::CODEC_SOTTO_600) || !lib.sends(voice::CODEC_SOTTO_600));
+    for (uint8_t c : lib.info().sends) CHECK(lib.plays(c));
 
     // 2 s in, in odd-sized pieces, as the deck feeds it.
     std::vector<int16_t> in = buzz(2.0, -26.0);
@@ -270,6 +411,9 @@ int main()
         CHECK_EQ(player.playedFrames(), (uint32_t)expanded.size());
     }
 
+    // The slower rates, on the codec 1 clip's speech.
+    for (uint8_t c : lib.info().sends)
+        if (c != voice::CODEC_SOTTO_V38) slowerCodec(lib, c, heard);
 
     return ragtime_test::finish();
 }

@@ -1,5 +1,6 @@
 // Voice messages (docs/PROTOCOL.md, "Voice"): a clip of speech coded with
-// sotto, Jeff's 2,400 bit/s vocoder, sent as a file of kind 0x03 exactly as
+// sotto, Jeff's vocoder, at 2,400, 1,200, 600 or 400 bit/s, sent as a file
+// of kind 0x03 exactly as
 // a picture goes. This is the part with no audio and no codec in it: the
 // .sot file (its header, sotto's 6-byte frames, and the silence runs that
 // squeeze pauses), reading one that is still arriving or has holes, the
@@ -7,10 +8,15 @@
 // clip costs the air. libsotto itself, which turns sound into frames and
 // back, is loaded at run time elsewhere.
 //
-// A sotto frame is 48 bits for 20 ms of speech, most significant bit
-// first: voicing (2 bits), pitch (7), energy (5), then the shape of the
-// voice's spectrum (34, codebook indexes: 9, 9, 8 and 8 bits since v3.6). No frame depends on another, so
-// any first part of a clip plays, and a lost frame costs 20 ms.
+// A sotto frame is 48 bits, most significant bit first. At 2,400 bit/s
+// it is 20 ms of speech: voicing (2 bits), pitch (7), energy (5), then the
+// shape of the voice's spectrum (34, codebook indexes: 9, 9, 8 and 8 bits
+// since v3.6). The slower rates keep the 6-byte frame and make it a
+// superframe of more speech: 40 ms at 1,200 (two 20 ms frames, the first
+// with 2,400's first 14 bits), 80 ms at 600 and 120 ms at 400 (four or six
+// frames coded together: a voicing pattern, a pitch line, a gain-shape
+// energy and shape anchors). The functions below with no codec read the
+// 2,400 layout; the ones that take a codec read any.
 #ifndef RAGTIME_VOICE_VOICE_H
 #define RAGTIME_VOICE_VOICE_H
 
@@ -32,6 +38,7 @@ namespace voice
 //-------------------------------------------------------------------------
 
 constexpr int FRAME_BYTES = 6;
+// 2,400 bit/s's frame (codecs 1 and 2); Codec::frameMs has every codec's.
 constexpr int FRAME_MS = 20;
 constexpr int FRAMES_PER_SECOND = 1000 / FRAME_MS;
 // Speech costs this many bytes a second, before silence runs.
@@ -80,6 +87,86 @@ constexpr double ENERGY_STEP_DB = (ENERGY_MAX_DB - ENERGY_MIN_DB) / 31.0;
 Frame makeFrame(Voicing voicing, int pitchCode, int energyCode, uint64_t shape);
 
 //-------------------------------------------------------------------------
+// The codecs
+//-------------------------------------------------------------------------
+
+// The .sot codec numbers (the header's codec byte; docs/PROTOCOL.md,
+// "Voice"). Codec 1 is sotto v3.6 (Jeff, 2026-10-31): its frame, its
+// codebook (shape 9-9-8-8, 8-bit values), its energy from the spectral
+// envelope, its postfilter and its concealment, frozen as text table 0 is:
+// 8 kHz speech. Codec 2 is sotto v3.8 (Jeff, 2026-11-02): the same 48-bit
+// frame and codebook, coded from 16 kHz speech, with a 4-8 kHz hiss band
+// riding in the pitch field of all-unvoiced frames (which carry no pitch)
+// and one bit of a speaker-shape side channel. An 8 kHz decoder plays
+// codec 2 as codec 1 without the band; the 16 kHz decoder must not be given
+// codec 1, whose unvoiced frames' pitch fields would read as loud hiss.
+// Codecs 3, 4 and 5 are sotto 1200, 600 and 400 (Jeff, 2026-11-07), on
+// v3.7's core at 8 kHz, with no hiss band. A later sotto that changes the
+// bits is a new number; a receiver plays only numbers it knows.
+constexpr uint8_t CODEC_SOTTO_V36 = 1;
+constexpr uint8_t CODEC_SOTTO_V38 = 2;
+constexpr uint8_t CODEC_SOTTO_1200 = 3;
+constexpr uint8_t CODEC_SOTTO_600 = 4;
+constexpr uint8_t CODEC_SOTTO_400 = 5;
+// What Ragtime sends unless the deck's Rate says otherwise.
+constexpr uint8_t CODEC_SEND = CODEC_SOTTO_V38;
+
+// The frame's layout, for the fields Ragtime reads from the bits.
+enum class Layout : uint8_t
+{
+    Frame20,    // 2,400: one 20 ms frame
+    Lr,         // 1,200: frames A and B, A's first 14 bits as 2,400's
+    Vlr,        // 600 and 400: N frames coded together
+};
+
+struct Codec
+{
+    uint8_t number = 0;
+    int bitsPerSecond = 0;
+    int frameMs = 0;            // speech a 6-byte frame holds
+    int codedRate = 0;          // the sample rate sotto codes: 16000 or 8000
+    Layout layout = Layout::Frame20;
+    // Frames the decoder must have beyond one to play it: 1 for 2,400
+    // (a frame's sound comes once the next is in), 2 for the slower ones
+    // (sotto 1200, 600 and 400 rebuild a lost frame from both sides).
+    int lookahead = 1;
+    // Lost frames' sound sotto gives before it is quiet (it holds 40 ms,
+    // fades 6 dB each 20 ms and is silent after 80 ms).
+    int quietAfterLost = 3;
+    const char* name = "";      // "sotto 1200"
+
+    double frameSeconds() const { return frameMs / 1000.0; }
+    // Speech's bytes a second, before silence runs.
+    int bytesPerSecond() const { return FRAME_BYTES * 1000 / frameMs; }
+    // Frames in MAX_CLIP_SECONDS.
+    uint32_t maxFrames() const;
+};
+
+// The codec with that number, or null for one this Ragtime doesn't know.
+const Codec* codecOf(uint8_t number);
+// What a sender may pick, fastest first: 2, 3, 4, 5.
+const std::vector<uint8_t>& sendCodecs();
+// The codec for a rate in bit/s (2400, 1200, 600, 400), or 0.
+uint8_t codecForRate(int bitsPerSecond);
+
+// A frame as the pitch strip and the deck's scope see it.
+struct FrameLook
+{
+    bool silent = true;
+    bool voiced = false;
+    double pitchHz = 0.0;       // voiced: its (first) pitch
+    double dbfs = SILENCE_DBFS; // its (mean) level
+};
+FrameLook lookOf(const Frame& frame, uint8_t codec);
+// Whether a frame is the codec's silence, as a .sot file's runs hold it:
+// energy 0 at 2,400; at 1,200, every bit but a run count 0; at 600 and
+// 400, mean energy 0 with the residual that keeps every frame at 0.
+bool isSilent(const Frame& frame, uint8_t codec);
+// The codec's silent frame, run count 0: what a reader feeds the decoder
+// for each frame a run stands for (all zero bits for 2,400 and 1,200).
+Frame silentFrame(uint8_t codec);
+
+//-------------------------------------------------------------------------
 // The .sot file
 //-------------------------------------------------------------------------
 
@@ -88,41 +175,31 @@ Frame makeFrame(Voicing voicing, int pitchCode, int energyCode, uint64_t shape);
 constexpr size_t HEADER_BYTES = 7;
 constexpr uint8_t MAGIC_0 = 'S';
 constexpr uint8_t MAGIC_1 = 'o';
-// Codec 1 is sotto v3.6 (Jeff, 2026-10-31): its frame, its codebook (shape
-// 9-9-8-8, 8-bit values), its energy from the spectral envelope, its
-// postfilter and its concealment, frozen as text table 0 is: 8 kHz speech.
-// Codec 2 is sotto v3.8 (Jeff, 2026-11-02): the same 48-bit frame and
-// codebook, coded from 16 kHz speech, with a 4-8 kHz hiss band riding in
-// the pitch field of all-unvoiced frames (which carry no pitch) and one
-// bit of a speaker-shape side channel. An 8 kHz decoder plays codec 2 as
-// codec 1 without the band; the 16 kHz decoder must not be given codec 1,
-// whose unvoiced frames' pitch fields would read as loud hiss. A later
-// sotto that changes the bits is a new number; a receiver plays only
-// numbers it knows.
-constexpr uint8_t CODEC_SOTTO_V36 = 1;
-constexpr uint8_t CODEC_SOTTO_V38 = 2;
-// What Ragtime sends.
-constexpr uint8_t CODEC_SEND = CODEC_SOTTO_V38;
 // sotto_format() of the libsotto Ragtime needs: v3.8, which codes codec 2
 // and plays both.
 constexpr const char* SOTTO_V38_FORMAT = "sotto v3.8, shape 9-9-8-8";
 // And of one that speaks only codec 1, refused (it has no 16 kHz coder).
 constexpr const char* SOTTO_V36_FORMAT = "sotto v3.6, shape 9-9-8-8";
 // Codecs a reader plays.
-inline bool knownCodec(uint8_t codec) { return codec == CODEC_SOTTO_V36 || codec == CODEC_SOTTO_V38; }
+inline bool knownCodec(uint8_t codec) { return codecOf(codec) != nullptr; }
 // No flags yet. A reader refuses a file with a flag it doesn't know, since
 // a flag could change what the frames mean.
 constexpr uint8_t KNOWN_FLAGS = 0x00;
 // A clip is at most this long, silences included, so a file can't ask a
 // reader to make more than a few hundred KB of frames.
 constexpr uint32_t MAX_CLIP_SECONDS = 30 * 60;
+// In 2,400's 20 ms frames, the most of any codec (Codec::maxFrames).
 constexpr uint32_t MAX_CLIP_FRAMES = MAX_CLIP_SECONDS * FRAMES_PER_SECOND;
 // A silent frame in the file stands for itself and the next run count
-// silent frames, the count in the 16 bits after its energy field.
+// silent frames, the count in 16 bits the silence doesn't use: at 2,400
+// and 1,200 the 16 after the energy field, at 600 and 400 the 16 after
+// the energy residual and the first 7 bits of the anchors.
 constexpr uint32_t MAX_RUN = 0xFFFF;
 
-// The codec a library sends, from its sotto_format(): CODEC_SOTTO_V38 for
-// sotto v3.8 (which plays codec 1 too), 0 for any other, v3.6 included.
+// The 2,400 codec a library sends, from its sotto_format(): CODEC_SOTTO_V38
+// for sotto v3.8 (which plays codec 1 too), 0 for any other, v3.6
+// included. Whether it does 1,200, 600 and 400 is in what it exports
+// (voice::SottoInfo).
 uint8_t codecOfFormat(const std::string& format);
 
 // A .sot file by its first bytes.
@@ -140,7 +217,9 @@ struct PauseGate
     // A quiet run at least this long becomes silence, but for hangFrames
     // at each end that touch speech, so word tails and breaths before a
     // word keep their sound. Quiet at either end of the clip goes whatever
-    // its length, but for the hang next to the speech.
+    // its length, but for the hang next to the speech. Both in 20 ms
+    // frames: a slower codec's longer frames count the same time, and at
+    // least one frame of hang.
     int minFrames = 10;
     int hangFrames = 2;
     bool enabled = true;
@@ -149,12 +228,13 @@ std::vector<uint8_t> makeSot(const std::vector<Frame>& frames, const PauseGate& 
                              uint8_t codec = CODEC_SEND);
 
 // The steps makeSot takes, one at a time.
-// Quiet pauses into SILENT_FRAMEs.
-std::vector<Frame> gatePauses(const std::vector<Frame>& frames, const PauseGate& gate);
+// Quiet pauses into the codec's silent frames.
+std::vector<Frame> gatePauses(const std::vector<Frame>& frames, const PauseGate& gate, uint8_t codec = CODEC_SEND);
 // Silent frames off both ends.
-std::vector<Frame> trimSilence(const std::vector<Frame>& frames);
-// The file for frames as they stand: every silent frame becomes
-// SILENT_FRAME and each run of them one frame. Empty past MAX_CLIP_FRAMES.
+std::vector<Frame> trimSilence(const std::vector<Frame>& frames, uint8_t codec = CODEC_SEND);
+// The file for frames as they stand: every silent frame becomes the
+// codec's silent frame and each run of them one frame. Empty past the
+// codec's maxFrames, or for a codec this Ragtime doesn't know.
 std::vector<uint8_t> writeSot(const std::vector<Frame>& frames, uint8_t codec = CODEC_SEND);
 
 // Bytes of a file that haven't come, [begin, end): pieces lost on D2G.
@@ -171,13 +251,14 @@ enum class ReadResult
     NotSot,         // the magic is wrong
     UnknownCodec,   // a codec this Ragtime can't play
     UnknownFlags,   // a flag this Ragtime doesn't know
-    TooLong,        // the header says more than MAX_CLIP_FRAMES
+    TooLong,        // the header says more than the codec's maxFrames
     Malformed,      // the frames don't add up to the header's length
 };
 
-// A clip read from a .sot file, every 20 ms its own frame: a run of
-// silence is as many SILENT_FRAMEs. good says whether each frame came (0:
-// lost, for sotto's decoder to cover as it covers a lost frame on 2 m).
+// A clip read from a .sot file, every frame its own (20 ms at 2,400, up
+// to 120 ms at 400): a run of silence is as many silent frames
+// (silentFrame). good says whether each frame came (0: lost, for sotto's
+// decoder to cover as it covers a lost frame on 2 m).
 struct Clip
 {
     uint8_t codec = 0;
@@ -187,7 +268,10 @@ struct Clip
     std::vector<uint8_t> good;      // one a frame
     bool whole = false;             // every frame is here and good
 
-    double seconds() const { return length / (double)FRAMES_PER_SECOND; }
+    // The codec's frame, 20 ms for one this Ragtime doesn't know.
+    int frameMs() const;
+    double frameSeconds() const { return frameMs() / 1000.0; }
+    double seconds() const { return length * frameSeconds(); }
 };
 
 // Reads a .sot file of size bytes, of which the first have bytes have come
