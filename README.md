@@ -34,6 +34,71 @@ chats on the D2G broadcast group. Current features include:
   is data, so it goes wherever Data2G runs; at 2,400 it is a gear
   5-and-up feature, and the slower rates take it lower.
 
+## Screenshots
+
+These were taken on the bench that comes with the build
+(`ragtime_fake_air`, below): fake data2g-hosts and a few chatty bot
+stations, with no radio. The picture of the tower is drawn for the
+occasion.
+
+**The D2G net.** The Broadcast tab, with the stations heard on the
+left, Recent work under them, and Globus on the right drawing the path
+to the station picked in Recent work. Reactions sit under the lines,
+and an `@` message shows its acknowledgement. Further up, a file
+broadcast by W1AW is being repaired: two pieces were lost, and Ragtime
+is asking for them.
+
+![The Broadcast tab with Globus and Recent work](docs/images/readme/broadcast.png)
+
+**A ragchew.** A session with W1AW: a file offered and saved, and a
+picture going out, shown as it is sent.
+
+![A session, with a picture being sent](docs/images/readme/session.png)
+
+**Files.** Everything coming and going, with the repair under way: the
+red gaps in the bar are the pieces still missing.
+
+![The Files tab, a broadcast file asking for two pieces](docs/images/readme/files-repair.png)
+
+**Pictures and voice.** A picture is shrunk and coded as progressive
+JPEG 2000 (or Cool-chic) to fit the airtime you allow. The preview
+plays it as the far end will see it arrive. Voice messages come back
+as cards with a play button and the clip's pitch strip.
+
+<table>
+<tr>
+<td width="32%"><img src="docs/images/readme/picture-dialog.png" alt="The picture dialog, previewing the picture as it arrives"></td>
+<td><img src="docs/images/readme/pictures-and-voice.png" alt="A picture and voice messages in a session"></td>
+</tr>
+</table>
+
+**The microphone deck.** Speech goes through a high-pass, RNNoise,
+a leveller and sotto, with meters all the way. Hold Push to talk (or
+the space bar), let go, and the clip goes to the net or to the station
+you are ragchewing with. The bar along the bottom is the airtime it
+will take at the current gear.
+
+![The microphone deck, recording](docs/images/readme/microphone-deck.png)
+
+**The Ear.** A waterfall and spectrum of what the radio hears,
+recorded alongside data2g-host. It draws Data2G's passband, the rig's
+filter as the rig reports it, and the edges the band's noise really
+shows. With its box ticked in Settings > Rig, you can drag the
+filter's edges, or the notch out of its bay, right on the scope.
+
+![The Ear, three Data2G bursts on the waterfall](docs/images/readme/ear.png)
+
+**The gearshift.** Data2G's modes as gears, plotted by speed and the
+S/N each needs. The black dashed line is the path: the weakest station
+heard in the last 15 minutes, since a broadcast must reach them all.
+Gears in red need more than that, less a 3 dB margin. The blue line is
+the band's noise from the rig's S-meter, with an axis on the right
+saying what each gear's station reads on your S-meter; the blue
+shading is "under the needle", stations you can copy but the S-meter
+can't show.
+
+![The gearshift](docs/images/readme/gearshift.png)
+
 ## Downloads
 
 Releases carry a Linux AppImage (x86_64, glibc 2.39 or newer, as on
