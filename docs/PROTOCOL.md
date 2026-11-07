@@ -962,17 +962,29 @@ is why codec 2 has its own number. A library that speaks both says
 one: it plays a codec 1 clip through the 8 kHz decoder and doubles the
 rate, and a codec 2 clip through the 16 kHz one, five frames behind.
 
-**Codecs 3, 4 and 5 are sotto 1200, 600 and 400** (Jeff, 2026-11-07),
-on v3.7's core at 8 kHz, with no hiss band: sotto's `sotto_lr_*` and
-`sotto_vlr_*` calls, `docs/sotto-1200.md` and `docs/sotto-vlr.md` in
-sotto. Each keeps the 6-byte frame and makes it a superframe of more
+**Codecs 3, 4 and 5 are sotto 1200, 600 and 400 with v3.8's hiss band**
+(Jeff, 2026-11-07): v3.7's core codes 0-4 kHz, from 16 kHz speech with
+v3.8's voicing rules, and the 4-8 kHz band rides in pitch fields that
+carry no pitch (sotto's `sotto_lr_enc16` / `sotto_lr_dec16` and
+`sotto_vlr_enc16` / `sotto_vlr_dec16`; `docs/sotto-1200-hiss.md` and
+`docs/sotto-vlr.md`, "Hiss band", in sotto). At 1,200 an unvoiced frame
+A's pitch field holds a 6-bit hiss index and a side-channel bit, and an
+unvoiced frame B's pitch step a 2-bit level and a side bit. At 600 and
+400 a superframe with no pitched frame holds the index and side bit in
+its pitch centre and a level slope in its pitch slope, and one with one
+pitched frame a 2-bit level and a side bit in its slope (its pitch is
+then flat). An 8 kHz sotto 1200, 600 or 400 decoder plays them without
+the band; as with codecs 1 and 2, a stream coded without the band would
+read as a wrong one, so those have no number here. Each keeps the 6-byte frame and makes it a superframe of more
 speech, coded together, so a frame no longer decodes alone: sotto
 1200's second 20 ms is coded from the halfway point to the next
 superframe, and 600's and 400's shapes run on straight lines between
 anchors that reach into the next one. Their decoders play a superframe
 once they hold the two after it, and rebuild a lone lost one from both
-sides. A receiver that has a sotto with no 600 and 400 decoder shows
-such a clip's card but can't play it.
+sides. A receiver whose sotto can't decode a rate shows such a clip's
+card but can't play it. Ragtime plays them through
+sotto's 16 kHz decoders, four superframes behind at 1,200 and 600 and
+three at 400 (their own two, and the hiss band layer's 100 ms).
 
 A later sotto that changes the bits is a new codec number, and a
 receiver plays only numbers it knows; decoder-only changes can come in
@@ -1010,14 +1022,17 @@ pitch and last 18 bits are 0. A two-second pause is then 6 bytes, not
 600. A reader expands each run into frames of all zero bits, which
 sotto decodes as silence. The frames, runs expanded, add up to the
 header's length, or the file is malformed. The slower codecs run the
-same way, with their own silent superframe. At 1,200 it is all zero
-bits but the count, in the same bits 14 to 29 (A's energy 0, B's
-energy step its lowest). At 600 and 400 it is a mean energy of 0 with
-the residual that leaves every frame's energy code at 0 (residual 12
-at 600, 17 at 400, the ones sotto's encoder sends for digital silence),
-every other field 0 but the count, in bits 23 to 38 (the anchors'
-first 16). Only a superframe exactly like that is a run: a quiet one
-the encoder made otherwise stays as it is.
+same way, with their own silent superframe. At 1,200 it is A's energy 0
+and B's energy step 0 (code 4: B halfway between this A's energy and
+the next one's), the count in the same bits 14 to 29 and every other
+bit 0. Any superframe with A's energy 0 and B's step 0 is one, whatever
+its hiss fields hold, as sotto's encoder sends in digital silence; the
+one before a sound, with B's step below 0, stays as it is. At 600 and
+400 it is a mean energy of 0 with the residual that leaves every
+frame's energy code at 0 (residual 12 at 600, 17 at 400, the ones
+sotto's encoder sends for digital silence), the count in bits 23 to 38
+(the anchors' first 16) and every other field 0; any superframe with
+that mean and residual is one, whatever else it holds.
 
 **What a sender does before writing.** Silence at both ends goes, and a
 quiet pause becomes silence: a run of frames each at least 30 dB under

@@ -28,8 +28,8 @@ chats on the D2G broadcast group. Current features include:
   the path log (who was heard when, and on which band).
 - Voice messages, coded with [sotto](https://github.com/baitisj/sotto),
   Jeff's vocoder: 300 bytes for each second of speech at 2,400 bit/s,
-  or 150 at 1,200 (600 and 400 bit/s come once libsotto can decode
-  them), sent as a file the way pictures go, and in a ragchew played
+  150 at 1,200, 75 at 600 or 50 at 400, every rate with sotto's
+  4-8 kHz hiss band, sent as a file the way pictures go, and in a ragchew played
   while it is still arriving. The deck's Rate picks. Voice over Data2G
   is data, so it goes wherever Data2G runs; at 2,400 it is a gear
   5-and-up feature, and the slower rates take it lower.
@@ -105,9 +105,8 @@ Play and the deck say libsotto is missing. Ragtime needs sotto v3.8,
 at the commit pinned in `packaging/sotto.sh`: it codes 16 kHz speech
 with a 4-8 kHz hiss band (codec 2), and plays clips from the earlier
 v3.6 (codec 1) too. An older libsotto (v3.6 or v3.7) is passed over.
-From the pinned commit it also codes sotto 1200 (codec 3); sotto 600
-and 400 (codecs 4 and 5) turn on by themselves with a libsotto that
-can decode them as well as encode them.
+From the pinned commit it also codes sotto 1200, 600 and 400 with the
+hiss band (codecs 3, 4 and 5), from and to 16 kHz.
 
 **The build makes it for you.** On Linux, configuring Ragtime (`cmake -S
 . -B build`) builds libsotto when none is found, in about ten seconds,

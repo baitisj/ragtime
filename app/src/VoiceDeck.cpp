@@ -355,10 +355,10 @@ void VoiceDeck::buildPanel()
         rateRow->Add(engraved(m, "RATE", 7.0), 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, FromDIP(6));
         rate_ = new wxChoice(m, wxID_ANY);
         rate_->SetToolTip(
-            "How many bits a second sotto codes your next clip with. 2400 sounds best, with the 4-8 kHz hiss "
-            "band. 1200 takes half the airtime, at 8 kHz; 600 and 400 take a quarter and a sixth, and sound "
-            "rougher. The far end needs a Ragtime that plays the rate; the card says which it is.\n\n"
-            "600 and 400 show here once your libsotto can decode them too.");
+            "How many bits a second sotto codes your next clip with. 2400 sounds best. 1200 takes half the "
+            "airtime and comes close; 600 and 400 take a quarter and a sixth, and sound rougher. Every rate "
+            "carries the 4-8 kHz hiss band. The far end needs a Ragtime that plays the rate; the card says "
+            "which it is.");
         rateRow->Add(rate_, 1, wxALIGN_CENTER_VERTICAL);
         s->Add(rateRow, 0, wxEXPAND | wxTOP | wxBOTTOM, FromDIP(4));
         s->Add(engraved(m, wxString::FromUTF8("LEVEL CHECK \xc2\xb7 THIS CLIP"), 7.0), 0, wxBOTTOM, FromDIP(3));

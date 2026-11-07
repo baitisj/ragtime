@@ -49,8 +49,16 @@ constexpr int ENERGY_SHIFT = 34;
 constexpr uint64_t SHAPE_MASK = (1ull << 34) - 1;
 // A silent frame's run count: the 16 bits after its energy field.
 constexpr int RUN_SHIFT = 18;
-constexpr uint64_t RUN_MASK = (uint64_t)MAX_RUN << RUN_SHIFT;
-constexpr uint64_t ALL_BITS = (1ull << 48) - 1;
+
+// sotto 1200's frame B energy step (bits 37 to 39), whose code 4 is a
+// step of 0 from halfway between this A's energy and the next one's
+// (sotto's c/sotto_lr_tables.h, LR_E_ZERO).
+constexpr int LR_B_ENERGY_SHIFT = 8;
+constexpr uint64_t LR_B_ENERGY_ZERO = 4;
+// A silent superframe at 1,200: A's energy 0 and B's step 0, as sotto's
+// encoder sends for digital silence (its other fields then carry the
+// hiss band's guesses, which say nothing in silence).
+constexpr uint64_t LR_SILENCE = LR_B_ENERGY_ZERO << LR_B_ENERGY_SHIFT;
 
 // sotto 600 and 400 (sotto's c/sotto_vlr_tables.h): voicing pattern 3
 // bits, pitch centre 7, pitch slope 3, energy mean 5, energy residual 5,
@@ -74,9 +82,9 @@ constexpr uint64_t VLR400_SILENT_RESIDUAL = 17;
 const Codec CODECS[] = {
     {CODEC_SOTTO_V36, 2400, 20, 8000, Layout::Frame20, 1, 3, "sotto v3.6"},
     {CODEC_SOTTO_V38, 2400, 20, 16000, Layout::Frame20, 1, 3, "sotto 2400"},
-    {CODEC_SOTTO_1200, 1200, 40, 8000, Layout::Lr, 2, 2, "sotto 1200"},
-    {CODEC_SOTTO_600, 600, 80, 8000, Layout::Vlr, 2, 1, "sotto 600"},
-    {CODEC_SOTTO_400, 400, 120, 8000, Layout::Vlr, 2, 1, "sotto 400"},
+    {CODEC_SOTTO_1200, 1200, 40, 16000, Layout::Lr, 2, 2, "sotto 1200"},
+    {CODEC_SOTTO_600, 600, 80, 16000, Layout::Vlr, 2, 1, "sotto 600"},
+    {CODEC_SOTTO_400, 400, 120, 16000, Layout::Vlr, 2, 1, "sotto 400"},
 };
 
 uint64_t vlrSilentResidual(uint8_t codec)
@@ -186,7 +194,8 @@ bool isSilent(const Frame& frame, uint8_t codec)
     const Codec* c = codecOf(codec);
     if (!c || c->layout == Layout::Frame20) return isSilent(frame);
     const uint64_t v = bitsOf(frame);
-    if (c->layout == Layout::Lr) return (v & ~RUN_MASK & ALL_BITS) == 0;
+    if (c->layout == Layout::Lr)
+        return energyCodeOf(frame) == 0 && ((v >> LR_B_ENERGY_SHIFT) & 0x7) == LR_B_ENERGY_ZERO;
     return ((v >> VLR_MEAN_SHIFT) & 0x1F) == 0 && ((v >> VLR_RESIDUAL_SHIFT) & 0x1F) == vlrSilentResidual(codec);
 }
 
@@ -194,6 +203,7 @@ Frame silentFrame(uint8_t codec)
 {
     const Codec* c = codecOf(codec);
     if (c && c->layout == Layout::Vlr) return frameOf(vlrSilentResidual(codec) << VLR_RESIDUAL_SHIFT);
+    if (c && c->layout == Layout::Lr) return frameOf(LR_SILENCE);
     return SILENT_FRAME;
 }
 

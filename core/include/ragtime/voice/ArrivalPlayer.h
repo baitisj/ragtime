@@ -40,7 +40,7 @@ namespace voice
 {
 
 // Voice's sound: 16 kHz, 16-bit, 320 samples a 20 ms frame (sotto v3.8's
-// sotto_decode16; the 8 kHz codecs are decoded at 8 kHz and doubled).
+// sotto_decode16; codec 1 is decoded at 8 kHz and doubled).
 constexpr int PLAY_RATE = 16000;
 constexpr int FRAME_SAMPLES = PLAY_RATE * FRAME_MS / 1000;
 // A codec's frame of sound: 320 samples at 2,400, up to 1,920 at 400.
@@ -53,7 +53,7 @@ inline size_t frameSamplesOf(const Clip& clip)
 // or with good false covers a lost one, and gives a frame of sound (the
 // clip's codec's: frameSamplesOf) delay frames behind: the first delay
 // calls give silence (1 for sotto's 8 kHz decoder, SOTTO_DEC16_DELAY_FRAMES
-// = 5 for the 16 kHz one, 3 for the slower rates). flush gives the frames
+// = 5 for the 16 kHz one, 4 at 1,200 and 600, 3 at 400). flush gives the frames
 // it still holds, one a call, and false once it holds none.
 struct FrameDecoder
 {

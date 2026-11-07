@@ -11,9 +11,10 @@
 // and plays codecs 1 and 2, so a libsotto built as another variant or with
 // another codebook is passed over rather than sending frames nobody can
 // play. The slower rates come with what the library exports: sotto 1200
-// (codec 3) with sotto_lr_*, sotto 600 and 400 (codecs 4 and 5) with
-// sotto_vlr_*, sent only when it can decode them too (a library with the
-// 600 and 400 encoder but not yet their decoder sends neither).
+// (codec 3) with sotto_lr_enc16 and sotto_lr_dec16, sotto 600 and 400
+// (codecs 4 and 5) with sotto_vlr_enc16 and sotto_vlr_dec16, all with the
+// hiss band (a fixed-point build's create functions give NULL, and then
+// it has none of them).
 //
 // One library for the whole program; encoders and decoders are cheap and
 // each belongs to one thread at a time.
@@ -35,9 +36,8 @@ namespace voice
 {
 
 // sotto.h's figures, so callers need no sotto.h. Ragtime's voice is 16 kHz
-// both ways (sotto v3.8's sotto_encode16 and sotto_decode16); the 8 kHz
-// codecs (1, 3, 4 and 5) are halved to code and decoded at 8 kHz and
-// doubled.
+// both ways (sotto_encode16 and sotto_decode16, and their 1,200, 600 and
+// 400 kin); codec 1 is decoded at 8 kHz and doubled.
 constexpr int SOTTO_RATE = 16000;
 constexpr int SOTTO_SAMPLES = 320;      // 20 ms at 16 kHz, one 2,400 frame
 constexpr int SOTTO_FRAME_BYTES = 6;
@@ -61,9 +61,9 @@ struct SottoInfo
 };
 
 // Turns 16 kHz speech into a codec's frames. Codec 2's come about 320 ms
-// behind (the pitch tracker's look-ahead, then v3.8's voicing rules');
-// the slower codecs' speech is halved to 8 kHz first, and their frames come
-// a few frames behind: flush() at the end gives the rest.
+// behind (the pitch tracker's look-ahead, then v3.8's voicing rules'),
+// the slower codecs' about 450 ms (1,200) to a second (600, 400): flush()
+// at the end gives the rest.
 class SottoEncoder
 {
 public:
@@ -82,18 +82,15 @@ public:
 
 private:
     friend class Sotto;
-    struct Halver;
     SottoEncoder(const SottoApi* api, uint8_t codec, void* state);
-    // A block of the coded rate's samples to sotto: 320 at 16 kHz for
-    // codec 2, 320 at 8 kHz for 1,200, 80 at 8 kHz for 600 and 400.
+    // A block of samples to sotto: 320 (20 ms) for codec 2, 640 (40 ms)
+    // for 1,200, 160 (10 ms) for 600 and 400.
     void block(const int16_t* samples, std::vector<SottoFrame>& out);
-    void coded(const int16_t* samples, size_t count, std::vector<SottoFrame>& out);
     size_t blockSamples() const;
     const SottoApi* api_;
     uint8_t codec_;
     void* state_;
-    std::unique_ptr<Halver> halver_;    // the 8 kHz codecs: 16 kHz to 8 kHz
-    std::vector<int16_t> part_;         // at the coded rate
+    std::vector<int16_t> part_;         // a block not yet full
     bool flushed_ = false;
 };
 
@@ -103,9 +100,9 @@ private:
 // its hiss band, 5 frames behind; a codec 1 clip through the 8 kHz
 // sotto_decode (sotto_decode16 would read its unvoiced frames' pitch as
 // hiss), doubled to 16 kHz, one frame behind. The slower codecs' decoders
-// play a frame once they have the two after it: sotto 1200 two frames
-// behind, 600 and 400 three (v3.7's core adds 20 ms, the part frame made
-// up with silence at the start). A lost frame (good false) is covered as sotto covers one on 2 m:
+// play a frame once they have the two after it, and the hiss band's layer
+// adds 100 ms: sotto 1200 and 600 come four frames behind, 400 three.
+// A lost frame (good false) is covered as sotto covers one on 2 m:
 // the last sound held 40 ms, fading 6 dB per 20 ms, silent after 80 ms;
 // the slower codecs rebuild a lone lost frame from both sides.
 class SottoDecoder
@@ -147,7 +144,7 @@ private:
     int delay_ = 1;
     size_t frameSamples_ = SOTTO_SAMPLES;
     void* state_ = nullptr;
-    std::unique_ptr<Doubler> doubler_;  // the 8 kHz codecs: 8 kHz to 16 kHz
+    std::unique_ptr<Doubler> doubler_;  // codec 1: 8 kHz to 16 kHz
     std::vector<int16_t> fifo_;         // sound at 16 kHz not yet given
     bool drained_ = false;              // sotto's own flush has given all it had
     int held_ = 0;                      // frames fed whose sound hasn't come out

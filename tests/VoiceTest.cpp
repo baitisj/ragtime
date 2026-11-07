@@ -505,11 +505,17 @@ void testCodecs()
     CHECK_EQ((int)voice::codecForRate(700), 0);
     CHECK_EQ((int)voice::sendCodecs().front(), (int)voice::CODEC_SOTTO_V38);
 
-    // Silence: 1,200's is all zero bits but the run count; 600's and 400's
-    // a mean of 0 with the residual that keeps every frame at 0.
+    // Silence: 1,200's is A's energy 0 and B's energy step 0 (code 4),
+    // whatever the hiss band's fields hold; 600's and 400's a mean of 0
+    // with the residual that keeps every frame at 0.
     CHECK(voice::isSilent(voice::silentFrame(voice::CODEC_SOTTO_1200), voice::CODEC_SOTTO_1200));
-    CHECK(voice::silentFrame(voice::CODEC_SOTTO_1200) == voice::SILENT_FRAME);
+    CHECK(voice::silentFrame(voice::CODEC_SOTTO_1200) == (Frame{0, 0, 0, 0, 0x04, 0}));
+    CHECK(!voice::isSilent(voice::SILENT_FRAME, voice::CODEC_SOTTO_1200));
     CHECK(!voice::isSilent(noisySilence(), voice::CODEC_SOTTO_1200));
+    // What sotto's encoder sends in digital silence, and just before a
+    // sound (B's step below 0, so B stays as it is).
+    CHECK(voice::isSilent(Frame{0x2a, 0x02, 0xee, 0x67, 0x04, 0xad}, voice::CODEC_SOTTO_1200));
+    CHECK(!voice::isSilent(Frame{0x2a, 0x02, 0xee, 0x67, 0x00, 0x13}, voice::CODEC_SOTTO_1200));
     CHECK(voice::isSilent(noisySilence(), voice::CODEC_SOTTO_V38));
     CHECK(voice::isSilent(vlrFrame(0, 34, 0, 0, 12, 0), voice::CODEC_SOTTO_600));
     CHECK(voice::isSilent(vlrFrame(3, 66, 5, 0, 12, 0x1ABCDEF), voice::CODEC_SOTTO_600));
