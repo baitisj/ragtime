@@ -2143,10 +2143,14 @@ against the plain modes).
   sotto's hiss encoder sends in digital silence.
 - **The library.** `voice::Sotto` binds `sotto_lr_enc16` /
   `sotto_lr_dec16` and `sotto_vlr_enc16` / `sotto_vlr_dec16` from the
-  pin, sotto `aa21055`, and tries a coder and decoder of each when it
+  pin, sotto `8a8c677`, and tries a coder and decoder of each when it
   loads: a fixed-point build's stubs give NULL, and then that rate is
   left off (`SottoInfo::sends` and `plays`). The pin's v3.8 frames and
   sound are bit-identical to `ebe5386`'s on two LibriSpeech clips.
+  Jeff re-pinned it the same day for sotto's low-rate pitch fixes
+  (`efc7000`: an onset frame codes its voiced half's pitch, and the
+  600/400 pitch line leaves out frames 20 steps off), which change
+  only the encoder.
   The plain 8 kHz `sotto_lr_*` and `sotto_vlr_*` calls are no longer
   used: no Ragtime release sent a plain stream.
 - **The coders.** 16 kHz in and out, as at 2,400. `SottoEncoder` feeds
