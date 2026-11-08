@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <memory>
 #include <vector>
 
 #include "Check.h"
@@ -169,6 +170,42 @@ void testLiveLevel()
             live.addBlock(1e-8);
         CHECK(near(live.levelDb(), before, 0.0001));
     }
+    // Digital silence (the zeros a clip drains with) neither counts nor
+    // drops the noise floor, so the room's own noise doesn't pass for
+    // speech after it.
+    {
+        LiveLevel live(2.0);
+        std::vector<float> x = speech(48000, 6.0, 5);
+        setActiveLevel(x, 48000, -45);
+        addFanNoise(x, -60, 5);
+        std::vector<float> room((size_t)48000 * 10, 0.0f);
+        addFanNoise(room, -60, 6);
+        auto feed = [&](const std::vector<float>& v) {
+            int counted = 0;
+            for (size_t i = 0; i + 480 <= v.size(); i += 480)
+            {
+                double s = 0;
+                for (size_t k = 0; k < 480; k++)
+                    s += (double)v[i + k] * v[i + k];
+                if (live.addBlock(s / 480) && live.voiced())
+                    counted++;
+            }
+            return counted;
+        };
+        feed(x);
+        double noise = live.noiseFloorDb();
+        for (int k = 0; k < 50; k++)
+            CHECK(!live.addBlock(0.0));
+        CHECK(near(live.noiseFloorDb(), noise, 0.0001));
+        int counted = feed(room);
+        std::fprintf(stderr, "live level: %d of 1000 blocks of the room counted as speech\n", counted);
+        CHECK(counted < 20);
+        // A voice detector that hears none keeps even speech out.
+        LiveLevel deaf(2.0);
+        for (size_t i = 0; i + 480 <= x.size(); i += 480)
+            CHECK(!deaf.addBlock(1e-4, false));
+        CHECK(!deaf.heard());
+    }
 }
 
 void testLimiter()
@@ -307,22 +344,38 @@ void testPeakMode()
     }
     Leveller pushed(480), popped(480);
     popped.setPeakMode(true);
-    // Both settle on the same first 8 s, before any shout. Stop half a
-    // second after the last.
-    x.resize((size_t)(48000 * 12.8));
+    // Both settle on the same first 8 s, before any shout. Stop just after
+    // the last.
+    x.resize((size_t)(48000 * 10.4));
     std::vector<float> a = level(pushed, x);
     std::vector<float> b = level(popped, x);
     double loudPushed = loudestBlock(a, 48000 * 8);
     double loudPopped = loudestBlock(b, 48000 * 8);
-    std::fprintf(stderr, "peak mode: loudest 10 ms pushed in %.2f, popped out %.2f dBFS; gain %.2f vs %.2f\n",
-                 loudPushed, loudPopped, pushed.gainDb(), popped.gainDb());
+    std::fprintf(stderr, "peak mode: loudest 10 ms pushed in %.2f, popped out %.2f dBFS; gain %.2f vs %.2f, cut %.2f\n",
+                 loudPushed, loudPopped, pushed.gainDb(), popped.gainDb(), popped.peakCutDb());
     // Pushed in, the shouts go through to the limiter.
     CHECK(loudPushed > PEAK_MODE_DBFS + 1.0);
     // Popped out, no 10 ms block comes out over the mark...
     CHECK(loudPopped <= PEAK_MODE_DBFS + 0.5);
     // ...and the voice stays turned down after the shouting.
-    CHECK(popped.gainDb() < pushed.gainDb() - 2.0);
-    CHECK(popped.peakCutDb() > 2.0);
+    CHECK(popped.gainDb() < pushed.gainDb() - 1.0);
+    CHECK(popped.peakCutDb() > 1.0);
+    // The cut wears off with time, pause or not: 1 dB a second, and the
+    // leveller's own gain holds still meanwhile.
+    {
+        double cut = popped.peakCutDb();
+        double own = popped.levelGainDb();
+        std::vector<float> pause(48000 * 2, 0.0f);
+        addNoise(pause, -80, 12);
+        level(popped, pause);
+        CHECK(near(popped.peakCutDb(), std::max(0.0, cut - 2.0 * Leveller::PEAK_RECOVER_DB_PER_S), 0.02));
+        CHECK(near(popped.levelGainDb(), own, 0.001));
+        std::vector<float> long_pause(48000 * 30, 0.0f);
+        addNoise(long_pause, -80, 13);
+        level(popped, long_pause);
+        CHECK(popped.peakCutDb() == 0.0);
+        CHECK(near(popped.gainDb(), own, 0.001));
+    }
     // Pushed back in, the cut goes.
     popped.setPeakMode(false);
     std::vector<float> more = speech(48000, 0.5, 19);
@@ -511,6 +564,112 @@ void testChain()
     }
 }
 
+
+// A stand-in noise reducer: passes the audio through and says whatever
+// it is told about the voice.
+class FixedDetector : public Denoiser
+{
+public:
+    explicit FixedDetector(float probability) : probability_(probability) {}
+    float process(float*) override { return probability_; }
+    int latency() const override { return 0; }
+    void reset() override {}
+    const char* name() const override { return "fixed"; }
+
+private:
+    float probability_;
+};
+
+// What the deck does between clips: the microphone keeps running.
+void runIdle(Chain& chain, const std::vector<float>& x)
+{
+    std::vector<float> out;
+    for (size_t pos = 0; pos < x.size(); pos += 480)
+        chain.process(x.data() + pos, std::min<size_t>(480, x.size() - pos), out);
+}
+
+// P.56 active level of y[from, to) seconds at 16 kHz.
+double activeBetween(const std::vector<float>& y, double from, double to)
+{
+    size_t a = std::min(y.size(), (size_t)(from * Chain::OUT_RATE));
+    size_t b = std::min(y.size(), (size_t)(to * Chain::OUT_RATE));
+    ActiveLevel level(Chain::OUT_RATE);
+    level.add(y.data() + a, b - a);
+    return level.levelDb();
+}
+
+void testLevellerHolds()
+{
+    // A long session, as Jeff had it: the deck open, a fan in the room
+    // 15 dB under a quiet talker, clips of a minute with 20 s of the room
+    // between them. Between clips the leveller once took the fan for a
+    // voice (the drained zeros dropped its noise floor, and flickering
+    // noise stood over the gate) and climbed to +30 dB, so every clip
+    // started loud and sank for 10 to 15 s. Now the gain holds in the
+    // gaps, and each clip is as loud at its end as at its start.
+    for (int detector = 0; detector < 2; detector++)
+    {
+        Chain chain(48000, detector ? std::make_unique<FixedDetector>(1.0f) : nullptr);
+        std::vector<float> room((size_t)48000 * 20, 0.0f);
+        addFanNoise(room, -60, 30);
+        runIdle(chain, room);
+        double first = 0;
+        for (int clip = 0; clip < 4; clip++)
+        {
+            std::vector<float> x = speech(48000, 60.0, 31 + (uint64_t)clip);
+            setActiveLevel(x, 48000, -45);
+            addFanNoise(x, -60, 41 + (uint64_t)clip);
+            std::vector<float> y = runClip(chain, x, 480);
+            double before = chain.takeReadings().levellerGainDb;
+            std::vector<float> gap((size_t)48000 * 20, 0.0f);
+            addFanNoise(gap, -60, 51 + (uint64_t)clip);
+            runIdle(chain, gap);
+            double after = chain.takeReadings().levellerGainDb;
+            // The first 10 s of the very first clip are the leveller
+            // finding the voice.
+            double start = activeBetween(y, clip == 0 ? 10 : 0, clip == 0 ? 20 : 10);
+            double end = activeBetween(y, 50, 60);
+            std::fprintf(stderr, "holds%s: clip %d starts %.2f, ends %.2f dBFS; gain %.2f, %.2f after 20 s of room\n",
+                         detector ? " (detector)" : "", clip, start, end, before, after);
+            CHECK(near(after, before, 0.5));
+            CHECK(near(start, LEVEL_TARGET_DBFS, 1.5));
+            CHECK(near(end, LEVEL_TARGET_DBFS, 1.5));
+            CHECK(near(start, end, 1.5));
+            if (clip == 0)
+                first = before;
+            else
+                CHECK(near(before, first, 1.5));
+        }
+    }
+    // A voice detector that hears no voice keeps the gain where it is, however
+    // loud the sound: a cough, a knock, the radio in the background.
+    {
+        Chain chain(48000, std::make_unique<FixedDetector>(0.0f));
+        chain.presetLevellerGain(6.0);
+        std::vector<float> x = speech(48000, 10.0, 60);
+        setActiveLevel(x, 48000, -20);
+        runClip(chain, x, 480);
+        Readings r = chain.takeReadings();
+        CHECK(near(r.levellerGainDb, 6.0, 0.001));
+        CHECK(near(r.levelGainDb, 6.0, 0.001));
+        CHECK(r.inputActiveDb <= LEVEL_FLOOR_DBFS);
+    }
+    // A preset gain (the one a closed deck kept) skips the fast start: the
+    // first clip of a new deck starts at the target, not 30 dB off it.
+    {
+        Chain chain(48000);
+        chain.presetLevellerGain(19.0);
+        CHECK(near(chain.takeReadings().levelGainDb, 19.0, 0.001));
+        std::vector<float> x = speech(48000, 10.0, 61);
+        setActiveLevel(x, 48000, -45);
+        addFanNoise(x, -60, 61);
+        std::vector<float> y = runClip(chain, x, 480);
+        double start = activeBetween(y, 0, 5);
+        std::fprintf(stderr, "preset: first 5 s at %.2f dBFS\n", start);
+        CHECK(near(start, LEVEL_TARGET_DBFS, 1.5));
+    }
+}
+
 } // namespace
 
 int main()
@@ -524,5 +683,6 @@ int main()
     testPeakMode();
     testLevelCheck();
     testChain();
+    testLevellerHolds();
     return ragtime_test::finish();
 }

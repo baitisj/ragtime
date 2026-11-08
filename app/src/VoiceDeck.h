@@ -189,6 +189,10 @@ private:
     std::vector<float> coded_;              // 16 kHz, waiting for the encoder
     std::vector<float> scratch_;            // the audio thread's own
     bool newSettings_ = true;
+    // The leveller's gain, kept when the deck closes and handed to the next
+    // chain: known once it has heard a voice, or from the last deck.
+    bool levellerKnown_ = false;
+    double levellerDb_ = 0;
 
     // The window's.
     ragtime::deck::Talk talk_state_;

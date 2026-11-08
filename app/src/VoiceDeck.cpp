@@ -5,6 +5,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <limits>
 
 #include <wx/button.h>
 #include <wx/checkbox.h>
@@ -571,6 +572,13 @@ void VoiceDeck::loadSettings()
     settings_.targetDb = loadInt(keys::VOICE_DECK_TARGET, (int)std::lround(voice::LEVEL_TARGET_DBFS * 10)) / 10.0;
     settings_.peakMode = loadBool(keys::VOICE_DECK_PEAKS, false);
     settings_ = settings_.clamped();
+    const int leveller = loadInt(keys::VOICE_DECK_LEVELLER, std::numeric_limits<int>::min());
+    if (leveller != std::numeric_limits<int>::min())
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        levellerKnown_ = true;
+        levellerDb_ = leveller / 10.0;
+    }
 }
 
 void VoiceDeck::saveSettings() const
@@ -582,6 +590,8 @@ void VoiceDeck::saveSettings() const
     saveBool(keys::VOICE_DECK_NOISE_IN, settings_.noiseIn);
     saveInt(keys::VOICE_DECK_TARGET, (int)std::lround(settings_.targetDb * 10));
     saveBool(keys::VOICE_DECK_PEAKS, settings_.peakMode);
+    // The microphone has stopped by now (the close handler stops it first).
+    if (levellerKnown_) saveInt(keys::VOICE_DECK_LEVELLER, (int)std::lround(levellerDb_ * 10));
     if (review_) saveBool(keys::VOICE_DECK_REVIEW, review_->GetValue());
 }
 
@@ -611,6 +621,9 @@ void VoiceDeck::onSamples(const float* samples, size_t n, int rate)
     {
         chain_ = std::make_unique<voice::Chain>(rate, denoise::makeRnNoise());
         newSettings_ = true;
+        // The leveller carries on where it was, in the last deck or before
+        // the microphone changed its rate.
+        if (levellerKnown_) chain_->presetLevellerGain(levellerDb_);
     }
     if (newSettings_)
     {
@@ -742,6 +755,11 @@ void VoiceDeck::showMeters(double seconds)
         {
             r = chain_->takeReadings();
             have = true;
+            if (r.speaking || levellerKnown_)
+            {
+                levellerKnown_ = true;
+                levellerDb_ = r.levelGainDb;
+            }
         }
     }
     activeNeedle_.step(have ? r.inputActiveDb : voice::LEVEL_FLOOR_DBFS, seconds);

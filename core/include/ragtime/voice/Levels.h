@@ -36,6 +36,10 @@ constexpr double PEAK_MODE_DBFS = -10.0;
 // The quietest level a dB figure here reports, for silence.
 constexpr double LEVEL_FLOOR_DBFS = -120.0;
 
+// 10 ms quieter than this is digital silence, not a room: a 16-bit
+// microphone's own noise sits 30 dB above it.
+constexpr double DIGITAL_SILENCE_DBFS = -110.0;
+
 // dBFS of a mean square (power), never below LEVEL_FLOOR_DBFS.
 double powerDb(double meanSquare);
 
@@ -77,8 +81,14 @@ private:
 // gate count as speech (with P.56's 200 ms hangover), and their power is
 // averaged over the last few seconds of speech. The gate sits 15.9 dB
 // under the level found, as P.56's threshold does, and above the noise
-// floor; it reads within a dB or so of ActiveLevel on speech, and holds
-// still through pauses.
+// floor (the quietest 100 ms mean, rising 3 dB a second); it reads
+// within a dB or so of ActiveLevel on speech, and holds still through
+// pauses.
+//
+// A block of digital silence (under DIGITAL_SILENCE_DBFS: the zeros the
+// chain drains itself with, or a microphone that sends nothing) is no
+// room noise, so it neither counts nor drops the noise floor; it once
+// left the gate wide open for the room's own noise after every clip.
 class LiveLevel
 {
 public:
@@ -87,7 +97,10 @@ public:
 
     void reset();
     // One 10 ms block's mean square. Returns whether it counted as speech.
-    bool addBlock(double meanSquare);
+    // mayBeSpeech false (a voice detector heard none) keeps the block out
+    // of the speech whatever its level; it still counts for the noise
+    // floor and runs the hangover down.
+    bool addBlock(double meanSquare, bool mayBeSpeech = true);
 
     // LEVEL_FLOOR_DBFS until speech is heard.
     double levelDb() const;
@@ -102,6 +115,10 @@ private:
     double power_ = 0;
     uint64_t blocks_ = 0;
     double noiseDb_ = 0;
+    std::array<double, 10> recent_{};  // the last 100 ms of mean squares
+    double recentSum_ = 0;
+    size_t recentPos_ = 0;
+    size_t recentFill_ = 0;
     bool started_ = false;
     int hang_ = 0;
     bool voiced_ = false;

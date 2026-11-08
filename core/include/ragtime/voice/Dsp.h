@@ -114,15 +114,21 @@ private:
 // what it is given (LiveLevel's way, over a couple of seconds of speech) and
 // moves its gain so that level comes out at the target, at most 3 dB a
 // second up and 6 down, and only while someone is talking, so pauses don't
-// pump the room up. For the first half second of speech after a reset it
-// moves fast, so the first clip starts near the target; after that it keeps
-// its gain from clip to clip, as a hand on a fader would.
+// pump the room up. Speech is what stands over LiveLevel's gate and, when
+// the chain has a noise reducer, what its voice detector calls a voice:
+// the room's hum, a fan or typing between clips never moves the gain.
+// For the first half second of speech it ever hears it moves fast, so
+// the first clip starts near the target; after that it keeps its gain
+// from clip to clip, as a hand on a fader would, and presetGain() hands
+// it the gain a deck closed with.
 //
 // Peak mode (the Target knob popped out): a 10 ms block that would come out
-// over PEAK_MODE_DBFS turns the gain down by its overshoot at once, and that
-// cut then wears off at 1 dB a second of speech, slower than the leveller
-// itself moves, so a voice that keeps shouting stays turned down rather than
-// being limited syllable by syllable. Pushed back in, the cut goes.
+// over PEAK_MODE_DBFS turns the gain down by its overshoot at once (the
+// attack), and that cut then wears off at 1 dB a second (the decay),
+// pause or speech, slower than the leveller itself moves, so a voice that
+// keeps shouting stays turned down rather than being limited syllable by
+// syllable, and one that stops shouting comes back up. Pushed back in, the
+// cut goes.
 class Leveller
 {
 public:
@@ -135,8 +141,16 @@ public:
     void setPeakMode(bool on) { peakMode_ = on; }
     bool peakMode() const { return peakMode_; }
 
-    // One 10 ms block, in place.
-    void processBlock(float* block);
+    // One 10 ms block, in place. voiceProbability: a voice detector's
+    // word on it, 0 to 1 (under VOICE_PROBABILITY it is not speech); a
+    // negative one means there is no detector, and the level alone decides.
+    void processBlock(float* block, float voiceProbability = -1.0f);
+
+    // Sets the leveller's own gain, as a deck closed with it, and skips the
+    // fast start: the gain is known already.
+    void presetGain(double gainDb);
+    // The leveller's own gain, peak mode's cut left out: what a deck keeps.
+    double levelGainDb() const { return levelGainDb_; }
 
     // The gain it applies, peak mode's cut included.
     double gainDb() const { return gainDb_; }
@@ -156,6 +170,8 @@ public:
     static constexpr double FAST_DB_PER_S = 100.0;
     static constexpr double FAST_SECONDS = 0.5;
     static constexpr double PEAK_RECOVER_DB_PER_S = 1.0;
+    // A voice detector under this has heard no voice.
+    static constexpr float VOICE_PROBABILITY = 0.5f;
 
 private:
     size_t block_;

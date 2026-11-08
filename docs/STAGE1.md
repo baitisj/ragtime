@@ -1836,16 +1836,39 @@ its knobs and reads its meters.
 - **Leveller.** A slow hand on the fader (`voice::Leveller`): it measures
   the active level coming in over about 2 s of speech (`voice::LiveLevel`,
   10 ms blocks over a gate 15.9 dB under the level found, as P.56's
-  threshold, and above the noise floor, with P.56's 200 ms hangover) and
-  moves its gain so that comes out at the Target, at most 3 dB a second
-  up and 6 down, on speech only, so pauses don't pump the room up. For the
-  first half second of speech it moves fast; after that it keeps its gain
-  from clip to clip. Gain from -30 to +30 dB.
+  threshold, and 6 dB above the noise floor, with P.56's 200 ms hangover)
+  and moves its gain so that comes out at the Target, at most 3 dB a
+  second up and 6 down (its attack and decay), on speech only, so pauses
+  don't pump the room up. Speech is what stands over the gate and, with
+  RNNoise built in, what RNNoise's voice detector calls a voice
+  (probability 0.5 or more, this frame's or the last, as its output is a
+  frame behind); the detector runs whether Noise is pushed in or not. For
+  the first half second of speech it ever hears it moves fast; after that
+  it keeps its gain from clip to clip, and the deck keeps it when it
+  closes (`/Voice/Deck/LevellerTenthsDb`) and starts the next one there
+  (`Chain::presetLevellerGain`), with no fast start. Gain from -30 to
+  +30 dB.
+
+  The noise floor is the quietest 100 ms mean, rising at most 3 dB a
+  second. 10 ms blocks of noise flicker by several dB, so a floor that
+  followed the quietest single block sat well inside the noise, and the
+  room passed for speech. Blocks of digital silence (under -110 dBFS: the
+  zeros a clip's end drains the chain with, or a microphone sending
+  nothing) neither count nor drop the floor. Before 2026-11-08 both let
+  the room's noise through the gate between clips, and the leveller
+  climbed toward +30 dB while Jeff wasn't talking, so each clip started
+  loud and sank for 10 to 15 s, and it seemed to start afresh with every
+  send. `testLevellerHolds` in `tests/VoiceChainTest.cpp` plays four
+  minute-long clips with a fan 15 dB under the voice and 20 s of room
+  between them: the gain holds in the gaps, and each clip ends within
+  1.5 dB of where it starts.
 - **Peak mode** (Target popped out): a 10 ms block that would come out
   over -10 dBFS (3 dB under sotto's ceiling) turns the gain down by its
-  overshoot at once, and that cut wears off at 1 dB a second of speech,
-  slower than the leveller moves, so a voice that keeps shouting stays
-  turned down. Pushed back in, the cut goes.
+  overshoot at once (the attack), and that cut wears off at 1 dB a second
+  (the decay), talking or not, slower than the leveller moves, so a voice
+  that keeps shouting stays turned down and one that stops comes back.
+  Until 2026-11-08 it wore off only while someone talked, so a cut stayed
+  through every pause. Pushed back in, the cut goes.
 - **Limiter.** Last, at 16 kHz, so it sees exactly what sotto gets: every
   10 ms window's RMS under -8.3 dBFS (1 dB under sotto's ceiling) and
   every sample under -1 dBFS, looking ahead 15 ms so the gain falls over

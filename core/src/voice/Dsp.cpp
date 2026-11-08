@@ -275,14 +275,24 @@ void Leveller::reset()
     lastPeakCut_ = 0;
 }
 
-void Leveller::processBlock(float* block)
+void Leveller::presetGain(double gainDb)
+{
+    levelGainDb_ = std::clamp(gainDb, MIN_GAIN_DB, MAX_GAIN_DB);
+    gainDb_ = std::max(MIN_GAIN_DB, levelGainDb_ - peakCutDb_);
+    appliedGain_ = dbToGain(gainDb_);
+    // Past the fast start.
+    speechBlocks_ = std::max<uint64_t>(speechBlocks_, (uint64_t)std::ceil(FAST_SECONDS / 0.01) + 1);
+}
+
+void Leveller::processBlock(float* block, float voiceProbability)
 {
     double sum = 0;
     for (size_t i = 0; i < block_; i++)
         sum += (double)block[i] * block[i];
     double meanSquare = sum / (double)block_;
 
-    speaking_ = level_.addBlock(meanSquare);
+    const bool mayBeSpeech = voiceProbability < 0 || voiceProbability >= VOICE_PROBABILITY;
+    speaking_ = level_.addBlock(meanSquare, mayBeSpeech);
     lastPeakCut_ = 0;
     // The gain moves on speech itself, not in the hangover after it.
     if (level_.voiced())
@@ -296,10 +306,9 @@ void Leveller::processBlock(float* block)
             levelGainDb_ = std::min(want, levelGainDb_ + up);
         else
             levelGainDb_ = std::max(want, levelGainDb_ - down);
-        // What peak mode took off comes back slowly, and only while
-        // someone talks.
-        peakCutDb_ = std::max(0.0, peakCutDb_ - PEAK_RECOVER_DB_PER_S * 0.01);
     }
+    // What peak mode took off wears off with time, talking or not.
+    peakCutDb_ = std::max(0.0, peakCutDb_ - PEAK_RECOVER_DB_PER_S * 0.01);
     if (!peakMode_)
         peakCutDb_ = 0;
     else
