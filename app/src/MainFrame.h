@@ -48,6 +48,7 @@ class BroadcastPage;
 struct FileCard;
 class ConnectionBar;
 class EarFrame;
+class GearshiftDialog;
 class VoiceDeck;
 struct DeckTarget;
 class FilesPage;
@@ -238,6 +239,9 @@ private:
     // The gearshift, its button and the 500 Hz switch.
     void loadGearshift();
     void showGearshift();
+    // Whether the rig's filter is read between bursts: while the Ear or the
+    // gearshift is open, or Ragtime has changed it.
+    void watchFilter();
     // The receive filter's width, for the gearshift's S-meter axis.
     std::optional<double> filterWidthHz() const;
     void gearChanged();
@@ -334,6 +338,11 @@ private:
 
     ConnectionBar* bar_ = nullptr;
     EarFrame* ear_ = nullptr;               // while the Ear is open
+    GearshiftDialog* gearDialog_ = nullptr; // while the gearshift is open
+    // View > Keep tool windows on top: the Ear, the deck, the gearshift and
+    // pictures stay above the main window (off by default, Andrew's ask,
+    // 2026-11-08). It counts from the next time each opens.
+    bool toolsOnTop_ = false;
     VoiceDeck* voiceDeck_ = nullptr;        // while the microphone deck is open
     PictureShelf pictures_;
     std::map<std::string, PictureFrame*> pictureFrames_;   // open, by shelf key

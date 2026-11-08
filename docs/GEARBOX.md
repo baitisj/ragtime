@@ -10,8 +10,12 @@ One popup, opened from the Gear button by Send (a speedometer with the
 gear's short name under it) or Settings > Gearshift (Ctrl+G). Every
 choice in it takes effect at once, so it closes with **Done** and a green
 check, never "Close" or "Save" (Jeff, 2026-10-25: "X Close" read as
-cancelling); Escape and the title bar's X do the same. The popup *is*
-the Submode Map:
+cancelling); Escape and the title bar's X do the same. It doesn't hold
+up the main window: the chat stays in use beside it, and what changes
+there (Auto following the S/N, the 500 Hz switch) shows in it at once.
+It stacks as any other window, unless View > Keep tool windows on top
+is ticked (off by default; Andrew, 2026-11-08). The popup *is* the
+Submode Map:
 
 - Speed across (bits per second, log scale from 20 to 10k), the S/N each
   mode needs down the side (harder further down), one dot per mode,

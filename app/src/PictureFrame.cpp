@@ -33,9 +33,9 @@ double scaleFor(int position)
 
 } // namespace
 
-PictureFrame::PictureFrame(wxWindow* parent, const wxString& title, const std::string& suggestedName)
+PictureFrame::PictureFrame(wxWindow* parent, const wxString& title, const std::string& suggestedName, bool onTop)
     : wxFrame(parent, wxID_ANY, title, wxDefaultPosition, wxDefaultSize,
-              wxDEFAULT_FRAME_STYLE | wxFRAME_FLOAT_ON_PARENT)
+              wxDEFAULT_FRAME_STYLE | (onTop ? wxFRAME_FLOAT_ON_PARENT : 0))
     , suggestedName_(suggestedName)
 {
     SetIcons(appIcons());

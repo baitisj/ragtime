@@ -89,7 +89,9 @@ struct VoiceDeckHooks
 class VoiceDeck : public wxFrame
 {
 public:
-    VoiceDeck(wxWindow* parent, VoiceDeckHooks hooks);
+    // onTop keeps it above the main window (View > Keep tool windows on
+    // top); otherwise it stacks as any other window.
+    VoiceDeck(wxWindow* parent, VoiceDeckHooks hooks, bool onTop);
     ~VoiceDeck() override;
 
 private:

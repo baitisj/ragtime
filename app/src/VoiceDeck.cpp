@@ -112,9 +112,9 @@ wxStaticText* engraved(wxWindow* parent, const wxString& text, double points = 7
 
 } // namespace
 
-VoiceDeck::VoiceDeck(wxWindow* parent, VoiceDeckHooks hooks)
+VoiceDeck::VoiceDeck(wxWindow* parent, VoiceDeckHooks hooks, bool onTop)
     : wxFrame(parent, wxID_ANY, wxString::FromUTF8("Microphone deck \xc2\xb7 Sotto Voce"), wxDefaultPosition,
-              wxDefaultSize, wxDEFAULT_FRAME_STYLE | wxFRAME_FLOAT_ON_PARENT)
+              wxDefaultSize, wxDEFAULT_FRAME_STYLE | (onTop ? wxFRAME_FLOAT_ON_PARENT : 0))
     , hooks_(std::move(hooks))
     , sotto_(voice::Sotto::library())
     , timer_(this)

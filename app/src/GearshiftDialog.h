@@ -7,7 +7,7 @@
 #include <string>
 #include <vector>
 
-#include <wx/dialog.h>
+#include <wx/frame.h>
 #include <wx/timer.h>
 
 #include "ragtime/gearbox/Gearbox.h"
@@ -36,11 +36,20 @@ struct BandNoise
 // the Gear button by Send. Every change goes straight to the Gearshift it
 // was given, and onChange runs after each, so the buttons can follow.
 // noise, when given, is asked once a second.
-class GearshiftDialog : public wxDialog
+//
+// It is a window of its own, so the main window stays in use beside it
+// (Andrew, 2026-11-08). With onTop it stays above owner; otherwise it
+// stacks as any other window. onClosed runs as it closes.
+class GearshiftDialog : public wxFrame
 {
 public:
-    GearshiftDialog(wxWindow* parent, ragtime::gearbox::Gearshift& shift,
-                    std::function<void()> onChange, std::function<BandNoise()> noise = nullptr);
+    GearshiftDialog(wxWindow* owner, bool onTop, ragtime::gearbox::Gearshift& shift,
+                    std::function<void()> onChange, std::function<void()> onClosed,
+                    std::function<BandNoise()> noise = nullptr);
+
+    // The gearshift changed from outside (S/N, the 500 Hz switch, data2g-
+    // host's modes): show it as it is now.
+    void follow();
 
 private:
     void refresh();
@@ -50,9 +59,11 @@ private:
 
     ragtime::gearbox::Gearshift& shift_;
     std::function<void()> onChange_;
+    std::function<void()> onClosed_;
     std::function<BandNoise()> noise_;
     wxTimer noiseTimer_;
     bool refreshing_ = false;
+    bool changing_ = false;   // while onChange_ runs: its own follow() is not needed
 
     std::array<wxToggleButton*, 4> widthChips_ {};
     wxStaticText* widthNote_ = nullptr;
