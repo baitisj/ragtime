@@ -94,6 +94,9 @@ public:
 
 private:
     void buildPanel();
+    // The window's size from the panel's: once built, and again once
+    // shown, when GTK knows its widgets' real sizes.
+    void fitToPanel(wxWindow* plate);
     void loadSettings();
     void saveSettings() const;
     void applySettings();

@@ -122,6 +122,26 @@ void drawCaption(wxGraphicsContext& gc, const wxString& text, double x, double y
     }
 }
 
+wxSize textSize(const wxWindow* w, const wxFont& font, const wxString& text)
+{
+    int x = 0, y = 0;
+    w->GetTextExtent(text.empty() ? wxString("Ag") : text, &x, &y, nullptr, nullptr, &font);
+    return wxSize(text.empty() ? 0 : x, y);
+}
+
+int lineHeight(const wxWindow* w, const wxFont& font)
+{
+    return textSize(w, font, "").y;
+}
+
+int captionTextWidth(const wxWindow* w, const wxFont& font, const wxString& text, double spacing)
+{
+    double total = 0.0;
+    for (size_t i = 0; i < text.length(); i++)
+        total += textSize(w, font, wxString(text[i])).x + (i + 1 < text.length() ? spacing : 0.0);
+    return (int)std::ceil(total);
+}
+
 } // namespace deckart
 
 //-------------------------------------------------------------------------
@@ -133,7 +153,12 @@ DeckModule::DeckModule(wxWindow* parent, const wxString& title) : wxPanel(parent
     SetBackgroundStyle(wxBG_STYLE_PAINT);
     SetBackgroundColour(deckart::colours().module);
     auto* outer = new wxBoxSizer(wxVERTICAL);
-    outer->AddSpacer(title_.empty() ? 6 : FromDIP(26));
+    outer->AddSpacer(title_.empty() ? 6 : ruleY() + FromDIP(4));
+    // Wide enough for the title.
+    if (!title_.empty())
+        outer->Add(deckart::captionTextWidth(this, deckart::captionFont(this, 8.5), title_, FromDIP(22) / 10.0)
+                       + 2 * FromDIP(10),
+                   0);
     content_ = new wxBoxSizer(wxVERTICAL);
     outer->Add(content_, 1, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, FromDIP(8));
     SetSizer(outer);
@@ -161,7 +186,14 @@ void DeckModule::onPaint(wxPaintEvent&)
     gc->SetFont(deckart::captionFont(this, 8.5), c.ink);
     deckart::drawCaption(*gc, title_, s.x / 2.0, FromDIP(7), FromDIP(22) / 10.0);
     gc->SetPen(wxPen(c.edge, 1));
-    gc->StrokeLine(FromDIP(8), FromDIP(22), s.x - FromDIP(8), FromDIP(22));
+    gc->StrokeLine(FromDIP(8), ruleY(), s.x - FromDIP(8), ruleY());
+}
+
+int DeckModule::ruleY() const
+{
+    // The title starts 7 down; the rule goes under it, 22 down at the usual
+    // font size, lower for a bigger one.
+    return std::max(FromDIP(22), FromDIP(7) + deckart::lineHeight(this, deckart::captionFont(this, 8.5)) + FromDIP(2));
 }
 
 //-------------------------------------------------------------------------
@@ -169,7 +201,7 @@ void DeckModule::onPaint(wxPaintEvent&)
 //-------------------------------------------------------------------------
 
 DeckControl::DeckControl(wxWindow* parent, wxWindowID id, const wxSize& size, long style)
-    : wxControl(parent, id, wxDefaultPosition, size, wxBORDER_NONE | style)
+    : wxControl(parent, id, wxDefaultPosition, size, wxBORDER_NONE | style), design_(size)
 {
     SetBackgroundStyle(wxBG_STYLE_PAINT);
     SetMinSize(size);
@@ -178,6 +210,15 @@ DeckControl::DeckControl(wxWindow* parent, wxWindowID id, const wxSize& size, lo
         Refresh();
         e.Skip();
     });
+}
+
+void DeckControl::refit()
+{
+    const wxSize need = textNeeds();
+    const wxSize size(std::max(design_.x, need.x), std::max(design_.y, need.y));
+    if (size == GetMinSize()) return;
+    SetMinSize(size);
+    InvalidateBestSize();
 }
 
 void DeckControl::onPaint(wxPaintEvent&)
@@ -220,6 +261,7 @@ DeckKnob::DeckKnob(wxWindow* parent, wxWindowID id, const wxString& caption, con
         Refresh();
         e.Skip();
     });
+    refit();
 }
 
 void DeckKnob::setValue(double value)
@@ -235,6 +277,7 @@ void DeckKnob::setPushed(bool pushed)
 void DeckKnob::setFormatter(Formatter f)
 {
     formatter_ = std::move(f);
+    refit();
     Refresh();
 }
 
@@ -247,6 +290,7 @@ void DeckKnob::setRingWhenOut(bool out)
 void DeckKnob::setNote(const wxString& note)
 {
     note_ = note;
+    refit();
     Refresh();
 }
 
@@ -352,7 +396,8 @@ void DeckKnob::onLostCapture(wxMouseCaptureLostEvent&)
 void DeckKnob::paint(wxGraphicsContext& gc, const wxSize& size)
 {
     deckart::Colours c = deckart::colours();
-    const double captionH = FromDIP(12), readoutH = FromDIP(13), noteH = note_.empty() ? 0 : FromDIP(11);
+    const Lines l = lines();
+    const double captionH = l.caption, readoutH = l.readout, noteH = l.note;
     double radius = std::min(size.x - 8.0, size.y - captionH - readoutH - noteH - 6.0) / 2.0;
     double cx = size.x / 2.0, cy = 3.0 + radius;
     bool enabled = IsEnabled();
@@ -444,6 +489,39 @@ void DeckKnob::paint(wxGraphicsContext& gc, const wxSize& size)
     }
 }
 
+DeckKnob::Lines DeckKnob::lines() const
+{
+    // At least the spacing the deck was drawn with; more for bigger text.
+    Lines l;
+    l.caption = std::max(FromDIP(12), deckart::lineHeight(this, deckart::captionFont(this, 7.5)));
+    l.readout = std::max(FromDIP(13), deckart::lineHeight(this, deckart::readoutFont(this, 8.5)));
+    l.note = note_.empty() ? 0 : std::max(FromDIP(11), deckart::lineHeight(this, deckart::readoutFont(this, 7.0)));
+    return l;
+}
+
+wxSize DeckKnob::textNeeds() const
+{
+    // The knob keeps the size it was made with; the lines under it grow.
+    const wxSize d = design();
+    const int diameter = std::min(d.x - 8, d.y - FromDIP(12) - FromDIP(13) - (note_.empty() ? 0 : FromDIP(11)) - 6);
+    const Lines l = lines();
+    int width = deckart::captionTextWidth(this, deckart::captionFont(this, 7.5), caption_, dip(1.4));
+    width = std::max(width, deckart::textSize(this, deckart::readoutFont(this, 7.0), note_).x);
+    // The readout's widest: the ends, the default and every position, in
+    // and out.
+    const deck::KnobSpec& spec = knob_.spec();
+    std::vector<double> values = spec.positions;
+    values.push_back(spec.minimum);
+    values.push_back(spec.maximum);
+    values.push_back(spec.defaultValue);
+    const wxFont readout = deckart::readoutFont(this, 8.5);
+    for (double v : values)
+        for (bool pushed : {false, true})
+            if (spec.pushable || pushed == spec.defaultPushed)
+                width = std::max(width, deckart::textSize(this, readout, formatter_(v, pushed)).x);
+    return wxSize(width + 4, std::max(0, diameter) + 6 + l.caption + l.readout + l.note);
+}
+
 //-------------------------------------------------------------------------
 // DeckMeter
 //-------------------------------------------------------------------------
@@ -453,6 +531,37 @@ DeckMeter::DeckMeter(wxWindow* parent, Face face, double floor, double top, std:
     : DeckControl(parent, wxID_ANY, size), face_(face), floor_(floor), top_(top), labels_(std::move(labels)),
       bands_(std::move(bands)), needle_(floor), hold_(NAN)
 {
+    refit();
+}
+
+bool DeckMeter::labelsFit(const wxSize& size) const
+{
+    // paint()'s geometry: every label inside the window's inner edge.
+    const double r = std::min(size.x * 0.46, size.y * 0.95);
+    const double cx = size.x / 2.0, cy = size.y * 0.22 + r;
+    const wxFont font = deckart::readoutFont(this, 6.5);
+    for (double l : labels_)
+    {
+        const wxSize t = deckart::textSize(this, font, labelText(l));
+        const double a = angleOf(l), out = r * 0.98 + t.y * 0.4;
+        const double x = cx + out * std::sin(a), y = cy - out * std::cos(a);
+        if (x - t.x / 2.0 < 3 || x + t.x / 2.0 > size.x - 3 || y - t.y / 2.0 < 3) return false;
+    }
+    return true;
+}
+
+wxString DeckMeter::labelText(double l)
+{
+    return l < 0 ? wxString::FromUTF8("\xE2\x88\x92") + wxString::Format("%g", -l) : wxString::Format("%g", l);
+}
+
+wxSize DeckMeter::textNeeds() const
+{
+    // Grow the face, keeping its shape, until the labels fit.
+    wxSize size = design();
+    for (int i = 0; i < 100 && !labelsFit(size); i++)
+        size = wxSize(size.x + 2, (int)std::lround((size.x + 2) * (double)design().y / design().x));
+    return size;
 }
 
 void DeckMeter::setNeedle(double dbfs)
@@ -520,7 +629,7 @@ void DeckMeter::paint(wxGraphicsContext& gc, const wxSize& size)
         pt(a, r * 0.90, x1, y1);
         gc.SetPen(wxPen(ink, 1));
         gc.StrokeLine(x0, y0, x1, y1);
-        wxString text = l < 0 ? wxString::FromUTF8("\xE2\x88\x92") + wxString::Format("%g", -l) : wxString::Format("%g", l);
+        wxString text = labelText(l);
         double tw = 0, th = 0, tx, ty;
         gc.GetTextExtent(text, &tw, &th);
         pt(a, r * 0.98 + th * 0.4, tx, ty);
@@ -560,6 +669,20 @@ DeckLamp::DeckLamp(wxWindow* parent, const wxString& caption, Colour colour, boo
                                         : parent->FromDIP(wxSize(80, 18))),
       caption_(caption), colour_(colour), below_(captionBelow)
 {
+    refit();
+}
+
+wxSize DeckLamp::textNeeds() const
+{
+    if (caption_.empty()) return wxSize(0, 0);
+    // paint()'s layout.
+    const int r = FromDIP(6);
+    const wxFont font = deckart::captionFont(this, 7.0);
+    const int th = deckart::lineHeight(this, font);
+    if (below_)
+        return wxSize(std::max(2 * r + 4, deckart::captionTextWidth(this, font, caption_, dip(0.8)) + 2),
+                      2 * r + 5 + th);
+    return wxSize(2 * r + 2 + FromDIP(6) + deckart::textSize(this, font, caption_).x + 2, std::max(2 * r + 4, th));
 }
 
 void DeckLamp::setLit(bool lit)
@@ -618,6 +741,7 @@ void DeckLamp::paint(wxGraphicsContext& gc, const wxSize& size)
 
 ReductionBar::ReductionBar(wxWindow* parent) : DeckControl(parent, wxID_ANY, parent->FromDIP(wxSize(130, 44)))
 {
+    refit();
     SetToolTip(_("The leveller's gain reduction. Normal talking sits in the green bracket, 3 to 6 dB."));
 }
 
@@ -627,6 +751,22 @@ void ReductionBar::setReduction(double db)
     if (std::fabs(db - db_) < 0.1) return;
     db_ = db;
     Refresh();
+}
+
+namespace
+{
+const char* const REDUCTION_TOP = "20 dB";
+const char* const REDUCTION_MID = "target 3\xE2\x80\x93" "6";
+} // namespace
+
+wxSize ReductionBar::textNeeds() const
+{
+    // The scale's words, "0", "target 3-6" centred and "20 dB", with room
+    // between them; under the bar and the bracket.
+    const wxFont font = deckart::readoutFont(this, 6.8);
+    const int ends = std::max(deckart::textSize(this, font, "0").x, deckart::textSize(this, font, REDUCTION_TOP).x);
+    const int mid = deckart::textSize(this, font, wxString::FromUTF8(REDUCTION_MID)).x;
+    return wxSize(mid + 2 * (ends + FromDIP(10)), FromDIP(18) + FromDIP(7) + deckart::lineHeight(this, font));
 }
 
 void ReductionBar::paint(wxGraphicsContext& gc, const wxSize& size)
@@ -656,11 +796,11 @@ void ReductionBar::paint(wxGraphicsContext& gc, const wxSize& size)
     double tw = 0, th = 0;
     double ty = barH + FromDIP(7);
     gc.DrawText("0", 0, ty);
-    wxString top = "20 dB";
+    wxString top = REDUCTION_TOP;
     gc.GetTextExtent(top, &tw, &th);
     gc.DrawText(top, size.x - tw, ty);
     gc.SetFont(deckart::readoutFont(this, 6.8), c.green);
-    wxString mid = wxString::FromUTF8("target 3\xE2\x80\x93" "6");
+    wxString mid = wxString::FromUTF8(REDUCTION_MID);
     gc.GetTextExtent(mid, &tw, &th);
     gc.DrawText(mid, (size.x - tw) / 2, ty);
 }
@@ -745,6 +885,7 @@ void PitchScope::paint(wxGraphicsContext& gc, const wxSize& size)
 
 AirtimeBar::AirtimeBar(wxWindow* parent) : DeckControl(parent, wxID_ANY, parent->FromDIP(wxSize(300, 34)))
 {
+    refit();
     SetToolTip(_("Seconds on the air for the clip so far, at the gear it will go in. "
                  "The red mark is the Max airtime setting; past it the bar turns red."));
 }
@@ -754,6 +895,12 @@ void AirtimeBar::set(const deck::AirBar& bar)
     if (std::fabs(bar.airSeconds - bar_.airSeconds) < 0.05 && bar.maxSeconds == bar_.maxSeconds) return;
     bar_ = bar;
     Refresh();
+}
+
+wxSize AirtimeBar::textNeeds() const
+{
+    // The bar, then the scale's words under it.
+    return wxSize(0, FromDIP(16) + FromDIP(2) + deckart::lineHeight(this, deckart::readoutFont(this, 6.8)) + 2);
 }
 
 void AirtimeBar::paint(wxGraphicsContext& gc, const wxSize& size)
@@ -808,6 +955,7 @@ TalkButton::TalkButton(wxWindow* parent, const wxSize& size) : DeckControl(paren
 {
     SetToolTip(_("Hold to record, let go to send (or hold the space bar while the deck has focus). "
                  "Esc while holding throws the clip away."));
+    refit();
     Bind(wxEVT_LEFT_DOWN, &TalkButton::onDown, this);
     Bind(wxEVT_LEFT_DCLICK, &TalkButton::onDown, this);
     Bind(wxEVT_LEFT_UP, &TalkButton::onUp, this);
@@ -858,6 +1006,19 @@ void TalkButton::onLostCapture(wxMouseCaptureLostEvent&)
     if (!mouse_) return;
     mouse_ = false;
     send(false);
+}
+
+wxSize TalkButton::textNeeds() const
+{
+    // The words and the clock inside the button's face: paint()'s layout
+    // takes about 3.4 lines down the middle, and the widest line across.
+    const wxFont caption = deckart::captionFont(this, 9.5);
+    const int th = deckart::lineHeight(this, caption);
+    const int clock = deckart::textSize(this, deckart::readoutFont(this, 12.0), "00:00").x;
+    const int words = std::max(deckart::captionTextWidth(this, caption, "TO TALK", dip(1.4)), clock);
+    const double r = std::max(words / 1.6, 3.6 * th / 2.0);
+    const int side = (int)std::ceil(2 * (r + FromDIP(8)));
+    return wxSize(side, side);
 }
 
 void TalkButton::paint(wxGraphicsContext& gc, const wxSize& size)

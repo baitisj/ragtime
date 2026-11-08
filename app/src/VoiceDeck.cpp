@@ -5,10 +5,12 @@
 #include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <initializer_list>
 
 #include <wx/button.h>
 #include <wx/checkbox.h>
 #include <wx/choice.h>
+#include <wx/display.h>
 #include <wx/panel.h>
 #include <wx/sizer.h>
 #include <wx/slider.h>
@@ -17,6 +19,7 @@
 #include <wx/stattext.h>
 #include <wx/tglbtn.h>
 #include <wx/app.h>
+#include <wx/arrstr.h>
 
 #include "DeckParts.h"
 #include "DrawnIcon.h"
@@ -94,11 +97,30 @@ std::string versionOf(const std::string& format)
     return format.substr(v + 1, end == std::string::npos ? std::string::npos : end - v - 1);
 }
 
+// A label's size from its font as wx measures it, wrapped lines and all;
+// the width given, or the text's. Before the window is shown GTK measures
+// a label in the default font rather than the one set on it, so a deck
+// laid out from GTK's sizes came out too tall or too narrow for its text.
+void fitLabel(wxStaticText* t, int width = -1)
+{
+    const wxFont font = t->GetFont();
+    int w = 0, h = 0;
+    for (const wxString& line : wxSplit(t->GetLabel(), '\n', '\0'))
+    {
+        const wxSize s = deckart::textSize(t, font, line);
+        w = std::max(w, s.x);
+        h += s.y;
+    }
+    if (h == 0) h = deckart::lineHeight(t, font);
+    t->SetMinSize(wxSize(width >= 0 ? width : w + 1, h));
+}
+
 wxStaticText* readout(wxWindow* parent, const wxString& text, double points = 8.0)
 {
     auto* t = new wxStaticText(parent, wxID_ANY, text, wxDefaultPosition, wxDefaultSize, wxALIGN_CENTRE_HORIZONTAL | wxST_NO_AUTORESIZE);
     t->SetFont(deckart::readoutFont(parent, points));
     t->SetForegroundColour(deckart::colours().dimInk);
+    fitLabel(t);
     return t;
 }
 
@@ -107,7 +129,24 @@ wxStaticText* engraved(wxWindow* parent, const wxString& text, double points = 7
     auto* t = new wxStaticText(parent, wxID_ANY, text);
     t->SetFont(deckart::captionFont(parent, points));
     t->SetForegroundColour(deckart::colours().ink);
+    fitLabel(t);
     return t;
+}
+
+// A module at least this wide, or as wide as its contents ask: a minimum
+// width alone would hold it to that width and clip what is in it.
+void atLeastWide(wxWindow* module, int width)
+{
+    module->SetMinSize(wxSize(std::max(width, module->GetBestSize().x), -1));
+}
+
+// A width that holds each sample in the window's font: for labels whose
+// words change but whose room shouldn't.
+int widthFor(const wxWindow* w, std::initializer_list<wxString> samples)
+{
+    int width = 0;
+    for (const wxString& s : samples) width = std::max(width, deckart::textSize(w, w->GetFont(), s).x);
+    return width + 2;
 }
 
 } // namespace
@@ -177,6 +216,20 @@ VoiceDeck::~VoiceDeck()
 // The panel
 //-------------------------------------------------------------------------
 
+void VoiceDeck::fitToPanel(wxWindow* plate)
+{
+    // About 1020 x 560: it fits a 1366 x 768 screen. With the desktop's
+    // text scaled up the parts grow with it; never past the screen, less
+    // room for the title bar.
+    const wxSize best = plate->GetBestSize();
+    const int display = wxDisplay::GetFromWindow(GetParent() ? GetParent() : this);
+    const wxRect screen = wxDisplay(display == wxNOT_FOUND ? 0u : (unsigned)display).GetClientArea();
+    const wxSize room(screen.width - FromDIP(16), screen.height - FromDIP(48));
+    const wxSize least(std::min(std::max(best.x, FromDIP(1000)), room.x), std::min(best.y, room.y));
+    SetMinClientSize(least);
+    SetClientSize(wxSize(std::min(std::max(best.x, FromDIP(1020)), room.x), least.y));
+}
+
 void VoiceDeck::buildPanel()
 {
     const deckart::Colours c = deckart::colours();
@@ -196,6 +249,8 @@ void VoiceDeck::buildPanel()
     auto* subtitle = new wxStaticText(head, wxID_ANY, wxString::FromUTF8("SPEECH INPUT \xc2\xb7 RAGTIME"));
     subtitle->SetFont(deckart::captionFont(head, 7.0));
     subtitle->SetForegroundColour(wxColour(0xb9, 0xae, 0x92));
+    fitLabel(title);
+    fitLabel(subtitle);
     names->Add(title);
     names->Add(subtitle);
     where_ = new wxStaticText(head, wxID_ANY, "");
@@ -230,7 +285,7 @@ void VoiceDeck::buildPanel()
             auto* cap = engraved(m, caption, 7.0);
             col->Add(cap, 0, wxALIGN_CENTER_HORIZONTAL | wxTOP, FromDIP(2));
             value = readout(m, "", 7.5);
-            value->SetMinSize(FromDIP(wxSize(108, -1)));
+            fitLabel(value, std::max(FromDIP(108), widthFor(value, {MINUS + "40" + DOT + "hold " + MINUS + "40"})));
             col->Add(value, 0, wxALIGN_CENTER_HORIZONTAL);
             return col;
         };
@@ -258,7 +313,7 @@ void VoiceDeck::buildPanel()
         gainRow->Add(gain_, 0, wxALIGN_CENTER_VERTICAL);
         gainRow->Add(clip_, 0, wxALIGN_CENTER_VERTICAL | wxLEFT, FromDIP(8));
         s->Add(gainRow, 0, wxALIGN_CENTER_HORIZONTAL);
-        m->SetMinSize(FromDIP(wxSize(240, -1)));
+        atLeastWide(m, FromDIP(240));
         modules->Add(m, 0, wxEXPAND | wxRIGHT, FromDIP(6));
     }
 
@@ -277,9 +332,13 @@ void VoiceDeck::buildPanel()
             knob->setNote("push in/out");
             knob->SetToolTip(tip + "\n\n" + knob->GetToolTipText());
             s->Add(knob, 0, wxALIGN_CENTER_HORIZONTAL);
-            auto* w = new wxStaticText(m, wxID_ANY, words);
+            auto* w = new wxStaticText(m, wxID_ANY, words, wxDefaultPosition, wxDefaultSize, wxALIGN_CENTRE_HORIZONTAL);
             w->SetFont(w->GetFont().Smaller());
             w->SetForegroundColour(deckart::colours().dimInk);
+            // One line at the usual font size; two rather than a wider
+            // deck with bigger text.
+            w->Wrap(std::max(FromDIP(150), knob->GetMinSize().x));
+            fitLabel(w);
             s->Add(w, 0, wxALIGN_CENTER_HORIZONTAL | wxBOTTOM, FromDIP(4));
         };
         deck::KnobSpec hp;
@@ -303,7 +362,7 @@ void VoiceDeck::buildPanel()
               "Push it in to switch it in.");
         noise_->setFormatter([](double v, bool in) { return in ? wxString::Format("%.0f %%", v) : wxString("Off"); });
         if (!haveNoise) noise_->Enable(false);
-        m->SetMinSize(FromDIP(wxSize(150, -1)));
+        atLeastWide(m, FromDIP(150));
         modules->Add(m, 0, wxEXPAND | wxRIGHT, FromDIP(6));
     }
 
@@ -334,9 +393,10 @@ void VoiceDeck::buildPanel()
                                        wxDefaultPosition, wxDefaultSize, wxALIGN_CENTRE_HORIZONTAL);
         words->SetFont(words->GetFont().Smaller());
         words->SetForegroundColour(deckart::colours().dimInk);
-        words->Wrap(FromDIP(130));
+        words->Wrap(std::max(FromDIP(130), reduction_->GetMinSize().x));
+        fitLabel(words);
         s->Add(words, 0, wxALIGN_CENTER_HORIZONTAL);
-        m->SetMinSize(FromDIP(wxSize(150, -1)));
+        atLeastWide(m, FromDIP(150));
         modules->Add(m, 0, wxEXPAND | wxRIGHT, FromDIP(6));
     }
 
@@ -349,6 +409,7 @@ void VoiceDeck::buildPanel()
         codec_ = new wxStaticText(m, wxID_ANY, "", wxDefaultPosition, wxDefaultSize, wxST_ELLIPSIZE_END | wxST_NO_AUTORESIZE);
         codec_->SetFont(deckart::readoutFont(m, 8.0));
         codec_->SetForegroundColour(deckart::colours().ink);
+        fitLabel(codec_, 0);
         s->Add(codec_, 0, wxEXPAND | wxTOP, FromDIP(6));
         // The rate the next clip is coded at.
         auto* rateRow = new wxBoxSizer(wxHORIZONTAL);
@@ -370,6 +431,8 @@ void VoiceDeck::buildPanel()
             text = new wxStaticText(m, wxID_ANY, "", wxDefaultPosition, wxDefaultSize, wxST_NO_AUTORESIZE);
             text->SetFont(deckart::readoutFont(m, 7.5));
             text->SetForegroundColour(deckart::colours().dimInk);
+            fitLabel(text, widthFor(text, {MINUS + "26  target " + MINUS + "26", MINUS + "12  clipped!",
+                                           MINUS + "9  under " + MINUS + "7", "45 dB below voice"}));
             grid->Add(lamp, 0, wxALIGN_CENTER_VERTICAL);
             grid->AddSpacer(0);
             grid->Add(text, 1, wxEXPAND | wxALIGN_CENTER_VERTICAL);
@@ -381,7 +444,7 @@ void VoiceDeck::buildPanel()
         row("Noise", checkNoise_, checkNoiseText_,
             "The quietest tenth of the clip against the voice: green at least 30 dB below it.");
         s->Add(grid, 0, wxEXPAND);
-        m->SetMinSize(FromDIP(wxSize(208, -1)));
+        atLeastWide(m, FromDIP(208));
         modules->Add(m, 0, wxEXPAND | wxRIGHT, FromDIP(6));
     }
 
@@ -427,6 +490,7 @@ void VoiceDeck::buildPanel()
         left->Add(engraved(m, "ON THE AIR", 8.5));
         airGear_ = new wxStaticText(m, wxID_ANY, "", wxDefaultPosition, FromDIP(wxSize(110, -1)), wxST_ELLIPSIZE_END | wxST_NO_AUTORESIZE);
         airGear_->SetFont(airGear_->GetFont().Smaller());
+        fitLabel(airGear_, std::max(FromDIP(110), widthFor(airGear_, {"at the host's gear"})));
         airGear_->SetForegroundColour(deckart::colours().dimInk);
         left->Add(airGear_);
         s->Add(left, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, FromDIP(12));
@@ -434,6 +498,8 @@ void VoiceDeck::buildPanel()
         s->Add(airtime_, 1, wxALIGN_CENTER_VERTICAL | wxRIGHT, FromDIP(12));
         airWords_ = new wxStaticText(m, wxID_ANY, "", wxDefaultPosition, FromDIP(wxSize(220, -1)), wxST_NO_AUTORESIZE);
         airWords_->SetFont(deckart::readoutFont(m, 8.5));
+        fitLabel(airWords_, std::max(FromDIP(220), widthFor(airWords_, {"10:00 of air for 1:00 of speech",
+                                                                         "1:00 of speech; airtime unknown"})));
         airWords_->SetForegroundColour(deckart::colours().ink);
         s->Add(airWords_, 0, wxALIGN_CENTER_VERTICAL);
         m->content()->Add(s, 1, wxEXPAND);
@@ -475,10 +541,15 @@ void VoiceDeck::buildPanel()
     plate->SetSizer(outer);
     for (wxStaticText* t : {where_, gear_}) t->SetBackgroundColour(wxColour(0x1f, 0x1d, 0x1a));
 
-    // About 1020 x 560: it fits a 1366 x 768 screen.
-    const wxSize best = plate->GetBestSize();
-    SetMinClientSize(wxSize(std::max(best.x, FromDIP(1000)), best.y));
-    SetClientSize(wxSize(std::max(best.x, FromDIP(1020)), best.y));
+    fitToPanel(plate);
+    Bind(wxEVT_SHOW, [this, plate](wxShowEvent& e) {
+        e.Skip();
+        if (!e.IsShown()) return;
+        CallAfter([this, plate]() {
+            fitToPanel(plate);
+            CentreOnParent();
+        });
+    });
 
     // The knobs.
     auto knobChanged = [this](wxCommandEvent&) {
@@ -729,6 +800,11 @@ void VoiceDeck::showTarget()
     gear_->SetLabel(gear.empty() ? wxString("the host picks the gear") : gear);
     airGear_->SetLabel(gearWords.empty() ? wxString("") : "at " + utf8(gearWords));
     airGear_->SetToolTip(airGear_->GetLabel());
+    fitLabel(where_);
+    fitLabel(gear_);
+    // Long gear words at a big font size can widen the deck.
+    wxWindow* plate = gear_->GetParent()->GetParent();
+    if (plate->GetBestSize().x > plate->GetClientSize().x) fitToPanel(plate);
     gear_->GetParent()->Layout();
 }
 
