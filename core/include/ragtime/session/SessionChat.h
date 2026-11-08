@@ -149,6 +149,9 @@ struct Message
     std::string path;
     bool picture = false;
     bool voice = false;
+    // A file row: all of it came and matched the digest its offer carried
+    // (files::checkedWhole), so it has the seal badge as a live card does.
+    bool checked = false;
 
     // Reactions (docs/PROTOCOL.md, "Reactions"): the far end's, and ours,
     // written or waiting for Pause sending to lift.

@@ -98,6 +98,12 @@ struct FileTransfer
 
     // Still going: waiting, offered, being answered or under way.
     bool live() const;
+    // All of it came and matched the digest its offer carries, what the
+    // seal badge says in a session (a session has no seals, but the offer
+    // lists the whole file's digest, and the receiver checks it before it
+    // keeps the file): theirs Saved, ours Delivered (the far end saves
+    // only once it checks), neither stopped early with enough.
+    bool checkedWhole() const;
 };
 
 // A name offered by the far end, made safe to save under: only its last

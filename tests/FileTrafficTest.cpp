@@ -379,6 +379,14 @@ void testAFileGoesAndIsSaved()
         CHECK(ours.result == Result::Sent && ours.outgoing && ours.peer == "W1AW" && ours.path == sent);
         CHECK(got.result == Result::Saved && !got.outgoing && got.peer == "AG7EW" && got.path == saveAs);
         CHECK_EQ(resultLabel(ours), std::string("Sent"));
+        // Whole and checked against its digest at both ends: the seal badge.
+        CHECK(checkedWhole(ours) && checkedWhole(got));
+        // Not a broadcast's Sent (nobody checked it), nor a part kept.
+        FinishedFile broadcast = ours;
+        broadcast.via = Via::Broadcast;
+        FinishedFile stopped = got;
+        stopped.enough = 4096;
+        CHECK(!checkedWhole(broadcast) && !checkedWhole(stopped));
         CHECK(got.size == 7000 && got.name == "FRED.TXT" && got.via == Via::Session);
         // The bps column: all of it crossed, over some seconds.
         CHECK(ours.movedBytes == 7000 && got.movedBytes == 7000);
@@ -905,6 +913,7 @@ void testDeclinedAndExpired()
     CHECK(p.a.transfer(true)->state == State::Declined);
     CHECK(!p.a.history.entries().empty() && resultLabel(p.a.history.entries().back()) == "Declined by W1AW");
     CHECK(!p.b.history.entries().empty() && resultLabel(p.b.history.entries().back()) == "Declined");
+    CHECK(!p.a.history.entries().empty() && !checkedWhole(p.a.history.entries().back()));
 
     p.a.files.offer("W1AW", scratch.write("LATE.TXT", 100), p.now, error);
     p.steps(2);

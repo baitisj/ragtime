@@ -212,6 +212,12 @@ std::string resultLabel(const FinishedFile& file)
     return "Failed";
 }
 
+bool checkedWhole(const FinishedFile& file)
+{
+    using Result = FinishedFile::Result;
+    return file.via == Via::Session && (file.result == Result::Saved || file.result == Result::Sent) && file.enough == 0;
+}
+
 std::string partStateText(const KeptPart& part)
 {
     if (part.outgoing && part.handed > part.bytes)

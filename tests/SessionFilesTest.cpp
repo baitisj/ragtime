@@ -272,9 +272,12 @@ void testAFileEndToEnd()
     link.turn(); // its first piece goes
     CHECK(transferOf(link.a, id).done == 4096);
     CHECK(last(link.b, false).done == 4096 && last(link.b, false).state == State::Receiving);
+    CHECK(!transferOf(link.a, id).checkedWhole() && !last(link.b, false).checkedWhole());
     link.turns(2);
     CHECK(transferOf(link.a, id).state == State::Delivered && transferOf(link.a, id).done == 7000);
     CHECK(last(link.b, false).state == State::Saved && last(link.b, false).path == saveAs);
+    // Both ends say it came whole and matched its digest: the seal badge.
+    CHECK(transferOf(link.a, id).checkedWhole() && last(link.b, false).checkedWhole());
     CHECK(readFile(saveAs) == readFile(source));
     CHECK(!exists(saveAs + ".part"));
     CHECK(link.pieces == 2);
@@ -1377,6 +1380,7 @@ void testTheStopSign()
     CHECK(link.b.enough(coming.id));
     FileTransfer stopped = last(link.b, false);
     CHECK(stopped.state == State::Saved && stopped.enough);
+    CHECK(!stopped.checkedWhole());   // only a part of it: no seal badge
     CHECK(readFile(stopped.path) == readFile(source).substr(0, 8192));
     CHECK(!exists(stopped.path + ".part") && link.b.keptCount() == 0);
     std::vector<uint8_t> shown;
@@ -1384,6 +1388,7 @@ void testTheStopSign()
     link.turns(2);
     FileTransfer sent = transferOf(link.a, id);
     CHECK(sent.state == State::Delivered && sent.enough);
+    CHECK(!sent.checkedWhole());
     CHECK(sent.done < sent.size);
     // Nothing more of it goes.
     int pieces = link.pieces;

@@ -253,7 +253,15 @@ The brief:
   up by its announce, the item the seal lists (Jeff, 2026-11-02); it
   shows none until a seal says something, as the card says how the file
   goes, and its tooltip and the menu's greyed first line say what the
-  seal says.
+  seal says. A session has no seals, but a file's offer carries the
+  digest of all of it and the receiver keeps the file only once it
+  matches, so a file that came whole in a session has the badge too
+  (Jeff, 2026-11-08; `FileTransfer::checkedWhole`): Sealed on one of
+  theirs we saved, Delivered on one of ours the far end saved, none on a
+  picture stopped part way. The session log keeps it (`c` on the `F`
+  line), so the badge is still there in a later session. Lines read back
+  from the Broadcast log have none: the seals heard aren't kept across a
+  restart.
 
 ## F. Sessions
 
