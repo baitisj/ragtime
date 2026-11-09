@@ -880,7 +880,7 @@ GearshiftDialog::GearshiftDialog(wxWindow* owner, bool onTop, Gearshift& shift, 
     // Fits Jeff's 1366x768 screen with room for the panel and title bar.
     // Bigger desktop text can ask for more, up to the screen.
     const wxSize fitted = GetSize();
-    const int display = wxDisplay::GetFromWindow(parent ? parent : this);
+    const int display = wxDisplay::GetFromWindow(owner ? owner : this);
     const wxRect screen = wxDisplay(display == wxNOT_FOUND ? 0u : (unsigned)display).GetClientArea();
     auto onScreen = [&](int w, int h) {
         return wxSize(std::min(std::max(w, fitted.x), screen.width), std::min(std::max(h, fitted.y), screen.height));
