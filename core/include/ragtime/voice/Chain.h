@@ -79,6 +79,7 @@ struct Readings
     bool clipped = false;                      // the mic hit full scale
     // The leveller and limiter (the gain-reduction meter).
     double levellerGainDb = 0;                 // + boost, - cut
+    double levelGainDb = 0;                    // the same, peak cut left out
     double limiterReductionDb = 0;             // the most, 0 or more
     bool speaking = false;                     // the leveller hears speech
     // From the noise reducer: how sure it is there is a voice, 0 to 1.
@@ -122,6 +123,9 @@ public:
     Readings takeReadings();
     // Everything back to how it was made, the leveller's gain included.
     void reset();
+    // The audio thread: starts the leveller at a gain it had before (a
+    // Readings::levelGainDb a closed deck kept), skipping its fast start.
+    void presetLevellerGain(double gainDb);
 
     // The delay from the microphone to the 16 kHz output, in seconds.
     double latencySeconds() const;
@@ -158,6 +162,7 @@ private:
     std::vector<float> dry_;              // the denoiser's latency, for mixing
     size_t dryPos_ = 0;
     double noiseMix_ = 0;                 // the amount in use (ramps per block)
+    float lastVoice_ = 0;                 // the voice detector's last word
     Leveller leveller_;
     Resampler toOut_;
     std::vector<float> out8k_;

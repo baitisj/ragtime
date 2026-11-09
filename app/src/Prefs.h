@@ -219,6 +219,9 @@ constexpr const char* VOICE_DECK_NOISE_IN = "/Voice/Deck/NoiseIn";
 constexpr const char* VOICE_DECK_TARGET = "/Voice/Deck/TargetTenthsDb";
 constexpr const char* VOICE_DECK_PEAKS = "/Voice/Deck/PeakMode";           // Target popped out
 constexpr const char* VOICE_DECK_REVIEW = "/Voice/Deck/HoldForReview";
+// The leveller's gain as the deck last closed (tenths of a dB), so the next
+// deck starts where the last one left off; absent until it has heard a voice.
+constexpr const char* VOICE_DECK_LEVELLER = "/Voice/Deck/LevellerTenthsDb";
 // The deck's Rate: sotto's bit/s for the next clip (2400, 1200, 600, 400).
 constexpr const char* VOICE_DECK_RATE = "/Voice/Deck/RateBitsPerSecond";
 // The most airtime a clip should take: the deck's bar turns red past it.

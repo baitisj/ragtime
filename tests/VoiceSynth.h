@@ -186,18 +186,29 @@ inline void addNoise(std::vector<float>& x, double db, uint64_t seed)
 // few hundred hertz) at `db` dBFS RMS, added.
 inline void addFanNoise(std::vector<float>& x, double db, uint64_t seed)
 {
+    if (x.empty())
+        return;
+    // Twice from the same seed, once for the RMS and once to add, rather
+    // than a buffer of it: GCC 16 at -O3 warns falsely (free-nonheap-object)
+    // on that buffer once it is inlined into a long test.
+    double sum = 0;
+    {
+        Rng rng(seed);
+        double y = 0;
+        for (size_t i = 0; i < x.size(); i++)
+        {
+            y = 0.95 * y + rng.gauss();
+            sum += y * y;
+        }
+    }
+    double g = std::pow(10.0, db / 20.0) / std::sqrt(sum / (double)x.size());
     Rng rng(seed);
-    std::vector<double> n(x.size());
-    double y = 0, sum = 0;
-    for (double& v : n)
+    double y = 0;
+    for (float& v : x)
     {
         y = 0.95 * y + rng.gauss();
-        v = y;
-        sum += y * y;
+        v += (float)(g * y);
     }
-    double g = n.empty() ? 0 : std::pow(10.0, db / 20.0) / std::sqrt(sum / (double)n.size());
-    for (size_t i = 0; i < x.size(); i++)
-        x[i] += (float)(g * n[i]);
 }
 
 inline std::vector<float> sine(int rate, double freq, double seconds, double rmsDb)

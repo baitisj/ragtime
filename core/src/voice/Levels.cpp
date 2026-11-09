@@ -165,19 +165,36 @@ void LiveLevel::reset()
     power_ = 0;
     blocks_ = 0;
     noiseDb_ = 0;
+    recent_.fill(0);
+    recentSum_ = 0;
+    recentPos_ = 0;
+    recentFill_ = 0;
     started_ = false;
     hang_ = 0;
     voiced_ = false;
 }
 
-bool LiveLevel::addBlock(double meanSquare)
+bool LiveLevel::addBlock(double meanSquare, bool mayBeSpeech)
 {
     double db = powerDb(meanSquare);
+    if (db < DIGITAL_SILENCE_DBFS)
+    {
+        voiced_ = false;
+        return false;
+    }
     // The noise floor falls at once to a quieter block and creeps up.
-    if (!started_ || db < noiseDb_)
-        noiseDb_ = db;
+    // The floor follows 100 ms means, not single blocks: noise flickers by
+    // several dB from one 10 ms block to the next, and the quietest flicker
+    // would put the gate inside the noise itself.
+    recentSum_ += meanSquare - recent_[recentPos_];
+    recent_[recentPos_] = meanSquare;
+    recentPos_ = (recentPos_ + 1) % recent_.size();
+    recentFill_ = std::min(recentFill_ + 1, recent_.size());
+    double smooth = powerDb(std::max(0.0, recentSum_) / (double)recentFill_);
+    if (!started_ || smooth < noiseDb_)
+        noiseDb_ = smooth;
     else
-        noiseDb_ = std::min(db, noiseDb_ + NOISE_RISE_DB);
+        noiseDb_ = std::min(smooth, noiseDb_ + NOISE_RISE_DB);
     started_ = true;
 
     double gate;
@@ -187,7 +204,7 @@ bool LiveLevel::addBlock(double meanSquare)
         gate = std::max({GATE_MIN_DB, noiseDb_ + GATE_OVER_NOISE, levelDb() - P56_MARGIN_DB});
 
     bool speech;
-    voiced_ = db > gate;
+    voiced_ = mayBeSpeech && db > gate;
     if (voiced_)
     {
         speech = true;

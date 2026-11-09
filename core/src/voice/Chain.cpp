@@ -66,6 +66,7 @@ void Chain::reset()
     else
         dry_.clear();
     dryPos_ = 0;
+    lastVoice_ = 0;
     leveller_.reset();
     toOut_.reset();
     limiter_.reset();
@@ -183,12 +184,14 @@ void Chain::runBlock(float* block, std::vector<float>& out)
     }
     inputGain_ = gain;
     double meanSquare = sum / (double)BLOCK;
-    inputLevel_.addBlock(meanSquare);
     call_.inLoudest = std::max(call_.inLoudest, powerDb(meanSquare));
 
     if (settings_.highPassIn)
         highPass_.process(block, BLOCK);
 
+    // With a noise reducer its voice detector says what is speech, for the
+    // meters and the leveller alike; without one the level alone does.
+    float heard = -1.0f;
     if (denoiser_)
     {
         // The denoiser always runs, so switching it in or out keeps its
@@ -197,6 +200,10 @@ void Chain::runBlock(float* block, std::vector<float>& out)
         float dry[BLOCK];
         std::copy(block, block + BLOCK, dry);
         call_.voiceProbability = denoiser_->process(block);
+        // The detector hears this block as it comes in; what comes out is
+        // a frame behind, so either frame's word counts.
+        heard = std::max(call_.voiceProbability, lastVoice_);
+        lastVoice_ = call_.voiceProbability;
         double mixTo = settings_.noiseIn ? settings_.noiseAmount : 0.0;
         double mixStep = (mixTo - noiseMix_) / (double)BLOCK;
         double mix = noiseMix_;
@@ -216,7 +223,8 @@ void Chain::runBlock(float* block, std::vector<float>& out)
         noiseMix_ = mixTo;
     }
 
-    leveller_.processBlock(block);
+    inputLevel_.addBlock(meanSquare, heard < 0 || heard >= Leveller::VOICE_PROBABILITY);
+    leveller_.processBlock(block, heard);
 
     out8k_.clear();
     toOut_.process(block, BLOCK, out8k_);
@@ -244,6 +252,14 @@ void Chain::runBlock(float* block, std::vector<float>& out)
     }
     out.insert(out.end(), limited_.begin(), limited_.begin() + (ptrdiff_t)n);
     totalOut_ += n;
+}
+
+void Chain::presetLevellerGain(double gainDb)
+{
+    leveller_.presetGain(gainDb);
+    std::lock_guard<std::mutex> lock(mutex_);
+    shared_.levellerGainDb = leveller_.gainDb();
+    shared_.levelGainDb = leveller_.levelGainDb();
 }
 
 void Chain::startClip()
@@ -285,6 +301,7 @@ void Chain::publish()
     r.inputLoudestDb = std::max(r.inputLoudestDb, call_.inLoudest);
     r.clipped = r.clipped || call_.clipped;
     r.levellerGainDb = leveller_.gainDb();
+    r.levelGainDb = leveller_.levelGainDb();
     r.limiterReductionDb = std::max(r.limiterReductionDb, limiter_.takeReductionDb());
     r.speaking = leveller_.speaking();
     r.voiceProbability = call_.voiceProbability;
