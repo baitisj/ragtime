@@ -9,10 +9,12 @@
 //   B <ms>                                a session began
 //   M <id> <atMs> <time> <seq> <ours> <state> <from> <text>
 //   S <id> <state>                        a message of ours settled
-//   F <atMs> <ours> <from> <text> [<path> <picture>]
+//   F <atMs> <ours> <from> <text> [<path> <picture> [<checked>]]
 //                                         a file that went, as one line:
-//                                         where it is, and 1 for a picture,
-//                                         v for a voice message
+//                                         where it is, 1 for a picture,
+//                                         v for a voice message, and c
+//                                         when it came whole and matched
+//                                         its digest (- when not)
 //   X <id> <call> <code>                  call reacted to a message
 //   Y <id> <code>                         we reacted to a message
 //   E <ms>                                the session ended

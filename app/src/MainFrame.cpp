@@ -101,6 +101,7 @@ enum
     ID_GLOBUS,
     ID_EAR,
     ID_VOICE_DECK,
+    ID_TOOLS_ON_TOP,
     ID_MESSAGE_STATION,
     ID_CHECK_IN,
     ID_PAUSE,
@@ -263,6 +264,7 @@ MainFrame::MainFrame()
     SetMinSize(wxSize(960, 600));
 
     globusOn_ = loadBool(keys::GLOBUS, true);
+    toolsOnTop_ = loadBool(keys::TOOLS_ON_TOP, false);
     listWidth_ = std::max(MIN_PANE, loadInt(keys::LIST_WIDTH, listWidth_));
     tableWidth_ = std::max(MIN_PANE, loadInt(keys::TABLE_WIDTH, tableWidth_));
     globusWidth_ = std::max(MIN_PANE, loadInt(keys::GLOBUS_WIDTH, globusWidth_));
@@ -339,6 +341,8 @@ MainFrame::MainFrame()
         sessionFiles_.stopAll("Ragtime was closed");
         // The deck lets go of the microphone before the audio stops.
         if (voiceDeck_) voiceDeck_->Close(true);
+        // The gearshift stops asking the rig for the band's noise.
+        if (gearDialog_) gearDialog_->Close(true);
         voiceTimer_.Stop();
         if (voiceAudio_) voiceAudio_->stop();
         // The Ear's change goes back, and a filter Ragtime changed is put
@@ -451,6 +455,9 @@ void MainFrame::buildMenus()
     }
     viewMenu_->AppendSubMenu(columns, "Station &columns",
                              "The station table's columns, shown while Globus is off");
+    viewMenu_->AppendCheckItem(ID_TOOLS_ON_TOP, "Keep tool windows on &top",
+                               "The Ear, the microphone deck, the gearshift and pictures stay above the main "
+                               "window, from the next time each opens");
     viewMenu_->AppendSeparator();
     viewMenu_->Append(ID_TAB_BROADCAST, "&Broadcast\tCtrl+1");
     viewMenu_->Append(ID_TAB_SESSION, "&Session\tCtrl+2");
@@ -501,6 +508,10 @@ void MainFrame::buildMenus()
     Bind(wxEVT_MENU, [this](wxCommandEvent& e) { setGlobus(e.IsChecked()); }, ID_GLOBUS);
     Bind(wxEVT_MENU, [this](wxCommandEvent& e) { setEar(e.IsChecked()); }, ID_EAR);
     Bind(wxEVT_MENU, [this](wxCommandEvent& e) { setVoiceDeck(e.IsChecked()); }, ID_VOICE_DECK);
+    Bind(wxEVT_MENU, [this](wxCommandEvent& e) {
+        toolsOnTop_ = e.IsChecked();
+        saveBool(keys::TOOLS_ON_TOP, toolsOnTop_);
+    }, ID_TOOLS_ON_TOP);
     Bind(wxEVT_MENU, [this](wxCommandEvent& e) { setPaused(e.IsChecked()); }, ID_PAUSE);
     Bind(wxEVT_MENU, [this](wxCommandEvent&) { checkIn(); }, ID_CHECK_IN);
     Bind(wxEVT_MENU, [this](wxCommandEvent&) { showWatchList(); }, ID_WATCH_LIST);
@@ -840,6 +851,7 @@ void MainFrame::buildLayout()
         CallAfter([this]() { placeTabToggle(); });
     });
     GetMenuBar()->Check(ID_GLOBUS, globusOn_);
+    GetMenuBar()->Check(ID_TOOLS_ON_TOP, toolsOnTop_);
     stationList_->setNarrow(globusOn_);
     tabToggle_->Show(!globusOn_);
 }
@@ -1810,6 +1822,7 @@ void MainFrame::onFileEvents()
                 line.path = f->path;
                 line.picture = f->picture;
                 line.voice = f->voice;
+                line.checked = files::checkedWhole(*f) && !e.partKept;
                 sessionLog_.file(f->peer, line);
             }
         }
@@ -2954,7 +2967,7 @@ void MainFrame::viewPicture(const std::string& key, const wxString& title, const
         open->second->Raise();
         return;
     }
-    auto* frame = new PictureFrame(this, title, name);
+    auto* frame = new PictureFrame(this, title, name, toolsOnTop_);
     pictureFrames_[key] = frame;
     frame->onClosed([this, key]() { pictureFrames_.erase(key); });
     showInFrame(key);
@@ -3454,18 +3467,35 @@ void MainFrame::loadGearshift()
 
 void MainFrame::showGearshift()
 {
+    if (gearDialog_)
+    {
+        gearDialog_->Raise();
+        return;
+    }
+    // Modeless, so the chat stays in use beside it; above the main window
+    // only with View > Keep tool windows on top.
+    gearDialog_ = new GearshiftDialog(this, toolsOnTop_, gearshift_, [this]() { gearChanged(); },
+                                      [this]() {
+                                          gearDialog_ = nullptr;
+                                          watchFilter();
+                                      },
+                                      [this]() {
+                                          BandNoise noise;
+                                          noise.reads = rig_->readsNoise();
+                                          noise.dbOverS9 = rig_->noiseDb();
+                                          noise.filterHz = filterWidthHz();
+                                          return noise;
+                                      });
     // The S-meter axis reads across the rig's filter: read it while the
     // gearshift is open, as while the Ear is.
-    if (rig_->readsNoise()) rig_->setFilterWatch(true);
-    GearshiftDialog dialog(this, gearshift_, [this]() { gearChanged(); }, [this]() {
-        BandNoise noise;
-        noise.reads = rig_->readsNoise();
-        noise.dbOverS9 = rig_->noiseDb();
-        noise.filterHz = filterWidthHz();
-        return noise;
-    });
-    dialog.ShowModal();
-    rig_->setFilterWatch(ear_ != nullptr || filterEdit_.changed());
+    watchFilter();
+    gearDialog_->Show();
+}
+
+void MainFrame::watchFilter()
+{
+    if (!rig_) return;
+    rig_->setFilterWatch(ear_ != nullptr || filterEdit_.changed() || (gearDialog_ != nullptr && rig_->readsNoise()));
 }
 
 std::optional<double> MainFrame::filterWidthHz() const
@@ -3498,6 +3528,7 @@ void MainFrame::showGear()
     {
         broadcast_->setGearLabel("host", "No gears yet: the gearshift says why. Until then broadcasts go in "
                                          "the group's mode as data2g-host has it." + width);
+        if (gearDialog_) gearDialog_->follow();
         return;
     }
     wxString tip = "Gear " + utf8(gear->name.empty() ? gear->mode : gear->name + ", Data2G's " + gear->mode)
@@ -3507,6 +3538,7 @@ void MainFrame::showGear()
     if (!link_.modes().empty() && broadcastMode().empty())
         tip += " data2g-host doesn't offer this mode, so broadcasts go in the group's mode.";
     broadcast_->setGearLabel(utf8(gear->name.empty() ? gear->mode : gear->name), tip, gear->bitsPerSecond);
+    if (gearDialog_) gearDialog_->follow();
 }
 
 void MainFrame::updatePathSnr(uint64_t nowMs)
@@ -3531,10 +3563,10 @@ void MainFrame::setEar(bool open)
             ear_ = nullptr;
             // Still read while Ragtime has changed the filter, so a new
             // mode on the rig drops what it would put back on quitting.
-            rig_->setFilterWatch(filterEdit_.changed());
+            watchFilter();
             bar_->setEarOpen(false);
             GetMenuBar()->Check(ID_EAR, false);
-        });
+        }, toolsOnTop_);
         ear_->setHost(prefs_.host, prefs_.commandPort);
         ear_->setNarrow(gearshift_.narrowOnly());
         ear_->setTransmitting(bar_->tx->isOn());
@@ -3589,7 +3621,7 @@ void MainFrame::setVoiceDeck(bool open)
             sessionPage_->setVoiceDeckLit(false);
             GetMenuBar()->Check(ID_VOICE_DECK, false);
         };
-        voiceDeck_ = new VoiceDeck(this, std::move(hooks));
+        voiceDeck_ = new VoiceDeck(this, std::move(hooks), toolsOnTop_);
         setVoiceDeckOpen(true);
         voiceDeck_->CentreOnParent();
         voiceDeck_->Show();

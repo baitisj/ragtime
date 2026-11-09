@@ -96,6 +96,12 @@ bool FileTransfer::live() const
     }
 }
 
+bool FileTransfer::checkedWhole() const
+{
+    if (enough) return false;
+    return outgoing ? state == State::Delivered : state == State::Saved;
+}
+
 std::string safeFileName(const std::string& offered)
 {
     // Only what follows the last separator of either kind.

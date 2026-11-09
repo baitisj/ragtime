@@ -20,7 +20,9 @@ class wxStaticText;
 class PictureFrame : public wxFrame
 {
 public:
-    PictureFrame(wxWindow* parent, const wxString& title, const std::string& suggestedName);
+    // onTop keeps it above the main window (View > Keep tool windows on
+    // top); otherwise it stacks as any other window.
+    PictureFrame(wxWindow* parent, const wxString& title, const std::string& suggestedName, bool onTop);
 
     // The picture as it stands: decoded from bytes of size in all.
     void show(const wxImage& image, int width, int height, uint64_t bytes, uint64_t size);

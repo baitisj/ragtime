@@ -51,6 +51,17 @@ wxFont readoutFont(const wxWindow* w, double points = 8.0);
 void drawCaption(wxGraphicsContext& gc, const wxString& text, double x, double y, double spacing);
 double captionWidth(wxGraphicsContext& gc, const wxString& text, double spacing);
 
+// Text as the window draws it, in pixels. The deck's fonts are set in
+// points, and a desktop with its text scaled up draws them bigger in
+// pixels while FromDIP() stays put, so every part sizes itself from these
+// rather than from fixed pixel heights, and grows with the text instead of
+// clipping it (Andrew's larger fonts, 2026-11-08).
+wxSize textSize(const wxWindow* w, const wxFont& font, const wxString& text);
+// The height of a line in the font.
+int lineHeight(const wxWindow* w, const wxFont& font);
+// A spaced caption's width, as drawCaption draws it.
+int captionTextWidth(const wxWindow* w, const wxFont& font, const wxString& text, double spacing);
+
 } // namespace deckart
 
 // A module of the panel: a raised face with an engraved title over a rule
@@ -63,6 +74,8 @@ public:
 
 private:
     void onPaint(wxPaintEvent& event);
+    // Where the rule under the title goes, from the title font's height.
+    int ruleY() const;
     wxString title_;
     wxSizer* content_;
 };
@@ -76,11 +89,22 @@ public:
 
 protected:
     virtual void paint(wxGraphicsContext& gc, const wxSize& size) = 0;
+    // The size the part needs for its text in the fonts as they are drawn;
+    // 0 in either direction for no need.
+    virtual wxSize textNeeds() const { return wxSize(0, 0); }
+    // The minimum size: the size it was made with, grown to its text's
+    // needs. Each part calls this once it is made and whenever its text
+    // changes size.
+    void refit();
+    // The size it was made with, in pixels: what it is at the system's
+    // usual font size.
+    const wxSize& design() const { return design_; }
     // Device-independent pixels, fractions kept.
     double dip(double v) const { return FromDIP(1000) / 1000.0 * v; }
 
 private:
     void onPaint(wxPaintEvent& event);
+    wxSize design_;
 };
 
 // A knob that feels like Glissando's Dial (deck::Knob has the feel): a
@@ -111,8 +135,15 @@ public:
 
 protected:
     void paint(wxGraphicsContext& gc, const wxSize& size) override;
+    wxSize textNeeds() const override;
 
 private:
+    struct Lines
+    {
+        int caption, readout, note;
+    };
+    // The heights of the lines under the knob, in pixels.
+    Lines lines() const;
     void sendChanged();
     void sendPushed();
     void onDown(wxMouseEvent& e);
@@ -155,9 +186,12 @@ public:
 
 protected:
     void paint(wxGraphicsContext& gc, const wxSize& size) override;
+    wxSize textNeeds() const override;
 
 private:
     double angleOf(double dbfs) const;
+    bool labelsFit(const wxSize& size) const;
+    static wxString labelText(double label);
     Face face_;
     double floor_, top_;
     std::vector<double> labels_;
@@ -184,6 +218,7 @@ public:
 
 protected:
     void paint(wxGraphicsContext& gc, const wxSize& size) override;
+    wxSize textNeeds() const override;
 
 private:
     wxString caption_;
@@ -202,6 +237,7 @@ public:
 
 protected:
     void paint(wxGraphicsContext& gc, const wxSize& size) override;
+    wxSize textNeeds() const override;
 
 private:
     double db_ = 0.0;
@@ -239,6 +275,7 @@ public:
 
 protected:
     void paint(wxGraphicsContext& gc, const wxSize& size) override;
+    wxSize textNeeds() const override;
 
 private:
     ragtime::deck::AirBar bar_;
@@ -258,6 +295,7 @@ public:
 
 protected:
     void paint(wxGraphicsContext& gc, const wxSize& size) override;
+    wxSize textNeeds() const override;
 
 private:
     void send(bool down);

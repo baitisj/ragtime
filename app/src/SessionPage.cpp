@@ -113,6 +113,24 @@ wxString stateLine(const Message& m, const std::string& peer)
     return wxString();
 }
 
+// A file's badge in a session (Jeff, 2026-11-08). A session has no seals,
+// but a file's offer carries the digest of all of it, and the receiver
+// keeps the file only once what came matches it: so a file that came
+// whole (FileTransfer::checkedWhole) has the seal's badge. Theirs is
+// Sealed, as a broadcast file whose seal matches; ours is Delivered, as a
+// message of ours the far end's modem acknowledged.
+wxString checkedBadge(bool ours, const wxWindow* window)
+{
+    return ours ? deliveredBadgeHtml(window) : sealBadgeHtml(ragtime::broadcast::Seals::Mark::Sealed, window);
+}
+
+wxString checkedLine(bool ours, const std::string& peer)
+{
+    std::string far = peer.empty() ? std::string("the far end") : peer;
+    if (ours) return wxString::FromUTF8("Delivered: " + far + " saved all of it, and it matched its digest");
+    return wxString::FromUTF8("Sealed: all of it came, and it matched the digest " + far + " sent with the offer");
+}
+
 } // namespace
 
 class SessionMessages : public ChatList
@@ -233,6 +251,7 @@ protected:
             badge = statusBadgeHtml(StatusBadge::Queued, this);
         else if (m->ours && m->state == State::Sent)
             badge = statusBadgeHtml(StatusBadge::Sent, this);
+        if (m->kind == Message::Kind::File && m->checked) badge = checkedBadge(m->ours, this);
 
         wxString html;
         html << "<table width=\"100%\" cellspacing=\"0\" cellpadding=\"2\"><tr>"
@@ -415,7 +434,10 @@ SessionPage::SessionPage(wxWindow* parent, const SessionChat& session, const rag
             tip = stateLine(*m, session_.peer());
         else if (m != nullptr && m->kind == Message::Kind::Text)
             tip = wxDateTime((time_t)m->time).FormatISOCombined(' ') + wxString::Format(", item %u", m->seq);
+        else if (m != nullptr && m->kind == Message::Kind::File && m->checked && overBadge)
+            tip = checkedLine(m->ours, m->ours ? session_.peer() : m->from);
         if (t != nullptr && !t->path.empty()) tip = utf8(t->path);
+        if (t != nullptr && t->checkedWhole() && overBadge) tip = checkedLine(t->outgoing, t->peer);
         list_->SetToolTip(tip);
         e.Skip();
     });
@@ -695,7 +717,8 @@ wxString SessionPage::cardHtml(const FileTransfer& t, bool picked, const wxWindo
     wxString card = picked ? wxString() : " bgcolor=\"" + htmlColour(blendColour(surface, ACCENT_BLUE, 0.07)) + "\"";
     wxString html;
     html << "<table width=\"100%\" cellspacing=\"0\" cellpadding=\"2\"><tr>"
-         << "<td width=\"" << BADGE_ROOM << "\"></td>"
+         << "<td width=\"" << BADGE_ROOM << "\" valign=\"top\">" << (t.checkedWhole() ? checkedBadge(t.outgoing, list) : wxString())
+         << "</td>"
          << "<td valign=\"top\" nowrap>" << grey(clock(t.atMs)) << "</td>"
          << "<td valign=\"top\" width=\"100%\"" << card << ">" << body << "</td>"
          << "</tr></table>";

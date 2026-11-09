@@ -117,6 +117,11 @@ struct FinishedFile
 // "Not taken", "Failed: <reason>"; a picture stopped part way, "Saved,
 // stopped at 41%" and "Sent: KC2G had enough at 41%".
 std::string resultLabel(const FinishedFile& file);
+// A file that went in a session came whole and matched the digest its
+// offer carried: Saved, or Sent (the far end saved it once it checked),
+// not stopped part way. What FileTransfer::checkedWhole says, kept in the
+// session log for the seal badge.
+bool checkedWhole(const FinishedFile& file);
 // The bps column: bits a second over the whole transfer, movedBytes × 8
 // / movedMs, as "236" or "1,180"; "" when unknown or under a second.
 std::string bpsText(const FinishedFile& file);

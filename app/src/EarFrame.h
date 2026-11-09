@@ -45,8 +45,10 @@ class EarFrame : public wxFrame
 public:
     // edit and write: the filter change in progress (kept by the owner, so
     // that quitting can put the rig back) and how a setting reaches the rig.
+    // onTop keeps it above the main window (View > Keep tool windows on
+    // top); otherwise it stacks as any other window.
     EarFrame(wxWindow* parent, ragtime::ear::FilterEdit& edit, EarFilterBar::Write write,
-             std::function<void()> onClosed);
+             std::function<void()> onClosed, bool onTop);
     ~EarFrame() override;
 
     // data2g-host's address and command port, to find its process when it

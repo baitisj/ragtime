@@ -89,11 +89,16 @@ struct VoiceDeckHooks
 class VoiceDeck : public wxFrame
 {
 public:
-    VoiceDeck(wxWindow* parent, VoiceDeckHooks hooks);
+    // onTop keeps it above the main window (View > Keep tool windows on
+    // top); otherwise it stacks as any other window.
+    VoiceDeck(wxWindow* parent, VoiceDeckHooks hooks, bool onTop);
     ~VoiceDeck() override;
 
 private:
     void buildPanel();
+    // The window's size from the panel's: once built, and again once
+    // shown, when GTK knows its widgets' real sizes.
+    void fitToPanel(wxWindow* plate);
     void loadSettings();
     void saveSettings() const;
     void applySettings();

@@ -272,7 +272,7 @@ and the Part 97 check.
   deck's Rate picks 2400, 1200, 600 or 400 bit/s, codecs 2 to 5
   (`voice::Codec`, `voice::codecOf`; 40, 80 and 120 ms superframes).
   Since 2026-11-07 (Jeff) codecs 3 to 5 carry v3.8's 4-8 kHz hiss band,
-  16 kHz both ways: the pin (sotto aa21055) has `sotto_lr_enc16` /
+  16 kHz both ways: the pin (sotto aa44cdb, with the low rates pitch fixes and the 600/400 hiss cap) has `sotto_lr_enc16` /
   `_dec16` and `sotto_vlr_enc16` / `_dec16`, which `voice::Sotto` binds
   (a fixed-point build's NULL stubs leave them off).
 - The voice chain (2026-10-31, voice PR 3 of the sotto plan,

@@ -253,7 +253,15 @@ The brief:
   up by its announce, the item the seal lists (Jeff, 2026-11-02); it
   shows none until a seal says something, as the card says how the file
   goes, and its tooltip and the menu's greyed first line say what the
-  seal says.
+  seal says. A session has no seals, but a file's offer carries the
+  digest of all of it and the receiver keeps the file only once it
+  matches, so a file that came whole in a session has the badge too
+  (Jeff, 2026-11-08; `FileTransfer::checkedWhole`): Sealed on one of
+  theirs we saved, Delivered on one of ours the far end saved, none on a
+  picture stopped part way. The session log keeps it (`c` on the `F`
+  line), so the badge is still there in a later session. Lines read back
+  from the Broadcast log have none: the seals heard aren't kept across a
+  restart.
 
 ## F. Sessions
 
@@ -1148,8 +1156,12 @@ where Jeff answered its questions. It comes in three steps, one PR each:
 ![The Ear on the bench, following a pretend data2g-host](images/ear.png)
 
 **Opening it.** The ear button on the connection bar (beside the dial)
-or View > Ear (Ctrl+E). It floats over the main window, and the button
-stays lit while it is open. It listens only while open: closing it stops
+or View > Ear (Ctrl+E). It opens over the main window, and the button
+stays lit while it is open. It stacks as any other window, so the main
+window can come in front of it; View > Keep tool windows on top keeps
+it above (off by default; Andrew asked, 2026-11-08), from the next time
+it opens. The same goes for the microphone deck, the gearshift and
+pictures. It listens only while open: closing it stops
 the recording.
 
 **What it listens to.** Jeff's call: assume PipeWire (or PulseAudio on
@@ -2020,8 +2032,9 @@ bytes still come rather than waiting for the whole file.
 Voice PR 4 of the plan "Ragtime voice messages with sotto" (Jeff,
 2026-10-31): the window you talk into. The microphone button, left of
 the picture button on both tabs, or View > Microphone deck
-(Ctrl+Shift+M), floats it (`app/src/VoiceDeck`); the button stays lit
-while it's open. It is a rack front panel read left to right in the
+(Ctrl+Shift+M), opens it in a window of its own (`app/src/VoiceDeck`),
+above the main window only with View > Keep tool windows on top; the
+button stays lit while it's open. It is a rack front panel read left to right in the
 order the sound flows, drawn in the theme's colours, light or dark
 (`app/src/DeckParts`), with standard dropdowns, buttons and boxes for
 everything that is a choice rather than an instrument. The logic it
@@ -2094,6 +2107,20 @@ draws is in core with no window (`core/src/deck/`, `ragtime_deck_test`).
   arriving voice" are on the strip under the panel.
 - **Never on the rig.** The deck keys nothing; data2g-host keys the rig
   when the file's bursts go, as for text.
+- **Bigger text.** The deck's fonts are set in points, and a desktop
+  with its text scaled up draws them bigger in pixels while `FromDIP()`
+  stays put (Andrew's larger fonts clipped "Hum, thumps and pops out",
+  2026-11-08). So every drawn part sizes itself from its text as wx
+  measures it (`deckart::textSize`, `DeckControl::refit`): the size it
+  was made with is a floor, and a knob's lines, a lamp's caption, a
+  meter's figures, the reduction scale and Push to talk's words grow it.
+  A module is at least its drawn width but never narrower than what it
+  holds (a bare minimum width would clip it), the Clean-up words wrap to
+  two lines rather than widen the deck, and labels take their size from
+  their own font, since GTK measures a label in the default font until
+  the window is shown. The window fits its panel once built and again
+  once shown, never past the screen. The gearshift's gear list and map
+  margins do the same.
 - **Packages.** The AppImage carries libsotto and the Codec 2 it links,
   built by `packaging/build-sotto.sh`, with their licences (and
   RNNoise's) in `usr/share/doc/ragtime/licences`. The Windows zip takes
@@ -2166,10 +2193,17 @@ against the plain modes).
   sotto's hiss encoder sends in digital silence.
 - **The library.** `voice::Sotto` binds `sotto_lr_enc16` /
   `sotto_lr_dec16` and `sotto_vlr_enc16` / `sotto_vlr_dec16` from the
-  pin, sotto `aa21055`, and tries a coder and decoder of each when it
+  pin, sotto `aa44cdb`, and tries a coder and decoder of each when it
   loads: a fixed-point build's stubs give NULL, and then that rate is
   left off (`SottoInfo::sends` and `plays`). The pin's v3.8 frames and
   sound are bit-identical to `ebe5386`'s on two LibriSpeech clips.
+  Jeff re-pinned it the same day for sotto's low-rate pitch fixes
+  (`efc7000`: an onset frame codes its voiced half's pitch, and the
+  600/400 pitch line leaves out frames 20 steps off), which change
+  only the encoder, and again for `3666908`, which caps 600/400's hiss
+  in frames with no hiss bits of their own at the last coded frame's
+  level (decoder only): Ragtime's test had found sotto 400 about 10 dB
+  too loud when hiss as loud as the speech ran under it.
   The plain 8 kHz `sotto_lr_*` and `sotto_vlr_*` calls are no longer
   used: no Ragtime release sent a plain stream.
 - **The coders.** 16 kHz in and out, as at 2,400. `SottoEncoder` feeds
