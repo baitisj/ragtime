@@ -1822,6 +1822,7 @@ void MainFrame::onFileEvents()
                 line.path = f->path;
                 line.picture = f->picture;
                 line.voice = f->voice;
+                line.checked = files::checkedWhole(*f) && !e.partKept;
                 sessionLog_.file(f->peer, line);
             }
         }

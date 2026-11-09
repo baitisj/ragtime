@@ -181,6 +181,8 @@ std::vector<Message> parseSessionLog(const std::string& text, size_t max)
                 m.picture = f[6] == "1";
                 m.voice = f[6] == "v";
             }
+            // Since 2026-11-08: it came whole and matched its digest.
+            m.checked = f.size() >= 8 && f[7] == "c";
             rows.push_back(std::move(m));
             if (open) any = true;
             lastMs = std::max(lastMs, atMs);
@@ -299,7 +301,7 @@ void SessionLog::weReacted(const std::string& peer, const Message& m, uint8_t co
 void SessionLog::file(const std::string& peer, const Message& note)
 {
     append(peer, join({"F", std::to_string(note.atMs), note.ours ? "1" : "0", escape(note.from), escape(note.text),
-                       escape(note.path), note.picture ? "1" : note.voice ? "v" : "0"}));
+                       escape(note.path), note.picture ? "1" : note.voice ? "v" : "0", note.checked ? "c" : "-"}));
 }
 
 void SessionLog::ended(const std::string& peer, uint64_t nowMs)
