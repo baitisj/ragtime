@@ -175,6 +175,7 @@ constexpr const char* AUTO_ALC = "/Connection/AutoAlc";             // Auto ALC 
 constexpr const char* PAUSED = "/Broadcast/Paused";
 constexpr const char* NARROW_ONLY = "/Gearshift/NarrowOnly";         // the 500 Hz switch
 constexpr const char* GLOBUS = "/Window/Globus";
+constexpr const char* TOOLS_ON_TOP = "/Window/ToolWindowsOnTop";    // the Ear, the deck, the gearshift, pictures
 constexpr const char* LIST_WIDTH = "/Window/StationListWidth";        // beside Globus
 constexpr const char* TABLE_WIDTH = "/Window/StationTableWidth";      // Globus off
 constexpr const char* GLOBUS_WIDTH = "/Window/GlobusWidth";

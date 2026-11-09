@@ -1148,8 +1148,12 @@ where Jeff answered its questions. It comes in three steps, one PR each:
 ![The Ear on the bench, following a pretend data2g-host](images/ear.png)
 
 **Opening it.** The ear button on the connection bar (beside the dial)
-or View > Ear (Ctrl+E). It floats over the main window, and the button
-stays lit while it is open. It listens only while open: closing it stops
+or View > Ear (Ctrl+E). It opens over the main window, and the button
+stays lit while it is open. It stacks as any other window, so the main
+window can come in front of it; View > Keep tool windows on top keeps
+it above (off by default; Andrew asked, 2026-11-08), from the next time
+it opens. The same goes for the microphone deck, the gearshift and
+pictures. It listens only while open: closing it stops
 the recording.
 
 **What it listens to.** Jeff's call: assume PipeWire (or PulseAudio on
@@ -1997,8 +2001,9 @@ bytes still come rather than waiting for the whole file.
 Voice PR 4 of the plan "Ragtime voice messages with sotto" (Jeff,
 2026-10-31): the window you talk into. The microphone button, left of
 the picture button on both tabs, or View > Microphone deck
-(Ctrl+Shift+M), floats it (`app/src/VoiceDeck`); the button stays lit
-while it's open. It is a rack front panel read left to right in the
+(Ctrl+Shift+M), opens it in a window of its own (`app/src/VoiceDeck`),
+above the main window only with View > Keep tool windows on top; the
+button stays lit while it's open. It is a rack front panel read left to right in the
 order the sound flows, drawn in the theme's colours, light or dark
 (`app/src/DeckParts`), with standard dropdowns, buttons and boxes for
 everything that is a choice rather than an instrument. The logic it

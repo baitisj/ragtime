@@ -23,6 +23,7 @@
 #include <wx/stattext.h>
 #include <wx/tglbtn.h>
 
+#include "AppIcon.h"
 #include "DrawnIcon.h"
 #include "Html.h"
 #include "Thresholds.h"
@@ -629,24 +630,30 @@ private:
     bool hovering_ = false;
 };
 
-GearshiftDialog::GearshiftDialog(wxWindow* parent, Gearshift& shift, std::function<void()> onChange,
-                                 std::function<BandNoise()> noise)
-    : wxDialog(parent, wxID_ANY, "Gearshift", wxDefaultPosition, wxDefaultSize,
-               wxDEFAULT_DIALOG_STYLE | wxRESIZE_BORDER)
+GearshiftDialog::GearshiftDialog(wxWindow* owner, bool onTop, Gearshift& shift, std::function<void()> onChange,
+                                 std::function<void()> onClosed, std::function<BandNoise()> noise)
+    // A frame, not a dialog: window managers keep a dialog above the rest
+    // of its program even with no parent (Openbox does). A frame floats on
+    // its parent only when asked to.
+    : wxFrame(owner, wxID_ANY, "Gearshift", wxDefaultPosition, wxDefaultSize,
+              wxDEFAULT_FRAME_STYLE | (onTop ? wxFRAME_FLOAT_ON_PARENT : 0))
     , shift_(shift)
     , onChange_(std::move(onChange))
+    , onClosed_(std::move(onClosed))
     , noise_(std::move(noise))
     , noiseTimer_(this)
 {
+    SetIcons(appIcons());
+    auto* panel = new wxPanel(this);
     auto* top = new wxBoxSizer(wxVERTICAL);
 
     // Width chips, narrowest to widest, then Path chips, then Auto.
     auto* chips = new wxBoxSizer(wxHORIZONTAL);
-    chips->Add(new wxStaticText(this, wxID_ANY, "Width"), 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 6);
+    chips->Add(new wxStaticText(panel, wxID_ANY, "Width"), 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 6);
     for (std::size_t i = 0; i < ALL_WIDTHS.size(); i++)
     {
         const Width width = ALL_WIDTHS[i];
-        auto* chip = new wxToggleButton(this, wxID_ANY, utf8(widthLabel(width)),
+        auto* chip = new wxToggleButton(panel, wxID_ANY, utf8(widthLabel(width)),
                                         wxDefaultPosition, wxDefaultSize, wxBU_EXACTFIT);
         chip->Bind(wxEVT_TOGGLEBUTTON, [this, width](wxCommandEvent&) {
             shift_.setWidth(width);
@@ -656,11 +663,11 @@ GearshiftDialog::GearshiftDialog(wxWindow* parent, Gearshift& shift, std::functi
         chips->Add(chip, 0, wxRIGHT, 2);
     }
     chips->AddSpacer(18);
-    chips->Add(new wxStaticText(this, wxID_ANY, "Path"), 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 6);
+    chips->Add(new wxStaticText(panel, wxID_ANY, "Path"), 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 6);
     for (std::size_t i = 0; i < ALL_PATHS.size(); i++)
     {
         const Path path = ALL_PATHS[i];
-        auto* chip = new wxToggleButton(this, wxID_ANY, pathLabel(path), wxDefaultPosition,
+        auto* chip = new wxToggleButton(panel, wxID_ANY, pathLabel(path), wxDefaultPosition,
                                         wxDefaultSize, wxBU_EXACTFIT);
         chip->SetToolTip(path == Path::Calm
                              ? "No fading (AWGN)"
@@ -673,7 +680,7 @@ GearshiftDialog::GearshiftDialog(wxWindow* parent, Gearshift& shift, std::functi
         chips->Add(chip, 0, wxRIGHT, 2);
     }
     chips->AddSpacer(18);
-    auto_ = new wxCheckBox(this, wxID_ANY,
+    auto_ = new wxCheckBox(panel, wxID_ANY,
                            wxString::Format("Auto (%.0f dB margin)", AUTO_MARGIN_DB));
     auto_->SetToolTip("Take the fastest gear that needs no more than the path's S/N, "
                       "less the margin");
@@ -684,14 +691,14 @@ GearshiftDialog::GearshiftDialog(wxWindow* parent, Gearshift& shift, std::functi
     chips->Add(auto_, 0, wxALIGN_CENTER_VERTICAL);
     top->Add(chips, 0, wxEXPAND | wxLEFT | wxRIGHT | wxTOP, 10);
 
-    widthNote_ = new wxStaticText(this, wxID_ANY, wxEmptyString);
+    widthNote_ = new wxStaticText(panel, wxID_ANY, wxEmptyString);
     widthNote_->SetForegroundColour(wxSystemSettings::GetColour(wxSYS_COLOUR_GRAYTEXT));
     widthNote_->SetFont(widthNote_->GetFont().Smaller());
     top->Add(widthNote_, 0, wxLEFT | wxTOP, 10);
 
     // The map, and the gear list beside it.
     auto* body = new wxBoxSizer(wxHORIZONTAL);
-    map_ = new SubmodeMap(this, shift_, [this](int gear) {
+    map_ = new SubmodeMap(panel, shift_, [this](int gear) {
         if (shift_.selectGear(gear))
             changed();
     }, [this](const std::string& mode) {
@@ -701,12 +708,12 @@ GearshiftDialog::GearshiftDialog(wxWindow* parent, Gearshift& shift, std::functi
     body->Add(map_, 1, wxEXPAND | wxRIGHT, 10);
 
     auto* side = new wxBoxSizer(wxVERTICAL);
-    inGear_ = new wxStaticText(this, wxID_ANY, wxEmptyString);
+    inGear_ = new wxStaticText(panel, wxID_ANY, wxEmptyString);
     inGear_->SetFont(inGear_->GetFont().Bold());
     side->Add(inGear_, 0, wxBOTTOM, 4);
-    snr_ = new wxStaticText(this, wxID_ANY, wxEmptyString);
+    snr_ = new wxStaticText(panel, wxID_ANY, wxEmptyString);
     side->Add(snr_, 0, wxBOTTOM, 8);
-    gears_ = new wxListCtrl(this, wxID_ANY, wxDefaultPosition, wxSize(434, -1),
+    gears_ = new wxListCtrl(panel, wxID_ANY, wxDefaultPosition, wxSize(434, -1),
                             wxLC_REPORT | wxLC_SINGLE_SEL);
     gears_->InsertColumn(0, "Gear", wxLIST_FORMAT_LEFT, 56);
     gears_->InsertColumn(1, "Data2G mode", wxLIST_FORMAT_LEFT, 132);
@@ -718,8 +725,8 @@ GearshiftDialog::GearshiftDialog(wxWindow* parent, Gearshift& shift, std::functi
     side->Add(gears_, 1, wxEXPAND);
     // Any mode the map draws within the width, gear or not.
     auto* any = new wxBoxSizer(wxHORIZONTAL);
-    any->Add(new wxStaticText(this, wxID_ANY, "Any mode"), 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 6);
-    anyMode_ = new wxChoice(this, wxID_ANY);
+    any->Add(new wxStaticText(panel, wxID_ANY, "Any mode"), 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 6);
+    anyMode_ = new wxChoice(panel, wxID_ANY);
     anyMode_->SetToolTip("Choose a mode that is not a gear. Clicking its dot on the map does the same.");
     anyMode_->Bind(wxEVT_CHOICE, [this](wxCommandEvent& e) {
         const int row = e.GetSelection();
@@ -733,27 +740,45 @@ GearshiftDialog::GearshiftDialog(wxWindow* parent, Gearshift& shift, std::functi
 
     // Where the thresholds came from.
     auto* foot = new wxBoxSizer(wxHORIZONTAL);
-    source_ = new wxStaticText(this, wxID_ANY, wxEmptyString, wxDefaultPosition, wxDefaultSize,
+    source_ = new wxStaticText(panel, wxID_ANY, wxEmptyString, wxDefaultPosition, wxDefaultSize,
                                wxST_ELLIPSIZE_MIDDLE);
     foot->Add(source_, 1, wxALIGN_CENTER_VERTICAL | wxRIGHT, 10);
-    auto* load = new wxButton(this, wxID_ANY, "Load thresholds...");
+    auto* load = new wxButton(panel, wxID_ANY, "Load thresholds...");
     load->SetToolTip("Data2G's data2g/codes_data/mode_thresholds.json, or the Submode Map's file");
     load->Bind(wxEVT_BUTTON, [this](wxCommandEvent&) { loadFile(); });
     foot->Add(load, 0, wxRIGHT, 6);
     // Done with a green check, not "X Close": every change has already
     // gone to the gearshift, so there is nothing to save or cancel (Jeff,
     // 2026-10-25: "X Close implies that you cancel something").
-    auto* done = new wxButton(this, wxID_OK, "Done");
+    auto* done = new wxButton(panel, wxID_OK, "Done");
     done->SetBitmap(checkIcon(goodText()));
     done->SetToolTip("Your choices are already in use; this just closes the gearshift");
-    // Done, Escape and the title bar's X all end the dialog through the
-    // escape id. Binding the button to Close() as well would send the same
-    // press round again, and the dialog would never end.
-    SetEscapeId(wxID_OK);
+    // Done, Escape and the title bar's X all close it.
+    done->Bind(wxEVT_BUTTON, [this](wxCommandEvent&) { Close(); });
+    Bind(wxEVT_CHAR_HOOK, [this](wxKeyEvent& e) {
+        if (e.GetKeyCode() == WXK_ESCAPE && !e.HasAnyModifiers())
+            Close();
+        else
+            e.Skip();
+    });
+    Bind(wxEVT_CLOSE_WINDOW, [this](wxCloseEvent&) {
+        noiseTimer_.Stop();
+        Hide();
+        if (onClosed_)
+        {
+            auto closed = std::move(onClosed_);
+            onClosed_ = nullptr;
+            closed();
+        }
+        Destroy();
+    });
     foot->Add(done, 0);
     top->Add(foot, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 10);
 
-    SetSizerAndFit(top);
+    panel->SetSizer(top);
+    auto* whole = new wxBoxSizer(wxVERTICAL);
+    whole->Add(panel, 1, wxEXPAND);
+    SetSizerAndFit(whole);
     // Fits Jeff's 1366x768 screen with room for the panel and title bar.
     SetSize(wxSize(1144, 610));
     SetMinSize(wxSize(1004, 520));
@@ -773,7 +798,17 @@ void GearshiftDialog::changed()
 {
     refresh();
     if (onChange_)
+    {
+        changing_ = true;
         onChange_();
+        changing_ = false;
+    }
+}
+
+void GearshiftDialog::follow()
+{
+    if (!changing_ && !refreshing_)
+        refresh();
 }
 
 void GearshiftDialog::refresh()

@@ -50,9 +50,10 @@ bool onThisMachine(const std::string& host)
 
 } // namespace
 
-EarFrame::EarFrame(wxWindow* parent, ear::FilterEdit& edit, EarFilterBar::Write write, std::function<void()> onClosed)
+EarFrame::EarFrame(wxWindow* parent, ear::FilterEdit& edit, EarFilterBar::Write write, std::function<void()> onClosed,
+                   bool onTop)
     : wxFrame(parent, wxID_ANY, wxString::FromUTF8("Ear \xc2\xb7 what the radio hears"), wxDefaultPosition,
-              wxDefaultSize, wxDEFAULT_FRAME_STYLE | wxFRAME_FLOAT_ON_PARENT)
+              wxDefaultSize, wxDEFAULT_FRAME_STYLE | (onTop ? wxFRAME_FLOAT_ON_PARENT : 0))
     , audio_(audio::makeEarAudio())
     , onClosed_(std::move(onClosed))
     , timer_(this)
