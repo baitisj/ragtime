@@ -2084,6 +2084,20 @@ draws is in core with no window (`core/src/deck/`, `ragtime_deck_test`).
   arriving voice" are on the strip under the panel.
 - **Never on the rig.** The deck keys nothing; data2g-host keys the rig
   when the file's bursts go, as for text.
+- **Bigger text.** The deck's fonts are set in points, and a desktop
+  with its text scaled up draws them bigger in pixels while `FromDIP()`
+  stays put (Andrew's larger fonts clipped "Hum, thumps and pops out",
+  2026-11-08). So every drawn part sizes itself from its text as wx
+  measures it (`deckart::textSize`, `DeckControl::refit`): the size it
+  was made with is a floor, and a knob's lines, a lamp's caption, a
+  meter's figures, the reduction scale and Push to talk's words grow it.
+  A module is at least its drawn width but never narrower than what it
+  holds (a bare minimum width would clip it), the Clean-up words wrap to
+  two lines rather than widen the deck, and labels take their size from
+  their own font, since GTK measures a label in the default font until
+  the window is shown. The window fits its panel once built and again
+  once shown, never past the screen. The gearshift's gear list and map
+  margins do the same.
 - **Packages.** The AppImage carries libsotto and the Codec 2 it links,
   built by `packaging/build-sotto.sh`, with their licences (and
   RNNoise's) in `usr/share/doc/ragtime/licences`. The Windows zip takes

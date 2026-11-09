@@ -1,6 +1,7 @@
 #include "GearshiftDialog.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <memory>
 #include <string>
@@ -12,6 +13,7 @@
 #include <wx/checkbox.h>
 #include <wx/choice.h>
 #include <wx/dcbuffer.h>
+#include <wx/display.h>
 #include <wx/filedlg.h>
 #include <wx/filename.h>
 #include <wx/graphics.h>
@@ -62,6 +64,37 @@ constexpr double DOT_RADIUS = 4.5;
 constexpr double KNOB_RADIUS = 9.5;       // half a gear knob's height
 constexpr double KNOB_HALF_WIDTH = 19.0;  // wide enough for a short name, "E2C"
 constexpr double S_AXIS_WIDTH = 64.0;     // the S-meter axis, right of the plot
+
+// The modulations in the map's legend, in order.
+const std::array<Modulation, 6> LEGEND_KINDS = {Modulation::Fsk,   Modulation::Qpsk,   Modulation::Qam16,
+                                               Modulation::Qam64, Modulation::Qam256, Modulation::Polar};
+
+// The gear list's columns: their headings, the widths they were drawn at,
+// and their widest usual text. A column is as wide as its text needs at
+// the system's font size, and never narrower than drawn (bigger desktop
+// text cut "4 min 19 s" to "4 min 1...", Andrew, 2026-11-08).
+struct GearColumn
+{
+    const char* heading;
+    int format;
+    int width;
+    const char* widest;
+};
+const GearColumn GEAR_COLUMNS[] = {
+    {"Gear", wxLIST_FORMAT_LEFT, 56, "Z8k"},
+    {"Data2G mode", wxLIST_FORMAT_LEFT, 132, "w48-16qam-r1/2"},
+    {"Speed", wxLIST_FORMAT_RIGHT, 84, "8222 bit/s"},
+    {"S/N", wxLIST_FORMAT_RIGHT, 76, "\xE2\x88\x92" "12.3 dB"},
+    {"1 KB", wxLIST_FORMAT_RIGHT, 80, "4 min 19 s"},
+};
+
+// A list column wide enough for its text, with the cell's padding.
+int columnWidth(const wxWindow* list, int drawn, const wxString& text)
+{
+    int w = 0, h = 0;
+    list->GetTextExtent(text, &w, &h);
+    return std::max(drawn, w + list->FromDIP(16));
+}
 
 // Why there are no gears to draw, or empty when there are: no thresholds
 // found at all, or thresholds with no widths and speeds yet (data2g-host's
@@ -147,10 +180,72 @@ private:
         double snrTop, snrBottom;  // dB at the top and bottom edges
     };
 
+    // The plot's margins, from the small font's size: what they were drawn
+    // at, more for bigger text. The S/N title stands on its side at the
+    // left with the scale beside it, the legend sits above, the speeds and
+    // "bit/s" under, and the S-meter's units and title at the right.
+    struct Margins
+    {
+        double left, top, bottom, sAxis;
+        double across;      // "bit/s" this far under the plot
+    };
+
+    // The legend over the plot: a dot and words for each modulation, then
+    // the hollow dot for modes wider than the width, left to right from the
+    // plot's left edge, onto another row where the next would run past the
+    // panel's (bigger text, narrower map).
+    struct LegendItem
+    {
+        wxString label;
+        double x, y;
+    };
+
+    std::vector<LegendItem> legendItems(double left) const
+    {
+        const wxFont small = GetFont().Smaller();
+        std::vector<wxString> labels;
+        for (Modulation kind : LEGEND_KINDS)
+            labels.push_back(modulationLabel(kind));
+        labels.push_back(wxString::FromUTF8("wider than ") + widthLabel(shift_.effectiveWidth()));
+        std::vector<LegendItem> items;
+        double x = left, y = 10;
+        for (const wxString& label : labels)
+        {
+            int w = 0, h = 0;
+            GetTextExtent(label, &w, &h, nullptr, nullptr, &small);
+            if (x > left && x + 13 + w > GetClientSize().x - 4)
+            {
+                x = left;
+                y += std::max(13, h) + 4;
+            }
+            items.push_back({label, x, y});
+            x += 13 + w + 14;
+        }
+        return items;
+    }
+
+    Margins margins() const
+    {
+        const wxFont small = GetFont().Smaller();
+        int w = 0, h = 0;
+        GetTextExtent(wxString::FromUTF8("\xE2\x88\x92") + "30", &w, &h, nullptr, nullptr, &small);
+        Margins m;
+        m.left = std::max(58.0, 4.0 + h + 4.0 + w + 6.0);
+        const std::vector<LegendItem> legend = legendItems(m.left);
+        m.top = std::max(34.0, legend.back().y + std::max(13, h) + 10.0);
+        m.across = std::max(20.0, 4.0 + h + 2.0);
+        m.bottom = std::max(42.0, m.across + h + 4.0);
+        int sw = 0;
+        GetTextExtent("S9+60", &sw, &h, nullptr, nullptr, &small);
+        m.sAxis = std::max(S_AXIS_WIDTH, 7.0 + sw + 4.0 + h + 2.0);
+        return m;
+    }
+
     Plot plot() const
     {
         const wxSize size = GetClientSize();
-        Plot p {58.0, 34.0, size.x - (noise_.reads ? S_AXIS_WIDTH : 16.0), size.y - 42.0, -15.0, 30.0};
+        const Margins m = margins();
+        Plot p {m.left, m.top, size.x - (noise_.reads ? m.sAxis : 16.0), size.y - m.bottom, -15.0, 30.0};
         // One S/N range for every path, so the dots move when the path
         // changes but the scale doesn't.
         double lo = 1e9, hi = -1e9;
@@ -297,7 +392,7 @@ private:
             const wxString across = "bit/s";
             double w = 0, h = 0;
             gc->GetTextExtent(across, &w, &h);
-            gc->DrawText(across, (p.left + p.right - w) / 2, p.bottom + 20);
+            gc->DrawText(across, (p.left + p.right - w) / 2, p.bottom + margins().across);
             const wxString down = "S/N needed, dB in 2500 Hz (harder further down)";
             gc->GetTextExtent(down, &w, &h);
             gc->DrawText(down, 4, (p.top + p.bottom + w) / 2, PI / 2);
@@ -402,7 +497,7 @@ private:
             gc->SetFont(knobFont, isCurrent ? *wxWHITE : line);
             double w = 0, h = 0;
             gc->GetTextExtent(label, &w, &h);
-            const double r = KNOB_RADIUS;
+            const double r = std::max(KNOB_RADIUS, h / 2 + 2);
             const double half = std::max(KNOB_HALF_WIDTH, w / 2 + 5);
             if (!shift_.isAuto() && suggestion && suggestion->number == gear.number)
             {
@@ -419,28 +514,25 @@ private:
         // The legend.
         {
             gc->SetFont(small, ink);
-            double x = p.left;
-            const double y = 10;
-            const Modulation kinds[] = {Modulation::Fsk,    Modulation::Qpsk,   Modulation::Qam16,
-                                        Modulation::Qam64,  Modulation::Qam256, Modulation::Polar};
-            for (Modulation kind : kinds)
+            const std::vector<LegendItem> legend = legendItems(p.left);
+            for (std::size_t i = 0; i < legend.size(); i++)
             {
-                gc->SetPen(*wxTRANSPARENT_PEN);
-                gc->SetBrush(wxBrush(fromRgb(modulationColour(kind))));
-                gc->DrawEllipse(x, y + 2, 9, 9);
-                const wxString label = modulationLabel(kind);
+                const LegendItem& item = legend[i];
+                if (i < LEGEND_KINDS.size())
+                {
+                    gc->SetPen(*wxTRANSPARENT_PEN);
+                    gc->SetBrush(wxBrush(fromRgb(modulationColour(LEGEND_KINDS[i]))));
+                }
+                else
+                {
+                    setPen(*gc, soft, 1.5);
+                    gc->SetBrush(*wxTRANSPARENT_BRUSH);
+                }
+                gc->DrawEllipse(item.x, item.y + 2, 9, 9);
                 double w = 0, h = 0;
-                gc->GetTextExtent(label, &w, &h);
-                gc->DrawText(label, x + 13, y + 6.5 - h / 2);
-                x += 13 + w + 14;
+                gc->GetTextExtent(item.label, &w, &h);
+                gc->DrawText(item.label, item.x + 13, item.y + 6.5 - h / 2);
             }
-            setPen(*gc, soft, 1.5);
-            gc->SetBrush(*wxTRANSPARENT_BRUSH);
-            gc->DrawEllipse(x, y + 2, 9, 9);
-            const wxString wider = wxString::FromUTF8("wider than ") + widthLabel(shift_.effectiveWidth());
-            double w = 0, h = 0;
-            gc->GetTextExtent(wider, &w, &h);
-            gc->DrawText(wider, x + 13, y + 6.5 - h / 2);
         }
 
         // Hovering a dot shows its name, width, speed and threshold, and
@@ -715,11 +807,17 @@ GearshiftDialog::GearshiftDialog(wxWindow* owner, bool onTop, Gearshift& shift, 
     side->Add(snr_, 0, wxBOTTOM, 8);
     gears_ = new wxListCtrl(panel, wxID_ANY, wxDefaultPosition, wxSize(434, -1),
                             wxLC_REPORT | wxLC_SINGLE_SEL);
-    gears_->InsertColumn(0, "Gear", wxLIST_FORMAT_LEFT, 56);
-    gears_->InsertColumn(1, "Data2G mode", wxLIST_FORMAT_LEFT, 132);
-    gears_->InsertColumn(2, "Speed", wxLIST_FORMAT_RIGHT, 84);
-    gears_->InsertColumn(3, "S/N", wxLIST_FORMAT_RIGHT, 76);
-    gears_->InsertColumn(4, "1 KB", wxLIST_FORMAT_RIGHT, 80);
+    int listWidth = 0;
+    for (int i = 0; i < 5; i++)
+    {
+        const GearColumn& c = GEAR_COLUMNS[i];
+        const int width = std::max(columnWidth(gears_, c.width, c.heading),
+                                   columnWidth(gears_, c.width, wxString::FromUTF8(c.widest)));
+        gears_->InsertColumn(i, c.heading, c.format, width);
+        listWidth += width;
+    }
+    // The columns and the list's frame: 434 as drawn.
+    gears_->SetMinSize(wxSize(std::max(434, listWidth + 6), -1));
     gears_->SetToolTip("Gears in red need more S/N than the path has, less Auto's 3 dB margin");
     gears_->Bind(wxEVT_LIST_ITEM_SELECTED, &GearshiftDialog::onGearSelected, this);
     side->Add(gears_, 1, wxEXPAND);
@@ -780,8 +878,15 @@ GearshiftDialog::GearshiftDialog(wxWindow* owner, bool onTop, Gearshift& shift, 
     whole->Add(panel, 1, wxEXPAND);
     SetSizerAndFit(whole);
     // Fits Jeff's 1366x768 screen with room for the panel and title bar.
-    SetSize(wxSize(1144, 610));
-    SetMinSize(wxSize(1004, 520));
+    // Bigger desktop text can ask for more, up to the screen.
+    const wxSize fitted = GetSize();
+    const int display = wxDisplay::GetFromWindow(parent ? parent : this);
+    const wxRect screen = wxDisplay(display == wxNOT_FOUND ? 0u : (unsigned)display).GetClientArea();
+    auto onScreen = [&](int w, int h) {
+        return wxSize(std::min(std::max(w, fitted.x), screen.width), std::min(std::max(h, fitted.y), screen.height));
+    };
+    SetSize(onScreen(1144, 610));
+    SetMinSize(onScreen(1004, 520));
     refresh();
     CentreOnParent();
 
@@ -865,6 +970,13 @@ void GearshiftDialog::refresh()
         gears_->SetItem(row, 2, utf8(formatSpeed(gear.bitsPerSecond)));
         gears_->SetItem(row, 3, utf8(formatDb(gear.threshold)));
         gears_->SetItem(row, 4, utf8(formatDuration(secondsPerKilobyte(gear.bitsPerSecond))));
+        // A file's longer mode names widen their column.
+        for (int col = 0; col < 5; col++)
+        {
+            const int width = columnWidth(gears_, gears_->GetColumnWidth(col), gears_->GetItemText(row, col));
+            if (width > gears_->GetColumnWidth(col))
+                gears_->SetColumnWidth(col, width);
+        }
         if (snr && dbShort(gear.threshold, *snr) > 0)
             gears_->SetItemTextColour(row, badText());
         if (current && current->number == gear.number)
