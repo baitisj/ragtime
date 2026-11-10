@@ -302,7 +302,13 @@ keep or change:
   it "Session ended by W1AW"), "Link lost" or "Link failed: data2g-host
   gave up on it (no progress)". A Leave the far end never acknowledged
   adds "W1AW didn't confirm it". An older host's bare `DISCONNECTED` is
-  read as before.
+  read as before. `CLIENT` when we never left is another program on our
+  host, such as Pat: "Another program on data2g-host ended the session
+  with W1AW ... Is Pat or another VARA program connected to it?"
+  (docs/DATA2G.md, "One host, many clients").
+- **A call we stopped stops only itself.** Cancel, or a call given up
+  after `CALL_GIVE_UP_MS`, no longer cuts off the next session someone
+  else starts with us (before, it was ABORTed as it opened).
 - **The buttons follow the moment:** Cancel while calling, Leave in a
   session, Leave now once leaving (as PLAN.md describes it), and Call
   again once it has ended. All are on the Station menu too (Ctrl+K,

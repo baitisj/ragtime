@@ -239,6 +239,7 @@ public:
         RefusedThere,   // the far end's host refused the call (another version, or its operator)
         IdleClosed,     // our host closed it: no data either way for its idle timeout
         ClosedThere,    // the far end's host closed it, with no farewell
+        ClosedHere,     // our host closed it for another of its clients (DISCONNECTED CLIENT, not ours)
     };
 
     struct Event

@@ -200,6 +200,14 @@ are in `data2g/codes_data/mode_thresholds.json` (GEARBOX.md).
   when the DISC was never acknowledged. Without `DATA2G ON`, or from a
   host before it, a bare `DISCONNECTED`, and Ragtime guesses as before
   (`SessionChat`).
+- **One host, many clients.** The command port takes any number of
+  clients, every one hears each `CONNECTED`, and any one's `DISCONNECT`
+  ends the session (`CLIENT`). A VARA client left running on the same
+  host, such as Pat listening for Winlink, answers a ragchew too, finds
+  no Winlink in it and hangs up as soon as the Hellos have crossed
+  (KC2G calling AG7EW, 2026-11-10). Ragtime can't see the other client,
+  but a `CLIENT` it never asked for says so ("Another program on
+  data2g-host ended the session", `SessionChat::Ending::ClosedHere`).
 - A caller who dials again while its old session is still up replaces
   that session.
 - The answering side takes the smaller of the two width caps.

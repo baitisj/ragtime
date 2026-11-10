@@ -784,7 +784,15 @@ void SessionChat::onEvent(const link::HostLink::Event& event, uint64_t nowMs)
             // own Leave, which the flags above say more about.
             const std::string& why = event.disconnect.reason;
             bool hostSays = event.sessionEnd != End::HostLost && !why.empty() && why != "CLIENT" && why != "ABORT";
-            if (hostSays)
+            // CLIENT with no Leave of ours: another program on our host,
+            // such as Pat answering the call as a VARA client, said
+            // DISCONNECT (KC2G's report, 2026-11-10).
+            bool notUs = event.sessionEnd != End::HostLost && why == "CLIENT" && phase_ == Phase::Connected;
+            if (notUs)
+            {
+                ending = farewellHeard_ ? Ending::LeftThere : Ending::ClosedHere;
+            }
+            else if (hostSays)
             {
                 if (why == "NO_ANSWER")
                     ending = cancelling_ ? Ending::Cancelled : Ending::NoAnswer;
@@ -880,7 +888,9 @@ void SessionChat::onEvent(const link::HostLink::Event& event, uint64_t nowMs)
 
 void SessionChat::begin(const std::string& peer, bool incoming, int bandwidth, uint64_t nowMs)
 {
-    bool stopping = cancelling_ || gaveUp_;
+    // Our own call answered while we stop it. A call that ended stopped
+    // leaves its flags for the strip; they don't stop the next session.
+    bool stopping = phase_ == Phase::Leaving && connectedMs_ == 0 && (cancelling_ || gaveUp_);
     endAfterglow();
     if (incoming || phase_ != Phase::Calling || peer != peer_) showHistory(peer);
     if (log_ != nullptr) log_->began(peer, nowMs);
@@ -1213,6 +1223,10 @@ SessionChat::Strip SessionChat::strip(uint64_t nowMs, long utcOffsetS) const
                         s.text = peer_ + "'s end closed the session at " + at;
                     break;
                 }
+                case Ending::ClosedHere:
+                    s.text = "Another program on data2g-host ended the session with " + peer_ + " at " + at
+                             + ", not Ragtime. Is Pat or another VARA program connected to it? Close it while Ragtime runs";
+                    break;
                 case Ending::HostLost:
                     s.text = "data2g-host went away at " + at + ", and the session with " + peer_ + " with it";
                     break;
