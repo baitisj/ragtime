@@ -224,6 +224,60 @@ void testModes()
     CHECK(ModeInfo().burstSeconds({10}) == 0.0);
 }
 
+// Hands (Data2G PR #146): the channels, REF and HAND lines, the
+// commands and the KISS port's REF frames.
+void testHands()
+{
+    // From the centre out, even below 1500 Hz and odd above.
+    CHECK(handChannelHz(0) == 1470.0 && handChannelHz(1) == 1530.0 && handChannelHz(2) == 1410.0);
+    CHECK(handChannelHz(39) == 1500.0 + 30.0 + 19 * 60.0);
+    CHECK_EQ(handChannelsWithin(500), 8);
+    CHECK_EQ(handChannelsWithin(1200), 20);
+    CHECK_EQ(handChannelsWithin(2400), 40);
+
+    using Type = CommandEvent::Type;
+    CommandEvent e = parseCommandLine("REF 12 4071.25 -2.5 -14.0");
+    CHECK(e.type == Type::Ref && e.handRef.id == 12 && e.handRef.endS == 4071.25 && e.handRef.offsetHz == -2.5
+          && e.handRef.snr == -14.0);
+    CHECK(parseCommandLine("REF 0 1.0 0.0 0.0").type == Type::Other);
+    CHECK(parseCommandLine("REF 3 1.0 0.0").type == Type::Other);
+    CHECK(parseHandRef("REF 4 10.00 0.0 3.5") && parseHandRef("REF 4 10.00 0.0 3.5")->id == 4);
+    CHECK(!parseHandRef("REF 4 nan 0.0 3.5"));
+
+    e = parseCommandLine("HAND SENT 5");
+    CHECK(e.type == Type::HandSent && e.number == 5);
+    e = parseCommandLine("HAND DROPPED 6");
+    CHECK(e.type == Type::HandDropped && e.number == 6);
+    e = parseCommandLine("HAND 3 7fffffffffffffff -18.5 -220");
+    CHECK(e.type == Type::Hand && e.number == 3 && e.handPayload == HAND_PAYLOAD_MASK && e.snr && *e.snr == -18.5
+          && e.value == -220.0);
+    // The top bit is never a Hand's.
+    CHECK(parseCommandLine("HAND 3 ffffffffffffffff 1.0 0").handPayload == HAND_PAYLOAD_MASK);
+    CHECK(parseCommandLine("HAND 3 xyz 1.0 0").type == Type::Other);
+    e = parseCommandLine("HAND SHORT 250");
+    CHECK(e.type == Type::HandShort && e.value == 250.0);
+    CHECK(parseCommandLine("HAND END").type == Type::HandEnd);
+
+    // The commands, numbers as the host reads them: no exponent, no comma.
+    CHECK_EQ(handSendLine(12, 200, 3.0, 7, 0x123), std::string("HAND SEND 12 200 3.000 7 0000000000000123"));
+    CHECK_EQ(handSendLine(1, 0, 0.25, 0, ~uint64_t(0)), std::string("HAND SEND 1 0 0.250 0 7fffffffffffffff"));
+    CHECK_EQ(handListenLine(1.5, 9, 0x00AB, {0, 1, 2}), std::string("HAND LISTEN 1.500 9 00ab 0 1 2"));
+    CHECK_EQ(handDelayText(2.0004), std::string("2.000"));
+    CHECK_EQ(handDelayText(12.3456), std::string("12.346"));
+
+    // REFS ON, byte for byte as Data2G's docs/broadcast.md gives it.
+    CHECK(kissEncodeRefs(true) == std::vector<uint8_t>({0xC0, 0x06, 'R', 'E', 'F', 'S', ' ', 'O', 'N', 0xC0}));
+    // A REF frame comes through the decoder with its subcommand.
+    std::string text = "REF 9 1.00 0.0 2.0";
+    std::vector<uint8_t> payload{KISS_REF};
+    payload.insert(payload.end(), text.begin(), text.end());
+    std::vector<uint8_t> stream = kissEncodeSetHardware(0, payload);
+    KissDecoder decoder;
+    std::vector<KissFrame> frames;
+    decoder.feed(stream.data(), stream.size(), frames);
+    CHECK(frames.size() == 1 && frames[0].command == KISS_SETHARDWARE && frames[0].payload == payload);
+}
+
 } // namespace
 
 int main()
@@ -234,5 +288,6 @@ int main()
     testDisconnectReasons();
     testCommandCallsign();
     testModes();
+    testHands();
     return ragtime_test::finish();
 }

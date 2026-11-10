@@ -51,6 +51,22 @@
 // - A session with no data either way for the shorter of the two hosts'
 //   idle timeouts is closed: IDLE on the host whose timer ran out, PEER on
 //   the other.
+// - Hands, as data2g-host since Data2G PR #146: each group burst heard
+//   is a reference, "REF id end offset snr" to a client that sent DATA2G
+//   ON or a HAND command, and a REF frame ahead of its frames on the KISS
+//   port once that client sent SETHARDWARE "REFS ON" (only group bursts:
+//   the real host refs session bursts too). HAND SEND schedules a Hand
+//   d seconds after a ref's end (HAND SENT c as it keys, HAND DROPPED c if
+//   this host is on air more than 0.5 s past the slot); HAND LISTEN opens
+//   a window d seconds after the burst carrying the named ACKMODE tag, and
+//   at its end says "HAND c hex16 snr dt" for each Hand from another host
+//   that landed in a listed channel within 0.6 s of the slot with the same
+//   tag, heard above -19 dB, then HAND END (also after 30 s unanchored);
+//   HAND CANCEL stops both. Arguments are as strict as the real host's,
+//   and channels past the width (8 after BW500) are WRONG. A waiting Hand
+//   or an open window holds the group's bursts. A Hand lasts setHandMs
+//   (0 in tests, 10560 on the bench). With setHands(false), a host from
+//   before it: no REF, and HAND is WRONG.
 #ifndef RAGTIME_TESTS_FAKE_HOST_H
 #define RAGTIME_TESTS_FAKE_HOST_H
 
@@ -110,6 +126,16 @@ public:
     // DISCONNECTED reasons, TIMEOUT and TXPOWER, as data2g-host since
     // Data2G PR #122 (off: as before it).
     void setReasons(bool on) { reasons_ = on; }
+    // Hands and REF lines, as data2g-host since Data2G PR #146 (off: as
+    // before it). A Hand keys the radio this long.
+    void setHands(bool on) { hands_ = on; }
+    void setHandMs(int ms) { handMs_ = ms; }
+    // How far off this host's bursts land as the others hear them, Hz:
+    // their REF lines' offset.
+    void setOffsetHz(double hz) { offsetHz_ = hz; }
+    // A Hand waits to go, or this host's window is armed or open.
+    bool handWaiting() const { return handOut_.has_value(); }
+    bool handListening() const { return window_.has_value(); }
     // The idle timeout and output volume as the client last set them.
     double idleTimeoutS() const { return idleTimeoutS_; }
     double txPowerDb() const { return txPowerDb_; }
@@ -169,6 +195,13 @@ private:
     // a bare DISCONNECTED.
     std::string disconnectedLine(const std::string& why) const;
     void stepIdle(long long nowMs);
+    void stepHand(long long nowMs);
+    void onHand(const std::vector<std::string>& w);
+    // The group's bursts wait: a Hand is waiting or a window open.
+    bool handHolds(long long nowMs) const;
+    // A burst this host heard: its REF line, kept for HAND SEND.
+    void heardRef(double snr, double offsetHz);
+    int handChannelsHere() const;
     void stepCall(long long nowMs);
     void stepSession(long long nowMs);
     bool sessionIdle(long long nowMs) const;
@@ -242,6 +275,44 @@ private:
     double txPowerDb_ = 0.0;
     uint64_t sessionRead_ = 0;  // host offsets: session bytes read since CONNECTED
     size_t cutBytes_ = 0;
+
+    // Hands (Data2G PR #146).
+    bool hands_ = true;
+    bool handClient_ = false;   // the command client sent a HAND command
+    bool refsOn_ = false;       // the KISS client sent REFS ON
+    bool narrow_ = false;       // BW500
+    int handMs_ = 0;
+    double offsetHz_ = 0.0;
+    long long epochMs_ = 0;     // host seconds count from here
+    struct Ref
+    {
+        int id;
+        long long endMs;
+    };
+    std::vector<Ref> refs_;     // the last 64
+    int refCount_ = 0;
+    struct HandOut
+    {
+        int channel;
+        int tag;
+        uint64_t payload;
+        long long atMs;
+    };
+    std::optional<HandOut> handOut_;
+    long long handOnAirUntilMs_ = -1;
+    struct Window
+    {
+        double delayS;
+        int tag;
+        uint16_t ack;
+        std::vector<int> channels;
+        long long armedMs;
+        bool open = false;
+        long long slotMs = 0;
+        long long closeMs = 0;
+        std::vector<std::string> heard;
+    };
+    std::optional<Window> window_;
 
     bool reportsSnr_ = false;
     double signalDb_ = 0.0;

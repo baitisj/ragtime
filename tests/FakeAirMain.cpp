@@ -9,7 +9,7 @@
 //
 //   ragtime_fake_air [--bots N] [--airtime MS] [--call CALL] [--fade] [--rate BPS]
 //                    [--loss PCT] [--files] [--voice] [--voice-file FILE.sot] [--no-snr] [--no-cut]
-//                    [--no-reasons]
+//                    [--no-reasons] [--no-hands]
 //                    [--rig PORT [--dial HZ] [--dial-hop] [--rig-vfo] [--rig-swr X] [--rig-noise DB]]
 //   ragtime_fake_air --replay FILE|FOLDER... [--from TIME] [--speed X]
 //
@@ -44,7 +44,10 @@
 // BUSY, IDLE, PEER...), and take TIMEOUT and TXPOWER, as data2g-host does
 // since Data2G PR #122, hanging up a session quiet for the shorter of its
 // two hosts' idle timeouts (the bots set Ragtime's day); --no-reasons
-// plays a host from before it.
+// plays a host from before it. They give each group burst heard a Hand
+// reference and take HAND SEND, LISTEN and CANCEL, as data2g-host does
+// with Data2G PR #146, a Hand keying for 10.56 s; --no-hands plays a host
+// from before it. The bots don't raise hands yet.
 //
 // --rig PORT plays a rigctld on that port (pick another than 4532 where a
 // real one runs): it answers "\chk_vfo" with 0, "f" with the dial,
@@ -476,6 +479,7 @@ struct Bot
         session.setTraffic(&traffic);
         bulletin = writeBulletin(p);
         host.setAirtimeMs(airtimeMs);
+        host.setHandMs((int)(link::HAND_SECONDS * 1000.0));
         host.setIdleBroadcastMs(3000);
         kiss = connectTo(host.kissPort());
         command = connectTo(host.commandPort());
@@ -834,6 +838,7 @@ int main(int argc, char** argv)
     bool snr = true;
     bool cuts = true;
     bool reasons = true;
+    bool hands = true;
     int rigPort = 0;
     uint64_t dialHz = 14105000;
     bool dialHop = false;
@@ -868,6 +873,8 @@ int main(int argc, char** argv)
             cuts = false;
         else if (std::strcmp(argv[i], "--no-reasons") == 0)
             reasons = false;
+        else if (std::strcmp(argv[i], "--no-hands") == 0)
+            hands = false;
         else if (std::strcmp(argv[i], "--rig") == 0 && i + 1 < argc)
             rigPort = std::atoi(argv[++i]);
         else if (std::strcmp(argv[i], "--dial") == 0 && i + 1 < argc)
@@ -893,7 +900,7 @@ int main(int argc, char** argv)
         {
             std::fprintf(stderr, "usage: ragtime_fake_air [--bots N] [--airtime MS] [--call CALL] [--fade] "
                                  "[--rate BPS] [--loss PCT] [--files] [--voice] [--voice-file FILE.sot] "
-                                 "[--no-snr] [--no-cut] [--no-reasons] "
+                                 "[--no-snr] [--no-cut] [--no-reasons] [--no-hands] "
                                  "[--rig PORT [--dial HZ] [--dial-hop] [--rig-vfo] [--rig-swr X] [--rig-noise DB]]\n"
                                  "       ragtime_fake_air --replay FILE|FOLDER... [--from 2026-10-25T16:20] "
                                  "[--speed X]\n");
@@ -933,6 +940,8 @@ int main(int argc, char** argv)
         h->setReportsSnr(snr);
         h->setCuts(cuts);
         h->setReasons(reasons);
+        h->setHands(hands);
+        h->setHandMs((int)(link::HAND_SECONDS * 1000.0));
         h->setSignalDb(5.0, 2.0);
     }
 
@@ -950,6 +959,7 @@ int main(int argc, char** argv)
         stations.back()->host.setReportsSnr(snr);
         stations.back()->host.setCuts(cuts);
         stations.back()->host.setReasons(reasons);
+        stations.back()->host.setHands(hands);
         stations.back()->host.setSignalDb(SIGNAL_DB[(size_t)i % (sizeof(SIGNAL_DB) / sizeof(SIGNAL_DB[0]))], 2.0);
     }
     if (share && !stations.empty())

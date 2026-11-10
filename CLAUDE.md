@@ -133,6 +133,16 @@ and the Part 97 check.
   NotListening, RefusedThere, IdleClosed, ClosedThere). The fake hosts
   give reasons and hang up quiet sessions (`--no-reasons` for an older
   one).
+- Data2G PR #146 (the Hand, open at 20db50e on 2026-11-10) gives the
+  show of hands. Ragtime's link layer speaks it ahead of the merge
+  (Jeff, 2026-11-10): `HostLink` sends KISS `REFS ON`, gives each heard
+  frame its burst's Hand reference, and has `handSend`, `handListen`
+  (the window named by its burst's first ACKMODE tag, the burst held
+  until the host's OK) and `handCancel`, with the REF and HAND lines as
+  events (docs/DATA2G.md, "Hands"). The fake hosts do references and
+  Hands (`--no-hands` for an older one). The payload (with the sender's
+  callsign, Jeff 2026-11-08) and net control's round are Stage 2, still
+  to build.
 - The dial, the path log and the watch list (2026-10-25,
   `docs/STAGE1.md`): `core/src/radio/` (`DialReader`, which only ever
   asks rigctld `\chk_vfo`, `f`, while transmitting the meters

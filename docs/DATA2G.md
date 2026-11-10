@@ -8,7 +8,10 @@ copied code (CLAUDE.md, "Data2G"). When Data2G moves on, read it again
 and update this page, with the new commit. What Data2G PR #122 adds
 (DISCONNECTED reasons, `TIMEOUT`, `TXPOWER`) was read at its head,
 [843987e](https://github.com/arodland/Data2G/pull/122/commits/843987e),
-on v0.3.0 (2026-10-26).
+on v0.3.0 (2026-10-26). The Hand ("Hands" below) was read at Data2G PR
+#146's head,
+[20db50e](https://github.com/arodland/Data2G/pull/146/commits/20db50e),
+not yet merged (master f5388f7, v0.4.3, has none of it, 2026-11-10).
 
 ## Where to look in Data2G
 
@@ -216,6 +219,63 @@ are in `data2g/codes_data/mode_thresholds.json` (GEARBOX.md).
   the caller polls every 15 to 30 s (`KEEPALIVE_S`). With nothing heard
   from the partner for 90 s (`LINK_LOST_S`) the session is lost.
 
+## Hands
+
+Data2G PR #146 (open, read at 20db50e) adds the Hand, the D2G net's show
+of hands (docs/PLAN.md, "On a multiplex link: the Hand burst"). Its
+design is in Data2G's `docs/hand-burst.md`, the commands in `docs/arq.md`
+§9, the KISS side in `docs/broadcast.md` §5, the waveform in
+`data2g/hand.py`.
+
+- **What a Hand is.** 63 bits in one of 40 channels, 6.25 Hz 8-FSK with
+  a constant envelope, 60 Hz apart round 1500 Hz, 10.56 s long. Channels
+  are numbered from the centre out: 0 at 1470 Hz, 1 at 1530, 2 at 1410
+  (`link::handChannelHz`). Only the channels inside the host's width
+  are taken, the narrower of its `BW` and `--kiss-bw`: 8 at 500 Hz, 20
+  at 1200, 40 at 2400 (`link::handChannelsWithin`, and
+  `HostLink::handChannels`, which takes `--kiss-bw` from the widest mode
+  `MODES` lists). A CRC-16 seeded with an 8-bit tag and the channel
+  rides under the polar code, so a Hand can't answer another net's call
+  or land a channel over. Data2G measures 90% decoded at -19.2 dB in
+  noise and -13.8 to -16.3 dB on fading paths.
+- **References.** Every burst the host decodes becomes one: `REF id end
+  offset snr` (id counting up from 1, the last 64 usable; end in host
+  seconds on the sound card's clock; offset the measured frequency
+  offset, Hz; snr the pilot SNR) on the command port, to a client that
+  sent `DATA2G ON` or a `HAND` command. The command port can't say which
+  KISS frames it belongs to, so SETHARDWARE `REFS ON` on the KISS port
+  (`C0 06 "REFS ON" C0`, per connection) has the same line come there as
+  a REF frame (SETHARDWARE, subcommand `0x11`, then the text) ahead of
+  that burst's frames. `HostLink` sends `REFS ON` as the ports come up,
+  and each `Heard` frame carries its burst's reference; a host from
+  before the PR logs a warning and ignores it.
+- **`HAND SEND ref tag d channel hex16`.** Answers burst `ref` with a
+  Hand `d` seconds after its end (0 < d < 30), shifted by its offset, so
+  it lands in its channel as net control hears it. WRONG for a gone
+  ref, bad numbers, a channel past the width, a slot already past or a
+  Hand already waiting. Then `HAND SENT c` as it keys, or `HAND DROPPED
+  c` if the radio was busy more than 0.5 s past the slot.
+- **`HAND LISTEN d tag ack channel...`.** Net control's window: `d`
+  seconds (1 <= d < 30) after the end of the burst carrying the KISS
+  frame sent with ACKMODE tag `ack` (4 hex digits), 10.56 s plus 0.6 s
+  either side. Each Hand decoded comes as `HAND c hex16 snr dt` (dt its
+  lateness, ms), then `HAND SHORT ms` if our own burst ran into the
+  window's head, then `HAND END`; an armed window whose burst never goes
+  gives up after 30 s. Send it before the burst's frames: `HostLink`
+  holds the burst until the host's OK (`handListen`).
+- **`HAND CANCEL`** stops a waiting Hand and any window, always OK. A
+  command client that leaves cancels its own.
+- **Holds.** While a Hand waits or a window is open the host starts no
+  CQ, broadcast, ID or KISS burst of its own; session bursts still go.
+  So broadcasts queue behind a round, for at most about 42 s.
+- **Numbers** are strict: digits only, and the delay digits and a point
+  (`link::handDelayText`), never an exponent or a comma.
+
+Not yet in the PR, from our review (2026-11-09): the 10-minute forced
+CW ID still ignores the Hand's holds, and `TXPOWER` still isn't reset
+when the client goes. `docs/hand-burst.md` recommends a callsign in the
+payload, which Jeff has decided for Ragtime (2026-11-08).
+
 ## Not in Data2G yet (asks)
 
 - `TXPOWER` back to the station's own level when the client goes, as
@@ -225,6 +285,7 @@ are in `data2g/codes_data/mode_thresholds.json` (GEARBOX.md).
 - The mode on `BCAST HEARD` (the path log's mode column).
 - A dial report from the host's own rig control.
 - A 200 Hz session cap.
-- The Hand (`HAND SEND`, `HAND LISTEN`, Stage 2).
+- The Hand merged (PR #146, "Hands" above, open at 20db50e), and the
+  10-minute forced CW ID made to wait for a Hand or an open window.
 - A note when a v2 broadcast is heard by a v3 host, so an operator knows
   to update.
