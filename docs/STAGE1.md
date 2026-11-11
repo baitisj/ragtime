@@ -192,20 +192,24 @@ bench"). Choices made there, for Jeff to keep or change:
   At its right end, data2g-host's address and state (Connected,
   Reconnecting in 8 s), with the last error as its tooltip. It sat at the
   connection bar's left end until Jeff moved it (2026-10-23).
-- **Light or dark (Jeff, 2026-10-23).** A button at the status bar's right
-  end, beside the size grip, switches: a moon in the light, a sun in the
-  dark. The choice is kept (`/Window/Theme`); until the first click the
-  desktop's theme stands. On GTK it is the theme's own dark variant,
-  falling back to Adwaita's when the theme has none; windows that keep a
-  colour from when they were made take it again (`followThemeBackground`,
-  `followThemeText` in `Theme.h`). wxWidgets 3.2 has no dark mode on
-  Windows, so the button isn't there. The colours that mean something
-  (delivered and sent green, not delivered red, the Link quiet strip's
-  amber, links, the station dots, the gearshift's too-hard gears) come in
-  a light and a dark shade (`goodText`, `badText`, `quietText`,
-  `accentText`, `quietSurface`, `htmlLink` in `Html.h`), so they read on
-  both (Jeff found the Link quiet strip and Delivered hard to see in the
-  dark, 2026-10-23).
+- **Light or dark (Jeff, 2026-10-23).** A button at the status bar's
+  right end, beside the size grip, switches: a moon in the light, a sun
+  in the dark. The choice is kept (`/Window/Theme`); until the first
+  click the desktop's theme stands. On GTK it is the theme's own dark
+  variant, falling back to Adwaita's when the theme has none; windows
+  that keep a colour from when they were made take it again
+  (`followThemeBackground`, `followThemeText` in `Theme.h`). wxWidgets
+  3.2 has no dark mode on Windows, so the button isn't there, and there
+  `themeIsDark` goes by the system's colours rather than Windows' dark
+  mode setting: wx draws its windows light either way, and what Ragtime
+  draws must match them (issue #139, the microphone deck dark round
+  black labels). The colours that mean something (delivered and sent
+  green, not delivered red, the Link quiet strip's amber, links, the
+  station dots, the gearshift's too-hard gears) come in a light and a
+  dark shade (`goodText`, `badText`, `quietText`, `accentText`,
+  `quietSurface`, `htmlLink` in `Html.h`), so they read on both (Jeff
+  found the Link quiet strip and Delivered hard to see in the dark,
+  2026-10-23).
 - **The chat lists' scrollbar sits beside the rows (Jeff, 2026-10-23).**
   GTK's overlay scrollbar faded in over the rows' right ends whenever a
   message came, covering "Sent" and "Delivered"; the Broadcast and
@@ -2039,6 +2043,9 @@ order the sound flows, drawn in the theme's colours, light or dark
 (`app/src/DeckParts`), with standard dropdowns, buttons and boxes for
 everything that is a choice rather than an instrument. The logic it
 draws is in core with no window (`core/src/deck/`, `ragtime_deck_test`).
+The deck's text, the standard labels and boxes on its plate included, is
+in the deck's own ink and follows a theme switch (`inked` in
+`VoiceDeck.cpp`), as the system's text colour need not read on the plate.
 
 - **sotto, loaded at run time.** libsotto is LGPL through Codec 2, so
   Ragtime never links it: `voice::Sotto` (`audio/src/Sotto.cpp`) opens

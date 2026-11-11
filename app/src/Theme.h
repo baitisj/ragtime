@@ -25,7 +25,8 @@ enum class ThemeChoice
 // Whether this build can switch.
 bool canSwitchTheme();
 
-// Whether the theme now showing is dark.
+// Whether the theme now showing is dark: on Windows, whether its colours
+// are, as wx 3.2 draws light windows there even in Windows' dark mode.
 bool themeIsDark();
 
 // Switches to the choice, and tells every window when the colours change.

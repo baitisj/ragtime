@@ -25,6 +25,7 @@
 #include "DeckParts.h"
 #include "DrawnIcon.h"
 #include "Prefs.h"
+#include "Theme.h"
 #include "ragtime/audio/VoiceAudio.h"
 #include "ragtime/denoise/RnNoise.h"
 #include "ragtime/voice/Voice.h"
@@ -116,11 +117,22 @@ void fitLabel(wxStaticText* t, int width = -1)
     t->SetMinSize(wxSize(width >= 0 ? width : w + 1, h));
 }
 
+// Text in the deck's ink, kept in it when the theme switches. The plate
+// and the modules are the deck's colours, not the system's, so a label
+// left in the system's text colour can vanish on them (issue #139).
+void inked(wxWindow* w, bool dim = false)
+{
+    followThemeText(w, [dim] {
+        const deckart::Colours c = deckart::colours();
+        return dim ? c.dimInk : c.ink;
+    });
+}
+
 wxStaticText* readout(wxWindow* parent, const wxString& text, double points = 8.0)
 {
     auto* t = new wxStaticText(parent, wxID_ANY, text, wxDefaultPosition, wxDefaultSize, wxALIGN_CENTRE_HORIZONTAL | wxST_NO_AUTORESIZE);
     t->SetFont(deckart::readoutFont(parent, points));
-    t->SetForegroundColour(deckart::colours().dimInk);
+    inked(t, true);
     fitLabel(t);
     return t;
 }
@@ -129,7 +141,7 @@ wxStaticText* engraved(wxWindow* parent, const wxString& text, double points = 7
 {
     auto* t = new wxStaticText(parent, wxID_ANY, text);
     t->SetFont(deckart::captionFont(parent, points));
-    t->SetForegroundColour(deckart::colours().ink);
+    inked(t);
     fitLabel(t);
     return t;
 }
@@ -236,6 +248,11 @@ void VoiceDeck::buildPanel()
     const deckart::Colours c = deckart::colours();
     auto* plate = new wxPanel(this);
     plate->SetBackgroundColour(c.plate);
+    plate->Bind(wxEVT_SYS_COLOUR_CHANGED, [plate](wxSysColourChangedEvent& e) {
+        e.Skip();
+        plate->SetBackgroundColour(deckart::colours().plate);
+        plate->Refresh();
+    });
     auto* outer = new wxBoxSizer(wxVERTICAL);
 
     // The nameplate.
@@ -335,7 +352,7 @@ void VoiceDeck::buildPanel()
             s->Add(knob, 0, wxALIGN_CENTER_HORIZONTAL);
             auto* w = new wxStaticText(m, wxID_ANY, words, wxDefaultPosition, wxDefaultSize, wxALIGN_CENTRE_HORIZONTAL);
             w->SetFont(w->GetFont().Smaller());
-            w->SetForegroundColour(deckart::colours().dimInk);
+            inked(w, true);
             // One line at the usual font size; two rather than a wider
             // deck with bigger text.
             w->Wrap(std::max(FromDIP(150), knob->GetMinSize().x));
@@ -393,7 +410,7 @@ void VoiceDeck::buildPanel()
         auto* words = new wxStaticText(m, wxID_ANY, "Popped out: loud bursts add reduction. Pushed in: level only",
                                        wxDefaultPosition, wxDefaultSize, wxALIGN_CENTRE_HORIZONTAL);
         words->SetFont(words->GetFont().Smaller());
-        words->SetForegroundColour(deckart::colours().dimInk);
+        inked(words, true);
         words->Wrap(std::max(FromDIP(130), reduction_->GetMinSize().x));
         fitLabel(words);
         s->Add(words, 0, wxALIGN_CENTER_HORIZONTAL);
@@ -409,7 +426,7 @@ void VoiceDeck::buildPanel()
         s->Add(scope_, 0, wxALIGN_CENTER_HORIZONTAL);
         codec_ = new wxStaticText(m, wxID_ANY, "", wxDefaultPosition, wxDefaultSize, wxST_ELLIPSIZE_END | wxST_NO_AUTORESIZE);
         codec_->SetFont(deckart::readoutFont(m, 8.0));
-        codec_->SetForegroundColour(deckart::colours().ink);
+        inked(codec_);
         fitLabel(codec_, 0);
         s->Add(codec_, 0, wxEXPAND | wxTOP, FromDIP(6));
         // The rate the next clip is coded at.
@@ -431,7 +448,7 @@ void VoiceDeck::buildPanel()
             lamp->SetToolTip(tip);
             text = new wxStaticText(m, wxID_ANY, "", wxDefaultPosition, wxDefaultSize, wxST_NO_AUTORESIZE);
             text->SetFont(deckart::readoutFont(m, 7.5));
-            text->SetForegroundColour(deckart::colours().dimInk);
+            inked(text, true);
             fitLabel(text, widthFor(text, {MINUS + "26  target " + MINUS + "26", MINUS + "12  clipped!",
                                            MINUS + "9  under " + MINUS + "7", "45 dB below voice"}));
             grid->Add(lamp, 0, wxALIGN_CENTER_VERTICAL);
@@ -492,7 +509,7 @@ void VoiceDeck::buildPanel()
         airGear_ = new wxStaticText(m, wxID_ANY, "", wxDefaultPosition, FromDIP(wxSize(110, -1)), wxST_ELLIPSIZE_END | wxST_NO_AUTORESIZE);
         airGear_->SetFont(airGear_->GetFont().Smaller());
         fitLabel(airGear_, std::max(FromDIP(110), widthFor(airGear_, {"at the host's gear"})));
-        airGear_->SetForegroundColour(deckart::colours().dimInk);
+        inked(airGear_, true);
         left->Add(airGear_);
         s->Add(left, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, FromDIP(12));
         airtime_ = new AirtimeBar(m);
@@ -501,7 +518,7 @@ void VoiceDeck::buildPanel()
         airWords_->SetFont(deckart::readoutFont(m, 8.5));
         fitLabel(airWords_, std::max(FromDIP(220), widthFor(airWords_, {"10:00 of air for 1:00 of speech",
                                                                          "1:00 of speech; airtime unknown"})));
-        airWords_->SetForegroundColour(deckart::colours().ink);
+        inked(airWords_);
         s->Add(airWords_, 0, wxALIGN_CENTER_VERTICAL);
         m->content()->Add(s, 1, wxEXPAND);
         outer->Add(m, 0, wxEXPAND | wxLEFT | wxRIGHT | wxTOP, FromDIP(10));
@@ -526,7 +543,9 @@ void VoiceDeck::buildPanel()
                             "instead of sending it at once.");
         status_ = new wxStaticText(plate, wxID_ANY, "Esc while holding throws the clip away", wxDefaultPosition,
                                    wxDefaultSize, wxST_ELLIPSIZE_END | wxST_NO_AUTORESIZE);
-        status_->SetForegroundColour(deckart::colours().dimInk);
+        inked(status_, true);
+        // Standard widgets, but on the deck's plate: their text in its ink.
+        for (wxWindow* w : std::initializer_list<wxWindow*>{sp, vol, arriving_, review_}) inked(w);
         auto* close = new wxButton(plate, wxID_CLOSE, "Close");
         strip->Add(sp, 0, wxALIGN_CENTER_VERTICAL);
         strip->Add(speaker_, 1, wxALIGN_CENTER_VERTICAL | wxLEFT, FromDIP(6));

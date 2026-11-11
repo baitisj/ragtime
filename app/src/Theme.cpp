@@ -74,7 +74,16 @@ bool canSwitchTheme()
 
 bool themeIsDark()
 {
+#if defined(__WXMSW__)
+    // wx 3.2 reads Windows' "apps use dark mode" setting here, yet draws
+    // its windows and controls light all the same, with black text. What
+    // Ragtime draws itself has to match the windows it sits in, so on
+    // Windows "dark" is what the system's colours are (issue #139: the
+    // microphone deck went dark round black labels).
+    return wxSystemSettings::GetAppearance().IsUsingDarkBackground();
+#else
     return wxSystemSettings::GetAppearance().IsDark();
+#endif
 }
 
 void applyTheme(ThemeChoice choice)
