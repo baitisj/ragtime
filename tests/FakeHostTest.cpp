@@ -9,6 +9,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <optional>
 #include <random>
 #include <string>
 #include <vector>
@@ -538,6 +539,64 @@ void testReasonsAndTheIdleTimeout()
     CHECK(ended(a, ""));
 }
 
+// A show of hands (Data2G PR #146): A's burst opens its window, B hears
+// the burst with its reference and answers with a Hand in channel 2, and
+// A's window reports it. A host from before the PR says WRONG.
+void testAShowOfHands()
+{
+    FakeAir air;
+    FakeHost hostA(air), hostB(air);
+    hostB.setSignalDb(-5.0);
+    hostA.setOffsetHz(3.0);
+    Station a("AG7EW", hostA), b("W1AW", hostB);
+    CHECK(run(air, a, b, [&] { return a.link.groupOpen() && b.link.groupOpen(); }));
+
+    // Paused, so the burst is still ours when the window is asked for.
+    a.link.setPaused(true, now);
+    uint64_t id = a.link.broadcast({textFrame("AG7EW", 1, "QNI? ANY TRAFFIC de AG7EW")}, "", now);
+    CHECK(a.link.handListen(id, 1.0, 7, {0, 1, 2, 3}, now));
+    a.link.setPaused(false, now);
+
+    std::optional<link::HandRef> ref;
+    CHECK(run(air, a, b, [&] {
+        for (const auto& e : b.events)
+        {
+            if (e.type == Type::Heard && e.handRef) ref = e.handRef;
+        }
+        return ref.has_value();
+    }));
+    CHECK(a.heard(Type::HandArmed));
+    CHECK(ref && ref->offsetHz == 3.0);
+    // The command port's REF line says the same.
+    bool line = false;
+    for (const auto& e : b.events) line = line || (e.type == Type::HandRef && e.handRef && e.handRef->id == ref->id);
+    CHECK(line);
+    CHECK(b.link.handSend(ref->id, 7, 1.0, 2, 42, now));
+
+    CHECK(run(air, a, b, [&] { return a.heard(Type::HandEnd); }));
+    CHECK(b.heard(Type::HandSent) && !b.heard(Type::Refused));
+    int hands = 0;
+    for (const auto& e : a.events)
+    {
+        if (e.type != Type::HandHeard) continue;
+        hands++;
+        CHECK(e.number == 2 && e.handPayload == 42 && e.snr && std::fabs(*e.snr + 5.0) < 0.05);
+        CHECK(std::fabs(e.value) <= link::HAND_SEARCH_S * 1000.0);
+    }
+    CHECK_EQ(hands, 1);
+    CHECK(!a.heard(Type::Refused));
+
+    // A host from before Data2G PR #146.
+    FakeAir oldAir;
+    FakeHost oldA(oldAir), oldB(oldAir);
+    oldA.setHands(false);
+    Station c("K1ABC", oldA), d("N0CALL", oldB);
+    CHECK(run(oldAir, c, d, [&] { return c.link.groupOpen() && d.link.groupOpen(); }));
+    CHECK(c.link.handSend(1, 7, 1.0, 0, 1, now));
+    CHECK(run(oldAir, c, d, [&] { return c.heard(Type::Refused); }));
+    CHECK(!c.heard(Type::HandRef));
+}
+
 int main()
 {
     testTwoStations();
@@ -545,5 +604,6 @@ int main()
     testSnrs();
     testTheHostSaysNo();
     testReasonsAndTheIdleTimeout();
+    testAShowOfHands();
     return ragtime_test::finish();
 }

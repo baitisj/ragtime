@@ -24,6 +24,7 @@ const char* const DATA2G = "DATA2G";
 const char* const CLEAN = "CLEANTXBUFFER";
 const char* const TXPOWER = "TXPOWER";
 const char* const TIMEOUT = "TIMEOUT";
+const char* const HAND_LISTEN = "HAND LISTEN";
 
 // A number with one decimal, the way the host writes them, whatever the
 // locale.
@@ -68,6 +69,10 @@ void HostLink::commandUp(uint64_t nowMs)
     sendLine("MODES", MODES, nowMs);
     std::vector<uint8_t> persist = kissEncodeCommand(0, KISS_PERSIST, KISS_P);
     kissOut_.insert(kissOut_.end(), persist.begin(), persist.end());
+    // Each heard burst's Hand reference ahead of its frames (Data2G PR
+    // #146); a host from before it reads no command it knows.
+    std::vector<uint8_t> refs = kissEncodeRefs(true);
+    kissOut_.insert(kissOut_.end(), refs.begin(), refs.end());
 }
 
 void HostLink::commandDown(uint64_t nowMs)
@@ -80,6 +85,8 @@ void HostLink::commandDown(uint64_t nowMs)
     lines_.reset();
     awaiting_.clear();
     modeAsked_ = false;
+    listenAsked_ = false;
+    kissRef_.reset();
     modesComing_.clear();
     if (groupPort_ >= 0)
     {
@@ -156,11 +163,18 @@ void HostLink::kissBytes(const uint8_t* bytes, size_t length, uint64_t nowMs)
                 bursts_.pop_front();
             }
         }
+        else if (frame.command == KISS_SETHARDWARE)
+        {
+            // A REF frame: the frames after it, up to the next, are its burst's.
+            if (!frame.payload.empty() && frame.payload[0] == KISS_REF)
+                kissRef_ = parseHandRef(std::string(frame.payload.begin() + 1, frame.payload.end()));
+        }
         else if (frame.port == groupPort_ && !frame.payload.empty())
         {
             Event e;
             e.type = Event::Type::Heard;
             e.frame = std::move(frame.payload);
+            e.handRef = kissRef_;
             emit(std::move(e));
         }
     }
@@ -201,6 +215,7 @@ void HostLink::tick(uint64_t nowMs)
     {
         awaiting_.clear();
         if (modeAsked_) answered(true, nowMs);
+        if (listenAsked_) listenAnswered(false);
     }
 
     // Leave now always leaves, whatever the host makes of the ABORT.
@@ -225,7 +240,6 @@ void HostLink::tick(uint64_t nowMs)
 
 void HostLink::answered(bool ok, uint64_t nowMs)
 {
-    (void)nowMs;
     if (!modeAsked_) return;
     modeAsked_ = false;
     Burst* burst = current();
@@ -233,7 +247,9 @@ void HostLink::answered(bool ok, uint64_t nowMs)
     if (ok)
     {
         groupMode_ = burst->mode;
-        writeBurst(*burst);
+        // A burst with a window asks for it next.
+        if (burst->listen) pump(nowMs);
+        else writeBurst(*burst);
     }
     else
     {
@@ -281,6 +297,18 @@ void HostLink::onLine(const std::string& line, uint64_t nowMs)
             }
             // A host from before Data2G PR #122: no reading, nothing refused.
             if (a.answer == TXPOWER || a.answer == TIMEOUT) break;
+            if (a.answer == HAND_LISTEN)
+            {
+                if (!ok)
+                {
+                    Event e;
+                    e.type = Event::Type::Refused;
+                    e.text = a.command;
+                    emit(e);
+                }
+                if (listenAsked_) listenAnswered(ok);
+                break;
+            }
             if (a.answer == CLEAN)
             {
                 data2g_ = data2g_ && ok;
@@ -468,6 +496,33 @@ void HostLink::onLine(const std::string& line, uint64_t nowMs)
             emit(e);
             break;
         }
+        case Type::Ref:
+        {
+            Event e;
+            e.type = Event::Type::HandRef;
+            e.handRef = c.handRef;
+            emit(e);
+            break;
+        }
+        case Type::HandSent:
+        case Type::HandDropped:
+        case Type::Hand:
+        case Type::HandShort:
+        case Type::HandEnd:
+        {
+            Event e;
+            e.type = c.type == Type::HandSent      ? Event::Type::HandSent
+                     : c.type == Type::HandDropped ? Event::Type::HandDropped
+                     : c.type == Type::Hand        ? Event::Type::HandHeard
+                     : c.type == Type::HandShort   ? Event::Type::HandShort
+                                                   : Event::Type::HandEnd;
+            e.number = c.number;
+            e.value = c.value;
+            e.snr = c.snr;
+            e.handPayload = c.handPayload;
+            emit(e);
+            break;
+        }
         case Type::Cqframe:
         case Type::Other:
             break;
@@ -570,7 +625,16 @@ bool HostLink::cancel(uint64_t id)
         if (it->id != id) continue;
         // Asked for its mode, it is still ours; written, it is the host's.
         if (it->state != BurstState::Queued) return false;
-        if (it == bursts_.begin()) modeAsked_ = false;
+        if (it == bursts_.begin())
+        {
+            modeAsked_ = false;
+            // Its window is armed or about to be: stop it.
+            if (listenAsked_)
+            {
+                listenAsked_ = false;
+                sendLine("HAND CANCEL", OK, lastMs_);
+            }
+        }
         setBurst(*it, BurstState::NotSent);
         bursts_.erase(it);
         return true;
@@ -642,17 +706,44 @@ void HostLink::setBurst(Burst& burst, BurstState state)
     emit(e);
 }
 
+void HostLink::assignTags(Burst& burst)
+{
+    if (burst.tags.size() == burst.frames.size()) return;
+    burst.tags.clear();
+    for (size_t i = 0; i < burst.frames.size(); i++)
+    {
+        burst.tags.push_back(nextTag_++);
+        if (nextTag_ == 0) nextTag_ = 1;
+    }
+}
+
 void HostLink::writeBurst(Burst& burst)
 {
-    for (const std::vector<uint8_t>& frame : burst.frames)
+    // Its tags may be chosen already, the first named by HAND LISTEN.
+    assignTags(burst);
+    for (size_t i = 0; i < burst.frames.size(); i++)
     {
-        uint16_t tag = nextTag_++;
-        if (nextTag_ == 0) nextTag_ = 1;
-        std::vector<uint8_t> kiss = kissEncodeAckMode(groupPort_, tag, frame);
+        std::vector<uint8_t> kiss = kissEncodeAckMode(groupPort_, burst.tags[i], burst.frames[i]);
         kissOut_.insert(kissOut_.end(), kiss.begin(), kiss.end());
-        burst.tags.push_back(tag);
     }
     setBurst(burst, session_ == SessionState::None ? BurstState::Sending : BurstState::Held);
+}
+
+void HostLink::listenAnswered(bool ok)
+{
+    listenAsked_ = false;
+    Burst* burst = current();
+    if (burst == nullptr || burst->state != BurstState::Queued || !burst->listen) return;
+    burst->listen.reset();
+    if (ok)
+    {
+        Event e;
+        e.type = Event::Type::HandArmed;
+        e.id = burst->id;
+        emit(e);
+    }
+    // Armed or not, the burst goes: it carries the net's traffic too.
+    writeBurst(*burst);
 }
 
 bool HostLink::mayGo(const Burst& burst, uint64_t nowMs) const
@@ -666,7 +757,7 @@ bool HostLink::mayGo(const Burst& burst, uint64_t nowMs) const
 void HostLink::pump(uint64_t nowMs)
 {
     Burst* burst = current();
-    if (burst == nullptr || burst->state != BurstState::Queued || modeAsked_) return;
+    if (burst == nullptr || burst->state != BurstState::Queued || modeAsked_ || listenAsked_) return;
     if (!commandUp_ || groupPort_ < 0 || paused_) return;
     if (!mayGo(*burst, nowMs))
     {
@@ -688,7 +779,74 @@ void HostLink::pump(uint64_t nowMs)
         sendLine("BCAST MODE " + std::to_string(groupPort_) + " " + burst->mode, OK, nowMs);
         return;
     }
+    if (burst->listen)
+    {
+        // The window is armed before the burst can go: the KISS port may
+        // send it at once, and the two ports are separate sockets.
+        assignTags(*burst);
+        listenAsked_ = true;
+        sendLine(handListenLine(burst->listen->delayS, burst->listen->tag, burst->tags.front(), burst->listen->channels),
+                 HAND_LISTEN, nowMs);
+        return;
+    }
     writeBurst(*burst);
+}
+
+//-------------------------------------------------------------------------
+// Hands
+//-------------------------------------------------------------------------
+
+int HostLink::handChannels() const
+{
+    // The width our BW gave the host (Data2G PR #146 at 0f277ab: --kiss-bw
+    // doesn't narrow it).
+    return handChannelsWithin(settings_.narrow ? 500 : 2400);
+}
+
+bool HostLink::handSend(int ref, int tag, double delayS, int channel, uint64_t payload, uint64_t nowMs)
+{
+    if (!commandUp_ || ref < 1 || tag < 0 || tag > 255 || channel < 0 || channel >= handChannels()) return false;
+    if (!(delayS > 0.0 && delayS < HAND_DELAY_MAX_S)) return false;
+    sendLine(handSendLine(ref, tag, delayS, channel, payload), OK, nowMs);
+    return true;
+}
+
+bool HostLink::handListen(uint64_t burstId, double delayS, int tag, const std::vector<int>& channels,
+                          uint64_t nowMs)
+{
+    if (!commandUp_ || tag < 0 || tag > 255 || channels.empty()) return false;
+    if (!(delayS >= HAND_LISTEN_MIN_S && delayS < HAND_DELAY_MAX_S)) return false;
+    int fit = handChannels();
+    if (std::any_of(channels.begin(), channels.end(), [fit](int c) { return c < 0 || c >= fit; })) return false;
+    // One window at a time, as the host has.
+    if (listenAsked_
+        || std::any_of(bursts_.begin(), bursts_.end(), [](const Burst& b) { return b.listen.has_value(); }))
+        return false;
+    for (Burst& burst : bursts_)
+    {
+        if (burst.id != burstId) continue;
+        if (burst.state != BurstState::Queued || burst.frames.empty()) return false;
+        burst.listen = Burst::Listen{delayS, tag, channels};
+        pump(nowMs);
+        return true;
+    }
+    return false;
+}
+
+bool HostLink::handCancel(uint64_t nowMs)
+{
+    if (!commandUp_) return false;
+    for (Burst& burst : bursts_)
+    {
+        if (burst.state == BurstState::Queued) burst.listen.reset();
+    }
+    bool waited = listenAsked_;
+    listenAsked_ = false;
+    sendLine("HAND CANCEL", OK, nowMs);
+    // A burst that waited on its window's OK goes without one.
+    Burst* burst = current();
+    if (waited && burst != nullptr && burst->state == BurstState::Queued) writeBurst(*burst);
+    return true;
 }
 
 void HostLink::heldChanged()

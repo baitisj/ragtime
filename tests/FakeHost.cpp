@@ -7,6 +7,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <random>
 #include <stdexcept>
 #include <string>
@@ -125,6 +126,7 @@ FakeHost::FakeHost(FakeAir& air, int groupPort) : FakeHost(air, groupPort, 0, 0)
 
 FakeHost::FakeHost(FakeAir& air, int groupPort, int kissPort, int commandPort) : air_(air), groupPort_(groupPort)
 {
+    epochMs_ = nowMs();
     kiss_.listener = listenOn(kissPort);
     if (kiss_.listener < 0) throw std::runtime_error("fake host: no KISS port");
     kissPort_ = boundPort(kiss_.listener);
@@ -233,6 +235,10 @@ void FakeHost::serviceCommand()
         // The client that asked for these has gone.
         data2g_ = false;
         idleTimeoutS_ = DEFAULT_IDLE_TIMEOUT_S;
+        // Its Hand and window must not hold the radio.
+        handClient_ = false;
+        handOut_.reset();
+        window_.reset();
     }
     for (uint8_t b : command_.in)
     {
@@ -277,7 +283,12 @@ void FakeHost::onCommand(const std::string& line)
     }
     else if (verb == "CHAT" || verb == "BW500" || verb == "BW2300")
     {
+        if (verb != "CHAT") narrow_ = verb == "BW500";
         reply("OK");
+    }
+    else if (verb == "HAND" && hands_)
+    {
+        onHand(w);
     }
     else if (verb == "DATA2G" && w.size() == 2 && cuts_)
     {
@@ -511,13 +522,23 @@ void FakeHost::serviceKiss()
 {
     int had = kiss_.client;
     service(kiss_.listener, kiss_.client, kiss_.in);
-    if (kiss_.client != had) kissDecoder_.reset();
+    if (kiss_.client != had)
+    {
+        kissDecoder_.reset();
+        refsOn_ = false;
+    }
     if (kiss_.in.empty()) return;
     std::vector<KissFrame> frames;
     kissDecoder_.feed(kiss_.in.data(), kiss_.in.size(), frames);
     kiss_.in.clear();
     for (KissFrame& f : frames)
     {
+        if (f.command == KISS_SETHARDWARE)
+        {
+            std::string text(f.payload.begin(), f.payload.end());
+            if (hands_ && (text == "REFS ON" || text == "REFS OFF")) refsOn_ = text == "REFS ON";
+            continue;
+        }
         if (f.port != groupPort_ || !groupOpen_) continue;
         if (f.command == KISS_ACKMODE && f.payload.size() >= 2)
         {
@@ -646,16 +667,206 @@ void FakeHost::finishBurst()
             h->reply("BCAST " + std::to_string(h->groupPort_) + " LOST 1");
             continue;
         }
+        double dB = heardAtDb();
+        h->heardRef(dB, offsetHz_);
         h->reply("BCAST " + std::to_string(h->groupPort_) + " HEARD " + from_
-                 + (h->reportsSnr_ ? h->snrSuffix(heardAtDb()) : std::string()));
+                 + (h->reportsSnr_ ? h->snrSuffix(dB) : std::string()));
         for (const Tagged* t : heard) h->writeTo(h->kiss_, kissEncode(h->groupPort_, t->frame));
     }
     for (const Tagged& t : burst)
     {
         if (t.tag != 0) writeTo(kiss_, kissEncodeAckMode(groupPort_, t.tag, {}));
+        // The burst a window waits on has gone: it opens.
+        if (window_ && !window_->open && t.tag != 0 && t.tag == window_->ack)
+        {
+            window_->open = true;
+            window_->slotMs = nowMs() + std::llround(window_->delayS * 1000.0);
+            window_->closeMs = window_->slotMs + handMs_ + std::llround(HAND_SEARCH_S * 1000.0);
+        }
     }
     reply("PTT OFF");
     burstsSent_++;
+}
+
+//-------------------------------------------------------------------------
+// Hands
+//-------------------------------------------------------------------------
+
+namespace
+{
+
+bool allOf(const std::string& text, size_t most, const char* chars)
+{
+    if (text.empty() || text.size() > most) return false;
+    return text.find_first_not_of(chars) == std::string::npos;
+}
+
+bool number(const std::string& text, long& out)
+{
+    if (!allOf(text, 9, "0123456789")) return false;
+    out = std::strtol(text.c_str(), nullptr, 10);
+    return true;
+}
+
+bool delay(const std::string& text, double& out)
+{
+    if (!allOf(text, 16, "0123456789.")) return false;
+    char* end = nullptr;
+    out = std::strtod(text.c_str(), &end);
+    return end != nullptr && *end == '\0' && std::isfinite(out);
+}
+
+const char* const HEX = "0123456789abcdefABCDEF";
+
+} // namespace
+
+int FakeHost::handChannelsHere() const
+{
+    return handChannelsWithin(narrow_ ? 500 : 2400);
+}
+
+bool FakeHost::handHolds(long long now) const
+{
+    (void)now;
+    return handOut_.has_value() || (window_ && window_->open) || handOnAirUntilMs_ >= 0;
+}
+
+void FakeHost::heardRef(double snr, double offsetHz)
+{
+    long long now = nowMs();
+    refs_.push_back({++refCount_, now});
+    if (refs_.size() > 64) refs_.erase(refs_.begin());
+    if (!hands_) return;
+    char line[96];
+    std::snprintf(line, sizeof line, "REF %d %.2f %.1f %.1f", refCount_, (now - epochMs_) / 1000.0, offsetHz, snr);
+    if (data2g_ || handClient_) reply(line);
+    if (refsOn_)
+    {
+        std::vector<uint8_t> payload{KISS_REF};
+        payload.insert(payload.end(), line, line + std::strlen(line));
+        writeTo(kiss_, kissEncodeSetHardware(0, payload));
+    }
+}
+
+void FakeHost::onHand(const std::vector<std::string>& w)
+{
+    handClient_ = true;
+    long long now = nowMs();
+    const std::string what = w.size() > 1 ? w[1] : std::string();
+    long ref = 0, tag = 0, channel = 0;
+    double d = 0.0;
+    if (what == "SEND" && w.size() == 7)
+    {
+        // HAND SEND ref tag d channel hex16
+        bool ok = number(w[2], ref) && number(w[3], tag) && tag <= 255 && delay(w[4], d) && d > 0.0
+                  && d < HAND_DELAY_MAX_S && number(w[5], channel) && channel < handChannelsHere()
+                  && allOf(w[6], 16, HEX) && !handOut_;
+        auto it = std::find_if(refs_.begin(), refs_.end(), [ref](const Ref& r) { return r.id == ref; });
+        long long at = it == refs_.end() ? 0 : it->endMs + std::llround(d * 1000.0);
+        if (!ok || it == refs_.end() || at <= now)
+        {
+            reply("WRONG");
+            return;
+        }
+        uint64_t payload = std::strtoull(w[6].c_str(), nullptr, 16) & HAND_PAYLOAD_MASK;
+        handOut_ = HandOut{(int)channel, (int)tag, payload, at};
+        reply("OK");
+    }
+    else if (what == "LISTEN" && w.size() >= 6)
+    {
+        // HAND LISTEN d tag ack channel [channel...]
+        bool ok = delay(w[2], d) && d >= HAND_LISTEN_MIN_S && d < HAND_DELAY_MAX_S && number(w[3], tag) && tag <= 255
+                  && w[4].size() == 4 && allOf(w[4], 4, HEX) && !window_;
+        std::vector<int> channels;
+        for (size_t i = 5; ok && i < w.size(); i++)
+        {
+            ok = number(w[i], channel) && channel < handChannelsHere();
+            if (ok && std::find(channels.begin(), channels.end(), (int)channel) == channels.end())
+                channels.push_back((int)channel);
+        }
+        if (!ok)
+        {
+            reply("WRONG");
+            return;
+        }
+        Window window;
+        window.delayS = d;
+        window.tag = (int)tag;
+        window.ack = (uint16_t)std::strtoul(w[4].c_str(), nullptr, 16);
+        window.channels = channels;
+        window.armedMs = now;
+        window_ = window;
+        reply("OK");
+    }
+    else if (what == "CANCEL" && w.size() == 2)
+    {
+        reply("OK");
+        handOut_.reset();
+        if (window_)
+        {
+            window_.reset();
+            reply("HAND END");
+        }
+    }
+    else
+    {
+        reply("WRONG");
+    }
+}
+
+void FakeHost::stepHand(long long now)
+{
+    if (handOnAirUntilMs_ >= 0 && now >= handOnAirUntilMs_)
+    {
+        handOnAirUntilMs_ = -1;
+        reply("PTT OFF");
+    }
+    if (handOut_ && now >= handOut_->atMs)
+    {
+        HandOut out = *handOut_;
+        bool onAir = onAirUntilMs_ >= 0 || keyed_ || handOnAirUntilMs_ >= 0;
+        if (!onAir)
+        {
+            handOut_.reset();
+            reply("PTT ON");
+            reply("HAND SENT " + std::to_string(out.channel));
+            // Heard by each window it lands in: the channel, the tag (the
+            // two seed its CRC), within the search of the slot, and strong
+            // enough.
+            for (FakeHost* h : air_.hosts_)
+            {
+                if (h == this || !h->window_ || !h->window_->open) continue;
+                Window& win = *h->window_;
+                long long dt = now - win.slotMs;
+                double dB = heardAtDb();
+                if (std::llabs(dt) > std::llround(HAND_SEARCH_S * 1000.0) || out.tag != win.tag || dB < -19.0
+                    || std::find(win.channels.begin(), win.channels.end(), out.channel) == win.channels.end())
+                    continue;
+                char line[96];
+                std::snprintf(line, sizeof line, "HAND %d %016llx %.1f %lld", out.channel,
+                              (unsigned long long)out.payload, dB, dt);
+                win.heard.push_back(line);
+            }
+            if (handMs_ <= 0) reply("PTT OFF");
+            else handOnAirUntilMs_ = now + handMs_;
+        }
+        else if (now > out.atMs + 500)
+        {
+            handOut_.reset();
+            reply("HAND DROPPED " + std::to_string(out.channel));
+        }
+    }
+    if (window_)
+    {
+        bool expired = !window_->open && now - window_->armedMs > (long long)(HAND_DELAY_MAX_S * 1000.0);
+        if (expired || (window_->open && now >= window_->closeMs))
+        {
+            std::vector<std::string> heard = std::move(window_->heard);
+            window_.reset();
+            for (const std::string& line : heard) reply(line);
+            reply("HAND END");
+        }
+    }
 }
 
 void FakeAir::step(int timeoutMs)
@@ -674,6 +885,7 @@ void FakeAir::step(int timeoutMs)
         h->stepCall(nowMs());
         h->stepSession(nowMs());
         h->stepIdle(nowMs());
+        h->stepHand(nowMs());
     }
     // A session holds the group: its bursts wait for it to end, or to go
     // idle.
@@ -685,7 +897,8 @@ void FakeAir::step(int timeoutMs)
             if (nowMs() >= h->onAirUntilMs_) h->finishBurst();
             continue;
         }
-        if (!h->burst_.empty() && !h->holdBursts_ && h->sessionIdle(nowMs())) h->sendBurst();
+        if (!h->burst_.empty() && !h->holdBursts_ && h->sessionIdle(nowMs()) && !h->handHolds(nowMs()))
+            h->sendBurst();
     }
 }
 

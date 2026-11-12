@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <cstdio>
 #include <cstdlib>
 #include <sstream>
 
@@ -128,6 +129,17 @@ std::vector<uint8_t> kissEncodeCommand(int port, uint8_t command, uint8_t value)
     return kissFrame((uint8_t)(((port & 0x0F) << 4) | (command & 0x0F)), {value});
 }
 
+std::vector<uint8_t> kissEncodeSetHardware(int port, const std::vector<uint8_t>& payload)
+{
+    return kissFrame((uint8_t)(((port & 0x0F) << 4) | KISS_SETHARDWARE), payload);
+}
+
+std::vector<uint8_t> kissEncodeRefs(bool on)
+{
+    std::string text = on ? "REFS ON" : "REFS OFF";
+    return kissEncodeSetHardware(0, std::vector<uint8_t>(text.begin(), text.end()));
+}
+
 void KissDecoder::feed(const uint8_t* bytes, size_t length, std::vector<KissFrame>& framesOut)
 {
     for (size_t i = 0; i < length; i++)
@@ -141,7 +153,8 @@ void KissDecoder::feed(const uint8_t* bytes, size_t length, std::vector<KissFram
                 frame.port = current_[0] >> 4;
                 frame.command = current_[0] & 0x0F;
                 frame.payload.assign(current_.begin() + 1, current_.end());
-                if (frame.command == KISS_DATA || frame.command == KISS_ACKMODE) framesOut.push_back(frame);
+                if (frame.command == KISS_DATA || frame.command == KISS_ACKMODE || frame.command == KISS_SETHARDWARE)
+                    framesOut.push_back(frame);
             }
             current_.clear();
             escaped_ = false;
@@ -232,6 +245,72 @@ std::vector<ModeInfo> narrowModes(const std::vector<ModeInfo>& offered)
         if (mode.bandwidthHz > 0 && mode.bandwidthHz <= NARROW_MODE_MAX_HZ) narrow.push_back(mode);
     }
     return narrow;
+}
+
+double handChannelHz(int channel)
+{
+    double off = 30.0 + 60.0 * (channel / 2);
+    return channel % 2 ? 1500.0 + off : 1500.0 - off;
+}
+
+int handChannelsWithin(int widthHz)
+{
+    // A Hand's 8 tones span 50 Hz: it fits while its far edge is inside.
+    int n = 0;
+    for (int c = 0; c < HAND_CHANNELS; c++)
+    {
+        if (std::fabs(handChannelHz(c) - 1500.0) + 25.0 <= widthHz / 2.0) n++;
+    }
+    return n;
+}
+
+namespace
+{
+
+bool hexDigits(const std::string& text, size_t most)
+{
+    if (text.empty() || text.size() > most) return false;
+    return std::all_of(text.begin(), text.end(), [](char c) { return std::isxdigit((unsigned char)c) != 0; });
+}
+
+bool refWords(const std::vector<std::string>& w, HandRef& ref)
+{
+    if (w.size() != 5 || upper(w[0]) != "REF" || !toInt(w[1], ref.id) || ref.id < 1) return false;
+    return toDouble(w[2], ref.endS) && toDouble(w[3], ref.offsetHz) && toDouble(w[4], ref.snr)
+           && std::isfinite(ref.endS) && std::isfinite(ref.offsetHz) && std::isfinite(ref.snr);
+}
+
+} // namespace
+
+std::optional<HandRef> parseHandRef(const std::string& text)
+{
+    HandRef ref;
+    if (!refWords(words(text), ref)) return std::nullopt;
+    return ref;
+}
+
+std::string handDelayText(double seconds)
+{
+    long long ms = std::llround(std::max(0.0, std::min(seconds, 1e6)) * 1000.0);
+    std::string frac = std::to_string(ms % 1000);
+    return std::to_string(ms / 1000) + "." + std::string(3 - frac.size(), '0') + frac;
+}
+
+std::string handSendLine(int ref, int tag, double delayS, int channel, uint64_t payload)
+{
+    char hex[17];
+    std::snprintf(hex, sizeof hex, "%016llx", (unsigned long long)(payload & HAND_PAYLOAD_MASK));
+    return "HAND SEND " + std::to_string(ref) + " " + std::to_string(tag) + " " + handDelayText(delayS) + " "
+           + std::to_string(channel) + " " + hex;
+}
+
+std::string handListenLine(double delayS, int tag, uint16_t ack, const std::vector<int>& channels)
+{
+    char hex[5];
+    std::snprintf(hex, sizeof hex, "%04x", (unsigned)ack);
+    std::string line = "HAND LISTEN " + handDelayText(delayS) + " " + std::to_string(tag) + " " + hex;
+    for (int c : channels) line += " " + std::to_string(c);
+    return line;
 }
 
 CommandEvent parseCommandLine(const std::string& line)
@@ -329,6 +408,31 @@ CommandEvent parseCommandLine(const std::string& line)
              && std::isfinite(event.value))
     {
         event.type = verb == "TXPOWER" ? CommandEvent::Type::TxPower : CommandEvent::Type::Timeout;
+    }
+    else if (verb == "REF" && refWords(w, event.handRef))
+    {
+        event.type = CommandEvent::Type::Ref;
+    }
+    else if (verb == "HAND" && w.size() == 3 && (arg1 == "SENT" || arg1 == "DROPPED") && toInt(w[2], event.number))
+    {
+        event.type = arg1 == "SENT" ? CommandEvent::Type::HandSent : CommandEvent::Type::HandDropped;
+    }
+    else if (verb == "HAND" && w.size() == 3 && arg1 == "SHORT" && toDouble(w[2], event.value)
+             && std::isfinite(event.value))
+    {
+        event.type = CommandEvent::Type::HandShort;
+    }
+    else if (verb == "HAND" && w.size() == 2 && arg1 == "END")
+    {
+        event.type = CommandEvent::Type::HandEnd;
+    }
+    else if (verb == "HAND" && w.size() == 5 && toInt(w[1], event.number) && event.number >= 0
+             && hexDigits(w[2], 16) && (event.snr = trailingSnr(w[3])) && toDouble(w[4], event.value)
+             && std::isfinite(event.value))
+    {
+        // HAND c hex16 snr dt
+        event.type = CommandEvent::Type::Hand;
+        event.handPayload = std::strtoull(w[2].c_str(), nullptr, 16) & HAND_PAYLOAD_MASK;
     }
     else if (verb == "BUFFER" && w.size() == 2 && toInt(w[1], event.count))
     {

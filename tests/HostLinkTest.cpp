@@ -2,6 +2,7 @@
 // with their ACKMODE tags and outcomes, a session holding the group, and
 // sessions called, answered, left and lost. The clock is simulated.
 #include <cstdint>
+#include <cstdio>
 #include <string>
 #include <vector>
 
@@ -59,6 +60,7 @@ std::vector<uint16_t> tagsWritten(HostLink& link, int port, std::vector<std::vec
     std::vector<uint16_t> tags;
     for (const KissFrame& f : kiss)
     {
+        if (f.command == KISS_SETHARDWARE) continue;   // REFS ON, as the ports come up
         CHECK(f.command == KISS_ACKMODE && f.port == port && f.payload.size() >= 2);
         if (f.payload.size() < 2) continue;
         tags.push_back((uint16_t)((f.payload[0] << 8) | f.payload[1]));
@@ -94,8 +96,11 @@ HostLink opened(uint64_t nowMs, bool narrow = false)
     answers += "OK\r";
     say(link, answers, nowMs);
     link.takeEvents();
-    // KISS P went as the ports came up.
-    CHECK(link.takeKissOutput() == std::vector<uint8_t>({0xC0, KISS_PERSIST, HostLink::KISS_P, 0xC0}));
+    // KISS P and REFS ON went as the ports came up.
+    std::vector<uint8_t> up = {0xC0, KISS_PERSIST, HostLink::KISS_P, 0xC0};
+    std::vector<uint8_t> refs = kissEncodeRefs(true);
+    up.insert(up.end(), refs.begin(), refs.end());
+    CHECK(link.takeKissOutput() == up);
     return link;
 }
 
@@ -776,6 +781,133 @@ void testBurstsThatYield()
     CHECK(link.burstState(chat2) == BurstState::Sending);
 }
 
+// Hands (Data2G PR #146): references, a Hand sent, net control's window.
+void testHands()
+{
+    HostLink link = opened(0);
+    // BW2300: all 40 channels; BW500: 8.
+    CHECK_EQ(link.handChannels(), 40);
+    CHECK_EQ(opened(0, true).handChannels(), 8);
+
+    // A REF line on the command port, and a REF frame on the KISS port
+    // ahead of its burst's frames: those frames carry it.
+    say(link, "REF 7 123.45 -3.5 -8.0\r", 10);
+    std::vector<HostLink::Event> events = link.takeEvents();
+    CHECK(events.size() == 1 && events[0].type == Type::HandRef && events[0].handRef
+          && events[0].handRef->id == 7 && events[0].handRef->endS == 123.45 && events[0].handRef->offsetHz == -3.5
+          && events[0].handRef->snr == -8.0);
+    std::string text = "REF 8 130.00 2.0 4.5";
+    std::vector<uint8_t> ref{KISS_REF};
+    ref.insert(ref.end(), text.begin(), text.end());
+    std::vector<uint8_t> in = kissEncodeSetHardware(0, ref);
+    for (const std::vector<uint8_t>& frame : {std::vector<uint8_t>{1, 2}, std::vector<uint8_t>{3}})
+    {
+        std::vector<uint8_t> k = kissEncode(2, frame);
+        in.insert(in.end(), k.begin(), k.end());
+    }
+    link.kissBytes(in.data(), in.size(), 20);
+    events = link.takeEvents();
+    CHECK_EQ(events.size(), (size_t)2);
+    for (const auto& e : events) CHECK(e.type == Type::Heard && e.handRef && e.handRef->id == 8);
+
+    // HAND SEND: checked here, then written.
+    CHECK(!link.handSend(8, 256, 3.0, 2, 1, 30));
+    CHECK(!link.handSend(8, 9, 30.0, 2, 1, 30));
+    CHECK(!link.handSend(8, 9, 3.0, 40, 1, 30));
+    CHECK(!link.handSend(0, 9, 3.0, 2, 1, 30));
+    CHECK(link.takeCommandOutput().empty());
+    CHECK(link.handSend(8, 9, 3.0, 2, 0xFEDCBA9876543210ull, 30));
+    CHECK(linesOf(link.takeCommandOutput()) == std::vector<std::string>({"HAND SEND 8 9 3.000 2 7edcba9876543210"}));
+    say(link, "OK\rHAND SENT 2\r", 40);
+    events = link.takeEvents();
+    CHECK(events.size() == 1 && events[0].type == Type::HandSent && events[0].number == 2);
+    CHECK(link.handSend(8, 9, 3.0, 2, 1, 50));
+    link.takeCommandOutput();
+    say(link, "WRONG\r", 60);
+    events = link.takeEvents();
+    CHECK(events.size() == 1 && events[0].type == Type::Refused && events[0].text.compare(0, 10, "HAND SEND ") == 0);
+
+    // Net control: the window is asked for, named by the burst's first
+    // tag, and the burst waits for the OK.
+    uint64_t id = link.broadcast({{1, 2, 3}, {4}}, "", 100);
+    CHECK(id != 0);
+    std::vector<uint16_t> early = tagsWritten(link, 2);
+    CHECK(early.size() == 2);   // written at once: it had no window
+    ackTags(link, 2, early, 110);
+    link.takeEvents();
+    CHECK(!link.handListen(id, 3.0, 9, {0, 1}, 120));  // gone already
+    // A burst waits behind a held one, so it is still queued to ask for.
+    link.holdYielding(0, 120);
+    link.setPaused(true, 120);
+    id = link.broadcast({{5, 6}, {7}}, "", 130);
+    CHECK(!link.handListen(id, 0.5, 9, {0}, 130));     // under HAND_LISTEN_MIN_S
+    CHECK(!link.handListen(id, 3.0, 9, {}, 130));
+    CHECK(!link.handListen(id, 3.0, 9, {40}, 130));
+    CHECK(link.handListen(id, 3.0, 9, {0, 1, 2}, 130));
+    CHECK(!link.handListen(id, 3.0, 9, {0}, 130));     // one window at a time
+    link.setPaused(false, 140);
+    std::vector<std::string> lines = linesOf(link.takeCommandOutput());
+    CHECK(lines.size() == 1 && lines[0].compare(0, 12, "HAND LISTEN ") == 0);
+    CHECK(link.takeKissOutput().empty());
+    CHECK(link.burstState(id) == BurstState::Queued);
+    char expected[64];
+    std::snprintf(expected, sizeof expected, "HAND LISTEN 3.000 9 %04x 0 1 2", (unsigned)(early.back() + 1));
+    CHECK_EQ(lines[0], std::string(expected));
+    say(link, "OK\r", 150);
+    std::vector<std::vector<uint8_t>> frames;
+    std::vector<uint16_t> tags = tagsWritten(link, 2, &frames);
+    CHECK(tags.size() == 2 && tags[0] == early.back() + 1);
+    CHECK(frames.size() == 2 && frames[0] == std::vector<uint8_t>({5, 6}));
+    events = link.takeEvents();
+    CHECK(hasEvent(events, Type::HandArmed));
+    ackTags(link, 2, tags, 160);
+    link.takeEvents();
+
+    // Its Hands, then the end.
+    say(link, "HAND 2 000000000000002a -12.5 140\rHAND SHORT 300\rHAND END\r", 5000);
+    events = link.takeEvents();
+    CHECK_EQ(events.size(), (size_t)3);
+    CHECK(events[0].type == Type::HandHeard && events[0].number == 2 && events[0].handPayload == 42 && events[0].snr
+          && *events[0].snr == -12.5 && events[0].value == 140.0);
+    CHECK(events[1].type == Type::HandShort && events[1].value == 300.0);
+    CHECK(events[2].type == Type::HandEnd);
+
+    // A window the host refuses: Refused, and the burst goes anyway.
+    id = link.broadcast({{8}}, "", 6000);
+    link.takeKissOutput();
+    link.takeEvents();
+    link.setPaused(true, 6000);
+    id = link.broadcast({{9}}, "", 6000);
+    CHECK(link.handListen(id, 2.0, 1, {3}, 6000));
+    ackTags(link, 2, {(uint16_t)(tags.back() + 1)}, 6010);
+    link.setPaused(false, 6020);
+    CHECK(linesOf(link.takeCommandOutput()).size() == 1);
+    say(link, "WRONG\r", 6030);
+    std::vector<uint16_t> nine = tagsWritten(link, 2);
+    CHECK(nine.size() == 1);
+    events = link.takeEvents();
+    CHECK(hasEvent(events, Type::Refused) && !hasEvent(events, Type::HandArmed));
+    ackTags(link, 2, nine, 6040);
+
+    // HAND CANCEL: a burst still waiting on its window's OK goes without it.
+    link.takeKissOutput();
+    link.setPaused(true, 7000);
+    id = link.broadcast({{10}}, "", 7000);
+    CHECK(link.handListen(id, 2.0, 1, {3}, 7000));
+    link.setPaused(false, 7010);
+    link.takeCommandOutput();
+    CHECK(link.handCancel(7020));
+    CHECK(linesOf(link.takeCommandOutput()) == std::vector<std::string>({"HAND CANCEL"}));
+    CHECK(tagsWritten(link, 2).size() == 1);
+    say(link, "OK\rOK\r", 7030);
+    events = link.takeEvents();
+    CHECK(!hasEvent(events, Type::Refused) && !hasEvent(events, Type::HandArmed));
+
+    // Nothing without the host.
+    HostLink down({"ag7ew", true, false});
+    CHECK(!down.handSend(1, 1, 3.0, 0, 1, 0) && !down.handCancel(0));
+}
+
 int main()
 {
     testTheOpening();
@@ -799,5 +931,6 @@ int main()
     testNothingWithoutTheHost();
     testWhatIsGoingOut();
     testSnippets();
+    testHands();
     return ragtime_test::finish();
 }

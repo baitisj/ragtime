@@ -126,6 +126,14 @@ public:
             Clean,              // clean: CLEANTXBUFFER's answer (Failed for WRONG), or SETTLED
             TxPower,            // value: the host's output volume, dB
             IdleTimeout,        // value: the host's link idle timeout, seconds
+            // Hands (Data2G PR #146):
+            HandRef,            // handRef: a burst the host decoded (the command port's REF line)
+            HandArmed,          // id: the burst a window waits on; the host took HAND LISTEN
+            HandSent,           // number: our Hand's channel, keyed
+            HandDropped,        // number: our Hand's channel, not sent (the radio busy past its slot)
+            HandHeard,          // number: channel, handPayload, snr, value: its lateness, ms
+            HandShort,          // value: ms of the window's head missed
+            HandEnd,            // the window is over, or an armed one gave up
         } type = Type::GroupOpen;
 
         int number = 0;
@@ -142,6 +150,10 @@ public:
         double value = 0.0;
         CommandEvent::Clean clean;
         CommandEvent::Disconnect disconnect;
+        // HandRef: the reference. Heard: the burst the frame came in, from
+        // a host since Data2G PR #146 (the KISS port's REF frame before it).
+        std::optional<HandRef> handRef;
+        uint64_t handPayload = 0;   // HandHeard: its 63 bits
     };
 
     // A broadcast written to the host but not sent is given up after this
@@ -255,6 +267,34 @@ public:
     bool paused() const { return paused_; }
 
     //---------------------------------------------------------------------
+    // Hands (Data2G PR #146, docs/DATA2G.md "Hands")
+    //---------------------------------------------------------------------
+
+    // The channels a Hand may use here: those inside our BW (BW500 with
+    // the narrow setting, else BW2300), so 8 or 40. The host's --kiss-bw
+    // doesn't narrow them.
+    int handChannels() const;
+    // HAND SEND: answer heard burst ref (a HandRef's or a Heard frame's
+    // id) with a Hand in channel, delayS after the burst's end (Data2G's
+    // advice: about 3 s), shifted by its offset; tag (0-255) and the
+    // channel seed the Hand's CRC. False for bad numbers or no host; the
+    // host's WRONG (a gone ref, a slot past, a Hand already waiting) comes
+    // as Refused, and then HandSent or HandDropped.
+    bool handSend(int ref, int tag, double delayS, int channel, uint64_t payload, uint64_t nowMs);
+    // HAND LISTEN: net control's window over channels, delayS (at least
+    // HAND_LISTEN_MIN_S) after the end of queued burst burstId, tag (0-255)
+    // seeding the CRC. The burst carries the net's call in its first
+    // frame, whose ACKMODE tag names it, and waits for the host's answer:
+    // HandArmed on OK, else Refused and the burst goes without a window.
+    // The decoded Hands come as HandHeard, then HandEnd. False if the
+    // burst isn't queued, another window is pending, or the numbers are
+    // bad. While a window is open the host sends no broadcasts.
+    bool handListen(uint64_t burstId, double delayS, int tag, const std::vector<int>& channels, uint64_t nowMs);
+    // HAND CANCEL: stops our waiting Hand and any window (a burst waiting
+    // on its window's OK goes without one). Always OK at the host.
+    bool handCancel(uint64_t nowMs);
+
+    //---------------------------------------------------------------------
     // Sessions
     //---------------------------------------------------------------------
 
@@ -322,6 +362,14 @@ private:
         std::vector<uint16_t> tags;     // written, not yet acknowledged
         uint64_t unsentMs = 0;          // time with the host, no session up
         bool yields = false;
+        // A Hand window after it (handListen): asked before it is written.
+        struct Listen
+        {
+            double delayS = 0.0;
+            int tag = 0;
+            std::vector<int> channels;
+        };
+        std::optional<Listen> listen;
     };
 
     void advance(uint64_t nowMs);
@@ -331,6 +379,8 @@ private:
     void pump(uint64_t nowMs);
     bool mayGo(const Burst& burst, uint64_t nowMs) const;
     void writeBurst(Burst& burst);
+    void assignTags(Burst& burst);
+    void listenAnswered(bool ok);
     void setBurst(Burst& burst, BurstState state);
     void finishSession(SessionEnd end, const CommandEvent::Disconnect& why = CommandEvent::Disconnect());
     void sendIdleTimeout(uint64_t nowMs);
@@ -357,6 +407,8 @@ private:
     std::deque<Awaiting> awaiting_;
     uint64_t awaitingSinceMs_ = 0;
     bool modeAsked_ = false;            // BCAST MODE sent for the current burst, not yet answered
+    bool listenAsked_ = false;          // HAND LISTEN sent for the current burst, not yet answered
+    std::optional<HandRef> kissRef_;    // the burst the KISS port's next frames came in
     std::vector<ModeInfo> modesComing_;
 
     int groupPort_ = -1;

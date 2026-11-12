@@ -36,6 +36,8 @@ constexpr const char* GROUP = "D2G";
 constexpr uint8_t KISS_DATA = 0x00;
 constexpr uint8_t KISS_ACKMODE = 0x0C;
 constexpr uint8_t KISS_PERSIST = 0x02;      // KISS P: one byte, a slot taken with probability (P + 1) / 256
+constexpr uint8_t KISS_SETHARDWARE = 0x06;  // data2g-host's subcommands: a first byte 0x20-0x7E is text
+constexpr uint8_t KISS_REF = 0x11;          // SETHARDWARE subcommand, host to app: a heard burst's REF line
 
 // A data frame for a KISS port (0 to 15).
 std::vector<uint8_t> kissEncode(int port, const std::vector<uint8_t>& data);
@@ -45,12 +47,21 @@ std::vector<uint8_t> kissEncode(int port, const std::vector<uint8_t>& data);
 std::vector<uint8_t> kissEncodeAckMode(int port, uint16_t tag, const std::vector<uint8_t>& data);
 // A KISS command with a one-byte value, such as KISS_PERSIST.
 std::vector<uint8_t> kissEncodeCommand(int port, uint8_t command, uint8_t value);
+// SETHARDWARE "REFS ON" (or OFF) on port 0: from then on, on this
+// connection, the host sends each decoded burst's Hand reference as a
+// REF frame (SETHARDWARE, subcommand KISS_REF, then the REF line's text)
+// ahead of that burst's frames (Data2G PR #146, docs/DATA2G.md "Hands").
+std::vector<uint8_t> kissEncodeRefs(bool on);
+// A SETHARDWARE frame with this payload (a subcommand byte, or text).
+std::vector<uint8_t> kissEncodeSetHardware(int port, const std::vector<uint8_t>& payload);
 
 struct KissFrame
 {
     int port = 0;
     uint8_t command = KISS_DATA;    // low nibble of the command byte
-    std::vector<uint8_t> payload;   // data, or for an ACKMODE ack the 2-byte tag
+    // Data; for an ACKMODE ack the 2-byte tag; for SETHARDWARE the
+    // subcommand byte and its text (a REF frame: KISS_REF, "REF ...").
+    std::vector<uint8_t> payload;
 };
 
 // Splits a KISS byte stream into frames, however it arrives in pieces.
@@ -116,6 +127,56 @@ constexpr int NARROW_MODE_MAX_HZ = 500;
 std::vector<ModeInfo> narrowModes(const std::vector<ModeInfo>& offered);
 
 //-------------------------------------------------------------------------
+// Hands (Data2G PR #146, docs/DATA2G.md "Hands")
+//-------------------------------------------------------------------------
+
+// The show of hands: after one burst, every station that heard it can
+// answer at once with a Hand, 63 bits in one of 40 narrow channels
+// (6.25 Hz 8-FSK, 60 Hz apart round 1500 Hz), 10.56 s long. Only a
+// station that knows when and where to look (net control) decodes them.
+constexpr int HAND_CHANNELS = 40;
+constexpr int HAND_PAYLOAD_BITS = 63;
+constexpr uint64_t HAND_PAYLOAD_MASK = (uint64_t(1) << HAND_PAYLOAD_BITS) - 1;
+constexpr double HAND_SECONDS = 10.56;
+// Net control's window: the Hand's slot, give or take this.
+constexpr double HAND_SEARCH_S = 0.6;
+// HAND LISTEN's delay: at least this, and both commands' under the most.
+constexpr double HAND_LISTEN_MIN_S = 1.0;
+constexpr double HAND_DELAY_MAX_S = 30.0;
+
+// Channel c's centre, Hz, numbered from the centre out: 0 at 1470, 1 at
+// 1530, 2 at 1410 and so on, even below 1500 Hz and odd above.
+double handChannelHz(int channel);
+// The channels that fit a width: a Hand is 50 Hz wide, so 8 in 500 Hz,
+// 20 in 1200 and all 40 in 2400. The host refuses the rest.
+int handChannelsWithin(int widthHz);
+
+// A heard burst as a Hand reference: "REF id end offset snr". The id
+// counts up from 1 on each host (its last 64 stay usable); end is the
+// burst's end in host seconds, on the sound card's clock; offset its
+// measured frequency offset, Hz (0 for modes that don't measure one);
+// snr its pilot SNR, dB.
+struct HandRef
+{
+    int id = 0;
+    double endS = 0.0;
+    double offsetHz = 0.0;
+    double snr = 0.0;
+};
+// A REF line's text, from the command port or a KISS REF frame.
+std::optional<HandRef> parseHandRef(const std::string& text);
+
+// HAND SEND ref tag d channel hex16: answer heard burst `ref` with a Hand
+// d seconds after its end. The payload's top bit is not sent.
+std::string handSendLine(int ref, int tag, double delayS, int channel, uint64_t payload);
+// HAND LISTEN d tag ack channel...: net control's window, d seconds after
+// the end of the burst carrying the frame sent with ACKMODE tag ack.
+std::string handListenLine(double delayS, int tag, uint16_t ack, const std::vector<int>& channels);
+// A delay as the host reads it: digits and a point, never an exponent or
+// a locale's comma.
+std::string handDelayText(double seconds);
+
+//-------------------------------------------------------------------------
 // The command port
 //-------------------------------------------------------------------------
 
@@ -144,6 +205,13 @@ struct CommandEvent
         Clean,          // clean: a CLEANTXBUFFER answer, or its SETTLED report
         TxPower,        // value: the output volume, dB (the answer to TXPOWER)
         Timeout,        // value: the link idle timeout, seconds (the answer to TIMEOUT)
+        // Hands (Data2G PR #146), with DATA2G ON or after a HAND command:
+        Ref,            // handRef: a burst this host decoded
+        HandSent,       // number: the channel of our Hand, keyed
+        HandDropped,    // number: our Hand's channel, not sent (the radio busy past its slot)
+        Hand,           // number: channel, handPayload, snr, value: its lateness, ms
+        HandShort,      // value: ms of the window's head missed
+        HandEnd,        // the window is over (or never opened)
     } type = Type::Other;
 
     bool on = false;
@@ -158,6 +226,8 @@ struct CommandEvent
     // neither, and a HEARD without one still parses.
     std::optional<double> snr;
     double value = 0.0;
+    HandRef handRef;
+    uint64_t handPayload = 0;
 
     // Why a session ended (Data2G PR #122, with DATA2G ON): "DISCONNECTED
     // reason [detail] [unconfirmed]". The reason is one word: CLIENT (our
