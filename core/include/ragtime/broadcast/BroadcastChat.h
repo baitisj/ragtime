@@ -23,6 +23,12 @@
 //   one lone burst every REACTION_LONE_GAP_MS. One per station per line, a
 //   later one replacing it. A reaction from the station an @message went
 //   to counts as its Ack.
+// - Check in calls the roll (docs/PROTOCOL.md, "Roll calls"): our Hello
+//   goes with a RollCall record and a Hand window after it, once the host
+//   has shown it does Hands, and every Ragtime that hears it checks in
+//   back by Hand. The window's row lists who did. A roll call heard from
+//   another station is answered by Hand the same way, by itself, unless
+//   we are in a ragchew or answering is turned off.
 // - A Hello rides along in the first frame after the group opens, after
 //   the station's settings change, and at most every 10 minutes after
 //   that, so the station list learns locators without a burst of its own.
@@ -47,6 +53,7 @@
 #include <vector>
 
 #include "ragtime/link/HostLink.h"
+#include "ragtime/protocol/Hands.h"
 #include "ragtime/protocol/Reactions.h"
 #include "ragtime/protocol/Records.h"
 #include "ragtime/protocol/Stream.h"
@@ -79,6 +86,30 @@ struct Message
         File,
         Rule,
         Ping,           // a ping of ours and its pong, or a station's ping to us and our pong
+        RollCall,       // our check-in that called the roll, and the Hands that answered it
+    };
+
+    // A roll call row's course.
+    enum class Roll
+    {
+        Calling,        // the check-in waits to go, its window asked for
+        Listening,      // gone, with the window open after it
+        Done,           // the window has closed
+        NoWindow,       // the host wouldn't open the window: a plain check-in
+    };
+
+    // A station that checked in by Hand to our roll call.
+    struct Hand
+    {
+        std::string call;           // empty when only a hash came, of no call we know
+        uint32_t hash = 0;          // then its protocol::handCallHash
+        std::string locator;
+        std::optional<double> snr;          // its Hand, as our host heard it
+        std::optional<double> theyHear;     // our roll call, as its host heard it
+        bool acceptsSessions = false;
+        bool automatic = false;
+        bool narrow = false;
+        int channel = 0;
     };
 
     uint64_t id = 0;            // this list's own number
@@ -117,6 +148,15 @@ struct Message
     uint64_t answeredMs = 0;        // ours: when the Pong came
     bool unanswered = false;        // ours: no Pong by dueMs (a late one still counts)
 
+    // A roll call row (Kind::RollCall): always ours. State is its burst's.
+    Roll roll = Roll::Calling;
+    uint16_t round = 0;
+    int rollTag = 0;
+    int rollChannels = 0;
+    std::vector<Hand> hands;        // in the order heard
+    bool windowShort = false;       // the window's head was missed (our own burst ran into it)
+    uint64_t windowEndMs = 0;       // Listening: done by then even if the host never says
+
     // A text line's reactions (docs/PROTOCOL.md, "Reactions"): the
     // stations', one each, and ours, on the air or waiting to go.
     std::vector<protocol::Reacted> reactions;
@@ -132,6 +172,21 @@ const char* stateLabel(Message::State state);
 // in 12 s: it hears us at −8.0 dB, we hear it at −3.5 dB", "W1AW pinged
 // us; we hear it at −3.5 dB. Pong sent".
 std::string pingLine(const Message& m);
+
+// The roll call row's words: "Calling the roll after your check-in: 40
+// Hand channels", "Roll call: listening for Hands", "Roll call: 2 checked
+// in by Hand: W1AW (FN31, −8 dB), KC2G (FN20, −12 dB)".
+std::string rollCallLine(const Message& m);
+
+// Hands go this long after the roll call's burst ends: time for every
+// host to decode it and its Ragtime to answer (Data2G's advice).
+constexpr double ROLL_CALL_DELAY_S = 3.0;
+// A roll call within this long of the last lists those who checked in by
+// Hand to it as in, so they stay quiet and the rest have the channels.
+constexpr uint64_t ROLL_CALL_AGAIN_MS = 10 * 60 * 1000;
+// A roll call heard more than this far from our clock is old (repaired,
+// or a clock wrong): not answered.
+constexpr uint32_t ROLL_CALL_FRESH_S = 120;
 
 // A Pong waits this long for the host to say how well it heard the Ping
 // (its BCAST HEARD may come just before or just after the frame), then goes
@@ -171,6 +226,7 @@ public:
         std::string locator;
         bool acceptsSessions = true;
         std::string software;       // "Ragtime 0.1.0"
+        bool answerRollCalls = true;    // check in by Hand to the roll calls heard
     };
 
     explicit BroadcastChat(link::HostLink& link);
@@ -226,8 +282,25 @@ public:
     // MAX_TYPED, or no callsign set.
     std::vector<uint64_t> send(const std::string& typed, const std::string& mode, uint64_t nowMs);
 
-    // A Hello of its own: "check in".
+    // Check in: a Hello of its own, calling the roll when it can
+    // (canCallRoll), with a roll call row. False with no callsign set.
     bool checkIn(const std::string& mode, uint64_t nowMs);
+    // Whether a check-in now would call the roll: the host has shown it
+    // does Hands, and no roll call of ours is still under way.
+    bool canCallRoll() const;
+    // Why not, in words for a tooltip; empty when it can.
+    std::string whyNoRollCall() const;
+    // The stations that checked in by Hand since last asked, with a call
+    // we know, for the station list and the path log.
+    std::vector<Message::Hand> takeHandCheckIns();
+    // Lines for the status bar about our own Hands: "Checked in by Hand
+    // to W1AW's roll call".
+    std::vector<std::string> takeHandNotes();
+    // Puts a call back from the 22-bit hash a Hand carries for a call
+    // that isn't standard: the app's, from the station list and the path
+    // log. Calls heard here are tried first.
+    using CallFinder = std::function<std::string(uint32_t hash)>;
+    void setCallFinder(CallFinder fn) { callFinder_ = std::move(fn); }
 
     // Pings call in mode (empty: the group's mode as it stands). Returns
     // the ping's row; 0 with no callsign set, or call not a callsign or
@@ -320,7 +393,13 @@ private:
     // Hands frames to HostLink as one burst, with our reactions waiting
     // packed in after them.
     uint64_t broadcast(std::vector<std::vector<uint8_t>> frames, const std::string& mode, uint64_t nowMs,
-                       const std::string& label);
+                       const std::string& label, const link::HostLink::HandWindow* window = nullptr);
+    // Roll calls (docs/PROTOCOL.md, "Roll calls").
+    void answerRollCall(const protocol::Record& record, const protocol::RollCall& roll,
+                        const std::optional<link::HandRef>& ref, uint64_t nowMs);
+    void onHandEvent(const link::HostLink::Event& event, uint64_t nowMs);
+    Message* activeRoll();
+    std::string findCall(uint32_t hash) const;
     // A burst of ours settled or was taken back: its reactions are on the
     // air, or wait again.
     void reactionsSettled(uint64_t burst, bool sent, uint64_t nowMs);
@@ -377,6 +456,18 @@ private:
 
     uint64_t qrlBurst_ = 0;         // our latest QRL's burst
     bool qrlOut_ = false;           // a QRL has gone (or is going) with no QRV since
+
+    // Roll calls: ours (the row), those we checked in to, and the calls
+    // heard, to put a Hand's hash back to a call.
+    uint16_t rollRound_ = 0;
+    std::map<std::string, uint64_t> handIns_;       // call: when it checked in by Hand to ours
+    std::set<std::pair<std::string, uint16_t>> answered_;   // (net control, round) we answered
+    std::string handTo_;                            // net control our Hand waiting to go answers
+    std::vector<Message::Hand> checkIns_;
+    std::vector<std::string> handNotes_;
+    std::set<std::string> calls_;                   // every call heard on the group
+    std::set<uint64_t> armed_;                      // bursts whose window the host took
+    CallFinder callFinder_;
 
     bool helloSent_ = false;        // since the group opened or the settings changed
     uint64_t helloMs_ = 0;

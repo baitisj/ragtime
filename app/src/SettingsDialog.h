@@ -128,6 +128,7 @@ private:
     wxTextCtrl* autoAccept_ = nullptr;
     wxCheckBox* pictures_ = nullptr;
     wxCheckBox* sealChat_ = nullptr;
+    wxCheckBox* answerRollCalls_ = nullptr;
     wxSpinCtrl* slowRepair_ = nullptr;
     wxChoice* repairFloor_ = nullptr;
     std::vector<std::string> floorModes_;   // repairFloor_'s, in order; "" first

@@ -256,6 +256,18 @@ MainFrame::MainFrame()
     session_.setLog(&sessionLog_);
     broadcastLog_.setPath(broadcastLogPath());
     chat_.setLog(&broadcastLog_, HostConnection::nowMs());
+    // A Hand names a call that isn't standard by a hash: one we have met.
+    chat_.setCallFinder([this](uint32_t hash) {
+        for (const broadcast::Station& s : stations_.stations())
+        {
+            if (protocol::handCallHash(s.call) == hash) return s.call;
+        }
+        for (const radio::PathEntry& e : pathLog_.entries())
+        {
+            if (protocol::handCallHash(e.call) == hash) return e.call;
+        }
+        return std::string();
+    });
     pathLog_.setPath(pathLogPath(), HostConnection::nowMs());
     watch_.setCalls(loadWatchList());
     acceptWanted_ = link_.settings().acceptSessions;
@@ -427,8 +439,9 @@ void MainFrame::buildMenus()
     auto* station = new wxMenu;
     station->Append(ID_MESSAGE_STATION, "&Message the selected station\tCtrl+M",
                     "Starts a line to the station picked in the list, \"@W1AW\"");
-    station->Append(ID_CHECK_IN, "Check &in\tCtrl+I", "Broadcasts your check-in: callsign, locator and whether "
-                                                       "you take sessions");
+    station->Append(ID_CHECK_IN, "Check &in\tCtrl+I", "Broadcasts your check-in (callsign, locator and whether "
+                                                       "you take sessions) and calls the roll: every Ragtime that "
+                                                       "hears it checks in back by Hand");
     station->AppendSeparator();
     station->Append(ID_CALL, "&Call...\tCtrl+K", "Starts a session (a ragchew) with the station picked in the list, "
                                                 "or one you name");
@@ -761,6 +774,7 @@ void MainFrame::buildLayout()
         else chat_.react(id, code, now);
         refreshMessages();
     });
+    broadcast_->onCheckIn([this] { checkIn(); }, [this] { return chat_.whyNoRollCall(); });
     broadcast_->onPing([this](const std::string& call) { pingStation(call); },
                        [this](const std::string& call) { return whyNoPing(call); });
     broadcast_->onBroadcastFile([this]() { broadcastFile(); });
@@ -869,6 +883,7 @@ void MainFrame::applyPrefs(bool reconnect)
     s.locator = prefs_.locator;
     s.acceptsSessions = acceptWanted_;
     s.software = software();
+    s.answerRollCalls = prefs_.answerRollCalls;
     chat_.setSettings(s, loadNewestItem(protocol::normalCallsign(prefs_.callsign)));
     seals_.setChain(prefs_.callsign, loadSealChain(protocol::normalCallsign(prefs_.callsign)));
     savedSeal_ = seals_.chain().number;
@@ -1022,6 +1037,17 @@ void MainFrame::onHostEvents(const std::vector<Event>& events)
             broadcastFiles_.onRecord(r, now);
             if (addressedToUs(r)) logWorked(r.header.callsign, now);
         }
+        // Stations that checked in by Hand to our roll call.
+        for (const broadcast::Message::Hand& h : chat_.takeHandCheckIns())
+        {
+            stations_.handCheckIn(h.call, h.locator, h.acceptsSessions, h.automatic, now);
+            stations_.heard(h.call, now, h.snr);
+            watch_.heard(h.call, now, h.snr);
+            // A Hand gives only the square: a finer locator in it stays.
+            if (locatorOf(h.call).compare(0, 4, h.locator) != 0) logStationLocator(h.call, h.locator, now);
+            logPath(h.call, h.snr, false, now);
+        }
+        for (const std::string& line : chat_.takeHandNotes()) note_ = line;
         // Lines rebuilt from parity go where a line heard goes.
         for (std::vector<protocol::Record> rebuilt = seals_.takeRebuilt(); !rebuilt.empty();
              rebuilt = seals_.takeRebuilt())
@@ -2206,7 +2232,13 @@ void MainFrame::pingStation(const std::string& call)
 
 void MainFrame::checkIn()
 {
-    if (chat_.checkIn(broadcastMode(), HostConnection::nowMs())) host_->flush();
+    std::string why = chat_.whyNoRollCall();
+    if (!chat_.checkIn(broadcastMode(), HostConnection::nowMs())) return;
+    host_->flush();
+    if (!why.empty()) note_ = "Checked in without a roll call: " + why;
+    else tabs_->SetSelection(TAB_BROADCAST);
+    showStatus();
+    refreshMessages();
 }
 
 void MainFrame::setPaused(bool paused)
@@ -4203,8 +4235,12 @@ void MainFrame::logLocator(const protocol::Record& record, uint64_t nowMs)
 {
     const protocol::Hello* hello = record.as<protocol::Hello>();
     if (hello == nullptr) return;
-    const std::string& call = record.header.callsign;
-    std::string locator = globus::tidyLocator(hello->locator);
+    logStationLocator(record.header.callsign, hello->locator, nowMs);
+}
+
+void MainFrame::logStationLocator(const std::string& call, const std::string& said, uint64_t nowMs)
+{
+    std::string locator = globus::tidyLocator(said);
     if (call.empty() || locator.empty() || call == protocol::normalCallsign(prefs_.callsign)) return;
     // Only a locator the log doesn't have for it yet: the first, or a move.
     if (pathLog_.lastLocator(call) == locator) return;

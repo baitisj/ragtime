@@ -845,7 +845,7 @@ void FakeHost::stepHand(long long now)
                 char line[96];
                 std::snprintf(line, sizeof line, "HAND %d %016llx %.1f %lld", out.channel,
                               (unsigned long long)out.payload, dB, dt);
-                win.heard.push_back(line);
+                win.heard.push_back(Window::Landed{out.channel, dB, line});
             }
             if (handMs_ <= 0) reply("PTT OFF");
             else handOnAirUntilMs_ = now + handMs_;
@@ -861,9 +861,16 @@ void FakeHost::stepHand(long long now)
         bool expired = !window_->open && now - window_->armedMs > (long long)(HAND_DELAY_MAX_S * 1000.0);
         if (expired || (window_->open && now >= window_->closeMs))
         {
-            std::vector<std::string> heard = std::move(window_->heard);
+            std::vector<Window::Landed> landed = std::move(window_->heard);
             window_.reset();
-            for (const std::string& line : heard) reply(line);
+            for (const Window::Landed& l : landed)
+            {
+                // Two in one channel: only one well above the other is heard.
+                bool lost = std::any_of(landed.begin(), landed.end(), [&l](const Window::Landed& o) {
+                    return &o != &l && o.channel == l.channel && o.dB > l.dB - 6.0;
+                });
+                if (!lost) reply(l.line);
+            }
             reply("HAND END");
         }
     }

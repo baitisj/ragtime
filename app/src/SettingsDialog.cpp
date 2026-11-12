@@ -305,6 +305,13 @@ wxWindow* SettingsDialog::stationPage(wxNotebook* book, const StationPrefs& pref
                           "that missed one can ask for it again. It is a transmission of its own: 10 to 60 s "
                           "of airtime on a poor link. Files you broadcast are always sealed.");
     broadcast->Add(sealChat_, 0, wxALL, 6);
+    answerRollCalls_ = new wxCheckBox(box, wxID_ANY, "Check in by Hand when a station calls the roll");
+    answerRollCalls_->SetValue(prefs.answerRollCalls);
+    answerRollCalls_->SetToolTip("A station's check-in calls the roll: every Ragtime that hears it answers with a Hand, "
+                                 "10.6 s of narrow tones carrying your callsign, locator and whether you take "
+                                 "sessions, all stations at once. Not while you ragchew. Needs data2g-host with "
+                                 "Hands (Data2G PR #146).");
+    broadcast->Add(answerRollCalls_, 0, wxLEFT | wxRIGHT | wxBOTTOM, 6);
     slowRepair_ = new wxSpinCtrl(box, wxID_ANY, wxEmptyString, wxDefaultPosition, wxDefaultSize, wxSP_ARROW_KEYS,
                                  SLOW_REPAIR_MIN_MINUTES, SLOW_REPAIR_MAX_MINUTES, prefs.slowRepairMinutes);
     const char* slowTip = "A station that asks for repairs says how well it hears you, and what it lacks goes again "
@@ -1239,6 +1246,7 @@ StationPrefs SettingsDialog::prefs() const
         if (!call.empty()) p.autoAccept.push_back(call);
     }
     p.sealChat = sealChat_->GetValue();
+    p.answerRollCalls = answerRollCalls_->GetValue();
     p.picturesAsTheyCome = pictures_->GetValue();
     p.slowRepairMinutes = slowRepair_->GetValue();
     int floor = repairFloor_->GetSelection();

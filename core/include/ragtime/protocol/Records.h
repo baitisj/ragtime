@@ -38,6 +38,7 @@ enum class RecordType : uint8_t
 {
     Hello = 0x01,
     Status = 0x02,
+    RollCall = 0x03,
     Text = 0x10,
     Ack = 0x11,
     Ping = 0x12,
@@ -93,6 +94,20 @@ struct Hello
     std::string locator;            // 4 or 6 characters, or empty
     std::string software;           // "Ragtime 0.1.0", or empty
 };
+
+// A check-in that calls the roll (docs/PROTOCOL.md, "Roll calls"): it
+// rides beside its sender's Hello, and every Ragtime that hears it
+// checks in back by Hand (protocol/Hands.h) in the window after it.
+struct RollCall
+{
+    uint16_t round = 0;             // the sender's own number for it, never 0
+    uint8_t delayTenths = 30;       // the Hands go this long after the burst ends, in 0.1 s
+    uint8_t channels = 40;          // the window's channels, the first so many (8, 20 or 40)
+    std::vector<uint16_t> in;       // rollCallHash of each station already in: they stay quiet
+};
+
+// The most stations a roll call lists as in.
+constexpr size_t MAX_ROLL_CALL_IN = 64;
 
 struct Status
 {
@@ -331,7 +346,7 @@ struct Unknown
 
 using Body = std::variant<Unknown, Hello, Status, Text, Ack, FileOffer, FileAnswer, FileData, FileSaved,
                           FileCancel, FileAnnounce, FilePiece, Seal, RepairRequest, RepairRefused, ItemParity,
-                          Ping, Pong, Reaction>;
+                          Ping, Pong, Reaction, RollCall>;
 
 struct Record
 {

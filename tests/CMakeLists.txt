@@ -40,6 +40,7 @@ endif()
 ragtime_test(ragtime_gearbox_test GearboxTest.cpp)
 
 ragtime_test(ragtime_broadcast_test BroadcastTest.cpp)
+ragtime_test(ragtime_roll_call_test RollCallTest.cpp)
 ragtime_test(ragtime_broadcast_log_test BroadcastLogTest.cpp)
 ragtime_test(ragtime_watch_list_test WatchListTest.cpp)
 

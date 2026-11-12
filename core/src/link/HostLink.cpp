@@ -87,6 +87,7 @@ void HostLink::commandDown(uint64_t nowMs)
     modeAsked_ = false;
     listenAsked_ = false;
     kissRef_.reset();
+    handsSeen_ = false;
     modesComing_.clear();
     if (groupPort_ >= 0)
     {
@@ -167,7 +168,10 @@ void HostLink::kissBytes(const uint8_t* bytes, size_t length, uint64_t nowMs)
         {
             // A REF frame: the frames after it, up to the next, are its burst's.
             if (!frame.payload.empty() && frame.payload[0] == KISS_REF)
+            {
                 kissRef_ = parseHandRef(std::string(frame.payload.begin() + 1, frame.payload.end()));
+                if (kissRef_) handsSeen_ = true;
+            }
         }
         else if (frame.port == groupPort_ && !frame.payload.empty())
         {
@@ -498,6 +502,7 @@ void HostLink::onLine(const std::string& line, uint64_t nowMs)
         }
         case Type::Ref:
         {
+            handsSeen_ = true;
             Event e;
             e.type = Event::Type::HandRef;
             e.handRef = c.handRef;
@@ -608,6 +613,27 @@ uint64_t HostLink::broadcast(const std::vector<std::vector<uint8_t>>& frames, co
     burst.mode = mode;
     burst.label = label;
     burst.yields = yields;
+    Event e;
+    e.type = Event::Type::Burst;
+    e.id = burst.id;
+    e.burstState = BurstState::Queued;
+    emit(e);
+    uint64_t id = burst.id;
+    pump(nowMs);
+    return id;
+}
+
+uint64_t HostLink::broadcast(const std::vector<std::vector<uint8_t>>& frames, const std::string& mode,
+                             uint64_t nowMs, const std::string& label, const HandWindow& window)
+{
+    if (frames.empty() || !canListen(window.delayS, window.tag, window.channels)) return 0;
+    advance(nowMs);
+    Burst& burst = bursts_.emplace_back();
+    burst.id = nextId_++;
+    burst.frames = frames;
+    burst.mode = mode;
+    burst.label = label;
+    burst.listen = Burst::Listen{window.delayS, window.tag, window.channels};
     Event e;
     e.type = Event::Type::Burst;
     e.id = burst.id;
@@ -811,17 +837,21 @@ bool HostLink::handSend(int ref, int tag, double delayS, int channel, uint64_t p
     return true;
 }
 
-bool HostLink::handListen(uint64_t burstId, double delayS, int tag, const std::vector<int>& channels,
-                          uint64_t nowMs)
+bool HostLink::canListen(double delayS, int tag, const std::vector<int>& channels) const
 {
     if (!commandUp_ || tag < 0 || tag > 255 || channels.empty()) return false;
     if (!(delayS >= HAND_LISTEN_MIN_S && delayS < HAND_DELAY_MAX_S)) return false;
     int fit = handChannels();
     if (std::any_of(channels.begin(), channels.end(), [fit](int c) { return c < 0 || c >= fit; })) return false;
     // One window at a time, as the host has.
-    if (listenAsked_
-        || std::any_of(bursts_.begin(), bursts_.end(), [](const Burst& b) { return b.listen.has_value(); }))
-        return false;
+    return !listenAsked_
+           && std::none_of(bursts_.begin(), bursts_.end(), [](const Burst& b) { return b.listen.has_value(); });
+}
+
+bool HostLink::handListen(uint64_t burstId, double delayS, int tag, const std::vector<int>& channels,
+                          uint64_t nowMs)
+{
+    if (!canListen(delayS, tag, channels)) return false;
     for (Burst& burst : bursts_)
     {
         if (burst.id != burstId) continue;

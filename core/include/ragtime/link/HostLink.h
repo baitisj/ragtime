@@ -238,6 +238,20 @@ public:
     // It is Queued while it waits.
     uint64_t broadcast(const std::vector<std::vector<uint8_t>>& frames, const std::string& mode, uint64_t nowMs,
                        const std::string& label = std::string(), bool yields = false);
+    // A Hand window after a burst (HAND LISTEN): delayS after it ends
+    // (HAND_LISTEN_MIN_S to HAND_DELAY_MAX_S), tag (0-255) seeding the
+    // Hands' CRC, over channels inside handChannels().
+    struct HandWindow
+    {
+        double delayS = 3.0;
+        int tag = 0;
+        std::vector<int> channels;
+    };
+    // The same, with a window armed before the burst can go (handListen).
+    // 0, with nothing queued, if the window can't be had: no host, bad
+    // numbers, or another window pending.
+    uint64_t broadcast(const std::vector<std::vector<uint8_t>>& frames, const std::string& mode, uint64_t nowMs,
+                       const std::string& label, const HandWindow& window);
     // Drops a burst still queued; false once the host has it.
     bool cancel(uint64_t id);
     BurstState burstState(uint64_t id) const;
@@ -274,6 +288,9 @@ public:
     // the narrow setting, else BW2300), so 8 or 40. The host's --kiss-bw
     // doesn't narrow them.
     int handChannels() const;
+    // The host has shown it does Hands: a Hand reference has come (a REF
+    // line or frame, for any burst it decoded) since the link came up.
+    bool handsSeen() const { return handsSeen_; }
     // HAND SEND: answer heard burst ref (a HandRef's or a Heard frame's
     // id) with a Hand in channel, delayS after the burst's end (Data2G's
     // advice: about 3 s), shifted by its offset; tag (0-255) and the
@@ -290,6 +307,8 @@ public:
     // burst isn't queued, another window is pending, or the numbers are
     // bad. While a window is open the host sends no broadcasts.
     bool handListen(uint64_t burstId, double delayS, int tag, const std::vector<int>& channels, uint64_t nowMs);
+    // Whether a window over these numbers could be armed now.
+    bool canListen(double delayS, int tag, const std::vector<int>& channels) const;
     // HAND CANCEL: stops our waiting Hand and any window (a burst waiting
     // on its window's OK goes without one). Always OK at the host.
     bool handCancel(uint64_t nowMs);
@@ -409,6 +428,7 @@ private:
     bool modeAsked_ = false;            // BCAST MODE sent for the current burst, not yet answered
     bool listenAsked_ = false;          // HAND LISTEN sent for the current burst, not yet answered
     std::optional<HandRef> kissRef_;    // the burst the KISS port's next frames came in
+    bool handsSeen_ = false;            // a REF since the command port came up
     std::vector<ModeInfo> modesComing_;
 
     int groupPort_ = -1;

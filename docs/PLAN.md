@@ -140,7 +140,7 @@ A node under automatic control never raises a hand for a contact such as CQ POTA
 - `HAND LISTEN D channels`: decode the window after the next burst this host sends, reporting `HAND channel payload snr offset` for each Hand decoded, then `HAND END`.
 - While a window is open, the host holds its own CQ and broadcast transmissions.
 
-What Andrew built (Data2G PR #146, open, read at 0f277ab, 2026-11-12;
+What Andrew built (Data2G PR #146, merged at e09e19d on 2026-11-11;
 docs/DATA2G.md, "Hands"): `REF id end offset snr` for every burst
 heard, also on the KISS port ahead of the burst's frames; `HAND SEND
 ref tag d channel hex16`; `HAND LISTEN d tag ack channel...`, its window
@@ -148,9 +148,14 @@ named by the ACKMODE tag of the frame carrying the net's call; and
 `HAND CANCEL`. The tag and the channel seed the CRC, channels count from
 the centre out, and net control searches 0.6 s and 5 Hz either side.
 Ragtime's link layer speaks it (`HostLink::handSend`, `handListen`,
-`handCancel`, and each heard frame's reference, 2026-11-10); the payload
-and the round itself are still to build. A Hand carries the sender's
-callsign (Jeff, 2026-11-08).
+`handCancel`, and each heard frame's reference, 2026-11-10). A Hand
+carries the sender's callsign (Jeff, 2026-11-08). The first round built
+is the roll call (Jeff, 2026-11-12; PROTOCOL.md, "Roll calls"): Check in
+sends the Hello with a window after it, and every Ragtime that hears it
+checks in back by Hand with the stranger fields above (call, square,
+S/N, sessions), each in a channel hashed from its call and the round.
+Net control's `ANY TRAFFIC` round, with its channel map and traffic
+fields, is still to build.
 
 Until it ships, the fallback on every link is polling, as on FM.
 

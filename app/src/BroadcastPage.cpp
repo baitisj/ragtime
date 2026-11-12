@@ -293,7 +293,7 @@ protected:
         if (m->kind == Message::Kind::Rule) return ruleItem(*m, picked);
         if (m->file != 0) return fileItem(*m, picked);
         if (m->kind == Message::Kind::File) return pastFileItem(*m, picked);
-        if (m->kind == Message::Kind::Ping) return pingItem(*m, picked);
+        if (m->kind == Message::Kind::Ping || m->kind == Message::Kind::RollCall) return pingItem(*m, picked);
         const std::string& me = owner_->chat_.settings().callsign;
         // What came before Ragtime last closed reads in grey.
         wxString body = m->past ? colour(secondaryText()) : wxString();
@@ -395,7 +395,7 @@ private:
              << "<td width=\"" << BADGE_ROOM << "\" valign=\"top\">" << badge << "</td>"
              << "<td valign=\"top\" nowrap><font" << font << ">" << clock(m.atMs) << "</font></td>"
              << "<td valign=\"top\" width=\"100%\"><font" << font << "><i>"
-             << htmlEscape(pingLine(m)) << "</i></font></td>"
+             << htmlEscape(m.kind == Message::Kind::RollCall ? rollCallLine(m) : pingLine(m)) << "</i></font></td>"
              << "<td valign=\"top\" nowrap align=\"right\">" << gear << "</td>"
              << "</tr></table>";
         return html;
@@ -746,6 +746,11 @@ void BroadcastPage::showMenu(int row)
         showPingMenu(*m);
         return;
     }
+    if (m->kind == Message::Kind::RollCall)
+    {
+        showRollCallMenu(*m);
+        return;
+    }
     uint64_t id = m->id;
     std::string from = m->from;
     wxString text = wxString::FromUTF8(m->text);
@@ -858,6 +863,33 @@ void BroadcastPage::showPingMenu(const Message& m)
     menu.Bind(wxEVT_MENU, [=](wxCommandEvent& e) {
         if (e.GetId() == ID_CANCEL && onCancel_) onCancel_(id);
         if (e.GetId() == ID_RESEND && onPing_) onPing_(call);
+        if (e.GetId() == ID_COPY && wxTheClipboard->Open())
+        {
+            wxTheClipboard->SetData(new wxTextDataObject(line));
+            wxTheClipboard->Close();
+        }
+    });
+    PopupMenu(&menu);
+}
+
+void BroadcastPage::showRollCallMenu(const Message& m)
+{
+    uint64_t id = m.id;
+    wxString line = wxString::FromUTF8(rollCallLine(m));
+    std::string why = whyNoRollCall_ ? whyNoRollCall_() : std::string("not here");
+
+    wxMenu menu;
+    if (m.state == State::Queued) menu.Append(ID_CANCEL, "Cancel");
+    // Those in already stay quiet, so a second round finds the rest.
+    wxString again = "Check in again";
+    if (!why.empty()) again += " (" + wxString::FromUTF8(why) + ")";
+    menu.Append(ID_RESEND, again);
+    menu.Enable(ID_RESEND, why.empty());
+    menu.AppendSeparator();
+    menu.Append(ID_COPY, "Copy text");
+    menu.Bind(wxEVT_MENU, [=](wxCommandEvent& e) {
+        if (e.GetId() == ID_CANCEL && onCancel_) onCancel_(id);
+        if (e.GetId() == ID_RESEND && onCheckIn_) onCheckIn_();
         if (e.GetId() == ID_COPY && wxTheClipboard->Open())
         {
             wxTheClipboard->SetData(new wxTextDataObject(line));

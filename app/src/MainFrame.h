@@ -284,6 +284,8 @@ private:
     // A Hello with a locator the path log doesn't have for the station yet
     // adds a line of its own.
     void logLocator(const ragtime::protocol::Record& record, uint64_t nowMs);
+    // The same for a locator a station said some other way (its Hand).
+    void logStationLocator(const std::string& call, const std::string& locator, uint64_t nowMs);
     // A Text heard on D2G addressed to our call.
     bool addressedToUs(const ragtime::protocol::Record& record) const;
     // Recent work again: on a new path log line (at most every few

@@ -790,8 +790,22 @@ void testHands()
     CHECK_EQ(opened(0, true).handChannels(), 8);
 
     // A REF line on the command port, and a REF frame on the KISS port
-    // ahead of its burst's frames: those frames carry it.
+    // ahead of its burst's frames: those frames carry it. Either shows
+    // the host does Hands.
+    CHECK(!link.handsSeen());
     say(link, "REF 7 123.45 -3.5 -8.0\r", 10);
+    CHECK(link.handsSeen());
+    {
+        HostLink other = opened(0);
+        std::string t = "REF 1 1.00 0.0 0.0";
+        std::vector<uint8_t> r{KISS_REF};
+        r.insert(r.end(), t.begin(), t.end());
+        std::vector<uint8_t> k = kissEncodeSetHardware(0, r);
+        other.kissBytes(k.data(), k.size(), 10);
+        CHECK(other.handsSeen());
+        other.commandDown(20);
+        CHECK(!other.handsSeen());
+    }
     std::vector<HostLink::Event> events = link.takeEvents();
     CHECK(events.size() == 1 && events[0].type == Type::HandRef && events[0].handRef
           && events[0].handRef->id == 7 && events[0].handRef->endS == 123.45 && events[0].handRef->offsetHz == -3.5
@@ -898,10 +912,34 @@ void testHands()
     link.takeCommandOutput();
     CHECK(link.handCancel(7020));
     CHECK(linesOf(link.takeCommandOutput()) == std::vector<std::string>({"HAND CANCEL"}));
-    CHECK(tagsWritten(link, 2).size() == 1);
+    std::vector<uint16_t> ten = tagsWritten(link, 2);
+    CHECK(ten.size() == 1);
     say(link, "OK\rOK\r", 7030);
     events = link.takeEvents();
     CHECK(!hasEvent(events, Type::Refused) && !hasEvent(events, Type::HandArmed));
+
+    // A burst with its window from the start: HAND LISTEN before any
+    // frame, even with nothing ahead of it.
+    ackTags(link, 2, ten, 7990);
+    link.takeKissOutput();
+    link.takeEvents();
+    HostLink::HandWindow window;
+    window.delayS = 3.0;
+    window.tag = 77;
+    window.channels = {0, 1};
+    HostLink::HandWindow bad = window;
+    bad.channels = {40};
+    CHECK_EQ(link.broadcast({{11}}, "", 8000, "roll call", bad), (uint64_t)0);
+    CHECK(link.takeEvents().empty());
+    id = link.broadcast({{11}}, "", 8000, "roll call", window);
+    CHECK(id != 0);
+    lines = linesOf(link.takeCommandOutput());
+    CHECK(lines.size() == 1 && lines[0].compare(0, 20, "HAND LISTEN 3.000 77") == 0);
+    CHECK(link.takeKissOutput().empty());
+    CHECK_EQ(link.broadcast({{12}}, "", 8000, "another", window), (uint64_t)0);     // one window at a time
+    say(link, "OK\r", 8010);
+    CHECK(tagsWritten(link, 2).size() == 1);
+    CHECK(hasEvent(link.takeEvents(), Type::HandArmed));
 
     // Nothing without the host.
     HostLink down({"ag7ew", true, false});

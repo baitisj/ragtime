@@ -41,6 +41,7 @@ struct StationPrefs
     std::string receivedFolder; // where files saved from a session go
     std::vector<std::string> autoAccept;   // stations whose files are saved without asking
     bool sealChat = false;      // our broadcast chat is sealed too (files always are)
+    bool answerRollCalls = true;    // check in by Hand to the roll calls heard
     // Pictures up to picture::AUTO_PICTURE_BYTES are received without
     // asking, from anyone, and show as they come.
     bool picturesAsTheyCome = true;
