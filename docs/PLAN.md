@@ -140,7 +140,7 @@ A node under automatic control never raises a hand for a contact such as CQ POTA
 - `HAND LISTEN D channels`: decode the window after the next burst this host sends, reporting `HAND channel payload snr offset` for each Hand decoded, then `HAND END`.
 - While a window is open, the host holds its own CQ and broadcast transmissions.
 
-What Andrew built (Data2G PR #146, open, read at 20db50e, 2026-11-10;
+What Andrew built (Data2G PR #146, open, read at 0f277ab, 2026-11-12;
 docs/DATA2G.md, "Hands"): `REF id end offset snr` for every burst
 heard, also on the KISS port ahead of the burst's frames; `HAND SEND
 ref tag d channel hex16`; `HAND LISTEN d tag ack channel...`, its window

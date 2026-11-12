@@ -10,8 +10,8 @@ and update this page, with the new commit. What Data2G PR #122 adds
 [843987e](https://github.com/arodland/Data2G/pull/122/commits/843987e),
 on v0.3.0 (2026-10-26). The Hand ("Hands" below) was read at Data2G PR
 #146's head,
-[20db50e](https://github.com/arodland/Data2G/pull/146/commits/20db50e),
-not yet merged (master f5388f7, v0.4.3, has none of it, 2026-11-10).
+[0f277ab](https://github.com/arodland/Data2G/pull/146/commits/0f277ab),
+not yet merged (master 8118dec has none of it, 2026-11-12).
 
 ## Where to look in Data2G
 
@@ -54,7 +54,7 @@ Python host needs only numpy and scipy; torch is for training.
 | --- | --- | --- |
 | `MYCALL call` | `OK`, then `REGISTERED call` | |
 | `LISTEN ON` / `OFF` | `OK` | Take calls or not |
-| `BW500`, `BW1200`, `BW2300`, `BW2750` | `OK` | The **session** width cap only: 500, 1200 or 2400 Hz (`BW2750` is 2400). Broadcast width is `--kiss-bw`. There is no 200 Hz cap; the 200 Hz modes sit inside 500 Hz |
+| `BW500`, `BW1200`, `BW2300`, `BW2750` | `OK` | The **session** width cap only: 500, 1200 or 2400 Hz (`BW2750` is 2400). Broadcast width is `--kiss-bw`. Under PR #146 `BW` also sets the Hand channels ("Hands"). There is no 200 Hz cap; the 200 Hz modes sit inside 500 Hz |
 | `CHAT ON` | `OK` | Sessions favour latency over throughput (`docs/arq.md`, "CHAT ON") |
 | `DATA2G ON` | `OK` | `BUFFER` counts plainly, `CLEANTXBUFFER` reports host byte offsets, bytes written before `CONNECTED` are dropped. Off again when the client goes |
 | `CONNECT from to`, `DISCONNECT`, `ABORT` | `OK` / `WRONG` | `ABORT` drops a session without the handshake, and also stops the transmitter at once and clears its queue (`Transmitter::abort`, broadcast bursts too); it answers `DISCONNECTED` (`DISCONNECTED ABORT` with `DATA2G ON`, PR #122) even with no session (read at v0.3.0, 6f0e72f). Ragtime's SWR trip uses it |
@@ -221,7 +221,7 @@ are in `data2g/codes_data/mode_thresholds.json` (GEARBOX.md).
 
 ## Hands
 
-Data2G PR #146 (open, read at 20db50e) adds the Hand, the D2G net's show
+Data2G PR #146 (open, read at 0f277ab) adds the Hand, the D2G net's show
 of hands (docs/PLAN.md, "On a multiplex link: the Hand burst"). Its
 design is in Data2G's `docs/hand-burst.md`, the commands in `docs/arq.md`
 §9, the KISS side in `docs/broadcast.md` §5, the waveform in
@@ -231,10 +231,11 @@ design is in Data2G's `docs/hand-burst.md`, the commands in `docs/arq.md`
   a constant envelope, 60 Hz apart round 1500 Hz, 10.56 s long. Channels
   are numbered from the centre out: 0 at 1470 Hz, 1 at 1530, 2 at 1410
   (`link::handChannelHz`). Only the channels inside the host's width
-  are taken, the narrower of its `BW` and `--kiss-bw`: 8 at 500 Hz, 20
-  at 1200, 40 at 2400 (`link::handChannelsWithin`, and
-  `HostLink::handChannels`, which takes `--kiss-bw` from the widest mode
-  `MODES` lists). A CRC-16 seeded with an 8-bit tag and the channel
+  are taken, set by the client's `BW` alone (`--kiss-bw` is for KISS
+  clients and doesn't apply, since 0f277ab): 8 at 500 Hz, 20 at 1200,
+  40 at 2400 (`link::handChannelsWithin`, and `HostLink::handChannels`:
+  8 with the narrow setting's BW500, else 40). `BW` is the host's, not
+  the client's: another command client sending one changes it. A CRC-16 seeded with an 8-bit tag and the channel
   rides under the polar code, so a Hand can't answer another net's call
   or land a channel over. Data2G measures 90% decoded at -19.2 dB in
   noise and -13.8 to -16.3 dB on fading paths.
@@ -285,7 +286,7 @@ payload, which Jeff has decided for Ragtime (2026-11-08).
 - The mode on `BCAST HEARD` (the path log's mode column).
 - A dial report from the host's own rig control.
 - A 200 Hz session cap.
-- The Hand merged (PR #146, "Hands" above, open at 20db50e), and the
+- The Hand merged (PR #146, "Hands" above, open at 0f277ab), and the
   10-minute forced CW ID made to wait for a Hand or an open window.
 - A note when a v2 broadcast is heard by a v3 host, so an operator knows
   to update.

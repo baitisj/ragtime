@@ -785,7 +785,7 @@ void testBurstsThatYield()
 void testHands()
 {
     HostLink link = opened(0);
-    // The known modes go to 2400 Hz: all 40 channels; 8 at 500 Hz.
+    // BW2300: all 40 channels; BW500: 8.
     CHECK_EQ(link.handChannels(), 40);
     CHECK_EQ(opened(0, true).handChannels(), 8);
 

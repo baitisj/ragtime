@@ -798,12 +798,9 @@ void HostLink::pump(uint64_t nowMs)
 
 int HostLink::handChannels() const
 {
-    int width = settings_.narrow ? 500 : 2400;
-    int widest = 0;
-    for (const ModeInfo& mode : modes_) widest = std::max(widest, mode.bandwidthHz);
-    // MODES lists only the modes inside the host's --kiss-bw.
-    if (widest > 0) width = std::min(width, widest <= 500 ? 500 : widest <= 1200 ? 1200 : 2400);
-    return handChannelsWithin(width);
+    // The width our BW gave the host (Data2G PR #146 at 0f277ab: --kiss-bw
+    // doesn't narrow it).
+    return handChannelsWithin(settings_.narrow ? 500 : 2400);
 }
 
 bool HostLink::handSend(int ref, int tag, double delayS, int channel, uint64_t payload, uint64_t nowMs)

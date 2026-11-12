@@ -133,7 +133,7 @@ and the Part 97 check.
   NotListening, RefusedThere, IdleClosed, ClosedThere). The fake hosts
   give reasons and hang up quiet sessions (`--no-reasons` for an older
   one).
-- Data2G PR #146 (the Hand, open at 20db50e on 2026-11-10) gives the
+- Data2G PR #146 (the Hand, open at 0f277ab on 2026-11-12) gives the
   show of hands. Ragtime's link layer speaks it ahead of the merge
   (Jeff, 2026-11-10): `HostLink` sends KISS `REFS ON`, gives each heard
   frame its burst's Hand reference, and has `handSend`, `handListen`

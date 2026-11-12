@@ -270,9 +270,9 @@ public:
     // Hands (Data2G PR #146, docs/DATA2G.md "Hands")
     //---------------------------------------------------------------------
 
-    // The channels a Hand may use here: those inside the narrower of our
-    // BW (500 Hz with the narrow setting) and the widest mode the host
-    // offers (its --kiss-bw), so 8, 20 or 40.
+    // The channels a Hand may use here: those inside our BW (BW500 with
+    // the narrow setting, else BW2300), so 8 or 40. The host's --kiss-bw
+    // doesn't narrow them.
     int handChannels() const;
     // HAND SEND: answer heard burst ref (a HandRef's or a Heard frame's
     // id) with a Hand in channel, delayS after the burst's end (Data2G's
