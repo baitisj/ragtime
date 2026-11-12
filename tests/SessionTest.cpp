@@ -571,6 +571,18 @@ void testTheHostSaysWhy()
     CHECK_EQ(failed.chat.strip(failed.now).text,
              std::string("Link failed at 00:00: data2g-host gave up on it (no progress)"));
 
+    // CLIENT, but we never left: another program on our host, such as
+    // Pat answering the call as a VARA client, sent DISCONNECT.
+    Rig pat(T0, 0.0);
+    Far far7("W1AW");
+    connect(pat, far7);
+    pat.advance(20 * 1000);
+    pat.say("DISCONNECTED CLIENT\r");
+    CHECK(!pat.sent("DISCONNECT"));
+    CHECK(pat.chat.ending() == Ending::ClosedHere);
+    CHECK(contains(pat.chat.strip(pat.now).text, "Another program on data2g-host ended the session with W1AW at 00:00"));
+    CHECK(contains(pat.chat.strip(pat.now).text, "Pat"));
+
     // Our Leave, never acknowledged by the far end.
     Rig left(T0, 0.0);
     Far far6("W1AW");
@@ -621,6 +633,48 @@ void testCallsThatDontConnect()
     Rig noData;
     noData.chat.dataPort(false, noData.now);
     CHECK(!noData.chat.call("W1AW", noData.now));
+}
+
+void testACallAfterOneWeStopped()
+{
+    // A call we cancelled, then one the far end makes: it's answered, not
+    // stopped as the cancelled one was (KC2G's report, 2026-11-10).
+    Rig rig;
+    CHECK(rig.chat.call("W1AW", rig.now));
+    rig.pump();
+    CHECK(rig.chat.leave(rig.now));
+    rig.say("OK\rOK\rDISCONNECTED\r");
+    CHECK(rig.chat.ending() == Ending::Cancelled);
+    rig.commands.clear();
+    rig.advance(60000);
+    rig.say("CONNECTED W1AW AG7EW 2300\r");
+    CHECK(rig.chat.phase() == Phase::Connected && rig.chat.incoming());
+    CHECK(!rig.sent("ABORT"));
+    std::vector<protocol::Record> ours = rig.ours();
+    CHECK(ours.size() == 1 && ours[0].as<protocol::Hello>() != nullptr);
+
+    // A call given up on, likewise.
+    Rig mute;
+    CHECK(mute.chat.call("W1AW", mute.now));
+    mute.pump();
+    mute.advance(SessionChat::CALL_GIVE_UP_MS);
+    mute.say("OK\rOK\rDISCONNECTED\r");
+    CHECK(mute.chat.ending() == Ending::NoAnswer);
+    mute.commands.clear();
+    mute.advance(60000);
+    mute.say("CONNECTED W1AW AG7EW 2300\r");
+    CHECK(mute.chat.phase() == Phase::Connected);
+    CHECK(!mute.sent("ABORT"));
+    CHECK(!mute.ours().empty());
+
+    // Answered as a call is stopped: that one still stops.
+    Rig late;
+    CHECK(late.chat.call("W1AW", late.now));
+    late.pump();
+    CHECK(late.chat.leave(late.now));
+    late.say("OK\rCONNECTED AG7EW W1AW 2300\r");
+    CHECK(late.sent("ABORT"));
+    CHECK(late.chat.phase() == Phase::Leaving);
 }
 
 void testTheDataPortCloses()
@@ -1118,6 +1172,7 @@ int main()
     testTheFarEndLeavesOrIsLost();
     testTheHostSaysWhy();
     testCallsThatDontConnect();
+    testACallAfterOneWeStopped();
     testTheDataPortCloses();
     testAStreamThatIsntRagtimes();
     testWhatElseRidesInASession();
