@@ -111,6 +111,7 @@ StationPrefs loadStationPrefs()
     p.receivedFolder = receivedFolder();
     p.autoAccept = loadAutoAccept();
     p.sealChat = config().ReadBool("/Broadcast/SealChat", p.sealChat);
+    p.answerRollCalls = config().ReadBool("/Broadcast/AnswerRollCalls", p.answerRollCalls);
     p.picturesAsTheyCome = config().ReadBool(keys::PICTURES_AS_THEY_COME, p.picturesAsTheyCome);
     p.slowRepairMinutes = (int)config().ReadLong("/Broadcast/SlowRepairMinutes", p.slowRepairMinutes);
     p.slowRepairMinutes = std::min(std::max(p.slowRepairMinutes, SLOW_REPAIR_MIN_MINUTES), SLOW_REPAIR_MAX_MINUTES);
@@ -138,6 +139,7 @@ void saveStationPrefs(const StationPrefs& p)
     if (!p.receivedFolder.empty() && p.receivedFolder != receivedFolder()) saveReceivedFolder(p.receivedFolder);
     saveAutoAccept(p.autoAccept);
     config().Write("/Broadcast/SealChat", p.sealChat);
+    config().Write("/Broadcast/AnswerRollCalls", p.answerRollCalls);
     config().Write(keys::PICTURES_AS_THEY_COME, p.picturesAsTheyCome);
     config().Write("/Broadcast/SlowRepairMinutes", (long)p.slowRepairMinutes);
     config().Write("/Broadcast/RepairFloor", wxString::FromUTF8(p.repairFloor));

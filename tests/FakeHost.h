@@ -62,8 +62,11 @@
 //   at its end says "HAND c hex16 snr dt" for each Hand from another host
 //   that landed in a listed channel within 0.6 s of the slot with the same
 //   tag, heard above -19 dB, then HAND END (also after 30 s unanchored);
-//   HAND CANCEL stops both. Arguments are as strict as the real host's,
-//   and channels past the width (8 after BW500) are WRONG. A waiting Hand
+//   HAND CANCEL stops both. Two Hands in one channel: the stronger is
+//   heard if 6 dB or more above the other, else neither (as
+//   docs/hand-burst.md in Data2G found on fading paths). Arguments are as
+//   strict as the real host's, and channels past the width (8 after
+//   BW500) are WRONG. A waiting Hand
 //   or an open window holds the group's bursts. A Hand lasts setHandMs
 //   (0 in tests, 10560 on the bench). With setHands(false), a host from
 //   before it: no REF, and HAND is WRONG.
@@ -310,7 +313,14 @@ private:
         bool open = false;
         long long slotMs = 0;
         long long closeMs = 0;
-        std::vector<std::string> heard;
+        // Each Hand that landed: its channel, level and HAND line.
+        struct Landed
+        {
+            int channel;
+            double dB;
+            std::string line;
+        };
+        std::vector<Landed> heard;
     };
     std::optional<Window> window_;
 

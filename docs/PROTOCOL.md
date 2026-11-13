@@ -82,6 +82,7 @@ length.
 | --- | --- | --- | --- |
 | `0x01` | Hello | version, flags, takes, [locator, [software]] | no |
 | `0x02` | Status | state, [partner] | no |
+| `0x03` | RollCall | round, delay, channels, count, in | no |
 | `0x10` | Text | flags, [to], text | **yes** |
 | `0x11` | Ack | to, item | no |
 | `0x12` | Ping | to, number, mode | no |
@@ -120,6 +121,20 @@ frame as a check-in.
 
 A station never offers a file to one whose Hello lacks bit 2 of takes;
 the file ends Not taken.
+
+**RollCall** (`0x03`) rides beside its sender's Hello and asks every
+Ragtime that hears it to check in by Hand (Roll calls, below).
+
+| Field | Bytes | Meaning |
+| --- | --- | --- |
+| round | 2 | The sender's own number for this roll call, never 0 |
+| delay | 1 | Tenths of a second from the burst's end to the Hands: 30 (3.0 s), never 0 |
+| channels | 1 | The window's channels: the first so many, 8, 20 or 40 |
+| count | 1 | How many follow, at most 64 |
+| in | 2 each | The 16-bit roll call hash of each station already in (Roll calls) |
+
+A later version may add fields after them; a reader skips what it
+doesn't know.
 
 **Status** (`0x02`): state, 1 byte (0 QRV, available; 1 QRL, in a
 session; 2 QRT, closing down), then optionally the partner's callsign
@@ -516,12 +531,98 @@ Broadcasts go on the `D2G` group, opened with `BCAST OPEN D2G FROM
 - **Check-ins.** A Hello rides along at the front of a message's first
   frame: the first message after the group opens, the first after the
   station's callsign, locator or Accept sessions changes, and then at
-  most every 10 minutes. A station may also send a Hello alone.
+  most every 10 minutes. A station may also send a Hello alone, and
+  when its host does Hands that check-in calls the roll (below).
 - **Addressed Texts.** A Text addressed to a station with ack wanted is
   answered on the group by that station's Ack, at once and without the
   operator; Acks heard together go in one burst. A Text heard again (the
   same callsign, seq and time) is shown once but acknowledged again, since
   the sender is asking because the first Ack went missing.
+
+### Roll calls
+
+A check-in calls the roll (Jeff, 2026-11-12): every Ragtime that hears
+it checks in back at once, by Hand. The Hand is Data2G's show of hands
+(Data2G PR #146; docs/DATA2G.md, "Hands"): 63 bits, 10.56 s of 6.25 Hz
+8-FSK in one of up to 40 channels 60 Hz apart, decoded down to about
+-19 dB. Data2G sends a Hand only as an answer, timed from a burst heard,
+into the window that burst's sender opened, so a station can't check in
+by Hand on its own: it answers someone's roll call.
+
+- **Calling.** Check in (Station > Check in, Ctrl+I) sends the Hello and
+  a RollCall in one frame, with a window over all our Hand channels (40,
+  or 8 with the 500 Hz setting) `delay` after its burst, armed with
+  `HAND LISTEN` before the burst can go. The tag that seeds the Hands'
+  CRC is byte 4 of SHA-256 over net control's callsign, a zero byte and
+  the round, big-endian, so a Hand can't be credited to another
+  station's roll call. A check-in goes as a plain Hello, with no RollCall,
+  until the host has shown it does Hands (a REF for any burst), and while
+  a roll call of ours is still under way.
+- **Answering.** A station that hears a RollCall answers with `HAND SEND`
+  on the burst's reference, `delay` after it, unless it is in a ragchew
+  (docs/PLAN.md, "Who stays quiet"), its operator has turned answering
+  off (Settings > Station, on by default), the record's time is more
+  than 2 minutes off its clock, its hash is in the `in` list, it has
+  answered that round already, or its host gave the frame no reference.
+- **The channel** is the first 4 bytes of SHA-256 over the answering
+  station's callsign, a zero byte and the round, big-endian, modulo the
+  smaller of `channels` and its own channel count. With no channel map,
+  each round reshuffles who shares a channel (docs/PLAN.md, "Stranger
+  hands"). Two Hands in one channel usually both fail; with 40 channels
+  and 10 answering, 8 in 10 have their channel to themselves.
+- **Net control** takes each Hand that unpacks (below), drops one whose
+  call isn't in the channel that call would pick at 8, 20 or 40 channels
+  (a false decode: CRC-16 lets about one through in a hundred 40-channel
+  rounds), and lists the rest on the roll call's row, each with the S/N
+  its host heard the Hand at, the S/N it heard our roll call at, its
+  square and whether it takes sessions. They join the station list and
+  the path log as stations heard, and a station's Hand counts as a Hello
+  with takes `0x7F` (only a Ragtime that takes all of v0 sends Hands),
+  its square kept only where no finer locator is known.
+- **Again.** A check-in within 10 minutes of the last lists, as `in`,
+  the 16-bit hash (the first 2 bytes of SHA-256 over the callsign) of
+  each station that checked in by Hand since, so they stay quiet and the
+  rest, who collided or faded, have the channels. The roll call's row
+  has Check in again on its menu.
+
+**What a Hand says.** 63 bits, most significant first; Data2G ignores
+the top bit of its 16 hex digits:
+
+| Field | Bits | Meaning |
+| --- | --- | --- |
+| version | 3 | 0 |
+| call | 28 | A standard callsign as a number, or `2^28 - 2^22` plus a 22-bit hash of any other |
+| square | 15 | The first four characters of the locator, or `0x7FFF` for none |
+| S/N | 6 | The roll call as the answering host heard it: 0 for none, else dB + 31, -30 to +32 |
+| sessions | 1 | Accepts sessions, as the Hello's flag |
+| automatic | 1 | As the Hello's flag |
+| 500 Hz | 1 | Sends only 500 Hz modes on this link (the narrow setting) |
+| spare | 8 | 0 |
+
+- **A standard callsign** is up to six letters and digits with a digit
+  second or third and one to three letters after it, and nothing else
+  (W1AW, AG7EW, 2E0ABC; not N0CALL, which has four letters after its
+  digit). It is written in six places, a space before a digit that comes
+  second and spaces after the letters: a space, digit or letter (37), a
+  digit or letter (36), the digit (10), and three letters or spaces
+  (27 each), a number below 262,177,560. Each place counts from space,
+  then 0 to 9, then A to Z, as they apply, and the number is
+  ((((p1 × 36 + p2) × 10 + p3) × 27 + p4) × 27 + p5) × 27 + p6.
+- **Any other callsign** (with `/` or `-`, or longer) goes as the top
+  22 bits of the first 4 bytes of SHA-256 over the callsign. Net control
+  puts it back to a call it has heard (on the group, in the station list
+  or the path log); else the row shows the hash, "a call we haven't
+  heard (#1a2b3c)".
+- **The square** is ((A × 18 + B) × 10 + d1) × 10 + d2 for letters A to
+  R counted from 0, below 32,400.
+- A Hand of another version, with a call number between the standard
+  ones and the hashes, a square past RR99 or spare bits set is not ours,
+  or not a Hand: dropped.
+
+The Hand carries the callsign, as Data2G's `docs/hand-burst.md`
+recommends, for identification and to catch false Hands. It is still no
+signature: it says a station is there, and every claim in it is checked
+when traffic moves.
 
 ### Pings
 

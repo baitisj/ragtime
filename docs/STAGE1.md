@@ -2296,6 +2296,44 @@ voice probe's clip then never ends without the watch, and in the app the
 card goes back to Play 6 s after the speaker stops, with the note; with
 the speaker running, the 6 s clip is heard to its end as before.
 
+## Check in by Hand
+
+Jeff, 2026-11-12: "can we make checkin use hand mode?" A Hand can only
+answer a burst whose sender opened a window for it, so a Hand check-in
+is a roll call, and Jeff chose that Check in itself calls it.
+
+- **Check in** (Station > Check in, Ctrl+I) sends the Hello with a
+  RollCall record and a 10.6 s Hand window 3 s after the burst
+  (`BroadcastChat::checkIn`, `HostLink::broadcast` with a `HandWindow`).
+  Every Ragtime that hears it answers by Hand at once, up to 40 at 2.4
+  kHz (8 at 500 Hz). The Hello still rides along with messages as
+  before; only Check in calls the roll.
+- **The row.** Our roll call is a row in the Broadcast tab, greyed like
+  a ping's: "Your check-in, calling the roll (40 Hand channels),
+  sending", "Roll call: listening for Hands", then "Roll call: 2 checked
+  in by Hand: KC2G (FN20, −6.0 dB), G4XYZ (IO91, +3.0 dB)"
+  (`rollCallLine`). Its menu has Check in again, which lists those
+  already in so they stay quiet and the rest get the channels.
+- **Who answered** joins the station list ("Checked in by Hand to our
+  roll call" in the Status tooltip; `Stations::handCheckIn`), the path
+  log and the watch list's bells, as if heard.
+- **Answering** is by itself, as a Pong is, and shows on the status bar
+  ("Checked in by Hand to W1AW's roll call"). Settings > Station, "Check
+  in by Hand when a station calls the roll" (on by default), turns it
+  off; a station in a ragchew never answers.
+- **What a Hand says** (PROTOCOL.md, "Roll calls"): the callsign in 28
+  bits, a standard call packed as a number and any other (with `/` or
+  `-`) as a 22-bit hash that net control puts back to a call it has
+  heard; the square; the S/N the roll call was heard at; Accepts
+  sessions, automatic and 500 Hz; 8 bits spare. `protocol/Hands.h`.
+- **Older hosts.** Until the host has shown it does Hands (a REF for any
+  burst, `HostLink::handsSeen`), Check in sends a plain Hello and says
+  why on the status bar. No Data2G release has Hands yet (PR #146 merged
+  after v0.4.3).
+- **The bench.** The fake hosts collide two Hands in one channel unless
+  one is 6 dB stronger, the bots' check-ins call the roll, and the bots
+  answer every roll call they hear, yours included.
+
 ## Waiting on Andrew (via Jeff)
 
 - Read from Data2G's source on 2026-10-25 (`docs/DATA2G.md`): `BW1200`
@@ -2312,5 +2350,6 @@ the speaker running, the 6 s clip is heard to its end as before.
   off as it closes.
 - SNR reports: answered by Data2G PR #98 (merged 2026-10-23), used as
   below.
-- The Hand primitive (`HAND SEND`, `HAND LISTEN`), which he will build;
-  it belongs to the D2G net (Stage 2), not Stage 1.
+- The Hand primitive (`HAND SEND`, `HAND LISTEN`): Data2G PR #146,
+  merged 2026-11-11. Ragtime's check-in calls the roll with it ("Check in
+  by Hand", above); net control's round is Stage 2.

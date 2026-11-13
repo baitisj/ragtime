@@ -94,6 +94,13 @@ public:
         onPing_ = std::move(ping);
         whyNoPing_ = std::move(whyNot);
     }
+    // A roll call row's Check in again: checkIn goes, and whyNot says
+    // why it wouldn't call the roll, or "".
+    void onCheckIn(std::function<void()> checkIn, std::function<std::string()> whyNot)
+    {
+        onCheckIn_ = std::move(checkIn);
+        whyNoRollCall_ = std::move(whyNot);
+    }
     // Broadcast files: the File... button, each card's look, and its links.
     void onBroadcastFile(std::function<void()> fn) { onBroadcastFile_ = std::move(fn); }
     void fileCards(std::function<bool(uint64_t file, FileCard& card)> fn) { fileCard_ = std::move(fn); }
@@ -162,6 +169,7 @@ private:
     void showMenu(int row);
     void showFileMenu(const ragtime::broadcast::Message& m);
     void showPingMenu(const ragtime::broadcast::Message& m);
+    void showRollCallMenu(const ragtime::broadcast::Message& m);
     void arrange(int width);
     // Redraws the Gear button's speedometer and gear name, in the theme's colours.
     void drawGearButton();
@@ -190,6 +198,8 @@ private:
     std::function<void(uint64_t, uint8_t)> onReact_;
     std::function<void(const std::string&)> onPing_;
     std::function<std::string(const std::string&)> whyNoPing_;
+    std::function<void()> onCheckIn_;
+    std::function<std::string()> whyNoRollCall_;
     std::function<void()> onBroadcastFile_, onBroadcastPicture_, onVoiceDeck_;
     std::function<wxString(uint64_t, const wxWindow*, const wxString&)> pictureHtml_;
     std::function<wxString(const std::string&, const wxWindow*, const wxString&)> pastPictureHtml_;

@@ -47,7 +47,9 @@
 // plays a host from before it. They give each group burst heard a Hand
 // reference and take HAND SEND, LISTEN and CANCEL, as data2g-host does
 // with Data2G PR #146, a Hand keying for 10.56 s; --no-hands plays a host
-// from before it. The bots don't raise hands yet.
+// from before it. The bots' check-ins call the roll, and they check in by
+// Hand to every roll call they hear, yours included (docs/PROTOCOL.md,
+// "Roll calls"); two Hands in one channel collide.
 //
 // --rig PORT plays a rigctld on that port (pick another than 4532 where a
 // real one runs): it answers "\chk_vfo" with 0, "f" with the dial,

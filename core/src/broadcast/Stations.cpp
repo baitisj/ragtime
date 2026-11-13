@@ -205,6 +205,23 @@ std::optional<PathReport> Stations::weakestPath(uint64_t nowMs) const
     return weakest;
 }
 
+void Stations::handCheckIn(const std::string& call, const std::string& locator, bool acceptsSessions,
+                           bool automatic, uint64_t nowMs)
+{
+    if (call.empty() || call == me_) return;
+    Station& s = touch(call, nowMs);
+    if (!s.helloHeard) s.takes = protocol::TAKES_ALL_V0;
+    s.helloHeard = true;
+    s.acceptsSessions = acceptsSessions;
+    s.automatic = automatic;
+    std::string tidy = globus::tidyLocator(locator);
+    // A Hand gives only the square: a finer locator in it stays.
+    if (!tidy.empty() && s.locator.compare(0, tidy.size(), tidy) != 0) s.locator = tidy;
+    s.handMs = nowMs;
+    s.lastTrafficMs = nowMs;
+    version_++;
+}
+
 void Stations::onRecord(const protocol::Record& record, uint64_t nowMs)
 {
     const std::string& call = record.header.callsign;
@@ -280,14 +297,16 @@ StatusView Stations::status(const Station& s, uint64_t nowMs) const
     {
         view.word = "No sessions";
         view.filled = false;
-        view.how = s.call + "'s check-in says it isn't taking sessions";
+        view.how = s.call + (s.handMs != 0 ? "'s Hand" : "'s check-in") + " says it isn't taking sessions";
         return view;
     }
     view.word = "QRV";
     if (s.statusHeard && s.state == State::Qrv)
         view.how = "From " + s.call + "'s QRV, " + ago;
     else
-        view.how = "Heard on the D2G group " + heardAgo(s.lastHeardMs, nowMs) + ", with no QRL since";
+        view.how = (s.handMs != 0 && s.handMs >= s.lastHeardMs ? "Checked in by Hand to our roll call "
+                                                                : "Heard on the D2G group ")
+                   + heardAgo(s.lastHeardMs, nowMs) + ", with no QRL since";
     return view;
 }
 

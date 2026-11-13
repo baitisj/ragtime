@@ -143,6 +143,66 @@ std::string pingLine(const Message& m)
     return line + ". Pong queued";
 }
 
+namespace
+{
+
+std::string handText(const Message::Hand& h)
+{
+    std::string who = !h.call.empty() ? h.call : "a call we haven't heard (#" + [&] {
+        static const char HEX[] = "0123456789abcdef";
+        std::string x;
+        for (int shift = 20; shift >= 0; shift -= 4) x += HEX[(h.hash >> shift) & 0xF];
+        return x;
+    }() + ")";
+    std::vector<std::string> about;
+    if (!h.locator.empty()) about.push_back(h.locator);
+    if (h.snr) about.push_back(gearbox::formatDb(*h.snr));
+    if (!h.acceptsSessions) about.push_back("no sessions");
+    if (about.empty()) return who;
+    std::string line = who + " (";
+    for (size_t i = 0; i < about.size(); i++) line += (i == 0 ? "" : ", ") + about[i];
+    return line + ")";
+}
+
+} // namespace
+
+std::string rollCallLine(const Message& m)
+{
+    const std::string channels = std::to_string(m.rollChannels) + " Hand channel" + (m.rollChannels == 1 ? "" : "s");
+    switch (m.state)
+    {
+        case State::Queued:
+            return "Your check-in, calling the roll (" + channels + "), queued";
+        case State::Sending:
+            return "Your check-in, calling the roll (" + channels + "), sending";
+        case State::Held:
+            return "Your check-in, calling the roll, held until the session goes idle";
+        case State::NotSent:
+            return "Your check-in and roll call didn't go";
+        case State::Cancelled:
+            return "Your check-in and roll call cancelled";
+        default:
+            break;
+    }
+    if (m.roll == Message::Roll::NoWindow)
+        return "Your check-in went as a plain one: data2g-host wouldn't open a window for Hands";
+    std::string line;
+    if (m.roll == Message::Roll::Done)
+    {
+        if (m.hands.empty()) line = "Roll call: no Hands heard";
+        else
+            line = "Roll call: " + std::to_string(m.hands.size()) + " checked in by Hand";
+    }
+    else
+    {
+        line = "Roll call: listening for Hands (" + channels + ")";
+        if (!m.hands.empty()) line += ", " + std::to_string(m.hands.size()) + " so far";
+    }
+    for (size_t i = 0; i < m.hands.size(); i++) line += (i == 0 ? ": " : ", ") + handText(m.hands[i]);
+    if (m.windowShort) line += " (the window's start was missed)";
+    return line;
+}
+
 uint64_t pongWaitMs(const link::ModeInfo& mode)
 {
     return std::max(MIN_PONG_WAIT_MS, PONG_SNR_WAIT_MS + 2 * listeningWindowMs(mode));
@@ -334,11 +394,253 @@ std::vector<uint64_t> BroadcastChat::send(const std::string& typed, const std::s
 bool BroadcastChat::checkIn(const std::string& mode, uint64_t nowMs)
 {
     if (settings_.callsign.empty()) return false;
-    std::vector<uint8_t> frame = protocol::encodeFrame({helloRecord(seconds(nowMs))});
+    uint32_t time = seconds(nowMs);
+    std::vector<protocol::Record> records{helloRecord(time)};
+    if (!canCallRoll())
+    {
+        std::vector<uint8_t> frame = protocol::encodeFrame(records);
+        if (frame.empty()) return false;
+        helloSent_ = true;
+        helloMs_ = nowMs;
+        return broadcast({frame}, mode, nowMs, "check-in") != 0;
+    }
+
+    // A round number of our own, never 0, never the last one.
+    rollRound_ = (uint16_t)(rollRound_ * 40503u + (uint16_t)(nowMs ^ (nowMs >> 16)) + 1u);
+    if (rollRound_ == 0) rollRound_ = 1;
+    protocol::RollCall roll;
+    roll.round = rollRound_;
+    roll.delayTenths = (uint8_t)(ROLL_CALL_DELAY_S * 10.0 + 0.5);
+    int channels = link_.handChannels();
+    roll.channels = (uint8_t)channels;
+    // Those in lately stay quiet, so the rest have the channels.
+    for (auto it = handIns_.begin(); it != handIns_.end();)
+    {
+        if (nowMs > it->second + ROLL_CALL_AGAIN_MS)
+        {
+            it = handIns_.erase(it);
+            continue;
+        }
+        if (roll.in.size() < protocol::MAX_ROLL_CALL_IN) roll.in.push_back(protocol::rollCallHash(it->first));
+        ++it;
+    }
+    records.push_back(numbering_.record(roll, time));
+    std::vector<uint8_t> frame = protocol::encodeFrame(records);
     if (frame.empty()) return false;
+
+    link::HostLink::HandWindow window;
+    window.delayS = ROLL_CALL_DELAY_S;
+    window.tag = protocol::rollCallTag(settings_.callsign, roll.round);
+    for (int c = 0; c < channels; c++) window.channels.push_back(c);
+    uint64_t burst = broadcast({frame}, mode, nowMs, "check-in, roll call", &window);
+    if (burst == 0) return false;
     helloSent_ = true;
     helloMs_ = nowMs;
-    return broadcast({frame}, mode, nowMs, "check-in") != 0;
+
+    Message m;
+    m.id = nextId_++;
+    m.kind = Message::Kind::RollCall;
+    m.ours = true;
+    m.from = settings_.callsign;
+    m.atMs = nowMs;
+    m.time = time;
+    m.state = State::Queued;
+    m.burst = burst;
+    m.mode = mode;
+    m.roll = Message::Roll::Calling;
+    m.round = roll.round;
+    m.rollTag = window.tag;
+    m.rollChannels = channels;
+    messages_.push_back(m);
+    trim();
+    version_++;
+    return true;
+}
+
+bool BroadcastChat::canCallRoll() const
+{
+    return whyNoRollCall().empty();
+}
+
+std::string BroadcastChat::whyNoRollCall() const
+{
+    if (settings_.callsign.empty()) return "no callsign set";
+    if (!link_.handsSeen()) return "data2g-host hasn't shown it does Hands yet (Data2G PR #146)";
+    if (link_.handChannels() <= 0) return "no Hand channels";
+    for (const Message& m : messages_)
+    {
+        if (m.kind == Message::Kind::RollCall && m.ours
+            && (m.roll == Message::Roll::Calling || m.roll == Message::Roll::Listening)
+            && m.state != State::NotSent && m.state != State::Cancelled)
+            return "a roll call of ours is still under way";
+    }
+    return std::string();
+}
+
+std::vector<Message::Hand> BroadcastChat::takeHandCheckIns()
+{
+    std::vector<Message::Hand> out;
+    out.swap(checkIns_);
+    return out;
+}
+
+std::vector<std::string> BroadcastChat::takeHandNotes()
+{
+    std::vector<std::string> out;
+    out.swap(handNotes_);
+    return out;
+}
+
+Message* BroadcastChat::activeRoll()
+{
+    for (auto it = messages_.rbegin(); it != messages_.rend(); ++it)
+    {
+        if (it->kind == Message::Kind::RollCall && it->ours
+            && (it->roll == Message::Roll::Calling || it->roll == Message::Roll::Listening))
+            return &*it;
+    }
+    return nullptr;
+}
+
+std::string BroadcastChat::findCall(uint32_t hash) const
+{
+    for (const std::string& call : calls_)
+    {
+        if (protocol::handCallHash(call) == hash) return call;
+    }
+    if (callFinder_) return callFinder_(hash);
+    return std::string();
+}
+
+void BroadcastChat::answerRollCall(const protocol::Record& record, const protocol::RollCall& roll,
+                                   const std::optional<link::HandRef>& ref, uint64_t nowMs)
+{
+    const std::string& from = record.header.callsign;
+    const std::string& me = settings_.callsign;
+    if (!settings_.answerRollCalls || me.empty() || from.empty() || from == me || !ref) return;
+    // Stations in a ragchew raise no hand (docs/PLAN.md).
+    if (link_.sessionState() != link::HostLink::SessionState::None) return;
+    uint32_t now = seconds(nowMs);
+    uint32_t age = now > record.header.time ? now - record.header.time : record.header.time - now;
+    if (age > ROLL_CALL_FRESH_S) return;
+    if (std::find(roll.in.begin(), roll.in.end(), protocol::rollCallHash(me)) != roll.in.end()) return;
+    if (answered_.count({from, roll.round}) != 0) return;
+    // The host sends one Hand at a time: a roll call heard while ours for
+    // another waits goes unanswered.
+    if (!handTo_.empty())
+    {
+        handNotes_.push_back("Heard " + from + "'s roll call while our Hand for " + handTo_
+                             + "'s waits to go: one at a time");
+        return;
+    }
+    answered_.insert({from, roll.round});
+    int width = std::min((int)roll.channels, link_.handChannels());
+    if (width <= 0) return;
+    protocol::HandCheckIn hand;
+    hand.call = me;
+    hand.locator = settings_.locator;
+    hand.snr = ref->snr;
+    hand.acceptsSessions = settings_.acceptsSessions;
+    hand.narrow = link_.handChannels() <= 8;
+    uint64_t payload = protocol::packHand(hand);
+    if (payload == 0) return;
+    int channel = protocol::rollCallChannel(me, roll.round, width);
+    if (link_.handSend(ref->id, protocol::rollCallTag(from, roll.round), roll.delayTenths / 10.0, channel, payload,
+                       nowMs))
+        handTo_ = from;
+}
+
+void BroadcastChat::onHandEvent(const Event& event, uint64_t nowMs)
+{
+    switch (event.type)
+    {
+        case Event::Type::HandSent:
+            if (!handTo_.empty()) handNotes_.push_back("Checked in by Hand to " + handTo_ + "'s roll call");
+            handTo_.clear();
+            break;
+        case Event::Type::HandDropped:
+            if (!handTo_.empty())
+                handNotes_.push_back("Our Hand for " + handTo_ + "'s roll call didn't go: the radio was busy");
+            handTo_.clear();
+            break;
+        case Event::Type::Refused:
+            if (event.text.rfind("HAND SEND", 0) == 0 && !handTo_.empty())
+            {
+                handNotes_.push_back("data2g-host wouldn't send our Hand for " + handTo_ + "'s roll call");
+                handTo_.clear();
+            }
+            else if (event.text.rfind("HAND LISTEN", 0) == 0)
+            {
+                if (Message* m = activeRoll())
+                {
+                    m->roll = Message::Roll::NoWindow;
+                    version_++;
+                }
+            }
+            break;
+        case Event::Type::HandArmed:
+            // The window waits on our check-in's burst.
+            break;
+        case Event::Type::HandShort:
+            if (Message* m = activeRoll())
+            {
+                m->windowShort = true;
+                version_++;
+            }
+            break;
+        case Event::Type::HandEnd:
+            if (Message* m = activeRoll())
+            {
+                if (m->roll == Message::Roll::Listening)
+                {
+                    m->roll = Message::Roll::Done;
+                    version_++;
+                }
+            }
+            break;
+        case Event::Type::HandHeard:
+        {
+            Message* m = activeRoll();
+            if (m == nullptr) break;
+            std::optional<protocol::HandCheckIn> heard = protocol::unpackHand(event.handPayload);
+            // Not a Ragtime Hand of this version: a false decode, or
+            // someone else's.
+            if (!heard) break;
+            Message::Hand h;
+            h.call = heard->call;
+            if (heard->hash)
+            {
+                h.hash = *heard->hash;
+                h.call = findCall(h.hash);
+            }
+            // A call in the wrong channel is a false decode (or a
+            // station with a stale round): dropped.
+            if (!h.call.empty() && !protocol::rollCallChannelFits(h.call, m->round, event.number, m->rollChannels))
+                break;
+            if (!h.call.empty() && h.call == settings_.callsign) break;
+            bool again = std::any_of(m->hands.begin(), m->hands.end(), [&](const Message::Hand& o) {
+                return !h.call.empty() ? o.call == h.call : o.call.empty() && o.hash == h.hash;
+            });
+            if (again) break;
+            h.locator = heard->locator;
+            h.snr = event.snr;
+            h.theyHear = heard->snr;
+            h.acceptsSessions = heard->acceptsSessions;
+            h.automatic = heard->automatic;
+            h.narrow = heard->narrow;
+            h.channel = event.number;
+            m->hands.push_back(h);
+            if (!h.call.empty())
+            {
+                handIns_[h.call] = nowMs;
+                checkIns_.push_back(h);
+            }
+            version_++;
+            break;
+        }
+        default:
+            break;
+    }
 }
 
 bool BroadcastChat::announce(protocol::Status::State state, const std::string& partner, const std::string& mode,
@@ -412,6 +714,15 @@ bool BroadcastChat::pingGoingOut(const std::string& call) const
 
 void BroadcastChat::tick(uint64_t nowMs)
 {
+    // A window the host never closed (the link dropped, an old host).
+    for (Message& m : messages_)
+    {
+        if (m.kind == Message::Kind::RollCall && m.roll == Message::Roll::Listening && nowMs >= m.windowEndMs)
+        {
+            m.roll = Message::Roll::Done;
+            version_++;
+        }
+    }
     for (size_t i = 0; i < pongsDue_.size();)
     {
         if (pongsDue_[i].untilMs > nowMs)
@@ -606,6 +917,7 @@ bool BroadcastChat::cancel(uint64_t id)
     {
         if (!other.ours || other.burst != burst) continue;
         other.state = State::Cancelled;
+        if (other.kind == Message::Kind::RollCall) other.roll = Message::Roll::Done;
         logState(other);
     }
     version_++;
@@ -706,8 +1018,10 @@ std::vector<protocol::Record> BroadcastChat::onEvent(const Event& event, uint64_
     switch (event.type)
     {
         case Event::Type::GroupOpen:
-            // A fresh start with the host: the next message says hello.
+            // A fresh start with the host: the next message says hello,
+            // and no Hand of ours waits there.
             helloSent_ = false;
+            handTo_.clear();
             break;
         case Event::Type::Burst:
         {
@@ -728,6 +1042,26 @@ std::vector<protocol::Record> BroadcastChat::onEvent(const Event& event, uint64_
                 if (state == m.state) continue;
                 m.state = state;
                 if (state == State::Sent && m.ackWanted) holdForAck(m, nowMs);
+                if (m.kind == Message::Kind::RollCall && m.roll == Message::Roll::Calling)
+                {
+                    if (state == State::Sent && armed_.count(m.burst) != 0)
+                    {
+                        m.roll = Message::Roll::Listening;
+                        m.windowEndMs = nowMs
+                                        + (uint64_t)((ROLL_CALL_DELAY_S + link::HAND_SECONDS + link::HAND_SEARCH_S
+                                                      + link::HAND_DELAY_MAX_S)
+                                                     * 1000.0);
+                    }
+                    else if (state == State::Sent)
+                    {
+                        m.roll = Message::Roll::NoWindow;
+                    }
+                    else if (state == State::NotSent)
+                    {
+                        m.roll = Message::Roll::Done;
+                    }
+                    if (state == State::Sent || state == State::NotSent) armed_.erase(m.burst);
+                }
                 if (state == State::Sent && m.ours && m.kind == Message::Kind::Ping)
                 {
                     m.sentMs = nowMs;
@@ -755,10 +1089,26 @@ std::vector<protocol::Record> BroadcastChat::onEvent(const Event& event, uint64_
         case Event::Type::Heard:
         {
             if (!protocol::decodeFrame(event.frame, heard) && heard.empty()) foreign_++;
-            for (const protocol::Record& r : heard) onRecord(r, nowMs);
+            for (const protocol::Record& r : heard)
+            {
+                onRecord(r, nowMs);
+                if (const protocol::RollCall* roll = r.as<protocol::RollCall>())
+                    answerRollCall(r, *roll, event.handRef, nowMs);
+            }
             flushAcks(std::string(), nowMs);
             break;
         }
+        case Event::Type::HandArmed:
+            armed_.insert(event.id);
+            break;
+        case Event::Type::HandSent:
+        case Event::Type::HandDropped:
+        case Event::Type::HandHeard:
+        case Event::Type::HandShort:
+        case Event::Type::HandEnd:
+        case Event::Type::Refused:
+            onHandEvent(event, nowMs);
+            break;
         default:
             break;
     }
@@ -775,6 +1125,7 @@ void BroadcastChat::onRecord(const protocol::Record& record, uint64_t nowMs)
 {
     const std::string& from = record.header.callsign;
     if (from.empty() || from == settings_.callsign) return;
+    calls_.insert(from);
 
     if (const protocol::Text* text = record.as<protocol::Text>())
     {
@@ -891,7 +1242,7 @@ std::vector<BroadcastChat::ReactionNote> BroadcastChat::takeReactionNotes()
 }
 
 uint64_t BroadcastChat::broadcast(std::vector<std::vector<uint8_t>> frames, const std::string& mode, uint64_t nowMs,
-                                  const std::string& label)
+                                  const std::string& label, const link::HostLink::HandWindow* window)
 {
     // Our reactions waiting, in frames of their own after the burst's: a
     // frame is cut where a codeword ends anyway, so they cost what they
@@ -930,7 +1281,8 @@ uint64_t BroadcastChat::broadcast(std::vector<std::vector<uint8_t>> frames, cons
 
     std::string reactions = taken.size() == 1 ? std::string("reaction") : std::to_string(taken.size()) + " reactions";
     std::string what = taken.empty() ? label : label.empty() ? reactions : label + " + " + reactions;
-    uint64_t burst = link_.broadcast(frames, mode, nowMs, what);
+    uint64_t burst = window != nullptr ? link_.broadcast(frames, mode, nowMs, what, *window)
+                                       : link_.broadcast(frames, mode, nowMs, what);
     if (burst == 0 || taken.empty()) return burst;
     reactionBursts_[burst] = taken;
     for (const auto& t : taken) reactionsOut_[t.first] = t.second;

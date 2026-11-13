@@ -8,10 +8,10 @@ copied code (CLAUDE.md, "Data2G"). When Data2G moves on, read it again
 and update this page, with the new commit. What Data2G PR #122 adds
 (DISCONNECTED reasons, `TIMEOUT`, `TXPOWER`) was read at its head,
 [843987e](https://github.com/arodland/Data2G/pull/122/commits/843987e),
-on v0.3.0 (2026-10-26). The Hand ("Hands" below) was read at Data2G PR
-#146's head,
-[0f277ab](https://github.com/arodland/Data2G/pull/146/commits/0f277ab),
-not yet merged (master 8118dec has none of it, 2026-11-12).
+on v0.3.0 (2026-10-26). The Hand ("Hands" below) was read where Data2G
+PR #146 merged,
+[e09e19d](https://github.com/arodland/Data2G/commit/e09e19d) (2026-11-11,
+after v0.4.3; no release has it yet, 2026-11-12).
 
 ## Where to look in Data2G
 
@@ -229,8 +229,10 @@ are in `data2g/codes_data/mode_thresholds.json` (GEARBOX.md).
 
 ## Hands
 
-Data2G PR #146 (open, read at 0f277ab) adds the Hand, the D2G net's show
-of hands (docs/PLAN.md, "On a multiplex link: the Hand burst"). Its
+Data2G PR #146 (merged at e09e19d, 2026-11-11) adds the Hand, the D2G
+net's show of hands (docs/PLAN.md, "On a multiplex link: the Hand
+burst"). Ragtime's check-in uses it to call the roll (PROTOCOL.md, "Roll
+calls"). Its
 design is in Data2G's `docs/hand-burst.md`, the commands in `docs/arq.md`
 §9, the KISS side in `docs/broadcast.md` §5, the waveform in
 `data2g/hand.py`.
@@ -279,9 +281,15 @@ design is in Data2G's `docs/hand-burst.md`, the commands in `docs/arq.md`
   So broadcasts queue behind a round, for at most about 42 s.
 - **Numbers** are strict: digits only, and the delay digits and a point
   (`link::handDelayText`), never an exponent or a comma.
+- **Does this host do Hands?** No command says. A host from before the
+  PR answers `HAND` with `WRONG`, but only after a roll call has gone, so
+  Ragtime waits for a reference instead: a REF line or frame for any
+  burst decoded shows it (`HostLink::handsSeen`), and until one comes a
+  check-in goes as a plain Hello.
 
-Not yet in the PR, from our review (2026-11-09): the 10-minute forced
-CW ID still ignores the Hand's holds, and `TXPOWER` still isn't reset
+Not in it, from our review (2026-11-09): the 10-minute forced CW ID
+still ignores the Hand's holds (`CW_FORCE_S` in `data2g/arq/engine.py`
+at e09e19d), and `TXPOWER` still isn't reset
 when the client goes. `docs/hand-burst.md` recommends a callsign in the
 payload, which Jeff has decided for Ragtime (2026-11-08).
 
@@ -294,7 +302,7 @@ payload, which Jeff has decided for Ragtime (2026-11-08).
 - The mode on `BCAST HEARD` (the path log's mode column).
 - A dial report from the host's own rig control.
 - A 200 Hz session cap.
-- The Hand merged (PR #146, "Hands" above, open at 0f277ab), and the
-  10-minute forced CW ID made to wait for a Hand or an open window.
+- The 10-minute forced CW ID made to wait for a Hand or an open window
+  (PR #146 merged without it).
 - A note when a v2 broadcast is heard by a v3 host, so an operator knows
   to update.

@@ -79,6 +79,8 @@ struct Station
     uint8_t takes = 0;
     std::string locator;            // tidied, or empty
     std::string software;
+    // It checked in by Hand to a roll call of ours, and when.
+    uint64_t handMs = 0;
 
     // From its latest Status, when one has been heard.
     bool statusHeard = false;
@@ -130,6 +132,12 @@ public:
     // The host heard a burst from this call ("BCAST <port> HEARD <call>
     // [snr]", or SN for the session partner), with its SNR when it gave one.
     void heard(const std::string& call, uint64_t nowMs, std::optional<double> snr = std::nullopt);
+    // It checked in by Hand to our roll call (docs/PROTOCOL.md, "Roll
+    // calls"), saying its locator (empty: none) and whether it takes
+    // sessions. Only a Ragtime that takes every v0 record sends Hands, so
+    // a station not heard before counts as one whose Hello said so.
+    void handCheckIn(const std::string& call, const std::string& locator, bool acceptsSessions, bool automatic,
+                     uint64_t nowMs);
 
     // The weakest of the stations whose SNR came in the last
     // PATH_WINDOW_MS; none when no station has one.

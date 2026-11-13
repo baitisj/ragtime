@@ -133,16 +133,21 @@ and the Part 97 check.
   NotListening, RefusedThere, IdleClosed, ClosedThere). The fake hosts
   give reasons and hang up quiet sessions (`--no-reasons` for an older
   one).
-- Data2G PR #146 (the Hand, open at 0f277ab on 2026-11-12) gives the
-  show of hands. Ragtime's link layer speaks it ahead of the merge
+- Data2G PR #146 (the Hand, merged at e09e19d on 2026-11-11, after
+  v0.4.3) gives the show of hands. Ragtime's link layer speaks it ahead of the merge
   (Jeff, 2026-11-10): `HostLink` sends KISS `REFS ON`, gives each heard
   frame its burst's Hand reference, and has `handSend`, `handListen`
   (the window named by its burst's first ACKMODE tag, the burst held
   until the host's OK) and `handCancel`, with the REF and HAND lines as
   events (docs/DATA2G.md, "Hands"). The fake hosts do references and
-  Hands (`--no-hands` for an older one). The payload (with the sender's
-  callsign, Jeff 2026-11-08) and net control's round are Stage 2, still
-  to build.
+  Hands (`--no-hands` for an older one), and collide two in one channel.
+  Check in calls the roll with them (Jeff, 2026-11-12; PROTOCOL.md "Roll
+  calls", STAGE1.md "Check in by Hand"): the Hello goes with a RollCall
+  record (`0x03`) and a window, and every Ragtime that hears it answers
+  by Hand (`protocol/Hands.h`: callsign, square, S/N, flags in 63 bits;
+  `BroadcastChat::answerRollCall`), unless in a ragchew or turned off in
+  Settings; the row lists who answered. Net control's traffic round is
+  Stage 2, still to build.
 - The dial, the path log and the watch list (2026-10-25,
   `docs/STAGE1.md`): `core/src/radio/` (`DialReader`, which only ever
   asks rigctld `\chk_vfo`, `f`, while transmitting the meters
