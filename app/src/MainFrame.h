@@ -121,10 +121,13 @@ private:
 
     // Sessions (docs/PLAN.md, "Sometimes we ragchew"): entered only with
     // Call or by being called, left only with Leave or Leave now.
-    void callStation(const std::string& call);
+    // askFirst: "Call W1AW?" before it goes, unless another question
+    // (busy, no sessions, leave the ragchew we're in) asks already.
+    void callStation(const std::string& call, bool askFirst = false);
     // A callsign double-clicked, in a list or a chat line (Jeff,
     // 2026-11-13): to the Session tab when we're in a ragchew with it,
-    // else a Call, asked about as Call asks; never our own callsign.
+    // else a Call, asked first (Jeff: a stray double click mustn't key
+    // the radio); never our own callsign.
     void openSession(const std::string& call);
     // A station heard this run, or one in the path log.
     bool knownStation(const std::string& call) const;

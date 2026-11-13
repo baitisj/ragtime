@@ -1523,7 +1523,7 @@ void MainFrame::openSession(const std::string& call)
 {
     std::string them = protocol::normalCallsign(call);
     if (them.empty() || them == protocol::normalCallsign(prefs_.callsign)) return;
-    callStation(them);
+    callStation(them, true);
 }
 
 bool MainFrame::knownStation(const std::string& call) const
@@ -1531,7 +1531,7 @@ bool MainFrame::knownStation(const std::string& call) const
     return stations_.find(call) != nullptr || !pathLog_.of(call, 0).empty();
 }
 
-void MainFrame::callStation(const std::string& call)
+void MainFrame::callStation(const std::string& call, bool askFirst)
 {
     std::string them = protocol::normalCallsign(call);
     if (them.empty()) return;
@@ -1609,7 +1609,15 @@ void MainFrame::callStation(const std::string& call)
                 return;
             }
             if (answer != wxID_YES) return;
+            askFirst = false;
         }
+    }
+    if (askFirst)
+    {
+        wxMessageDialog ask(this, "Call " + utf8(them) + " for a ragchew?", "Call " + utf8(them),
+                            wxYES_NO | wxNO_DEFAULT | wxICON_QUESTION);
+        ask.SetYesNoLabels("Call", "Cancel");
+        if (ask.ShowModal() != wxID_YES) return;
     }
 
     if (!session_.call(them, now))

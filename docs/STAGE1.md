@@ -2342,10 +2342,11 @@ boldface."
 
 - **Double-click a callsign** in the station list, Recent work (or pick
   it and press Enter), or a chat line on either tab, and Ragtime goes
-  to the Session tab if the ragchew is with that station, or calls it
-  as Call does: a busy station or one taking no sessions is asked
-  about, and in a ragchew with someone else it asks first to leave
-  (`MainFrame::openSession`). Our own callsign does nothing. Message @
+  to the Session tab if the ragchew is with that station, or offers to
+  call it: "Call W1AW for a ragchew?" (Call or Cancel, Jeff: a stray
+  double click mustn't key the radio), or, where Call would ask anyway,
+  that question instead (a busy station, one taking no sessions, or
+  leaving a ragchew with someone else; `MainFrame::openSession`). Our own callsign does nothing. Message @
   stays on the station's menu; double-click used to address a message
   (PLAN.md's "fills @W1AW or offers Call").
 - **Which words count.** In a chat line, the word under the double click
