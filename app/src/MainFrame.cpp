@@ -627,6 +627,7 @@ void MainFrame::buildLayout()
     tabs_->AddPage(sessionPage_, wxString::FromUTF8("Session \xc2\xb7 none"));
     filesPage_ = new FilesPage(tabs_, history_);
     tabs_->AddPage(filesPage_, "Files");
+    canBoldTabs_ = boldTab(tabs_, TAB_SESSION, false);
     auto* middleSizer = new wxBoxSizer(wxVERTICAL);
     middleSizer->Add(tabs_, 1, wxEXPAND);
     middle_->SetSizer(middleSizer);
@@ -716,10 +717,9 @@ void MainFrame::buildLayout()
         if (!call.empty()) recent_->clearSelection();
         stationPicked(call);
     });
-    stationList_->onActivate([this](const std::string& call) {
-        tabs_->SetSelection(TAB_BROADCAST);
-        broadcast_->address(call);
-    });
+    // Double-clicked (or Enter): a ragchew with it (Jeff, 2026-11-13).
+    // Message @ on its menu addresses a line instead.
+    stationList_->onActivate([this](const std::string& call) { openSession(call); });
     stationList_->onMenu([this](const std::string& call) { stationMenu(call); });
     stationList_->bells([this](const std::string& call) { return watch_.belled(call); },
                         [this](const std::string& call) { return watch_.bellTip(call); });
@@ -729,10 +729,7 @@ void MainFrame::buildLayout()
         if (!call.empty()) stationList_->clearSelection();
         stationPicked(call);
     });
-    recent_->onActivate([this](const std::string& call) {
-        tabs_->SetSelection(TAB_BROADCAST);
-        broadcast_->address(call);
-    });
+    recent_->onActivate([this](const std::string& call) { openSession(call); });
     recent_->onMenu([this](const std::string& call) { stationMenu(call); });
     recent_->onOrder([this](radio::WorkOrder order) {
         recentOrder_ = order;
@@ -743,6 +740,8 @@ void MainFrame::buildLayout()
 
     // The Broadcast tab.
     broadcast_->onSend([this](const std::string& typed) { return sendTyped(typed); });
+    broadcast_->onCallsign([this](const std::string& call) { openSession(call); },
+                           [this](const std::string& call) { return knownStation(call); });
     broadcast_->onGear([this]() { showGearshift(); });
     broadcast_->nameModes([this](const std::string& mode) { return gearshift_.shortName(mode); });
     broadcast_->sealMarks(
@@ -803,6 +802,8 @@ void MainFrame::buildLayout()
     sessionPage_->onLeave([this]() { leaveSession(); });
     sessionPage_->onLeaveNow([this]() { leaveSessionNow(); });
     sessionPage_->onCallAgain([this]() { callStation(session_.peer()); });
+    sessionPage_->onCallsign([this](const std::string& call) { openSession(call); },
+                             [this](const std::string& call) { return knownStation(call); });
     sessionPage_->onResend([this](uint64_t id) {
         if (session_.resend(id, HostConnection::nowMs()) == 0) return;
         host_->flush();
@@ -1478,11 +1479,23 @@ void MainFrame::updateTabLabels()
     else
         session += utf8(session_.peer());
     if (sessionUnread_ > 0) session += wxString::Format(" (%zu)", sessionUnread_);
+    // Bold while it has lines not yet seen (Jeff, 2026-11-13); where a tab
+    // can't be bold, a dot before it.
+    const bool bold = sessionUnread_ > 0;
+    if (bold && !canBoldTabs_) session = wxString::FromUTF8("\xe2\x97\x8f ") + session;
+    bool changed = false;
     if (tabs_->GetPageText(TAB_SESSION) != session)
     {
         tabs_->SetPageText(TAB_SESSION, session);
-        placeTabToggle();
+        changed = true;
     }
+    if (canBoldTabs_ && (int)bold != sessionBold_)
+    {
+        boldTab(tabs_, TAB_SESSION, bold);
+        sessionBold_ = (int)bold;
+        changed = true;
+    }
+    if (changed) placeTabToggle();
 }
 
 //-------------------------------------------------------------------------
@@ -1504,6 +1517,18 @@ void MainFrame::callPrompt()
         call = std::string(ask.GetValue().Upper().utf8_str());
     }
     callStation(call);
+}
+
+void MainFrame::openSession(const std::string& call)
+{
+    std::string them = protocol::normalCallsign(call);
+    if (them.empty() || them == protocol::normalCallsign(prefs_.callsign)) return;
+    callStation(them);
+}
+
+bool MainFrame::knownStation(const std::string& call) const
+{
+    return stations_.find(call) != nullptr || !pathLog_.of(call, 0).empty();
 }
 
 void MainFrame::callStation(const std::string& call)

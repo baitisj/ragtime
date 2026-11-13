@@ -68,6 +68,18 @@ void testCallsigns()
     CHECK_EQ(normalCallsign("W1AW-7"), std::string("W1AW-7"));
     CHECK_EQ(normalCallsign("AG7EW:board"), std::string()); // ':' is reserved
     CHECK_EQ(normalCallsign("ABCDEFGHIJK"), std::string()); // 11 characters
+
+    // A callsign double-clicked in a chat line.
+    CHECK_EQ(callsignInWord("W1AW"), std::string("W1AW"));
+    CHECK_EQ(callsignInWord("@w1aw"), std::string("W1AW"));
+    CHECK_EQ(callsignInWord("KC2G,"), std::string("KC2G"));
+    CHECK_EQ(callsignInWord("(VK2ABC/P):"), std::string("VK2ABC/P"));
+    CHECK_EQ(callsignInWord("AG7EW\xc2\xa0"), std::string("AG7EW"));
+    CHECK_EQ(callsignInWord("dB"), std::string());
+    CHECK_EQ(callsignInWord("73"), std::string());
+    CHECK_EQ(callsignInWord("-8.0"), std::string());
+    CHECK_EQ(callsignInWord("@"), std::string());
+    CHECK_EQ(callsignInWord("http://x"), std::string());
     CHECK_EQ(normalCallsign(""), std::string());
 
     // Three characters to two bytes, with an end mark.

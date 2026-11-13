@@ -112,7 +112,8 @@ beside Globus and with Globus off:
   "zoom in to display the full path plus a little comfort space").
 - A second click on the station picked, in the station list or Recent
   work, unpicks it and lets the globe go (Jeff, 2026-11-02). It waits for
-  the double-click time, so a double click still addresses a message.
+  the double-click time, so a double click still opens a ragchew with
+  the station (docs/STAGE1.md, "Callsigns open a ragchew").
 - Caption under the globe: `W1AW · FN31 · 3,951 km · 81°`, then the
   station's details. It wraps in a narrow pane.
 - A station picked in Recent work is a yellow dot (`#ffd01a`) with a

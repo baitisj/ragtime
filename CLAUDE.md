@@ -411,8 +411,9 @@ and the Part 97 check.
 
 **Sessions and the screen**
 
-- A session (ragchew) starts only when the operator presses **Call** or
-  accepts one, and ends only on **Leave**. Selecting things never opens or
+- A session (ragchew) starts only when the operator presses **Call**
+  (or double-clicks a callsign, Jeff 2026-11-13) or accepts one, and
+  ends only on **Leave**. Selecting things never opens or
   closes one, and a quiet link shows as quiet, not closed.
 - Three tabs in this order: Broadcast, Session (pops open when a session
   starts, greyed when none), Files.

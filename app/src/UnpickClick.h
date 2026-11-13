@@ -12,8 +12,8 @@ class wxWindow;
 
 // A click on the row already picked unpicks it (Jeff, 2026-11-02), so a
 // station can be let go of and Globus with it. The unpick waits for the
-// double-click time, so a double click on the picked row still addresses
-// a message to the station rather than unpicking it and picking it again;
+// double-click time, so a double click on the picked row still opens a
+// ragchew with the station rather than unpicking it and picking it again;
 // the list's own double-click handler calls cancel().
 class UnpickClick : public wxTimer
 {
