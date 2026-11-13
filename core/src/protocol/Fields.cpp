@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstring>
 
 #include "ragtime/files/Sha256.h"
 
@@ -210,6 +211,28 @@ std::string normalCallsign(const std::string& callsign)
     }
     if (out.size() > MAX_CALLSIGN) return std::string();
     return out;
+}
+
+std::string callsignInWord(const std::string& word)
+{
+    // Trimmed from both ends: what wraps a call in a line, and the
+    // no-break space (UTF-8 C2 A0) after a line's sender.
+    auto trimmed = [](unsigned char c) {
+        return std::isspace(c) || c == 0xC2 || c == 0xA0 || (c != 0 && std::strchr("@()[]<>{}\"',.;:!?", c) != nullptr);
+    };
+    size_t begin = 0;
+    size_t end = word.size();
+    while (begin < end && trimmed((unsigned char)word[begin])) begin++;
+    while (end > begin && trimmed((unsigned char)word[end - 1])) end--;
+    std::string call = normalCallsign(word.substr(begin, end - begin));
+    bool letter = false;
+    bool digit = false;
+    for (char c : call)
+    {
+        letter = letter || std::isalpha((unsigned char)c);
+        digit = digit || std::isdigit((unsigned char)c);
+    }
+    return letter && digit ? call : std::string();
 }
 
 bool putCallsign(std::vector<uint8_t>& out, const std::string& callsign)

@@ -5,6 +5,7 @@
 
 #include <wx/event.h>
 #include <wx/htmllbox.h>
+#include <wx/notebook.h>
 #include <wx/settings.h>
 #include <wx/window.h>
 
@@ -118,6 +119,38 @@ void scrollbarBeside(wxWindow* window)
         gtk_scrolled_window_set_overlay_scrolling(GTK_SCROLLED_WINDOW(widget), FALSE);
 #else
     (void)window;
+#endif
+}
+
+bool boldTab(wxNotebook* book, size_t page, bool bold)
+{
+#if defined(__WXGTK3__)
+    if (book == nullptr || page >= book->GetPageCount()) return false;
+    GtkWidget* notebook = static_cast<GtkWidget*>(book->GetHandle());
+    wxWindow* content = book->GetPage(page);
+    if (notebook == nullptr || !GTK_IS_NOTEBOOK(notebook) || content == nullptr) return false;
+    GtkWidget* tab = gtk_notebook_get_tab_label(GTK_NOTEBOOK(notebook), static_cast<GtkWidget*>(content->GetHandle()));
+    // wx packs the label into a box, beside the tab's image if it has one.
+    GtkWidget* label = tab != nullptr && GTK_IS_LABEL(tab) ? tab : nullptr;
+    if (label == nullptr && tab != nullptr && GTK_IS_CONTAINER(tab))
+    {
+        GList* children = gtk_container_get_children(GTK_CONTAINER(tab));
+        for (GList* child = children; child != nullptr && label == nullptr; child = child->next)
+            if (GTK_IS_LABEL(child->data)) label = GTK_WIDGET(child->data);
+        g_list_free(children);
+    }
+    if (label == nullptr) return false;
+    // The label's own attributes: wx's SetPageText leaves them be.
+    PangoAttrList* attrs = pango_attr_list_new();
+    if (bold) pango_attr_list_insert(attrs, pango_attr_weight_new(PANGO_WEIGHT_BOLD));
+    gtk_label_set_attributes(GTK_LABEL(label), attrs);
+    pango_attr_list_unref(attrs);
+    return true;
+#else
+    (void)book;
+    (void)page;
+    (void)bold;
+    return false;
 #endif
 }
 

@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <ctime>
+#include <initializer_list>
 #include <utility>
 
 #include <wx/bmpbuttn.h>
@@ -241,6 +242,18 @@ public:
     }
 
 protected:
+    std::vector<std::string> callsIn(size_t row) const override
+    {
+        std::vector<std::string> calls;
+        const Message* m = at(row);
+        if (m == nullptr) return calls;
+        for (const std::string* call : {&m->from, &m->to})
+            if (!call->empty()) calls.push_back(*call);
+        for (const Message::Hand& hand : m->hands)
+            if (!hand.call.empty()) calls.push_back(hand.call);
+        return calls;
+    }
+
     void OnLinkClicked(size_t n, const wxHtmlLinkInfo& link) override
     {
         const Message* m = at(n);
@@ -704,6 +717,12 @@ void BroadcastPage::setPaused(bool paused, const wxString& why)
     paused_->SetLabel(line);
     paused_->Show(paused);
     Layout();
+}
+
+void BroadcastPage::onCallsign(std::function<void(const std::string& call)> fn,
+                               std::function<bool(const std::string& call)> isStation)
+{
+    list_->onCallsign(std::move(fn), std::move(isStation));
 }
 
 void BroadcastPage::address(const std::string& call)

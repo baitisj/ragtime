@@ -33,7 +33,8 @@ public:
 
     StationList(wxWindow* parent, const ragtime::broadcast::Stations& stations);
 
-    // Picked (or none: ""), double-clicked or Enter, right-clicked.
+    // Picked (or none: ""), double-clicked or Enter (a ragchew with
+    // it), right-clicked.
     void onSelect(CallFn fn) { onSelect_ = std::move(fn); }
     void onActivate(CallFn fn) { onActivate_ = std::move(fn); }
     void onMenu(CallFn fn) { onMenu_ = std::move(fn); }

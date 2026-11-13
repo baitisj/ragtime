@@ -4,6 +4,7 @@
 #include <ctime>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include <wx/bmpbuttn.h>
 #include <wx/button.h>
@@ -158,6 +159,15 @@ public:
     }
 
 protected:
+    std::vector<std::string> callsIn(size_t row) const override
+    {
+        std::vector<std::string> calls;
+        if (const Message* m = at(row); m != nullptr && !m->from.empty()) calls.push_back(m->from);
+        if (const FileTransfer* t = fileAt(row); t != nullptr && !t->peer.empty()) calls.push_back(t->peer);
+        if (!owner_->session_.peer().empty()) calls.push_back(owner_->session_.peer());
+        return calls;
+    }
+
     void OnLinkClicked(size_t n, const wxHtmlLinkInfo& info) override
     {
         wxString href = info.GetHref();
@@ -442,6 +452,12 @@ SessionPage::SessionPage(wxWindow* parent, const SessionChat& session, const rag
         e.Skip();
     });
     refresh(0, 0);
+}
+
+void SessionPage::onCallsign(std::function<void(const std::string& call)> fn,
+                             std::function<bool(const std::string& call)> isStation)
+{
+    list_->onCallsign(std::move(fn), std::move(isStation));
 }
 
 void SessionPage::setVoiceDeckLit(bool lit)

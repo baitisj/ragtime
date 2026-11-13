@@ -147,6 +147,10 @@ public:
         sealMark_ = std::move(fn);
         sealsVersion_ = std::move(version);
     }
+    // A callsign double-clicked in a line: its sender, who it is to, a
+    // Hand in a roll call, or a station isStation knows named in the text.
+    void onCallsign(std::function<void(const std::string& call)> fn,
+                    std::function<bool(const std::string& call)> isStation);
     // Turns a Data2G mode name into the short name shown to people ("E2C").
     void nameModes(std::function<std::string(const std::string& mode)> fn) { nameMode_ = std::move(fn); }
 

@@ -88,6 +88,13 @@ constexpr size_t MAX_CALLSIGN = 10;
 // one (a character outside those, or too long).
 std::string normalCallsign(const std::string& callsign);
 
+// The callsign in a word of a chat line, as double-clicked there: "@W1AW",
+// "W1AW," or "(KC2G)" give W1AW and KC2G, with the brackets, quotes,
+// stops and spaces (a no-break space too) around it trimmed. Empty when
+// what is left isn't a normal callsign with a letter and a digit in it,
+// as "dB", "73" or "-8.0" aren't.
+std::string callsignInWord(const std::string& word);
+
 // Radix 40, three characters to two bytes: the call and an end mark,
 // padded with end marks to a multiple of three. A..Z are 1..26, 0..9
 // 27..36, '/' 37, '-' 38; 0 is the end mark and 39 is reserved. False if

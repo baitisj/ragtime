@@ -1,11 +1,13 @@
 #ifndef RAGTIME_THEME_H
 #define RAGTIME_THEME_H
 
+#include <cstddef>
 #include <functional>
 
 #include <wx/colour.h>
 #include <wx/settings.h>
 
+class wxNotebook;
 class wxWindow;
 
 // Light or dark, from the status bar's button (Jeff, 2026-10-23). Ragtime
@@ -45,5 +47,11 @@ void followThemeText(wxWindow* window, std::function<wxColour()> colour);
 // 2026-10-23). This gives the list a scrollbar beside its rows instead.
 // Nothing elsewhere, where scrollbars already sit aside.
 void scrollbarBeside(wxWindow* window);
+
+// A notebook tab's label in bold, or back to plain: the Session tab while
+// it has lines not yet seen (Jeff, 2026-11-13). wx has no font per tab, so
+// on GTK this sets the label's weight; elsewhere it does nothing and says
+// false, and the caller marks the tab some other way.
+bool boldTab(wxNotebook* book, size_t page, bool bold);
 
 #endif

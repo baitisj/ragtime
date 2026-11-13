@@ -46,6 +46,10 @@ public:
     void onLeave(std::function<void()> fn) { onLeave_ = std::move(fn); }
     void onLeaveNow(std::function<void()> fn) { onLeaveNow_ = std::move(fn); }
     void onCallAgain(std::function<void()> fn) { onCallAgain_ = std::move(fn); }
+    // A callsign double-clicked in a line: the partner's, or a station
+    // isStation knows named in the text.
+    void onCallsign(std::function<void(const std::string& call)> fn,
+                    std::function<bool(const std::string& call)> isStation);
     // Re-send on a message's right-click menu, with the message's id.
     void onResend(std::function<void(uint64_t id)> fn) { onResend_ = std::move(fn); }
     // A reaction picked on a message's menu or chip, with its palette code.

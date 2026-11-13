@@ -854,8 +854,8 @@ contact)" in the caption. The tooltip also says where the station last
 was, with distance and bearing from our locator: "Last at FN31pr · 3,900
 km · 81°" (Jeff, 2026-11-01). Picking a station in the station list
 that hasn't sent its locator this run shows the log's in the same way,
-without the blink. Double-click addresses a message to it; the
-right-click menu is the station list's, so Call, Watch and Paths heard
+without the blink. Double-click opens a ragchew with it ("Callsigns
+open a ragchew", below); the right-click menu is the station list's, so Call, Watch and Paths heard
 work from here. A pick in either list unpicks the other, and Call and
 Message take whichever is picked. A second click on the row picked, in
 either list, unpicks it and lets Globus go (Jeff, 2026-11-02;
@@ -2333,6 +2333,33 @@ is a roll call, and Jeff chose that Check in itself calls it.
 - **The bench.** The fake hosts collide two Hands in one channel unless
   one is 6 dB stronger, the bots' check-ins call the roll, and the bots
   answer every roll call they hear, yours included.
+
+## Callsigns open a ragchew
+
+Jeff, 2026-11-13: "double-clicking on a callsign should take to a
+Session. If there are new messages in a Session, make the tab
+boldface."
+
+- **Double-click a callsign** in the station list, Recent work (or pick
+  it and press Enter), or a chat line on either tab, and Ragtime goes
+  to the Session tab if the ragchew is with that station, or offers to
+  call it: "Call W1AW for a ragchew?" (Call or Cancel, Jeff: a stray
+  double click mustn't key the radio), or, where Call would ask anyway,
+  that question instead (a busy station, one taking no sessions, or
+  leaving a ragchew with someone else; `MainFrame::openSession`). Our own callsign does nothing. Message @
+  stays on the station's menu; double-click used to address a message
+  (PLAN.md's "fills @W1AW or offers Call").
+- **Which words count.** In a chat line, the word under the double click
+  (`ChatList`, from wx's cell click) with its `@`, brackets and stops
+  trimmed (`protocol::callsignInWord`, a letter and a digit at least)
+  counts when the row names it (the sender, who a line is to, a Hand in
+  a roll call row, the ragchew's partner) or it is a station heard this
+  run or in the path log, so "CQ de W1AW" in a line works too.
+- **The Session tab is bold** while it has lines not yet seen (the
+  `(2)` count after the partner's call: lines, reactions, file offers),
+  until the tab is looked at. GTK sets the tab label's weight
+  (`boldTab` in `Theme`); wx can't bold one tab elsewhere, so on
+  Windows a dot leads the label instead.
 
 ## Waiting on Andrew (via Jeff)
 

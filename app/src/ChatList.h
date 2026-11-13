@@ -2,6 +2,9 @@
 #define RAGTIME_CHAT_LIST_H
 
 #include <cstddef>
+#include <functional>
+#include <string>
+#include <vector>
 
 #include <wx/htmllbox.h>
 
@@ -12,6 +15,11 @@
 // smaller screen from a remote desktop, wraps long lines onto more rows,
 // and wx keeps the top row where it was, so the newest lines went below
 // the bottom and the list stopped following (Jeff, 2026-10-26).
+//
+// Double-clicking a callsign in a row opens a ragchew with that station
+// (Jeff, 2026-11-13): wx tells which word the first click of the two hit,
+// and a word that is a callsign the row names, or a station Ragtime
+// knows, goes to onCallsign.
 //
 // Whether it follows is settled the moment the operator scrolls, not at
 // the next paint. On GTK a scroll's own scroll bar update sends a size
@@ -35,7 +43,28 @@ public:
     // operator's, and says whether the newest row still shows.
     void UpdateScrollbar() override;
 
+    // A callsign double-clicked in a row: one the row names (callsIn), or
+    // one isStation says is a station heard. Called after the click.
+    void onCallsign(std::function<void(const std::string& call)> fn,
+                    std::function<bool(const std::string& call)> isStation)
+    {
+        onCallsign_ = std::move(fn);
+        isStation_ = std::move(isStation);
+    }
+
+protected:
+    // The stations a row names: who sent it, who it is to, the Hands that
+    // answered a roll call.
+    virtual std::vector<std::string> callsIn(size_t row) const
+    {
+        (void)row;
+        return {};
+    }
+
 private:
+    // The double click's callsign, or "" when it didn't land on one.
+    std::string callsignAt(const wxPoint& where) const;
+
     bool lastRowShows() const;
     // Scrolls so the newest row shows, as the list's own move.
     void pin();
@@ -43,6 +72,10 @@ private:
     bool following_ = true;
     bool pinning_ = false;     // inside our own scroll
     size_t seenTop_ = 0;       // the top row at the last scroll bar update
+    wxString clickedWord_;     // the word under the last click, and where it was
+    wxPoint clickedAt_;
+    std::function<void(const std::string&)> onCallsign_;
+    std::function<bool(const std::string&)> isStation_;
 };
 
 #endif

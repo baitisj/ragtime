@@ -271,7 +271,7 @@ The Broadcast tab is the first tab and never closes. It is where CQs, roundtable
 
 - **Speed** is the gearshift ("The gearshift", under Main window): the Gear button by Send shows a speedometer with the gear's short name under it, for example `A29` (`docs/GEARBOX.md`, "Mode names"), and opens the gearshift on the Submode Map.
 - Each message shows Queued, Sending, Sent, or Not sent, with the same rules as now (the host's ACKMODE report, two minutes to give up). No acknowledgements in broadcast mode except for addressed messages, if we keep them.
-- The station list on the left is fed by broadcast traffic: callsign, last heard, locator if sent, and whether it takes sessions. Double-clicking a station does nothing risky: it fills "@W1AW" or offers **Call**.
+- The station list on the left is fed by broadcast traffic: callsign, last heard, locator if sent, and whether it takes sessions. Double-clicking a station does nothing risky: it fills "@W1AW" or offers **Call**. (Since 2026-11-13, Jeff: double-clicking a callsign anywhere goes to its ragchew, or asks "Call W1AW for a ragchew?"; `docs/STAGE1.md`, "Callsigns open a ragchew".)
 - Woah! becomes a plain **Pause sending** switch on the toolbar.
 
 Since Data2G PR #98 the host ends each `BCAST HEARD` with the burst's SNR, so the list shows signal strength beside last heard.

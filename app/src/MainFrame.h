@@ -121,7 +121,16 @@ private:
 
     // Sessions (docs/PLAN.md, "Sometimes we ragchew"): entered only with
     // Call or by being called, left only with Leave or Leave now.
-    void callStation(const std::string& call);
+    // askFirst: "Call W1AW?" before it goes, unless another question
+    // (busy, no sessions, leave the ragchew we're in) asks already.
+    void callStation(const std::string& call, bool askFirst = false);
+    // A callsign double-clicked, in a list or a chat line (Jeff,
+    // 2026-11-13): to the Session tab when we're in a ragchew with it,
+    // else a Call, asked first (Jeff: a stray double click mustn't key
+    // the radio); never our own callsign.
+    void openSession(const std::string& call);
+    // A station heard this run, or one in the path log.
+    bool knownStation(const std::string& call) const;
     void callPrompt();
     void leaveSession();
     void leaveSessionNow();
@@ -381,6 +390,8 @@ private:
     uint64_t seenMessage_ = 0;  // the newest message id the operator has seen
     size_t unread_ = 0;
     size_t sessionUnread_ = 0;  // heard in the session while its tab is out of sight
+    bool canBoldTabs_ = false;  // a tab's label can be bold here (GTK)
+    int sessionBold_ = -1;      // the Session tab's label is bold (1) or plain (0); -1 not yet set
     size_t reactionsUnread_ = 0;    // reactions to our lines heard while the Broadcast tab is out of sight
     std::string reactionNote_;      // the latest, shown over the transfers line until reactionNoteUntilMs_
     uint64_t reactionNoteUntilMs_ = 0;
