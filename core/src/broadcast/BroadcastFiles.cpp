@@ -388,7 +388,16 @@ void BroadcastFiles::nextBurst(Outgoing& out, uint64_t nowMs)
     out.burstPieces = pieces;
     out.tries = 1;
     out.firstBurst = first;
-    out.burst = link_.broadcast(frames, out.file.mode, nowMs, fileLabel(out.file, out.burstPieces), true);
+    std::string label = fileLabel(out.file, out.burstPieces);
+    if (out.next >= out.file.pieces)
+    {
+        // The first pass's last burst: the seal over the file rides in it
+        // when it fits (Seals::sendFileEnd).
+        out.burst = seals_.sendFileEnd(out.file.seq, frames, first ? &out.announce : nullptr, out.file.mode, label,
+                                       nowMs);
+        return;
+    }
+    out.burst = link_.broadcast(frames, out.file.mode, nowMs, label, true);
     if (first) seals_.going({out.announce}, out.burst, out.file.mode, nowMs);
 }
 

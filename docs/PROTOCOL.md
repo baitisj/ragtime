@@ -770,7 +770,20 @@ the host's `MODES` lists them.
   numbers (unsealed chat between files) ends a run, and the next run is
   another seal. A run too long for one frame goes as several seals, a
   frame each. The seals made at one time are packed into bursts together.
-- A seal burst that is Not sent goes again, three tries in all.
+- **A file's seal rides with its last pieces.** The seal over a file
+  (and over what else of ours is settled before it) goes in the burst
+  that ends the file's first pass, after its pieces, with its SealRound
+  where it would have one, when it fits in that burst (12 s at most).
+  The pieces come first, so a listener knows what it lacks when the seal
+  arrives, and nothing keys again for the seal straight after the file
+  (#185: on an empty channel a voice clip ended in a keying for its
+  pieces and another, at once, for its seal). A seal riding in a file's
+  burst may follow one riding in an earlier file's burst still waiting
+  to go, as bursts that yield keep their order. A last burst too full
+  for it is followed by the seal alone, as above.
+- A seal burst that is Not sent goes again, three tries in all; a seal
+  that rode in a file's burst goes again alone, and the pieces go again
+  without it.
 - When a seal burst is Sent, a **listening window** opens: 3 × the
   airtime of a one-codeword burst in its mode, plus 4 s (52 s in
   fsk16r25-r1/3, 13 s in qpsk-r1/3).

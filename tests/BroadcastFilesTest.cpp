@@ -158,6 +158,24 @@ struct Air
     size_t framesOnAir = 0;
     std::vector<uint64_t> sealsOnAir;   // when each Seal went
     std::vector<Aired> aired;
+    // Each keying: who, when, and the records it carried.
+    struct Keying
+    {
+        std::string call;
+        uint64_t atMs = 0;
+        std::vector<protocol::RecordType> types;
+        bool has(protocol::RecordType type) const
+        {
+            return std::find(types.begin(), types.end(), type) != types.end();
+        }
+        bool sealsOnly() const
+        {
+            return !types.empty() && std::all_of(types.begin(), types.end(), [](protocol::RecordType t) {
+                return t == protocol::RecordType::Seal;
+            });
+        }
+    };
+    std::vector<Keying> keyings;
 
     Station& add(const std::string& call, uint32_t seed)
     {
@@ -209,6 +227,7 @@ struct Air
             if (frames.empty()) continue;
             std::string ptt = "PTT ON\rMODE qpsk-r1/3\r";
             s.link.commandBytes(ptt.data(), ptt.size(), now);
+            bool keyed = false;
             for (auto& op : stations)
             {
                 if (op.get() == &s) continue;
@@ -225,11 +244,14 @@ struct Air
                 CHECK(data.size() <= protocol::MAX_BROADCAST_FRAME);
                 CHECK(!data.empty() && data[0] == protocol::FRAME_BYTE);
                 framesOnAir++;
+                if (!keyed) keyings.push_back({s.call(), now, {}});
+                keyed = true;
                 std::vector<protocol::Record> records;
                 protocol::decodeFrame(data, records);
                 for (const protocol::Record& r : records)
                 {
                     aired.push_back({s.groupMode, r});
+                    keyings.back().types.push_back((protocol::RecordType)r.type());
                     if (r.type() == (uint8_t)protocol::RecordType::RepairRequest) requestsOnAir++;
                     if (r.type() == (uint8_t)protocol::RecordType::Seal) sealsOnAir.push_back(now);
                 }
@@ -1547,6 +1569,8 @@ void testChatUnsealed()
     Station& a = air.add("AG7EW", 1);
     Station& b = air.add("KC2G", 2);
     a.seals.setSealText(false);
+    std::filesystem::path bDir = freshFolder("b");
+    b.files.setAutoReceive(bDir.string());
     air.run(2000);
     a.chat.send("CQ CQ", "", now);
     a.chat.send("de AG7EW", "", now);
@@ -1587,17 +1611,35 @@ void testChatUnsealed()
     BroadcastFile file = fileFrom(b, "AG7EW");
     CHECK(file.id != 0);
 
-    // Chat between two files leaves a gap in the numbers: two seals, made
-    // together and keyed together, not one keying each.
+    // Chat between two files leaves a gap in the numbers: each file's seal
+    // rides in its own burst, the second behind the first while that is
+    // still queued, so no seal keys alone until the repeats, which go
+    // together.
     air.sealsOnAir.clear();
+    air.keyings.clear();
     CHECK(a.files.send(makeFile("one.txt", 300), "qpsk-r1/3", now, error) != 0);
     a.chat.send("and another", "", now);
     CHECK(a.files.send(makeFile("two.txt", 300), "qpsk-r1/3", now, error) != 0);
     air.run(Seals::QUIET_MS + 60000);
     CHECK_EQ(a.seals.sealsSent(), (size_t)3);
-    // Each goes twice (a file's seal is repeated once), always as a pair.
     CHECK_EQ(air.sealsOnAir.size(), (size_t)(2 * (1 + Seals::FLUSH_REPEATS)));
-    for (size_t i = 0; i + 1 < air.sealsOnAir.size(); i += 2) CHECK_EQ(air.sealsOnAir[i], air.sealsOnAir[i + 1]);
+    std::vector<const Air::Keying*> sealing;
+    for (const Air::Keying& k : air.keyings)
+    {
+        if (k.call == "AG7EW" && k.has(protocol::RecordType::Seal)) sealing.push_back(&k);
+    }
+    CHECK_EQ(sealing.size(), (size_t)(2 + Seals::FLUSH_REPEATS));
+    if (sealing.size() == 2 + Seals::FLUSH_REPEATS)
+    {
+        for (size_t i = 0; i < 2; i++) CHECK(sealing[i]->has(protocol::RecordType::FileAnnounce));
+        for (size_t i = 2; i < sealing.size(); i++) CHECK(sealing[i]->sealsOnly() && sealing[i]->types.size() == 2);
+    }
+    size_t whole = 0;
+    for (const BroadcastFile& f : b.files.files(now))
+    {
+        if (!f.outgoing && (f.name == "one.txt" || f.name == "two.txt") && f.state == BroadcastFile::State::Saved) whole++;
+    }
+    CHECK_EQ(whole, (size_t)2);
     CHECK_EQ(air.requestsOnAir, (size_t)0);
 }
 
@@ -2556,12 +2598,78 @@ void testQuietChannel()
     Station& a = air.add("AG7EW", 1);
     air.run(2000);
     std::string error;
-    CHECK(a.files.send(makeFile("quiet.sot", 3000, 11), "qpsk-r1/3", now, error, false, true) != 0);
+    CHECK(a.files.send(makeFile("quiet.sot", 2800, 11), "qpsk-r1/3", now, error, false, true) != 0);
     air.run(10 * 60 * 1000);
     CHECK_EQ(a.seals.sealsSent(), (size_t)1);
     CHECK_EQ(air.sealsOnAir.size(), (size_t)(1 + Seals::FLUSH_REPEATS));
     uint64_t window = broadcast::listeningWindowMs(broadcast::findMode(a.link.modes(), "qpsk-r1/3"));
     for (size_t i = 1; i < air.sealsOnAir.size(); i++) CHECK(air.sealsOnAir[i] >= air.sealsOnAir[i - 1] + window);
+    CHECK_EQ(air.requestsOnAir, (size_t)0);
+
+    // Spud's flight report (2026-11-26): the seal keyed again straight
+    // after the clip's last burst. It rides in that burst now, which has
+    // room for it at this size: the clip's keyings, then the repeat, and
+    // no keying for the seal alone.
+    size_t pieceKeyings = 0;
+    size_t lastPieces = air.keyings.size();
+    for (size_t i = 0; i < air.keyings.size(); i++)
+    {
+        if (!air.keyings[i].has(protocol::RecordType::FilePiece)) continue;
+        pieceKeyings++;
+        lastPieces = i;
+    }
+    CHECK(pieceKeyings >= 2);
+    CHECK_EQ(air.keyings.size(), pieceKeyings + Seals::FLUSH_REPEATS);
+    CHECK(lastPieces < air.keyings.size() && air.keyings[lastPieces].has(protocol::RecordType::Seal));
+    if (!air.keyings.empty())
+    {
+        const Air::Keying& lastKeying = air.keyings.back();
+        CHECK(lastKeying.sealsOnly());
+        if (lastPieces < air.keyings.size()) CHECK(lastKeying.atMs >= air.keyings[lastPieces].atMs + window);
+    }
+
+    // A last burst with no room for it: the seal keys alone after it, as
+    // before, and goes again once.
+    air.keyings.clear();
+    air.sealsOnAir.clear();
+    CHECK(a.files.send(makeFile("full.sot", 3000, 12), "qpsk-r1/3", now, error, false, true) != 0);
+    air.run(10 * 60 * 1000);
+    CHECK_EQ(a.seals.sealsSent(), (size_t)2);
+    CHECK_EQ(air.sealsOnAir.size(), (size_t)(1 + Seals::FLUSH_REPEATS));
+    size_t alone = 0;
+    for (const Air::Keying& k : air.keyings) alone += k.sealsOnly() ? 1 : 0;
+    CHECK_EQ(alone, (size_t)(1 + Seals::FLUSH_REPEATS));
+}
+
+// The seal rides in a file's only burst too: its announce, its pieces and
+// the seal over it in one keying, and a listener has it whole and sealed.
+void testSealRidesOneBurst()
+{
+    Air air;
+    Station& a = air.add("AG7EW", 1);
+    Station& b = air.add("KC2G", 2);
+    std::filesystem::path bDir = freshFolder("b");
+    b.files.setAutoReceive(bDir.string());
+    air.run(2000);
+    std::string error;
+    CHECK(a.files.send(makeFile("short.sot", 200, 5), "qpsk-r1/3", now, error, false, true) != 0);
+    air.run(5 * 60 * 1000);
+    std::vector<const Air::Keying*> ours;
+    for (const Air::Keying& k : air.keyings)
+    {
+        if (k.call == "AG7EW") ours.push_back(&k);
+    }
+    CHECK_EQ(ours.size(), (size_t)(1 + Seals::FLUSH_REPEATS));
+    if (!ours.empty())
+    {
+        CHECK(ours[0]->has(protocol::RecordType::FileAnnounce));
+        CHECK(ours[0]->has(protocol::RecordType::FilePiece));
+        CHECK(ours[0]->has(protocol::RecordType::Seal));
+    }
+    CHECK_EQ(a.seals.sealsSent(), (size_t)1);
+    BroadcastFile file = fileFrom(b, "AG7EW");
+    CHECK(file.id != 0 && file.state == BroadcastFile::State::Saved);
+    CHECK(b.seals.sealHeard("AG7EW", file.seq));
     CHECK_EQ(air.requestsOnAir, (size_t)0);
 }
 
@@ -2615,6 +2723,7 @@ int main()
     testPictures();
     testVoice();
     testQuietChannel();
+    testSealRidesOneBurst();
     std::filesystem::remove_all(scratch());
     return ragtime_test::finish();
 }

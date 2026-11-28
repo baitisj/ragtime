@@ -924,6 +924,23 @@ void testHandWindowOutlastsListening()
     CHECK(b.hand.has_value());
     CHECK(a.window.has_value() && a.window->open);
     CHECK_EQ(sealsFromA(), (long)1);
+    // Both rode in the clip's last burst, after its pieces, not in a
+    // keying of their own.
+    {
+        uint64_t sealAt = 0;
+        bool round = false, piece = false;
+        for (const auto& h : b.heard)
+        {
+            if (h.second.header.callsign == "W1AW" && h.second.as<protocol::Seal>() != nullptr) sealAt = h.first;
+        }
+        for (const auto& h : b.heard)
+        {
+            if (h.second.header.callsign != "W1AW" || h.first != sealAt) continue;
+            round = round || h.second.as<protocol::SealRound>() != nullptr;
+            piece = piece || h.second.as<protocol::FilePiece>() != nullptr;
+        }
+        CHECK(sealAt != 0 && round && piece);
+    }
 
     // The host holds A's bursts while the window is open (Data2G's holds),
     // to its end: nothing of A's should be waiting for it there.
@@ -1021,14 +1038,22 @@ void testRequestWaitsForHands()
     CHECK(b.hand.has_value());
     CHECK(a.window.has_value() && a.window->open);
     uint64_t opened = a.window ? a.window->openMs : now;
+    // What C sent before the window (it may ask for the first seal by
+    // its line, three minutes on) is not over the Hands.
+    size_t cAtOpen = c.seals.requestsSent();
     uint64_t slotEnds = opened + (uint64_t)((3.0 + link::HAND_SECONDS + link::HAND_SEARCH_S) * 1000.0);
-    while (now + 500 <= slotEnds + 400)
+    while (now + 500 < slotEnds)
     {
         now += 500;
         step(all);
     }
     // C kept quiet over the Hands, so B's came through.
-    CHECK_EQ(c.seals.requestsSent(), cRequests);
+    CHECK_EQ(c.seals.requestsSent(), cAtOpen);
+    while (now + 500 <= slotEnds + 400)
+    {
+        now += 500;
+        step(all);
+    }
     raiseHands(all, false);
     CHECK_EQ(a.seals.handsHeard(), (size_t)1);
     size_t heardBefore = a.seals.requestsHeard();

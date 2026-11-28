@@ -59,6 +59,11 @@ and nothing else on the net has that name.
 
   So a seal covers one over. It covers six minutes only when the
   station has chatted steadily for six minutes, never pausing for 60 s.
+- **A file's seal rides along.** The seal over a file goes in the
+  same transmission as the file's last pieces, after them, when there is
+  room: the file ends in one keying, not one for the pieces and another
+  straight after for the seal. When nobody asks for repairs, the seal
+  goes once more a little later, in case it was lost.
 - **Big overs.** One seal fits in one broadcast frame of 255 bytes,
   which holds about 18 fingerprints. A longer run goes as several seals,
   packed into the same burst.
