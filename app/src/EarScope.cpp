@@ -45,6 +45,7 @@ EarScope::EarScope(wxWindow* parent)
     Bind(wxEVT_MOTION, [this](wxMouseEvent& e) { mouseMove(e); });
     Bind(wxEVT_LEFT_DOWN, [this](wxMouseEvent& e) { mouseDown(e); });
     Bind(wxEVT_LEFT_UP, [this](wxMouseEvent& e) { mouseUp(e); });
+    Bind(wxEVT_MOUSEWHEEL, [this](wxMouseEvent& e) { mouseWheel(e); });
     Bind(wxEVT_MOUSE_CAPTURE_LOST, [this](wxMouseCaptureLostEvent&) {
         grip_ = Grip::None;
         drag_.reset();
@@ -152,6 +153,12 @@ void EarScope::setNotch(const std::optional<Notch>& notch)
 {
     const bool had = notch_.has_value();
     notch_ = notch;
+    if (grip_ == Grip::NotchWidth && !notchWidens())
+    {
+        // The rig lost its notch, or its width, under the operator's hand.
+        if (HasCapture()) ReleaseMouse();
+        grip_ = Grip::None;
+    }
     if (had != notch_.has_value() && grip_ == Grip::Notch && !notch_)
     {
         // The rig lost its notch under the operator's hand.
@@ -166,6 +173,20 @@ wxRect EarScope::notchKnob(double x) const
 {
     const int w = FromDIP(26), h = FromDIP(18);
     return wxRect((int)std::lround(x) - w / 2, plot_.y + plot_.height * 62 / 100 - h / 2, w, h);
+}
+
+bool EarScope::notchWidens() const
+{
+    return notch_ && notch_->on && notch_->movable && notch_->stepsHz.size() > 1;
+}
+
+int EarScope::notchStepFor(double widthHz) const
+{
+    if (!notch_ || notch_->stepsHz.empty()) return 0;
+    int best = 0;
+    for (int k = 1; k < (int)notch_->stepsHz.size(); k++)
+        if (std::fabs(notch_->stepsHz[k] - widthHz) < std::fabs(notch_->stepsHz[best] - widthHz)) best = k;
+    return best;
 }
 
 std::optional<double> EarScope::notchAt(int x) const
@@ -188,6 +209,13 @@ EarScope::Grip EarScope::gripAt(int x, int y) const
     const bool notch = notch_ && notch_->movable;
     if (notch && !notch_->on && bay_.Contains(x, y)) return Grip::Notch;
     if (notch && notch_->on && notchKnob(xOf(notch_->hz)).Contains(x, y)) return Grip::Notch;
+    // The sides of its shading, where the rig can change its width.
+    if (notchWidens())
+    {
+        const double half = notch_->widthHz / 2;
+        for (double side : {notch_->hz - half, notch_->hz + half})
+            if (std::abs(x - (int)xOf(side)) <= near && std::abs(x - (int)xOf(notch_->hz)) > near) return Grip::NotchWidth;
+    }
     if (!handles_ || !movable_)
         return notch && notch_->on && std::abs(x - (int)xOf(notch_->hz)) <= near ? Grip::Notch : Grip::None;
     if (std::abs(x - (int)xOf(handles_->lowHz)) <= near) return Grip::Low;
@@ -210,6 +238,13 @@ void EarScope::mouseDown(wxMouseEvent& e)
         Refresh();
         return;
     }
+    if (grip_ == Grip::NotchWidth)
+    {
+        widthDrag_ = notch_->widthHz;
+        CaptureMouse();
+        Refresh();
+        return;
+    }
     gripHz_ = hzAt(e.GetX());
     dragFrom_ = *handles_;
     drag_ = dragFrom_;
@@ -223,6 +258,10 @@ void EarScope::mouseMove(wxMouseEvent& e)
     if (grip_ == Grip::Notch)
     {
         notchDrag_ = notchAt(e.GetX());
+    }
+    else if (grip_ == Grip::NotchWidth)
+    {
+        if (notch_) widthDrag_ = std::max(20.0, 2 * std::fabs(hzAt(e.GetX()) - notch_->hz));
     }
     else if (grip_ != Grip::None && drag_)
     {
@@ -244,14 +283,16 @@ void EarScope::mouseMove(wxMouseEvent& e)
             s.highHz += hz - gripHz_;
             break;
         case Grip::None:
-        case Grip::Notch: break;
+        case Grip::Notch:
+        case Grip::NotchWidth: break;
         }
         drag_ = s;
     }
     else
     {
         const Grip g = gripAt(e.GetX(), e.GetY());
-        SetCursor(g == Grip::Low || g == Grip::High || g == Grip::Notch ? wxCursor(wxCURSOR_SIZEWE)
+        SetCursor(g == Grip::Low || g == Grip::High || g == Grip::Notch || g == Grip::NotchWidth
+                      ? wxCursor(wxCURSOR_SIZEWE)
                   : g == Grip::Shift                ? wxCursor(wxCURSOR_HAND)
                                                     : wxNullCursor);
     }
@@ -275,6 +316,15 @@ void EarScope::mouseUp(wxMouseEvent&)
             notchMoved_(at);
         return;
     }
+    if (grip_ == Grip::NotchWidth)
+    {
+        grip_ = Grip::None;
+        Refresh();
+        if (!notchWidens() || !notchWidthPicked_) return;
+        const int step = notchStepFor(widthDrag_);
+        if (step != notch_->step) notchWidthPicked_(step);
+        return;
+    }
     const std::optional<ragtime::ear::Span> s = drag_;
     grip_ = Grip::None;
     drag_.reset();
@@ -282,6 +332,33 @@ void EarScope::mouseUp(wxMouseEvent&)
     if (s && (std::fabs(s->lowHz - dragFrom_.lowHz) >= 10 || std::fabs(s->highHz - dragFrom_.highHz) >= 10) &&
         dragged_)
         dragged_(dragFrom_, *s);
+}
+
+void EarScope::mouseWheel(wxMouseEvent& e)
+{
+    // Over the notch's knob, its width a step at a time: up wider.
+    if (grip_ != Grip::None || !notchWidens() || !notchWidthPicked_ || e.GetWheelRotation() == 0)
+    {
+        e.Skip();
+        return;
+    }
+    const double x = plot_.x + notch_->hz / topHz_ * plot_.width;
+    if (!notchKnob(x).Contains(e.GetX(), e.GetY()))
+    {
+        e.Skip();
+        return;
+    }
+    // The step whose width is next above, or below, the one it has.
+    const double now = notch_->stepsHz[notch_->step];
+    const bool wider = e.GetWheelRotation() > 0;
+    int pick = -1;
+    for (int k = 0; k < (int)notch_->stepsHz.size(); k++)
+    {
+        const double w = notch_->stepsHz[k];
+        if (k == notch_->step || (wider ? w <= now : w >= now)) continue;
+        if (pick < 0 || (wider ? w < notch_->stepsHz[pick] : w > notch_->stepsHz[pick])) pick = k;
+    }
+    if (pick >= 0) notchWidthPicked_(pick);
 }
 
 void EarScope::addRows(const std::vector<std::vector<float>>& rows, bool transmitting)
@@ -669,12 +746,36 @@ void EarScope::paintNotch(wxGraphicsContext& gc, bool dark, const wxFont& small)
     {
         // In the spectrum: its width shaded, red at the foot where it cuts
         // into Data2G's passband, the bar at its centre.
-        const double half = ragtime::ear::NotchModel::WIDTH_HZ / 2;
+        const bool widening = grip_ == Grip::NotchWidth;
+        const double widthHz = widening ? widthDrag_ : notch_->widthHz;
+        const double half = widthHz / 2;
         const double x0 = xOf(std::max(0.0, atHz - half)), x1 = xOf(std::min(topHz_, atHz + half));
         gc.SetPen(*wxTRANSPARENT_PEN);
         gc.SetBrush(wxBrush(wxColour(magenta.Red(), magenta.Green(), magenta.Blue(), 45)));
         gc.DrawRectangle(x0, plot_.y, x1 - x0, plot_.height);
-        if (ragtime::ear::notchCutsData2G(atHz, narrow_))
+        // Its width's grips, where the rig can change it; while one is
+        // dragged, the steps' sides dotted.
+        if (notchWidens() || (widening && notch_->stepsHz.size() > 1))
+        {
+            if (widening)
+            {
+                gc.SetPen(wxPen(magenta, 1, wxPENSTYLE_DOT));
+                for (double w : notch_->stepsHz)
+                    for (double side : {atHz - w / 2, atHz + w / 2})
+                        gc.StrokeLine(xOf(side), plot_.y + FromDIP(24), xOf(side), plot_.GetBottom() - FromDIP(10));
+            }
+            const int gw = FromDIP(6), gh = FromDIP(22);
+            const double gy = plot_.y + plot_.height * 0.38 - gh / 2.0;
+            for (double gx : {x0, x1})
+            {
+                gc.SetPen(wxPen(magenta, 1));
+                gc.StrokeLine(gx, plot_.y + FromDIP(24), gx, plot_.GetBottom() - FromDIP(10));
+                gc.SetPen(*wxTRANSPARENT_PEN);
+                gc.SetBrush(wxBrush(magenta));
+                gc.DrawRoundedRectangle(gx - gw / 2.0, gy, gw, gh, FromDIP(2));
+            }
+        }
+        if (ragtime::ear::notchCutsData2G(atHz, narrow_, widthHz))
         {
             const ragtime::ear::Passband pb = ragtime::ear::data2gPassband(narrow_);
             const double c0 = std::max(x0, xOf(pb.lowHz)), c1 = std::min(x1, xOf(pb.highHz));
@@ -685,9 +786,18 @@ void EarScope::paintNotch(wxGraphicsContext& gc, bool dark, const wxFont& small)
         gc.SetPen(wxPen(magenta, FromDIP(2), dragging ? wxPENSTYLE_LONG_DASH : wxPENSTYLE_SOLID));
         gc.StrokeLine(x, plot_.y, x, plot_.GetBottom());
         knob(x);
-        if (dragging)
+        if (dragging || widening)
         {
-            const wxString label = wxString::Format("notch %d Hz", (int)std::lround(atHz / 10) * 10);
+            // "notch 1240 Hz · Wide · 400 Hz": the step a drag of a side
+            // lands on, and how wide that step measures.
+            wxString label = wxString::Format("notch %d Hz", (int)std::lround(atHz / 10) * 10);
+            if (notch_->stepsHz.size() > 1)
+            {
+                const int step = widening ? notchStepFor(widthDrag_) : notch_->step;
+                if (step < (int)notch_->stepNames.size() && !notch_->stepNames[step].empty())
+                    label += wxString::FromUTF8(" \u00b7 ") + notch_->stepNames[step];
+                label += wxString::Format(wxString::FromUTF8(" \u00b7 %d Hz wide"), (int)std::lround(notch_->stepsHz[step] / 10) * 10);
+            }
             gc.SetFont(small, text);
             gc.GetTextExtent(label, &w, &h);
             const wxRect k = notchKnob(x);

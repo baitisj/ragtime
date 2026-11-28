@@ -75,8 +75,9 @@ bool readsBack(const RigFilter& got, const RigFilter& want)
         return !b || (a && std::abs(*a - *b) <= 10);
     };
     const bool shift = !want.ifShiftHz || (got.ifShiftHz && std::abs(*got.ifShiftHz - *want.ifShiftHz) <= ear::IF_SHIFT_STEP_HZ);
+    const bool width = !want.notchWidth || got.notchWidth == want.notchWidth;
     const bool notch = !want.notchOn || (got.notchOn == want.notchOn &&
-                                         (!*want.notchOn || (knob(got.notchRaw, want.notchRaw) && hz(got.notchHz, want.notchHz))));
+                                         (!*want.notchOn || (knob(got.notchRaw, want.notchRaw) && hz(got.notchHz, want.notchHz) && width)));
     return got.mode == want.mode && got.widthHz == want.widthHz && knob(got.pbtIn, want.pbtIn) &&
            knob(got.pbtOut, want.pbtOut) && shift && notch;
 }
@@ -181,6 +182,7 @@ EarFilterBar::EarFilterBar(wxWindow* parent, EarScope* scope, FilterEdit& edit, 
     });
     scope_->onDrag([this](const Span& from, const Span& to) { dragged(from, to); });
     scope_->onNotch([this](std::optional<double> hz) { notchMoved(hz); });
+    scope_->onNotchWidth([this](int step) { notchWidthMoved(step); });
 }
 
 ear::KnobModel EarFilterBar::model(const RigFilter& f) const
@@ -396,6 +398,7 @@ const ear::NotchModel& EarFilterBar::notchModel()
         notchModel_ = rig_.key.empty() || !rig_.filter ? ear::NotchModel() : loadEarNotch(rig_.key, rig_.filter->mode);
         learnedRaw_.reset();
         dipHz_.reset();
+        dipWidthHz_.reset();
     }
     return notchModel_;
 }
@@ -413,6 +416,7 @@ void EarFilterBar::showNotch(ear::EdgeFinder& edges)
         const double hz = *rigHz;
         edges.setBridge(hz - DIP_SEARCH_HZ, hz + DIP_SEARCH_HZ);
         dipHz_.reset();
+        dipWidthHz_.reset();
         if (auto d = edges.dip(hz - DIP_SEARCH_HZ, hz + DIP_SEARCH_HZ))
         {
             dipHz_ = d->hz;
@@ -429,12 +433,22 @@ void EarFilterBar::showNotch(ear::EdgeFinder& edges)
                 notchModel_.learn(*rig->notchRaw, d->hz);
                 if (!rig_.key.empty()) saveEarNotch(rig_.key, rig->mode, notchModel_);
             }
+            // How wide it is, at the step the rig has (its one width with
+            // none), from where the noise climbs back each side.
+            dipWidthHz_ = d->widthHz;
+            if (d->widthHz && inside && settled)
+            {
+                const std::optional<int> step = rig->notchWidths > 0 ? rig->notchWidth : std::nullopt;
+                if ((rig->notchWidths == 0 || step) && notchModel_.learnWidth(step, *d->widthHz) && !rig_.key.empty())
+                    saveEarNotch(rig_.key, rig->mode, notchModel_);
+            }
         }
     }
     else
     {
         edges.setBridge(0, 0);
         dipHz_.reset();
+        dipWidthHz_.reset();
     }
 
     // The bar: where the rig has a notch. It shows the change waiting or on
@@ -449,9 +463,30 @@ void EarFilterBar::showNotch(ear::EdgeFinder& edges)
     const std::optional<double> at = *f->notchOn ? ear::notchCentre(*f, notchModel_) : std::nullopt;
     n.on = at.has_value();
     if (n.on) n.hz = *at;
-    if (on && n.on && rig->notchRaw == f->notchRaw && rig->notchHz == f->notchHz) n.dipHz = dipHz_;
+    const bool asRead = on && n.on && rig->notchRaw == f->notchRaw && rig->notchHz == f->notchHz;
+    if (asRead) n.dipHz = dipHz_;
+    // As wide as the noise shows it, else as measured at its step before.
+    n.widthHz = asRead && rig->notchWidth == f->notchWidth && dipWidthHz_ ? *dipWidthHz_ : ear::notchWidthOf(*f, notchModel_);
     n.movable = adjustable() && !calibration_.running() && !restore_ && edit_.state() != FilterEdit::State::Waiting;
+    // Its width's steps, where the rig can change it.
+    if (f->notchWidths > 1 && f->notchWidth)
+    {
+        for (int k = 0; k < f->notchWidths; k++)
+        {
+            n.stepsHz.push_back(notchModel_.widthAt(k, f->notchWidths));
+            n.stepNames.push_back(wxString::FromUTF8(notchModel_.stepName(k, f->notchWidths)));
+        }
+        n.step = *f->notchWidth;
+    }
     scope_->setNotch(n);
+}
+
+void EarFilterBar::notchWidthMoved(int step)
+{
+    const std::optional<RigFilter> now = setting();
+    if (!settable() || !now || !now->notchOn || !*now->notchOn || now->notchWidths < 2 || calibration_.running())
+        return;
+    change(ear::withNotchWidth(*now, step), spanNow());
 }
 
 void EarFilterBar::notchMoved(std::optional<double> hz)
@@ -469,7 +504,7 @@ bool EarFilterBar::cutsData2G() const
     const std::optional<RigFilter>& p = edit_.pending();
     if (!p || !p->notchOn || !*p->notchOn) return false;
     const std::optional<double> at = ear::notchCentre(*p, notchModel_);
-    return at && ear::notchCutsData2G(*at, narrow_);
+    return at && ear::notchCutsData2G(*at, narrow_, ear::notchWidthOf(*p, notchModel_));
 }
 
 void EarFilterBar::change(const RigFilter& to, const std::optional<Span>& wanted)
@@ -513,6 +548,7 @@ void EarFilterBar::recall(int n)
     if (p->notchOn) to.notchOn = p->notchOn;
     if (p->notchRaw) to.notchRaw = p->notchRaw;
     if (p->notchHz) to.notchHz = p->notchHz;
+    if (p->notchWidth && to.notchWidths > *p->notchWidth) to.notchWidth = p->notchWidth;
     change(to, std::nullopt);
 }
 

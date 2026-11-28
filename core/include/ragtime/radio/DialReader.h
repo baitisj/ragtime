@@ -29,7 +29,11 @@
 // While the Ear is open (setFilterWatch), between bursts it also reads the
 // rig's receive filter every FILTER_MS: "+m" (the mode and its passband
 // width), then "+l PBT_IN" and "+l PBT_OUT" (radio::RigFilter). Jeff
-// agreed to these reads on his shared rigctld (2026-10-26).
+// agreed to these reads on his shared rigctld (2026-10-26). From a rig
+// with a manual notch, also its width where it has one: the extra
+// parameter "+p DSP_IF_NOTCH_W" (an FTX-1's; no VFO named, as rigctld
+// takes none for a parameter), and "P DSP_IF_NOTCH_W 1" to set it (Jeff,
+// 2026-11-28).
 //
 // It tunes the rig only when the operator picks a frequency (the dial's
 // dropdown, Custom..., or Ctrl or Shift with the mouse wheel over it;
@@ -100,8 +104,9 @@ public:
         NotchRaw,   // NOTCHF_RAW, its position: also only while the Ear is open
         NotchHz,    // NOTCHF, its centre in Hz, from a rig with no NOTCHF_RAW
         IfShift,    // IF, IF SHIFT in Hz, from a rig with no PBT (a Yaesu)
+        NotchWidth, // the notch's width step, an extra parameter ("+p")
     };
-    static constexpr int METERS = 11;
+    static constexpr int METERS = 12;
     // Probed on connecting: all but the filter's.
     static constexpr int PROBED = 5;
 

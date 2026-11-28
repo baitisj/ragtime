@@ -101,7 +101,9 @@ filter as the rig reports it, and the edges the band's noise really
 shows. With its box ticked in Settings > Rig, you can drag the
 filter's edges, or the notch out of its bay, right on the scope. An
 Icom moves its edges with twin PBT; a Yaesu with IF SHIFT and its own
-filter widths, so the edges land on the steps the rig has.
+filter widths, so the edges land on the steps the rig has. The notch
+is drawn as wide as the noise shows it, and on a rig whose notch
+width Hamlib can change, grips on its sides pick the rig's widths.
 
 ![The Ear, three Data2G bursts on the waterfall](docs/images/readme/ear.png)
 

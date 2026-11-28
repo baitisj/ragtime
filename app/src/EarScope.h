@@ -8,6 +8,7 @@
 
 #include <wx/image.h>
 #include <wx/panel.h>
+#include <wx/string.h>
 
 class wxGraphicsContext;
 
@@ -37,8 +38,12 @@ class wxGraphicsContext;
 // Where the rig has a manual notch, a bay to the right of the spectrum
 // holds its bar while it is off (NF OFF). Dragged into the spectrum the
 // notch goes on there; dragged back to the bay, off (Jeff, 2026-10-26).
-// On, the bar sits at the notch's centre with its width shaded, and a
-// small mark shows where the noise shows its dip.
+// On, the bar sits at the notch's centre with its width shaded (as wide
+// as the noise shows it), and a small mark shows where the noise shows its
+// dip. Where the rig can change the notch's width, the shading's two sides
+// have grips: dragged out or in, the notch widens or narrows about its
+// centre and snaps to the rig's nearest step, which the owner is handed;
+// the mouse wheel over the knob steps it too (Jeff, 2026-11-28).
 //
 // The colours follow the noise: the floor is a slow average of each
 // row's quieter part, and the waterfall runs from just under it to 50 dB
@@ -53,6 +58,12 @@ public:
         double hz = 0;                  // its centre, while on
         std::optional<double> dipHz;    // where the noise shows it
         bool movable = false;           // the Ear may set it
+        double widthHz = ragtime::ear::NotchModel::WIDTH_HZ;
+        // The rig's width steps, Hz and names, where it can change the
+        // width (none where it can't), and the step it has.
+        std::vector<double> stepsHz;
+        std::vector<wxString> stepNames;
+        int step = 0;
     };
 
     explicit EarScope(wxWindow* parent);
@@ -81,6 +92,8 @@ public:
     void setNotch(const std::optional<Notch>& notch);
     // The bar let go: at hz, or in the bay (none).
     void onNotch(std::function<void(std::optional<double> hz)> moved) { notchMoved_ = std::move(moved); }
+    // A width step picked by its grips or the wheel.
+    void onNotchWidth(std::function<void(int step)> picked) { notchWidthPicked_ = std::move(picked); }
 
 private:
     void paint();
@@ -93,6 +106,7 @@ private:
         High,
         Shift,
         Notch,
+        NotchWidth,
     };
     Grip gripAt(int x, int y) const;
     double hzAt(int x) const;
@@ -100,10 +114,15 @@ private:
     wxRect notchKnob(double x) const;
     // Where a notch dragged to x would go: none in the bay.
     std::optional<double> notchAt(int x) const;
+    // Whether the notch's width can be dragged now, and the step nearest a
+    // width.
+    bool notchWidens() const;
+    int notchStepFor(double widthHz) const;
     void paintNotch(wxGraphicsContext& gc, bool dark, const wxFont& small);
     void mouseDown(wxMouseEvent& e);
     void mouseMove(wxMouseEvent& e);
     void mouseUp(wxMouseEvent& e);
+    void mouseWheel(wxMouseEvent& e);
 
     static constexpr int HISTORY = 600;     // waterfall rows kept
 
@@ -132,6 +151,8 @@ private:
     std::optional<Notch> notch_;
     std::function<void(std::optional<double>)> notchMoved_;
     std::optional<double> notchDrag_;   // being dragged: where (none in the bay)
+    std::function<void(int)> notchWidthPicked_;
+    double widthDrag_ = 0;              // its width, while a side is dragged
 
     // The areas, in pixels, worked out at each paint.
     wxRect plot_;       // the spectrum

@@ -1075,6 +1075,103 @@ void notchInHz()
     CHECK_EQ(ragtime::radio::describe(on), std::string("USB \xc2\xb7 3000 Hz filter \xc2\xb7 notch 1230 Hz"));
 }
 
+// The notch's width (Jeff, 2026-11-28): measured from the dip, kept for
+// each of the rig's width steps, a side's drag landing on the step
+// nearest, and through rigctld or Hamlib only where the rig has a
+// control for it.
+void notchWidth()
+{
+    // A dip about 340 Hz across at -6 dB, as the IC-7100's.
+    {
+        std::mt19937 rng(5);
+        const std::vector<Lift> hole = {{1330, 1670, -10.0}, {1400, 1600, -10.0}, {1450, 1550, -10.0}, {1480, 1520, -15.0}};
+        EdgeFinder f(10.0);
+        for (int i = 0; i < 60; i++) f.addRow(noiseRow(rng, 300, 2700, hole), false);
+        f.setBridge(1050, 1950);
+        std::optional<Dip> d = f.dip(1050, 1950);
+        CHECK(d && d->widthHz && *d->widthHz > 280 && *d->widthHz < 420);
+        // A narrower one measures narrower.
+        const std::vector<Lift> slot = {{1420, 1580, -10.0}, {1450, 1550, -10.0}, {1470, 1530, -10.0}, {1490, 1510, -15.0}};
+        EdgeFinder g(10.0);
+        for (int i = 0; i < 60; i++) g.addRow(noiseRow(rng, 300, 2700, slot), false);
+        g.setBridge(1050, 1950);
+        std::optional<Dip> e = g.dip(1050, 1950);
+        CHECK(e && e->widthHz && d && d->widthHz && *e->widthHz < *d->widthHz - 80);
+    }
+
+    // The model: guesses until measured, then what was measured.
+    NotchModel m;
+    CHECK_EQ(m.widthAt(std::nullopt, 0), NotchModel::WIDTH_HZ);
+    CHECK_EQ(m.widthAt(0, 2), 200.0);
+    CHECK_EQ(m.widthAt(1, 2), 400.0);
+    CHECK_EQ(m.stepName(0, 2), std::string("Narrow"));
+    CHECK_EQ(m.stepName(1, 2), std::string("Wide"));
+    CHECK_EQ(m.stepName(1, 3), std::string("Mid"));
+    CHECK_EQ(m.stepName(std::nullopt, 2), std::string());
+    CHECK_EQ(m.stepFor(380, 2), 1);
+    CHECK_EQ(m.stepFor(150, 2), 0);
+    CHECK(m.learnWidth(1, 300));
+    CHECK_EQ(m.widthAt(1, 2), 300.0);
+    // The step not measured follows the one that was.
+    CHECK(std::fabs(m.widthAt(0, 2) - 200) < 1e-6);
+    // Once known, a little at a time.
+    m.learnWidth(1, 400);
+    CHECK(std::fabs(m.widthAt(1, 2) - 330) < 1e-6);
+    CHECK(!m.learnWidth(1, 331));
+    CHECK(!m.learnWidth(0, 5000));
+    // An Icom's steps run the other way: named by how wide they measure.
+    NotchModel icom;
+    icom.learnWidth(0, 420);
+    icom.learnWidth(1, 300);
+    icom.learnWidth(2, 180);
+    CHECK_EQ(icom.stepName(0, 3), std::string("Wide"));
+    CHECK_EQ(icom.stepName(2, 3), std::string("Narrow"));
+    CHECK_EQ(icom.stepFor(200, 3), 2);
+    // Kept as text and back; an older model has none.
+    std::optional<NotchModel> back = NotchModel::fromText(icom.text());
+    CHECK(back && back->widthsHz.size() == 3 && std::fabs(back->widthsHz[2] - 180) < 0.1);
+    NotchModel gap;
+    gap.learnWidth(1, 250);
+    back = NotchModel::fromText(gap.text());
+    CHECK(back && back->widthsHz.size() == 2 && back->widthsHz[0] == 0.0 && std::fabs(back->widthsHz[1] - 250) < 0.1);
+    back = NotchModel::fromText("5010.0 -990.0 - -");
+    CHECK(back && back->widthsHz.empty());
+
+    // The setting: a step within the rig's, kept by presets, told in words.
+    RigFilter yaesu;
+    yaesu.mode = "USB";
+    yaesu.widthHz = 3000;
+    yaesu.notchOn = true;
+    yaesu.notchHz = 1500;
+    yaesu.notchWidth = 1;
+    yaesu.notchWidths = 2;
+    const RigFilter narrow = withNotchWidth(yaesu, 0);
+    CHECK(narrow.notchWidth == std::optional<int>(0));
+    CHECK(withNotchWidth(yaesu, 5).notchWidth == std::optional<int>(1));
+    CHECK(withNotchWidth(usb(2400), 1).notchWidth == std::nullopt);
+    const NotchModel plain;
+    CHECK_EQ(notchChangeText(yaesu, narrow, plain), std::string("Notch Wide \xe2\x86\x92 Narrow"));
+    CHECK_EQ(notchWidthOf(narrow, plain), 200.0);
+    CHECK(holds(yaesu, yaesu) && !holds(narrow, yaesu));
+    RigFilter moved = withNotch(narrow, 1200.0, plain);
+    moved.notchWidth = 1;
+    CHECK_EQ(notchChangeText(narrow, moved, plain), std::string("Notch 1500 \xe2\x86\x92 1200 Hz, Wide"));
+    // A wide notch reaches Data2G's narrow passband sooner.
+    CHECK(!notchCutsData2G(1000, true, 340));
+    CHECK(notchCutsData2G(1000, true, 600));
+    // The flight recorder's words.
+    CHECK_EQ(ragtime::radio::notchText(narrow), std::string("NF 1500 Hz W0/2"));
+    CHECK_EQ(ragtime::radio::notchText(usb(2400)), std::string());
+
+    // Which of Hamlib's extra names are a notch's width.
+    CHECK(ragtime::radio::notchWidthName("DSP_IF_NOTCH_W"));
+    CHECK(ragtime::radio::notchWidthName("MANUAL_NOTCH_WIDTH"));
+    CHECK(!ragtime::radio::notchWidthName("DSP_APF_WIDTH"));
+    CHECK(!ragtime::radio::notchWidthName("CONTOUR_WIDTH"));
+    CHECK(!ragtime::radio::notchWidthName("NOTCHF"));
+    CHECK(!ragtime::radio::notchWidthName("DSP_NB_WIDTH"));
+}
+
 // A Yaesu with IF SHIFT and no PBT (2026-11-26, an FT-891): Calibrate
 // measures what a shift does, then the middle shifts and each edge moves
 // alone, on the rig's own widths and 20 Hz of shift.
@@ -1337,6 +1434,7 @@ int main()
     notch();
     notchInHz();
     ifShift();
+    notchWidth();
     clockHeld();
     keepAhead();
     shiftPastTheEnd();

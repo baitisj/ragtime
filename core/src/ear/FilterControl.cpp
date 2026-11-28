@@ -6,6 +6,8 @@
 #include <cstdlib>
 #include <locale>
 #include <sstream>
+#include <string>
+#include <vector>
 
 #include "ragtime/ear/Passbands.h"
 
@@ -50,6 +52,53 @@ void NotchModel::learn(double raw, double hz)
     seenHz = hz;
 }
 
+bool NotchModel::learnWidth(std::optional<int> step, double hz)
+{
+    const int i = step ? std::max(0, std::min(*step, 15)) : 0;
+    if (hz < 20 || hz > 4000) return false;
+    if ((int)widthsHz.size() <= i) widthsHz.resize(i + 1, 0.0);
+    double& w = widthsHz[i];
+    // A little at a time once known: one dip in a busy band can be off.
+    const double next = w > 0 ? w + (hz - w) * 0.3 : hz;
+    const bool moved = std::fabs(next - w) >= 5;
+    w = next;
+    return moved;
+}
+
+double NotchModel::widthAt(std::optional<int> step, int steps) const
+{
+    const int n = std::max(1, steps);
+    const int i = steps > 0 && step ? std::max(0, std::min(*step, n - 1)) : 0;
+    if (i < (int)widthsHz.size() && widthsHz[i] > 0) return widthsHz[i];
+    // The nearest step measured, each step 1.5 times the one before.
+    int nearest = -1;
+    for (int k = 0; k < std::min(n, (int)widthsHz.size()); k++)
+        if (widthsHz[k] > 0 && (nearest < 0 || std::abs(k - i) < std::abs(nearest - i))) nearest = k;
+    if (nearest >= 0) return widthsHz[nearest] * std::pow(1.5, i - nearest);
+    return n == 1 ? WIDTH_HZ : 200.0 + 200.0 * i / (n - 1);
+}
+
+int NotchModel::stepFor(double hz, int steps) const
+{
+    int best = 0;
+    for (int k = 1; k < std::max(1, steps); k++)
+        if (std::fabs(widthAt(k, steps) - hz) < std::fabs(widthAt(best, steps) - hz)) best = k;
+    return best;
+}
+
+std::string NotchModel::stepName(std::optional<int> step, int steps) const
+{
+    if (!step || steps < 2) return std::string();
+    // Its rank by width among the steps.
+    const double w = widthAt(step, steps);
+    int rank = 0;
+    for (int k = 0; k < steps; k++)
+        if (k != *step && (widthAt(k, steps) < w || (widthAt(k, steps) == w && k < *step))) rank++;
+    if (steps == 2) return rank == 0 ? "Narrow" : "Wide";
+    if (steps == 3) return rank == 0 ? "Narrow" : rank == 1 ? "Mid" : "Wide";
+    return "width " + std::to_string(rank + 1);
+}
+
 std::string NotchModel::text() const
 {
     std::ostringstream out;
@@ -67,6 +116,13 @@ std::string NotchModel::text() const
     else
     {
         out << "- -";
+    }
+    for (double w : widthsHz)
+    {
+        if (w > 0)
+            out << ' ' << w;
+        else
+            out << " -";
     }
     return out.str();
 }
@@ -89,6 +145,15 @@ std::optional<NotchModel> NotchModel::fromText(const std::string& text)
             m.seenHz = b;
         }
     }
+    // The widths, if any (an older one has none).
+    std::string w;
+    while (in >> w && m.widthsHz.size() < 16)
+    {
+        std::istringstream v(w);
+        v.imbue(std::locale::classic());
+        double hz = 0;
+        m.widthsHz.push_back(w != "-" && (v >> hz) && hz > 0 ? hz : 0.0);
+    }
     return m;
 }
 
@@ -99,10 +164,22 @@ std::optional<double> notchCentre(const RigFilter& f, const NotchModel& m)
     return std::nullopt;
 }
 
-bool notchCutsData2G(double hz, bool narrow)
+bool notchCutsData2G(double hz, bool narrow, double widthHz)
 {
     const Passband p = data2gPassband(narrow);
-    return hz + NotchModel::WIDTH_HZ / 2 > p.lowHz && hz - NotchModel::WIDTH_HZ / 2 < p.highHz;
+    return hz + widthHz / 2 > p.lowHz && hz - widthHz / 2 < p.highHz;
+}
+
+double notchWidthOf(const RigFilter& f, const NotchModel& m)
+{
+    return m.widthAt(f.notchWidth, f.notchWidths);
+}
+
+RigFilter withNotchWidth(const RigFilter& now, int step)
+{
+    RigFilter out = now;
+    if (now.notchWidths > 0) out.notchWidth = std::max(0, std::min(step, now.notchWidths - 1));
+    return out;
 }
 
 std::string notchChangeText(const RigFilter& from, const RigFilter& to, const NotchModel& m)
@@ -112,10 +189,16 @@ std::string notchChangeText(const RigFilter& from, const RigFilter& to, const No
     if (!is) return "Notch off";
     const std::optional<double> toHz = notchCentre(to, m), fromHz = notchCentre(from, m);
     if (!was) return toHz ? "Notch on at " + std::to_string(tens(*toHz)) + " Hz" : std::string("Notch on");
-    if (!toHz || !fromHz) return std::string();
+    // Its width, where that alone changed.
+    const bool widens = to.notchWidth && from.notchWidth && *to.notchWidth != *from.notchWidth;
+    const std::string width = widens ? "Notch " + m.stepName(from.notchWidth, from.notchWidths) + ARROW +
+                                           m.stepName(to.notchWidth, to.notchWidths)
+                                     : std::string();
+    if (!toHz || !fromHz) return width;
     const int at = tens(*toHz), before = tens(*fromHz);
-    if (before == at) return std::string();
-    return "Notch " + std::to_string(before) + ARROW + std::to_string(at) + " Hz";
+    if (before == at) return width;
+    return "Notch " + std::to_string(before) + ARROW + std::to_string(at) + " Hz" +
+           (widens ? ", " + m.stepName(to.notchWidth, to.notchWidths) : std::string());
 }
 
 RigFilter withNotch(const RigFilter& now, std::optional<double> hz, const NotchModel& m)
@@ -376,6 +459,7 @@ bool holds(const RigFilter& rig, const RigFilter& preset)
     const bool on = rig.notchOn && *rig.notchOn;
     if (on != *preset.notchOn) return false;
     if (!on) return true;
+    if (preset.notchWidth && rig.notchWidth != preset.notchWidth) return false;
     if (preset.notchHz) return rig.notchHz && std::abs(*rig.notchHz - *preset.notchHz) <= 15;
     return near(rig.notchRaw, preset.notchRaw);
 }

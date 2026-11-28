@@ -542,6 +542,8 @@ void filter()
         if (out == "+l PBT_OUT\n") say(dial, "get_level: PBT_OUT\n0.623529\nRPRT 0\n", ms);
         if (out == "+u MN\n") say(dial, "get_func: MN\n1\nRPRT 0\n", ms);
         if (out == "+l NOTCHF_RAW\n") say(dial, "get_level: NOTCHF_RAW\n0.682353\nRPRT 0\n", ms);
+        // No width control: not asked again.
+        if (out == "+p DSP_IF_NOTCH_W\n") say(dial, "get_parm: DSP_IF_NOTCH_W\nRPRT -1\n", ms);
         all += out;
     }
     // Every FILTER_MS, with the dial still once a second.
@@ -685,6 +687,9 @@ void filterSet()
     say(dial, "get_func: MN\n0\nRPRT 0\n", t);
     CHECK_EQ(dial.takeOutput(), std::string("+l NOTCHF_RAW\n"));
     say(dial, "get_level: NOTCHF_RAW\n0.682353\nRPRT 0\n", t);
+    // An Icom has no notch width: refused, and never asked again.
+    CHECK_EQ(dial.takeOutput(), std::string("+p DSP_IF_NOTCH_W\n"));
+    say(dial, "get_parm: DSP_IF_NOTCH_W\nRPRT -1\n", t);
     CHECK(dial.filter().has_value());
     CHECK_EQ(dial.takeOutput(), std::string(""));
 
@@ -837,6 +842,9 @@ void filterYaesu()
     say(dial, "get_level: NOTCHF_RAW\nRPRT -11\n", t);
     CHECK_EQ(dial.takeOutput(), std::string("+l NOTCHF\n"));
     say(dial, "get_level: NOTCHF\n1500\nRPRT 0\n", t);
+    // Its width, as an FTX-1 gives it: an extra parameter, no VFO.
+    CHECK_EQ(dial.takeOutput(), std::string("+p DSP_IF_NOTCH_W\n"));
+    say(dial, "get_parm: DSP_IF_NOTCH_W\n1\nRPRT 0\n", t);
     CHECK(dial.filter().has_value());
     if (dial.filter())
     {
@@ -844,6 +852,8 @@ void filterYaesu()
         CHECK(!dial.filter()->notchRaw);
         CHECK(dial.filter()->notchHz == std::optional<int>(1500));
         CHECK(dial.filter()->ifShiftHz == std::optional<int>(0));
+        CHECK(dial.filter()->notchWidth == std::optional<int>(1));
+        CHECK_EQ(dial.filter()->notchWidths, 2);
     }
     CHECK_EQ(dial.takeOutput(), std::string(""));
 
@@ -865,8 +875,26 @@ void filterYaesu()
     say(dial, "get_func: MN\n1\nRPRT 0\n", t);
     CHECK_EQ(dial.takeOutput(), std::string("+l NOTCHF\n"));
     say(dial, "get_level: NOTCHF\n1230\nRPRT 0\n", t);
+    CHECK_EQ(dial.takeOutput(), std::string("+p DSP_IF_NOTCH_W\n"));
+    say(dial, "get_parm: DSP_IF_NOTCH_W\n1\nRPRT 0\n", t);
     CHECK(dial.filter() && dial.filter()->notchOn == std::optional<bool>(true) &&
           dial.filter()->notchHz == std::optional<int>(1230));
+
+    // Narrower: the width alone, then read back.
+    t += 100;
+    f.notchWidth = 0;
+    dial.setFilter(f, t);
+    CHECK_EQ(dial.takeOutput(), std::string("P DSP_IF_NOTCH_W 0\n"));
+    say(dial, "RPRT 0\n", t);
+    CHECK_EQ(dial.takeOutput(), std::string("+m\n"));
+    say(dial, "get_mode:\nMode: USB\nPassband: 3000\nRPRT 0\n", t);
+    say(dial, dial.takeOutput() == "+l IF\n" ? "get_level: IF\n0\nRPRT 0\n" : "", t);
+    say(dial, dial.takeOutput() == "+u MN\n" ? "get_func: MN\n1\nRPRT 0\n" : "", t);
+    say(dial, dial.takeOutput() == "+l NOTCHF\n" ? "get_level: NOTCHF\n1230\nRPRT 0\n" : "", t);
+    say(dial, dial.takeOutput() == "+p DSP_IF_NOTCH_W\n" ? "get_parm: DSP_IF_NOTCH_W\n0\nRPRT 0\n" : "", t);
+    CHECK(dial.filter() && dial.filter()->notchWidth == std::optional<int>(0));
+    // Nonsense is no reading.
+    CHECK(dial.filter() && dial.filter()->notchWidths == 2);
 
     // Off before it moves; the same Hz is no move.
     t += 100;
@@ -885,6 +913,7 @@ void filterYaesu()
         if (out == "+l IF\n") say(dial, "get_level: IF\n0\nRPRT 0\n", t);
         if (out == "+u MN\n") say(dial, "get_func: MN\n0\nRPRT 0\n", t);
         if (out == "+l NOTCHF\n") say(dial, "get_level: NOTCHF\n1230\nRPRT 0\n", t);
+        if (out == "+p DSP_IF_NOTCH_W\n") say(dial, "get_parm: DSP_IF_NOTCH_W\n0\nRPRT 0\n", t);
         out = dial.takeOutput();
     }
     CHECK_EQ(out, std::string("L NOTCHF 2000\n"));
@@ -902,6 +931,7 @@ void filterYaesu()
         if (out == "+l IF\n") say(dial, "get_level: IF\n0\nRPRT 0\n", t);
         if (out == "+u MN\n") say(dial, "get_func: MN\n0\nRPRT 0\n", t);
         if (out == "+l NOTCHF\n") say(dial, "get_level: NOTCHF\n2000\nRPRT 0\n", t);
+        if (out == "+p DSP_IF_NOTCH_W\n") say(dial, "get_parm: DSP_IF_NOTCH_W\n0\nRPRT 0\n", t);
         out = dial.takeOutput();
     }
     CHECK_EQ(out, std::string("M USB 2400\n"));
@@ -914,6 +944,7 @@ void filterYaesu()
     say(dial, "get_level: IF\n-200\nRPRT 0\n", t);
     say(dial, dial.takeOutput() == "+u MN\n" ? "get_func: MN\n0\nRPRT 0\n" : "", t);
     say(dial, dial.takeOutput() == "+l NOTCHF\n" ? "get_level: NOTCHF\n2000\nRPRT 0\n" : "", t);
+    say(dial, dial.takeOutput() == "+p DSP_IF_NOTCH_W\n" ? "get_parm: DSP_IF_NOTCH_W\n0\nRPRT 0\n" : "", t);
     CHECK(dial.filter() && dial.filter()->ifShiftHz == std::optional<int>(-200) && dial.filter()->widthHz == 2400);
     CHECK(dial.filterProblem().empty());
 }
@@ -934,6 +965,7 @@ void filterSetTwice()
     say(dial, dial.takeOutput() == "+l PBT_OUT\n" ? "get_level: PBT_OUT\n0.501961\nRPRT 0\n" : "", t);
     say(dial, dial.takeOutput() == "+u MN\n" ? "get_func: MN\n0\nRPRT 0\n" : "", t);
     say(dial, dial.takeOutput() == "+l NOTCHF_RAW\n" ? "get_level: NOTCHF_RAW\n0.682353\nRPRT 0\n" : "", t);
+    say(dial, dial.takeOutput() == "+p DSP_IF_NOTCH_W\n" ? "get_parm: DSP_IF_NOTCH_W\nRPRT -1\n" : "", t);
     CHECK(dial.filter().has_value());
     CHECK_EQ(dial.takeOutput(), std::string(""));
 
