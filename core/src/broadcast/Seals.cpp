@@ -142,6 +142,7 @@ void Seals::setChain(const std::string& callsign, const Chain& chain)
         gears_.clear();
         stationGears_.clear();
         sealSoon_ = false;
+        ridesIn_.clear();
         settled_.clear();
         roundItems_.clear();
         callsign_ = call;
@@ -687,47 +688,67 @@ std::optional<uint64_t> Seals::nextSealMs() const
     return std::min(lastItemMs_ + QUIET_MS, oldestSent + SEAL_EVERY_MS);
 }
 
-void Seals::sealIfDue(uint64_t nowMs)
+bool Seals::sealable(const OurItem& item, const std::optional<uint32_t>& riding) const
 {
-    if (link_.paused() || resendLast_ != 0 || callsign_.empty()) return;
-    // One seal burst at a time, so the chain goes out in order.
+    // Going in the burst a seal rides in: settled with it (sendFileEnd).
+    if (item.fate == Fate::Going && item.burst != RIDING_BURST) return false;
+    // A file whose pieces are still going is sealed after them, but for
+    // the one whose last burst the seal rides in.
+    if (item.file && files_ != nullptr && files_->streaming(item.seq) && item.seq != riding) return false;
+    return true;
+}
+
+bool Seals::sealBusy(bool riding) const
+{
+    if (link_.paused() || resendLast_ != 0 || callsign_.empty()) return true;
+    // One seal burst at a time, so the chain goes out in order. A seal
+    // riding in a file's burst may follow one riding in an earlier file's
+    // burst still queued: yielding bursts keep their order (HostLink).
     for (const OurSeal& s : seals_)
     {
-        if (!s.sent && s.tries < SEAL_TRIES) return;
+        if (s.sent || s.tries >= SEAL_TRIES) continue;
+        if (!riding || !ridesIn_.count(s.burst)) return true;
+        BurstState state = link_.burstState(s.burst);
+        if (state == BurstState::Sent || state == BurstState::NotSent) return true;
     }
-    while (!unsealed_.empty() && unsealed_.front().fate == Fate::Unsent) unsealed_.pop_front();
-    if (unsealed_.empty())
-    {
-        sealSoon_ = false;
-        return;
-    }
+    return false;
+}
 
-    // The settled items at the front. A seal lists consecutive numbers, so
-    // a gap (unsealed chat, a number that never reached us, or the numbers
-    // wrapping) starts another seal, made now and sent in the same bursts.
+size_t Seals::settledFront(const std::optional<uint32_t>& riding, bool& anySent, uint64_t& oldestSent)
+{
+    while (!unsealed_.empty() && unsealed_.front().fate == Fate::Unsent) unsealed_.pop_front();
+    // The settled items at the front.
     size_t n = 0;
-    bool anySent = false;
-    uint64_t oldestSent = std::numeric_limits<uint64_t>::max();
+    anySent = false;
+    oldestSent = std::numeric_limits<uint64_t>::max();
     for (size_t i = 0; i < unsealed_.size(); i++)
     {
         const OurItem& item = unsealed_[i];
-        if (item.fate == Fate::Going) break;
-        if (item.file && files_ != nullptr && files_->streaming(item.seq)) break;
+        if (!sealable(item, riding)) break;
         if (item.fate == Fate::Sent)
         {
             anySent = true;
             oldestSent = std::min(oldestSent, item.sentMs);
         }
+        else if (item.fate == Fate::Going)
+        {
+            anySent = true;
+        }
         n++;
     }
-    if (n == 0 || !anySent) return;
-    bool going = std::any_of(unsealed_.begin(), unsealed_.end(), [](const OurItem& i) { return i.fate == Fate::Going; });
-    bool due = (!going && (sealSoon_ || nowMs >= lastItemMs_ + QUIET_MS)) || nowMs >= oldestSent + SEAL_EVERY_MS;
-    if (!due) return;
-    sealSoon_ = false;
+    return n;
+}
 
+Seals::Making Seals::makeSeals(size_t n, uint64_t nowMs) const
+{
+    // A seal lists consecutive numbers, so a gap (unsealed chat, a number
+    // that never reached us, or the numbers wrapping) starts another seal,
+    // made now and sent in the same bursts.
+    Making m;
+    m.n = n;
+    m.lastNumber = lastNumber_;
+    m.lastDigest = lastDigest_;
     uint32_t time = seconds(nowMs);
-    std::vector<OurSeal> made;
     size_t at = 0;
     while (at < n)
     {
@@ -748,15 +769,15 @@ void Seals::sealIfDue(uint64_t nowMs)
         size_t k = std::min<size_t>(end - at, 255);
         protocol::Seal seal;
         protocol::Record record;
-        uint16_t number = lastNumber_ >= MAX_SEAL_NUMBER ? 1 : (uint16_t)(lastNumber_ + 1);
+        uint16_t number = m.lastNumber >= MAX_SEAL_NUMBER ? 1 : (uint16_t)(m.lastNumber + 1);
         for (;;)
         {
             seal = protocol::Seal();
             seal.number = number;
-            seal.previous = lastDigest_;
+            seal.previous = m.lastDigest;
             seal.firstItem = unsealed_[at].seq;
             for (size_t i = at; i < at + k; i++)
-                seal.items.push_back(unsealed_[i].fate == Fate::Sent ? unsealed_[i].digest : protocol::Digest{});
+                seal.items.push_back(unsealed_[i].fate != Fate::Unsent ? unsealed_[i].digest : protocol::Digest{});
             record = chat_.record(seal, time);
             std::vector<uint8_t> frame = protocol::encodeFrame({record});
             if ((!frame.empty() && frame.size() <= protocol::MAX_BROADCAST_FRAME) || k == 1) break;
@@ -772,45 +793,92 @@ void Seals::sealIfDue(uint64_t nowMs)
         {
             s.air += unsealed_[i].air;
             s.mode = unsealed_[i].mode;
-            sealedItems_[unsealed_[i].seq] = unsealed_[i];
+            m.sealed.push_back(i);
         }
-        lastNumber_ = number;
-        lastDigest_ = s.digest;
-        made.push_back(std::move(s));
+        m.lastNumber = number;
+        m.lastDigest = s.digest;
+        m.seals.push_back(std::move(s));
         at += k;
     }
-    unsealed_.erase(unsealed_.begin(), unsealed_.begin() + (std::ptrdiff_t)n);
+    return m;
+}
+
+void Seals::commitSeals(Making& m)
+{
+    for (size_t i : m.sealed) sealedItems_[unsealed_[i].seq] = unsealed_[i];
+    lastNumber_ = m.lastNumber;
+    lastDigest_ = m.lastDigest;
+    unsealed_.erase(unsealed_.begin(), unsealed_.begin() + (std::ptrdiff_t)m.n);
+}
+
+std::optional<std::vector<uint8_t>> Seals::sealRoundFrame(const Making& m, uint64_t nowMs,
+                                                          link::HostLink::HandWindow& window) const
+{
+    // One seal, and a host that does Hands: a SealRound beside it and a
+    // window after it, so stations lacking something say so by Hand
+    // (docs/PROTOCOL.md, "Repairs by Hand").
+    if (m.seals.size() != 1 || handRound_ || !link_.handsSeen() || link_.handChannels() <= 0) return std::nullopt;
+    protocol::SealRound round;
+    round.seal = m.seals.front().number;
+    round.channels = (uint8_t)link_.handChannels();
+    window = link::HostLink::HandWindow();
+    window.delayS = round.delayTenths / 10.0;
+    window.tag = protocol::repairTag(callsign_, round.seal);
+    for (int c = 0; c < round.channels; c++) window.channels.push_back(c);
+    return protocol::encodeFrame({chat_.record(round, seconds(nowMs))});
+}
+
+void Seals::sealsGoing(std::vector<OurSeal>& made, uint64_t id, const std::optional<link::HostLink::HandWindow>& window)
+{
+    for (OurSeal& s : made)
+    {
+        s.burst = id;
+        s.tries = 1;
+    }
+    if (window)
+        handRound_ = HandRound{made.front().number, (int)window->channels.size(), id, window->delayS, 0};
+    for (OurSeal& s : made) seals_.push_back(std::move(s));
+    version_++;
+}
+
+void Seals::sealIfDue(uint64_t nowMs)
+{
+    if (sealBusy(false)) return;
+    bool anySent = false;
+    uint64_t oldestSent = 0;
+    size_t n = settledFront(std::nullopt, anySent, oldestSent);
+    if (unsealed_.empty())
+    {
+        sealSoon_ = false;
+        return;
+    }
+    if (n == 0 || !anySent) return;
+    bool going = std::any_of(unsealed_.begin(), unsealed_.end(), [](const OurItem& i) { return i.fate == Fate::Going; });
+    bool due = (!going && (sealSoon_ || nowMs >= lastItemMs_ + QUIET_MS)) || nowMs >= oldestSent + SEAL_EVERY_MS;
+    if (!due) return;
+    sealSoon_ = false;
+
+    Making m = makeSeals(n, nowMs);
+    commitSeals(m);
+    std::vector<OurSeal>& made = m.seals;
 
     // A seal a frame, the frames as bursts.
     std::string mode = made.back().mode;
     std::vector<std::vector<uint8_t>> frames;
     for (const OurSeal& s : made) frames.push_back(protocol::encodeFrame({s.record}));
 
-    // One seal, and a host that does Hands: a SealRound beside it and a
-    // window after it, so stations lacking something say so by Hand
-    // (docs/PROTOCOL.md, "Repairs by Hand").
-    if (made.size() == 1 && !handRound_ && link_.handsSeen() && link_.handChannels() > 0)
+    link::HostLink::HandWindow window;
+    if (std::optional<std::vector<uint8_t>> round = sealRoundFrame(m, nowMs, window))
     {
-        protocol::SealRound round;
-        round.seal = made.front().number;
-        round.channels = (uint8_t)link_.handChannels();
         std::vector<std::vector<uint8_t>> withRound = frames;
-        withRound.push_back(protocol::encodeFrame({chat_.record(round, time)}));
+        withRound.push_back(*round);
         link::ModeInfo info = modeInfo(mode);
         if (!info.valid() || packBursts(withRound, info).size() == 1)
         {
-            link::HostLink::HandWindow window;
-            window.delayS = round.delayTenths / 10.0;
-            window.tag = protocol::repairTag(callsign_, round.seal);
-            for (int c = 0; c < round.channels; c++) window.channels.push_back(c);
             uint64_t id = link_.broadcast(withRound, mode, nowMs, "seal, repairs by Hand", window);
             if (id != 0)
             {
-                made.front().burst = id;
-                made.front().tries = 1;
-                handRound_ = HandRound{round.seal, round.channels, id, window.delayS, 0};
-                for (OurSeal& s : made) seals_.push_back(std::move(s));
-                version_++;
+                sealsGoing(made, id, window);
                 return;
             }
         }
@@ -829,6 +897,87 @@ void Seals::sealIfDue(uint64_t nowMs)
     }
     for (OurSeal& s : made) seals_.push_back(std::move(s));
     version_++;
+}
+
+uint64_t Seals::sendFileEnd(uint32_t fileSeq, const std::vector<std::vector<uint8_t>>& frames,
+                            const protocol::Record* announce, const std::string& mode, const std::string& label,
+                            uint64_t nowMs)
+{
+    // Its announce goes in this burst (a file of one burst): an item going
+    // in the burst the seal would ride in, until the burst has its id.
+    if (announce != nullptr) going({*announce}, RIDING_BURST, mode, nowMs);
+    auto bind = [&](uint64_t id) {
+        for (OurItem& item : unsealed_)
+        {
+            if (item.burst == RIDING_BURST) item.burst = id;
+        }
+        for (auto& entry : sealedItems_)
+        {
+            if (entry.second.burst == RIDING_BURST) entry.second.burst = id;
+        }
+        for (auto& entry : drafts_)
+        {
+            if (entry.second.burst == RIDING_BURST) entry.second.burst = id;
+        }
+        // No burst (no host): the announce never went.
+        if (id == 0)
+        {
+            for (OurItem& item : unsealed_)
+            {
+                if (item.burst == 0 && item.fate == Fate::Going) item.fate = Fate::Unsent;
+            }
+        }
+        return id;
+    };
+    auto alone = [&]() { return bind(link_.broadcast(frames, mode, nowMs, label, true)); };
+
+    // The seal over the file, after its last pieces in their keying, when
+    // it fits: not a keying of its own straight after (#185). As
+    // sealIfDue would seal it once the burst has gone, so nothing else
+    // settled waits for it.
+    link::ModeInfo info = modeInfo(mode);
+    if (sealBusy(true) || !info.valid()) return alone();
+    bool anySent = false;
+    uint64_t oldestSent = 0;
+    size_t n = settledFront(fileSeq, anySent, oldestSent);
+    bool fileIn = false;
+    for (size_t i = 0; i < n; i++) fileIn = fileIn || unsealed_[i].seq == fileSeq;
+    if (!fileIn) return alone();
+    Making m = makeSeals(n, nowMs);
+    if (m.seals.empty()) return alone();
+    for (const OurSeal& s : m.seals)
+    {
+        if (s.mode != mode) return alone();
+    }
+    std::vector<std::vector<uint8_t>> all = frames;
+    for (const OurSeal& s : m.seals) all.push_back(protocol::encodeFrame({s.record}));
+
+    link::HostLink::HandWindow window;
+    if (std::optional<std::vector<uint8_t>> round = sealRoundFrame(m, nowMs, window))
+    {
+        std::vector<std::vector<uint8_t>> withRound = all;
+        withRound.push_back(*round);
+        if (packBursts(withRound, info).size() == 1)
+        {
+            uint64_t id = link_.broadcast(withRound, mode, nowMs, label + ", sealed, repairs by Hand", window);
+            if (id != 0)
+            {
+                commitSeals(m);
+                sealSoon_ = false;
+                ridesIn_.insert(id);
+                sealsGoing(m.seals, bind(id), window);
+                return id;
+            }
+        }
+    }
+    if (packBursts(all, info).size() != 1) return alone();
+    uint64_t id = link_.broadcast(all, mode, nowMs, label + ", sealed", true);
+    if (id == 0) return alone();
+    commitSeals(m);
+    sealSoon_ = false;
+    ridesIn_.insert(id);
+    sealsGoing(m.seals, bind(id), std::nullopt);
+    return id;
 }
 
 void Seals::onSealOver(const std::string& from, const protocol::RepairRequest& request, uint64_t nowMs)
@@ -1414,6 +1563,7 @@ void Seals::onEvent(const Event& event, uint64_t nowMs)
     bool settled = event.burstState == BurstState::Sent || event.burstState == BurstState::NotSent;
     if (!settled) return;
     bool sent = event.burstState == BurstState::Sent;
+    ridesIn_.erase(event.id);
 
     for (OurItem& item : unsealed_)
     {

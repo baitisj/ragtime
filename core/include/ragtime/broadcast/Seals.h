@@ -69,6 +69,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <deque>
+#include <limits>
 #include <map>
 #include <optional>
 #include <random>
@@ -249,6 +250,17 @@ public:
     void addAirtime(uint32_t seq, double seconds);
     // A file's pieces have all gone: seal now, not after QUIET_MS.
     void sealSoon() { sealSoon_ = true; }
+    // The last burst of a file's first pass (BroadcastFiles), queued as
+    // HostLink::broadcast queues it (yielding), with announce, when not
+    // null, going in it (a file of one burst). The seal over the file (and
+    // what else is settled before it) rides after its pieces when it fits
+    // in the burst, with a SealRound and a Hand window when it would have
+    // one alone: so it goes in the same keying, not in one of its own
+    // straight after (#185). If the burst isn't sent, the seal goes again
+    // alone, and the pieces as BroadcastFiles retries them. Its id.
+    uint64_t sendFileEnd(uint32_t fileSeq, const std::vector<std::vector<uint8_t>>& frames,
+                         const protocol::Record* announce, const std::string& mode, const std::string& label,
+                         uint64_t nowMs);
     // Our line seq (with its record time) is still a draft, to be fixed
     // in place (BroadcastChat::edit; docs/PROTOCOL.md, "Edits"): sealed
     // chat that no seal lists yet, or unsealed chat (the default) that a
@@ -480,6 +492,28 @@ private:
     const OurSeal* sealFor(uint32_t seq) const;
     const OurItem* findItem(uint32_t seq) const;
     void sealIfDue(uint64_t nowMs);
+    // The burst an item goes in before it has an id: the file's last burst
+    // that a seal rides in (sendFileEnd).
+    static constexpr uint64_t RIDING_BURST = std::numeric_limits<uint64_t>::max();
+    // Seals made over the n settled items at the front, not yet ours:
+    // the items' indices sealed, and the chain after them.
+    struct Making
+    {
+        std::vector<OurSeal> seals;
+        std::vector<size_t> sealed;
+        size_t n = 0;
+        uint16_t lastNumber = 0;
+        protocol::Digest lastDigest{};
+    };
+    bool sealable(const OurItem& item, const std::optional<uint32_t>& riding) const;
+    bool sealBusy(bool riding) const;
+    std::set<uint64_t> ridesIn_;    // the file bursts seals rode in, until settled
+    size_t settledFront(const std::optional<uint32_t>& riding, bool& anySent, uint64_t& oldestSent);
+    Making makeSeals(size_t n, uint64_t nowMs) const;
+    void commitSeals(Making& m);
+    std::optional<std::vector<uint8_t>> sealRoundFrame(const Making& m, uint64_t nowMs,
+                                                       link::HostLink::HandWindow& window) const;
+    void sealsGoing(std::vector<OurSeal>& made, uint64_t id, const std::optional<link::HostLink::HandWindow>& window);
     // byHand: from a repair Hand, which gives counts, not which items.
     void onRequest(const std::string& from, const protocol::RepairRequest& request, uint64_t nowMs,
                    bool byHand = false);
