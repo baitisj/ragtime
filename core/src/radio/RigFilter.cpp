@@ -2,6 +2,7 @@
 
 #include <cmath>
 #include <cstdio>
+#include <string>
 
 namespace ragtime
 {
@@ -72,6 +73,8 @@ std::string describe(const RigFilter& filter)
         else
             std::snprintf(text, sizeof text, "notch on");
         out += (out.empty() ? "" : dot) + std::string(text);
+        if (filter.notchWidth && filter.notchWidths > 1)
+            out += " (width " + std::to_string(*filter.notchWidth + 1) + " of " + std::to_string(filter.notchWidths) + ")";
     }
     return out;
 }
@@ -85,9 +88,19 @@ std::string notchText(const RigFilter& filter)
 {
     if (!filter.notchOn) return std::string();
     if (!*filter.notchOn) return "NF off";
-    if (filter.notchRaw) return "NF " + pbtText(*filter.notchRaw);
-    if (filter.notchHz) return "NF " + std::to_string(*filter.notchHz) + " Hz";
-    return "NF on";
+    const std::string width = filter.notchWidth && filter.notchWidths > 1
+                                  ? " W" + std::to_string(*filter.notchWidth) + "/" + std::to_string(filter.notchWidths)
+                                  : std::string();
+    if (filter.notchRaw) return "NF " + pbtText(*filter.notchRaw) + width;
+    if (filter.notchHz) return "NF " + std::to_string(*filter.notchHz) + " Hz" + width;
+    return "NF on" + width;
+}
+
+bool notchWidthName(const std::string& name)
+{
+    auto has = [&name](const char* part) { return name.find(part) != std::string::npos; };
+    const bool endsW = name.size() >= 2 && name.compare(name.size() - 2, 2, "_W") == 0;
+    return has("NOTCH") && (has("WIDTH") || endsW) && !has("APF") && !has("CONTOUR");
 }
 
 } // namespace radio

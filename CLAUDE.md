@@ -218,9 +218,11 @@ into the APK, so rebuild it after changing them.
   (`+m`, `+l PBT_IN`, `+l PBT_OUT`, `+u MN`, `+l NOTCHF_RAW`, Jeff's
   OK 2026-10-26; `+l NOTCHF` from a rig with no NOTCHF_RAW, a Yaesu or
   a Kenwood, and `+l IF`, IF SHIFT, from one with no PBT, since
-  2026-11-26), naming
+  2026-11-26; `+p DSP_IF_NOTCH_W`, the notch's width, from a rig with
+  the manual notch, since 2026-11-28), naming
   `currVFO` for a `--vfo` one, and sets only the Ear's filter (`M`,
-  `L PBT_IN`, `L PBT_OUT` or `L IF`, `L NOTCHF_RAW` or `L NOTCHF`, `U MN`, each only when it
+  `L PBT_IN`, `L PBT_OUT` or `L IF`, `L NOTCHF_RAW` or `L NOTCHF`,
+  `P DSP_IF_NOTCH_W`, `U MN`, each only when it
   differs, with its box ticked) and a frequency the operator picks
   (`F`); `Bands`, the US data segments, and 60 m's channels (the dial exactly 1.5 kHz below a channel's centre, Jeff 2026-10-27) and band segment; `PathLog`, a line a
   burst heard, appended, and each station's 24-hour strip by band),
@@ -322,7 +324,14 @@ into the APK, so rebuild it after changing them.
   `ear::data2gKept`), Disable (PBT centred, notch off) and four presets (tap
   recalls, hold stores, pushed in while the rig has them), the notch's
   bar dragged out of its NF OFF bay (`ear::NotchModel`, learned from the
-  dip, `EdgeFinder::dip`; in Hz, NOTCHF, on a Yaesu or Kenwood), Revert (the
+  dip, `EdgeFinder::dip`; in Hz, NOTCHF, on a Yaesu or Kenwood) and
+  drawn at the width measured from the dip (its -6 dB width,
+  `Dip::widthHz`, learned per step in `NotchModel::widthsHz`); on a rig
+  with a notch width control (Hamlib's ext level or parm named like
+  NOTCH WIDTH, today the FTX-1's `DSP_IF_NOTCH_W`; through rigctld that
+  one name only, `radio::NOTCH_WIDTH_PARM`, Jeff 2026-11-28) grips on
+  the shading's sides, or the wheel over the bar, pick the rig's width
+  steps (`ear::withNotchWidth`), which presets keep, Revert (the
   filter as the Ear found it), and Calibrate for the twin PBT (`ear::KnobModel`: Hz per knob,
   the real centre and width, and a cut in the audio that hides an edge;
   two turns each side, as an IC-7100 hides its low edge under a cut
@@ -548,7 +557,8 @@ into the APK, so rebuild it after changing them.
   Custom..., or Ctrl or Shift with the wheel), through rigctld (`F`) or
   Hamlib, never while transmitting. Ragtime reads the dial and the
   transmit meters from
-  rigctld (`\chk_vfo`, `f`, `+m`, `+l` levels and `+u MN` only: the operator's
+  rigctld (`\chk_vfo`, `f`, `+m`, `+l` levels, `+u MN` and
+  `+p DSP_IF_NOTCH_W` only: the operator's
   rigctld is shared), or from the rig it
   opens with Hamlib, where PTT is the only thing it sets unasked, the SWR
   trip (off by default) the only thing that sets the power, to 0. The
@@ -558,7 +568,9 @@ into the APK, so rebuild it after changing them.
   through Hamlib or rigctld (`M`, `L PBT_IN`, `L PBT_OUT`,
   `L NOTCHF_RAW` and `U MN`, Jeff's OK 2026-10-26; for a Yaesu or a
   Kenwood, `L NOTCHF`, the notch in Hz, where there is no NOTCHF_RAW, and
-  `L IF`, IF SHIFT, where there is no PBT, Jeff 2026-11-26); it and a picked
+  `L IF`, IF SHIFT, where there is no PBT, Jeff 2026-11-26; the notch's
+  width, `P DSP_IF_NOTCH_W`, where the rig has that control, Jeff
+  2026-11-28); it and a picked
   frequency are the only set commands Ragtime ever sends rigctld. It
   never keys through rigctld (NET rigctl is left out of the Hamlib
   list).
@@ -665,7 +677,8 @@ on the frames' Hand reference. `--rig PORT` plays a rigctld for the dial (14.105
 in three; `--rig-vfo` plays a rigctld started with `--vfo`;
 `--rig-yaesu` plays a Yaesu, with no PBT and the notch in Hz (`+l
 NOTCHF`, `L NOTCHF`) instead of NOTCHF_RAW, IF SHIFT (`+l IF`, `L IF`)
-and an FT-891's widths; it answers
+and an FT-891's widths, and an FTX-1's notch width (`+p DSP_IF_NOTCH_W`,
+`P DSP_IF_NOTCH_W 0` or `1`, 1 at first); it answers
 the meters too, its SWR 1.3 or `--rig-swr X`, an ALC that follows host
 A's `TXPOWER` for Auto ALC, and the S-meter, -40 dB over S9 or
 `--rig-noise DB`) and prints anything it is

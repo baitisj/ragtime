@@ -76,8 +76,10 @@
 // --rig-yaesu plays a Yaesu (an FT-891, say): no PBT and no NOTCHF_RAW,
 // the notch's centre in Hz instead, "+l NOTCHF" (1500 at first), set with
 // "L NOTCHF 1200"; IF SHIFT, "+l IF" (0 at first), set with "L IF 200"
-// (+-1200 Hz in 20 Hz steps); and widths rounded up to an FT-891's steps,
-// so "M USB 1000" reads back as 1100.
+// (+-1200 Hz in 20 Hz steps); widths rounded up to an FT-891's steps,
+// so "M USB 1000" reads back as 1100; and the notch's width as an FTX-1
+// gives it, the extra parameter "+p DSP_IF_NOTCH_W" (1 at first, 0 or
+// 1), set with "P DSP_IF_NOTCH_W 0" (no VFO named, even with --rig-vfo).
 // --dial-hop moves the dial to 14.250 MHz, outside the US data segments,
 // for one minute in every three, so receive only shows.
 //
@@ -268,6 +270,12 @@ public:
                                       ++strengths_ % 6 == 0 ? -10 : noise_ + (int)(nowMs / 5000 % 4));
                     answer = head + (value[0] != 0 ? std::string(value) + "RPRT 0\n" : std::string("RPRT -11\n"));
                 }
+                else if (line == "+p DSP_IF_NOTCH_W")
+                {
+                    // A parameter names no VFO.
+                    answer = "get_parm: DSP_IF_NOTCH_W\n" +
+                             (yaesu_ ? std::to_string(notchWidth_) + "\nRPRT 0\n" : std::string("RPRT -1\n"));
+                }
                 else if (line == (vfo_ ? "+u currVFO MN" : "+u MN"))
                 {
                     answer = "get_func: " + line.substr(3) + "\n" + (notchOn_ ? "1" : "0") + "\nRPRT 0\n";
@@ -333,6 +341,15 @@ private:
         in.imbue(std::locale::classic());
         std::string command, vfo;
         in >> command;
+        if (command == "P")
+        {
+            // The notch's width, as an FTX-1's: a parameter, no VFO.
+            std::string parm;
+            int step = -1;
+            if (!yaesu_ || !(in >> parm >> step) || parm != "DSP_IF_NOTCH_W" || step < 0 || step > 1) return false;
+            notchWidth_ = step;
+            return true;
+        }
         if (vfo_ && !(in >> vfo && vfo == "currVFO")) return false;
         if (command == "F")
         {
@@ -387,6 +404,7 @@ private:
     double notchRaw_ = 0.5;
     int notchHz_ = 1500;
     int ifShift_ = 0;
+    int notchWidth_ = 1;
     int listener_ = -1;
     uint64_t dialHz_;
     bool hop_;

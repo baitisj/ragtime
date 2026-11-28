@@ -139,6 +139,27 @@ std::optional<Dip> EdgeFinder::dip(double lowHz, double highHz) const
         const double bend = a - 2 * b + c;
         if (bend > 0) d.hz += 0.5 * (a - c) / bend * topHz_ / Spectrum::BINS;
     }
+    // Its width: out each side to where it climbs back to DROP_DB under
+    // the passband, between bins. A side that meets the passband's edge
+    // (falling again) or the end of what is heard first has no width.
+    const double level = passband - DROP_DB;
+    auto side = [&](int step) -> std::optional<double> {
+        int i = best;
+        while (true)
+        {
+            const int next = i + step;
+            if (next < 0 || next >= Spectrum::BINS || !heard[next]) return std::nullopt;
+            if (db[next] >= level)
+            {
+                const double share = db[next] != db[i] ? (level - db[i]) / (db[next] - db[i]) : 0.5;
+                return binHz(i) + share * (binHz(next) - binHz(i));
+            }
+            if (db[next] < db[i] - 1.0 && std::fabs(binHz(next) - d.hz) > 100) return std::nullopt;
+            i = next;
+        }
+    };
+    const std::optional<double> lo = side(-1), hi = side(1);
+    if (lo && hi && *hi > *lo) d.widthHz = *hi - *lo;
     return d;
 }
 

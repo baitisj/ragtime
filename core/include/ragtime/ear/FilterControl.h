@@ -108,6 +108,10 @@ struct KnobModel
 // lie outside the passband. Other rigs start from the same line, and each
 // dip measured corrects it: one moves the line, a second far enough from
 // the first sets its slope too. Kept for each rig and mode.
+//
+// Its width too, from the dip: one for each of the rig's width steps (or
+// the one width of a rig with none), so the Ear draws the notch as wide
+// as it is and a drag of its side lands on the step nearest.
 struct NotchModel
 {
     static constexpr double HZ_PER_UNIT = 5010;
@@ -130,8 +134,24 @@ struct NotchModel
     // Whether it has learned from a dip.
     bool learned() const { return seenRaw.has_value(); }
 
-    // "5010.0 -990.0 0.6824 2430.0", the last two a dash for none, in the
-    // C locale; and back.
+    // Widths measured, Hz, by step (the first for a rig with no steps);
+    // 0 for one not yet measured.
+    std::vector<double> widthsHz;
+    // A dip's width measured at a step; true when what is kept moved.
+    bool learnWidth(std::optional<int> step, double hz);
+    // The width at a step of this many (none, or 0 steps: the rig's one
+    // width): as measured, else from the nearest step measured, taking
+    // each step as 1.5 times as wide as the one before; else WIDTH_HZ
+    // with no steps, or 200 to 400 Hz across them.
+    double widthAt(std::optional<int> step, int steps) const;
+    // The step, of this many, whose width is nearest hz.
+    int stepFor(double hz, int steps) const;
+    // Its name: by how wide it is among the steps, "Narrow" and "Wide",
+    // or "Narrow", "Mid" and "Wide"; "width 2" with more; empty with none.
+    std::string stepName(std::optional<int> step, int steps) const;
+
+    // "5010.0 -990.0 0.6824 2430.0", the last two a dash for none, then
+    // the widths, a dash for one not measured, in the C locale; and back.
     std::string text() const;
     static std::optional<NotchModel> fromText(const std::string& text);
 };
@@ -140,10 +160,14 @@ struct NotchModel
 // (NOTCHF), else its position (NOTCHF_RAW) through the model; none
 // from a rig that gives neither.
 std::optional<double> notchCentre(const RigFilter& f, const NotchModel& m);
-// Whether a notch at hz cuts into Data2G's passband.
-bool notchCutsData2G(double hz, bool narrow);
+// Whether a notch at hz, this wide, cuts into Data2G's passband.
+bool notchCutsData2G(double hz, bool narrow, double widthHz = NotchModel::WIDTH_HZ);
+// A setting's notch width, Hz: its step's (or the rig's one width).
+double notchWidthOf(const RigFilter& f, const NotchModel& m);
+// The notch's width at a step, the rest as it is.
+RigFilter withNotchWidth(const RigFilter& now, int step);
 // The notch's change, or empty: "Notch on at 1500 Hz", "Notch 1500 →
-// 1200 Hz", "Notch off".
+// 1200 Hz", "Notch off", "Notch Narrow → Wide".
 std::string notchChangeText(const RigFilter& from, const RigFilter& to, const NotchModel& m);
 // The notch on, centred at hz (off with none), the rest as it is: in Hz,
 // to the nearest 10, for a rig that gives its notch in Hz and no
@@ -221,8 +245,8 @@ double guessHzPerKnob(const RigFilter& f);
 RigFilter disabled(const RigFilter& now);
 bool filtersOff(const RigFilter& f);
 // The rig has what a preset holds: the same mode and width, the knobs
-// and the notch within one and a half of the rig's steps. Parts the
-// preset doesn't hold match anything.
+// and the notch within one and a half of the rig's steps, and the same
+// notch width step. Parts the preset doesn't hold match anything.
 bool holds(const RigFilter& rig, const RigFilter& preset);
 // Whether a passband cuts more than 10 Hz into what of Data2G's it must
 // leave whole (data2gKept: the wide modes', or with the 500 Hz switch on

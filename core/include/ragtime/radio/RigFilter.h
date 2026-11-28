@@ -20,6 +20,15 @@
 // ear::NotchModel turns into Hz. Yaesu and Kenwood rigs (an FT-891, say)
 // have no NOTCHF_RAW and give their NOTCHF level instead, the notch's
 // centre in audio Hz (in 10 Hz steps on a Yaesu).
+//
+// Some rigs can change the notch's width too, in a few steps (Narrow and
+// Wide, or Wide, Mid and Narrow). Hamlib has no standard level for it, so
+// it is found by name among the rig's extra levels and parameters
+// (notchWidthName): today only an FTX-1's DSP_IF_NOTCH_W, a parameter, 0
+// or 1. Through rigctld that one name is asked ("+p DSP_IF_NOTCH_W"),
+// as rigctld can't say which extra ones a rig has. The width is the step
+// as the rig numbers it, 0 up; what each step measures is the Ear's to
+// find (ear::NotchModel).
 #ifndef RAGTIME_RADIO_RIG_FILTER_H
 #define RAGTIME_RADIO_RIG_FILTER_H
 
@@ -41,12 +50,15 @@ struct RigFilter
     std::optional<bool> notchOn;    // the manual notch
     std::optional<double> notchRaw; // its position, 0 to 1
     std::optional<int> notchHz;     // or its centre in Hz (NOTCHF)
+    std::optional<int> notchWidth;  // its width: a step, 0 up, of
+    int notchWidths = 0;            // this many; 0 where the rig has none
 
     bool operator==(const RigFilter& o) const
     {
         return mode == o.mode && widthHz == o.widthHz && pbtIn == o.pbtIn && pbtOut == o.pbtOut &&
                ifShiftHz == o.ifShiftHz &&
-               notchOn == o.notchOn && notchRaw == o.notchRaw && notchHz == o.notchHz;
+               notchOn == o.notchOn && notchRaw == o.notchRaw && notchHz == o.notchHz &&
+               notchWidth == o.notchWidth && notchWidths == o.notchWidths;
     }
     bool operator!=(const RigFilter& o) const { return !(*this == o); }
 };
@@ -63,9 +75,19 @@ std::string describe(const RigFilter& filter);
 // "IF +200 Hz" for the flight recorder; empty from a rig without it.
 std::string ifShiftText(const RigFilter& filter);
 // The notch for the flight recorder: "NF off", "NF 0.68", "NF 1500 Hz",
-// or "NF on" from a rig that says nothing of where; empty from a rig
-// with no notch.
+// or "NF on" from a rig that says nothing of where, then its width step
+// where the rig has them ("NF 1500 Hz W1/2"); empty from a rig with no
+// notch.
 std::string notchText(const RigFilter& filter);
+
+// The notch's width through rigctld: the one extra parameter asked, and
+// its steps (an FTX-1's, 0 or 1).
+constexpr const char* NOTCH_WIDTH_PARM = "DSP_IF_NOTCH_W";
+constexpr int NOTCH_WIDTH_PARM_STEPS = 2;
+// Whether a Hamlib extra level's or parameter's name is a notch width:
+// "NOTCH" in it with "WIDTH" or ending "_W" ("DSP_IF_NOTCH_W"), and not
+// the audio peak filter's or the contour's.
+bool notchWidthName(const std::string& name);
 
 } // namespace radio
 } // namespace ragtime

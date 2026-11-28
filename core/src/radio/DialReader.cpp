@@ -20,8 +20,9 @@ namespace
 // The manual notch's on and off is a function, MN, asked with "u".
 const char* const LEVELS[DialReader::METERS] = {"ALC",      "SWR",    "RFPOWER_METER_WATTS", "RFPOWER_METER",
                                                  "STRENGTH", "PBT_IN", "PBT_OUT",             "MN",
-                                                 "NOTCHF_RAW", "NOTCHF",   "IF"};
-constexpr int FILTER_STEPS = 7;
+                                                 "NOTCHF_RAW", "NOTCHF",   "IF",
+                                                 NOTCH_WIDTH_PARM};
+constexpr int FILTER_STEPS = 8;
 
 // A number on a line of its own: digits, perhaps signed, perhaps with a
 // decimal part ("14074000", "14074000.000000", "0.593750").
@@ -143,6 +144,8 @@ bool DialReader::askable(int meter) const
     // IF SHIFT only from a rig with no PBT (a Yaesu).
     if (meter == (int)Meter::IfShift)
         return state_[(int)Meter::PbtIn] == State::Dropped && state_[(int)Meter::PbtOut] == State::Dropped;
+    // Its width only from a rig with a manual notch.
+    if (meter == (int)Meter::NotchWidth) return state_[(int)Meter::NotchOn] != State::Dropped;
     // Its centre in Hz only from one with no position (a Yaesu, a Kenwood).
     if (meter == (int)Meter::NotchHz)
         return state_[(int)Meter::NotchOn] != State::Dropped && state_[(int)Meter::NotchRaw] == State::Dropped;
@@ -172,8 +175,12 @@ void DialReader::askMeter(int meter, uint64_t nowMs)
 {
     // Questions only: "l" gets a level, "u" a function, and nothing here
     // sets the radio.
-    out_ += std::string(meter == (int)Meter::NotchOn ? "+u " : "+l ") + (vfo_ == Vfo::Yes ? "currVFO " : "") +
-            LEVELS[meter] + "\n";
+    // "p" a parameter, which names no VFO.
+    if (meter == (int)Meter::NotchWidth)
+        out_ += std::string("+p ") + LEVELS[meter] + "\n";
+    else
+        out_ += std::string(meter == (int)Meter::NotchOn ? "+u " : "+l ") + (vfo_ == Vfo::Yes ? "currVFO " : "") +
+                LEVELS[meter] + "\n";
     asking_ = Ask::Meter;
     askedMeter_ = meter;
     askedMs_ = nowMs;
@@ -264,8 +271,8 @@ bool DialReader::askFilter(uint64_t nowMs)
 
 int DialReader::filterMeter(int step)
 {
-    static const Meter order[] = {Meter::PbtIn,   Meter::PbtOut,   Meter::IfShift,
-                                  Meter::NotchOn, Meter::NotchRaw, Meter::NotchHz};
+    static const Meter order[] = {Meter::PbtIn,    Meter::PbtOut,  Meter::IfShift,   Meter::NotchOn,
+                                  Meter::NotchRaw, Meter::NotchHz, Meter::NotchWidth};
     return (int)order[step - 1];
 }
 
@@ -357,8 +364,12 @@ void DialReader::queueFilter()
                                 : movesHz ? "L " + vfo + "NOTCHF " + std::to_string(*f.notchHz)
                                           : "";
         const std::string mn = switches ? "U " + vfo + "MN " + (*f.notchOn ? "1" : "0") : "";
-        for (const std::string& line : f.notchOn && *f.notchOn ? std::vector<std::string>{raw, mn}
-                                                                 : std::vector<std::string>{mn, raw})
+        // Its width with its position: the extra parameter, no VFO named.
+        const bool widens = f.notchWidth && (!had || had->notchWidth != f.notchWidth);
+        const std::string width =
+            widens ? std::string("P ") + NOTCH_WIDTH_PARM + " " + std::to_string(*f.notchWidth) : std::string();
+        for (const std::string& line : f.notchOn && *f.notchOn ? std::vector<std::string>{raw, width, mn}
+                                                                 : std::vector<std::string>{mn, raw, width})
             if (!line.empty()) setLines_.push_back(line);
         // What the rig should have once these go.
         RigFilter next = had.value_or(RigFilter{});
@@ -370,6 +381,7 @@ void DialReader::queueFilter()
         for (auto part : {&RigFilter::pbtIn, &RigFilter::pbtOut, &RigFilter::notchRaw})
             if (f.*part) next.*part = f.*part;
         if (f.notchHz) next.notchHz = f.notchHz;
+        if (f.notchWidth) next.notchWidth = f.notchWidth;
         if (f.ifShiftHz) next.ifShiftHz = f.ifShiftHz;
         if (f.notchOn) next.notchOn = f.notchOn;
         sent_ = next;
@@ -522,11 +534,13 @@ void DialReader::meterValue(int meter, double value)
     bool pbt = meter == (int)Meter::PbtIn || meter == (int)Meter::PbtOut;
     bool notchHz = meter == (int)Meter::NotchHz;
     bool ifShift = meter == (int)Meter::IfShift;
-    bool notch = meter == (int)Meter::NotchOn || meter == (int)Meter::NotchRaw || notchHz;
+    bool notchWidth = meter == (int)Meter::NotchWidth;
+    bool notch = meter == (int)Meter::NotchOn || meter == (int)Meter::NotchRaw || notchHz || notchWidth;
     // IF SHIFT past +-5 kHz is no reading: a rigctld whose Hamlib couldn't
     // parse the rig's answer prints whatever it had.
     if (ifShift ? std::fabs(value) > 5000
         : notchHz ? (value <= 0 || value > 10000)
+        : notchWidth ? (value < 0 || value >= NOTCH_WIDTH_PARM_STEPS)
         : notch ? (value < 0 || value > 1)
         : pbt ? std::fabs(value) > 10000
             : strength ? (value < -100 || value > 100) : (value < 0 || (meter == (int)Meter::Alc && value > 2.0)))
@@ -547,6 +561,11 @@ void DialReader::meterValue(int meter, double value)
         if (meter == (int)Meter::NotchRaw) reading_->notchRaw = value;
         if (notchHz) reading_->notchHz = (int)std::lround(value);
         if (ifShift) reading_->ifShiftHz = (int)std::lround(value);
+        if (notchWidth)
+        {
+            reading_->notchWidth = (int)std::lround(value);
+            reading_->notchWidths = NOTCH_WIDTH_PARM_STEPS;
+        }
         return;
     }
     if (strength)
@@ -569,7 +588,8 @@ void DialReader::meterValue(int meter, double value)
     case Meter::NotchOn:
     case Meter::NotchRaw:
     case Meter::NotchHz:
-    case Meter::IfShift: break;
+    case Meter::IfShift:
+    case Meter::NotchWidth: break;
     }
     readings_.push_back(reading);
 }
@@ -610,15 +630,17 @@ void DialReader::onLine(const std::string& line, uint64_t nowMs)
         return;
     }
     if (inMode_ || (asking_ == Ask::Mode && answering_ < 0 && line.compare(0, 11, "get_level: ") != 0 &&
-                    line.compare(0, 10, "get_func: ") != 0))
+                    line.compare(0, 10, "get_func: ") != 0 && line.compare(0, 10, "get_parm: ") != 0))
     {
         modeLine(line, nowMs);
         return;
     }
 
     // A long answer: "get_level: SWR" (or "get_level: currVFO SWR"), the
-    // value, then RPRT; "get_func: MN" the same.
-    if (line.compare(0, 11, "get_level: ") == 0 || line.compare(0, 10, "get_func: ") == 0)
+    // value, then RPRT; "get_func: MN" and "get_parm: DSP_IF_NOTCH_W" the
+    // same.
+    if (line.compare(0, 11, "get_level: ") == 0 || line.compare(0, 10, "get_func: ") == 0 ||
+        line.compare(0, 10, "get_parm: ") == 0)
     {
         std::string name = line.substr(line.rfind(' ') + 1);
         answering_ = -1;

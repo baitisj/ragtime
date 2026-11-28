@@ -26,7 +26,8 @@
 //
 // A notch shows as a dip in the average: dip() finds the deepest one in a
 // span, DIP_DB or more under the passband, which is where the notch
-// really sits.
+// really sits, and how wide it is: across where it climbs back to
+// DROP_DB under the passband, as a filter's width is quoted.
 //
 // After the Ear writes the filter, restart() can hold the average off
 // for a while: an IC-7100 swells about 10 dB across the band for 5 to
@@ -63,6 +64,9 @@ struct Dip
 {
     double hz = 0;
     double depthDb = 0;     // under the passband's level
+    // Across, DROP_DB under the passband; none where a side runs into the
+    // passband's edge or out of the picture first.
+    std::optional<double> widthHz;
 };
 
 class EdgeFinder

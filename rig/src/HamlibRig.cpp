@@ -239,6 +239,90 @@ struct Meter
 
 // The meters this rig says it reports: ALC, SWR, and RF power in watts
 // where the backend knows them, or else as a share of full power.
+// The notch's width, where the rig has a control for it: Hamlib has no
+// standard level, so an extra level, else an extra parameter, named for it
+// (radio::notchWidthName; an FTX-1's parameter DSP_IF_NOTCH_W, 0 or 1).
+struct NotchWidthControl
+{
+    const struct confparams* conf = nullptr;
+    bool parm = false;
+    int steps = 0;
+};
+
+int findNotchWidth(RIG*, const struct confparams* conf, rig_ptr_t data)
+{
+    if (conf == nullptr || conf->name == nullptr || !radio::notchWidthName(conf->name)) return 1;
+    if (conf->type != RIG_CONF_COMBO && conf->type != RIG_CONF_CHECKBUTTON && conf->type != RIG_CONF_NUMERIC) return 1;
+    *static_cast<const struct confparams**>(data) = conf;
+    return 0;
+}
+
+// Combo and on-off values are whole numbers; any other is a float.
+bool wholeValue(const struct confparams* conf)
+{
+    return conf->type == RIG_CONF_COMBO || conf->type == RIG_CONF_CHECKBUTTON;
+}
+
+NotchWidthControl notchWidthOf(RIG* rig)
+{
+    NotchWidthControl c;
+    const struct confparams* conf = nullptr;
+    if (rig->caps->get_ext_level != nullptr) rig_ext_level_foreach(rig, findNotchWidth, &conf);
+    if (conf == nullptr && rig->caps->get_ext_parm != nullptr)
+    {
+        rig_ext_parm_foreach(rig, findNotchWidth, &conf);
+        c.parm = conf != nullptr;
+    }
+    if (conf == nullptr) return c;
+    if (conf->type == RIG_CONF_CHECKBUTTON)
+    {
+        c.steps = 2;
+    }
+    else if (conf->type == RIG_CONF_COMBO)
+    {
+        while (c.steps < RIG_COMBO_MAX && conf->u.c.combostr[c.steps] != nullptr) c.steps++;
+    }
+    else
+    {
+        const double step = conf->u.n.step > 0 ? conf->u.n.step : 1.0;
+        c.steps = (int)std::lround((conf->u.n.max - conf->u.n.min) / step) + 1;
+    }
+    if (c.steps < 2 || c.steps > 16) return NotchWidthControl();
+    c.conf = conf;
+    return c;
+}
+
+std::optional<int> readNotchWidth(RIG* rig, const NotchWidthControl& c, int& code)
+{
+    value_t v;
+    v.f = 0;
+    v.i = 0;
+    code = c.parm ? rig_get_ext_parm(rig, c.conf->token, &v) : rig_get_ext_level(rig, RIG_VFO_CURR, c.conf->token, &v);
+    if (code != RIG_OK) return std::nullopt;
+    int step = 0;
+    if (wholeValue(c.conf))
+    {
+        step = v.i;
+    }
+    else
+    {
+        const double size = c.conf->u.n.step > 0 ? c.conf->u.n.step : 1.0;
+        step = (int)std::lround((v.f - c.conf->u.n.min) / size);
+    }
+    if (step < 0 || step >= c.steps) return std::nullopt;
+    return step;
+}
+
+int writeNotchWidth(RIG* rig, const NotchWidthControl& c, int step)
+{
+    value_t v;
+    if (wholeValue(c.conf))
+        v.i = step;
+    else
+        v.f = (float)(c.conf->u.n.min + step * (c.conf->u.n.step > 0 ? c.conf->u.n.step : 1.0));
+    return c.parm ? rig_set_ext_parm(rig, c.conf->token, v) : rig_set_ext_level(rig, RIG_VFO_CURR, c.conf->token, v);
+}
+
 std::vector<Meter> metersOf(RIG* rig)
 {
     std::vector<Meter> meters;
@@ -555,6 +639,8 @@ void HamlibRig::run()
     // once it is on ("IS01+0400" doesn't parse, and the value is left as
     // passed in), so then the shift is taken as written.
     std::optional<int> ifWritten;
+    NotchWidthControl notchWidth;
+    int notchWidthFailures = 0;
     int modeFailures = 0;
     int notchFailures = 0;
     uint64_t nextFilter = 0;
@@ -675,6 +761,18 @@ void HamlibRig::run()
         };
         notch(false);
         knob(RIG_LEVEL_NOTCHF_RAW, f.notchRaw, "NOTCHF_RAW");
+        // Its width, where the rig has a control for it.
+        if (f.notchWidth && notchWidth.conf != nullptr && *f.notchWidth < notchWidth.steps)
+        {
+            int code = 0;
+            const std::optional<int> now = readNotchWidth(rig, notchWidth, code);
+            if (now != f.notchWidth)
+            {
+                int k = writeNotchWidth(rig, notchWidth, *f.notchWidth);
+                if (k != RIG_OK && problem.empty())
+                    problem = std::string("Setting ") + notchWidth.conf->name + " failed: " + errorText(k);
+            }
+        }
         // A Yaesu's or a Kenwood's notch, in Hz (an FT-891 has no
         // NOTCHF_RAW, and moves in 10 Hz steps).
         if (f.notchHz && rig_has_set_level(rig, RIG_LEVEL_NOTCHF) != 0)
@@ -844,6 +942,8 @@ void HamlibRig::run()
                     // IF SHIFT only where there is no PBT.
                     readsIfShift = !readsPbtIn && !readsPbtOut && rig_has_get_level(rig, RIG_LEVEL_IF) != 0;
                     ifWritten.reset();
+                    notchWidth = readsNotch ? notchWidthOf(rig) : NotchWidthControl();
+                    notchWidthFailures = 0;
                     modeFailures = 0;
                     notchFailures = 0;
                     nextFilter = 0;
@@ -1019,7 +1119,7 @@ void HamlibRig::run()
                 else
                     keepIf = true;
             }
-            bool keepNotch = false, keepHz = false;
+            bool keepNotch = false, keepHz = false, keepWidth = false;
             if (readsNotch)
             {
                 int on = 0;
@@ -1037,6 +1137,25 @@ void HamlibRig::run()
                             filter.notchHz = hz.i;
                         else
                             keepHz = true;
+                    }
+                    if (notchWidth.conf != nullptr)
+                    {
+                        int code = 0;
+                        filter.notchWidth = readNotchWidth(rig, notchWidth, code);
+                        if (filter.notchWidth)
+                        {
+                            notchWidthFailures = 0;
+                            filter.notchWidths = notchWidth.steps;
+                        }
+                        else if (code == -RIG_ENIMPL || code == -RIG_ENAVAIL || code == -RIG_EINVAL ||
+                                 ++notchWidthFailures >= 3)
+                        {
+                            notchWidth = NotchWidthControl();
+                        }
+                        else
+                        {
+                            keepWidth = true;
+                        }
                     }
                 }
                 // A slow answer now and then is no reason to stop asking.
@@ -1056,10 +1175,17 @@ void HamlibRig::run()
                 filter.notchOn = shared->status.filter->notchOn;
                 filter.notchRaw = shared->status.filter->notchRaw;
                 filter.notchHz = shared->status.filter->notchHz;
+                filter.notchWidth = shared->status.filter->notchWidth;
+                filter.notchWidths = shared->status.filter->notchWidths;
             }
             else if (keepHz && shared->status.filter)
             {
                 filter.notchHz = shared->status.filter->notchHz;
+            }
+            if (keepWidth && shared->status.filter)
+            {
+                filter.notchWidth = shared->status.filter->notchWidth;
+                filter.notchWidths = shared->status.filter->notchWidths;
             }
             if (keepIf && shared->status.filter) filter.ifShiftHz = shared->status.filter->ifShiftHz;
             std::optional<radio::RigFilter> got = filter.mode.empty() && !filter.pbtIn && !filter.pbtOut

@@ -72,6 +72,7 @@ public:
 private:
     void dragged(const ragtime::ear::Span& from, const ragtime::ear::Span& wanted);
     void notchMoved(std::optional<double> hz);
+    void notchWidthMoved(int step);
     // The notch as the scope draws it, the dip the noise shows, and what
     // the model learns from it.
     void showNotch(ragtime::ear::EdgeFinder& edges);
@@ -148,6 +149,7 @@ private:
     std::string notchKey_;                  // notchModel_'s rig and mode
     ragtime::ear::NotchModel notchModel_;
     std::optional<double> dipHz_;           // where the noise shows the notch
+    std::optional<double> dipWidthHz_;      // and how wide
     std::optional<double> learnedRaw_;      // the position the model last learned at
 };
 
